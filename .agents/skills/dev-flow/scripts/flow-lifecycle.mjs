@@ -45,8 +45,8 @@ import {
   handleForkFinalize,
   handleRework,
   handleVerifyE2eFailure,
-  pickSignalBlameFile, recordVerifyEvidenceForFlow,
-  syncReviewSlotForSubmit,
+  pickSignalBlameFile, promotePlanningInLedgerOnFinalize, recordVerifyEvidenceForFlow,
+  syncReviewSlotForSubmit, validatePlanningReadyForFinalize,
 } from './flow-lifecycle-helpers.mjs'
 
 export { handleRework }
@@ -117,6 +117,13 @@ export async function handleFinalize(opts, roots) {
     return { exitCode: prdGate.exitCode }
   }
 
+  const planningCheck = validatePlanningReadyForFinalize({ implRoot, ledger, taskId, specRel, todoRel, prdRel })
+  if (planningCheck.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(planningCheck, null, 2)}\n`)
+    process.stderr.write(`${planningCheck.message}\n`)
+    return { exitCode: planningCheck.exitCode ?? EXIT.FACT }
+  }
+
   for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', prdGate.checkPrdInFinalize ? prdRel : null]]) {
     if (!relDoc) continue
     const absDoc = join(implRoot, relDoc)
@@ -183,6 +190,7 @@ export async function handleFinalize(opts, roots) {
     return { exitCode: governHook.exitCode ?? EXIT.FACT }
   }
 
+  if (planningCheck.shouldPromotePlanning) promotePlanningInLedgerOnFinalize(ledger, opts)
   ledger.finalized = true
   ledger.finalizedHead = currentHead
   ledger.status = 'finalized'

@@ -5,20 +5,28 @@
  * 自动被 `scripts/dev/fixtures.mjs` 发现执行，也可直接运行 `node scripts/dev/fixtures-kernel-dedup.mjs`。
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
+import { critiquePassDoc } from '../../kit/skills/lib/critique-rounds.mjs'
 import { computeFeatureFingerprint, writeFeatureMap } from '../../kit/skills/lib/feature-map.mjs'
 import { isInsideDir, isMainModule } from '../../kit/skills/lib/git-core.mjs'
+import { resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
 import { readGitConfigFast, readLooseCommitLogFast } from '../../kit/skills/lib/git-fast.mjs'
 import { inspectSurveyStatusFast, isCleanWorktreeFast } from '../../kit/skills/lib/git-status-fast.mjs'
 import { hydrateIssueBody } from '../../kit/skills/lib/issue-template-hydrate.mjs'
+import { readTaskLedger, updateTaskLedger } from '../../kit/skills/lib/ledger.mjs'
+import { evaluatePlanExitGate } from '../../kit/skills/lib/plan-exit-gate.mjs'
 import { getHostingProvider, registerHostingProvider } from '../../kit/skills/lib/platform.mjs'
 import { countTextLines } from '../../kit/skills/lib/static-gates.mjs'
 import { scanBrokenCommentPaths } from '../../kit/skills/lib/static-gates-comment-hygiene.mjs'
 import { GenericRemoteBackend, LocalOnlyBackend, createTaskBackend } from '../../kit/skills/lib/task-backend.mjs'
+import { approveSpec } from '../../kit/skills/dev-plan/scripts/doc-plan-ops.mjs'
+import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
+import { handleFinalize, handleSubmit, handleVerify } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'
 import { pickSignalBlameFile } from '../../kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs'
+import { handleClaim } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
 import { handleRun as handleVerifyRun } from '../../kit/skills/dev-verify-tools/scripts/verify-tools.mjs'
 import { SKILL_ROOT, gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
@@ -438,6 +446,147 @@ export function registerKernelDedupCases(cases) {
       return 'bench.mjs 缺少 1x strict-budget 硬预算校验'
     }
     return true
+  }])
+
+  cases.push(['C7：planning=true 任务 finalize 规划退出门禁正反双向（未过审拦 BLOCKED_PLAN_NOT_READY；已过审直接 finalize 解除 planning 并放行 submit）', async () => {
+    const dir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'README.md': '# demo\n',
+      'AGENTS.md': [
+        '# demo',
+        '',
+        '```yaml',
+        'quick-test: node test/ok.test.mjs',
+        'full-test: node test/ok.test.mjs',
+        'smoke-verify: none',
+        'merge-gate: node test/ok.test.mjs',
+        'high-risk: none',
+        'do-not-edit: docs/archive/',
+        '```',
+        '',
+        '## 取舍',
+        '',
+        '- `no-tdd`: yes',
+        '',
+      ].join('\n'),
+      'src/app.mjs': 'export const ok = true\n',
+      'test/ok.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(1, 1)\n',
+    })
+    gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+    try {
+      const roots = await resolveRepoRoots(dir)
+      const st = await handleStart({ task: 'p-fin', slug: 'p-fin', case: '4', planning: true, implementer: 'plan-x', json: true }, roots)
+      if (st.exitCode !== 0) return `start --planning 失败：${st.exitCode}`
+      const wt = join(dir, '.worktrees', 'impl-p-fin')
+      const specRel = 'docs/specs/261120-p-fin-spec.md'
+      const todoRel = 'docs/todo/261120-p-fin-todo.md'
+      mkdirSync(dirname(join(wt, specRel)), { recursive: true })
+      mkdirSync(dirname(join(wt, todoRel)), { recursive: true })
+      const makeSpecText = (checked) => [
+        '---',
+        'kind: spec',
+        'title: "Plan Finalize"',
+        'status: draft',
+        'tier: L3',
+        'created: 2026-11-20',
+        'updated: 2026-11-22',
+        'owner: plan-x',
+        'plan_mode: interactive',
+        'approved: false',
+        'implemented: false',
+        'plan_critique: pending',
+        'related_prd: null',
+        `related_todo: ../todo/261120-p-fin-todo.md`,
+        'task_id: p-fin',
+        '---',
+        '',
+        '# Plan Finalize',
+        '',
+        '## 要解决的问题',
+        '- planning 任务过审后直接 finalize 并 submit',
+        '',
+        '## 本期不做',
+        '- 不跳过未批准拦截',
+        '',
+        '## 门型与回滚路径',
+        '- two-way',
+        '',
+        '## 验收标准',
+        `- [${checked ? 'x' : ' '}] C1: 完成后可解除 planning 态`,
+        '',
+      ].join('\n')
+      writeFileSync(join(wt, specRel), makeSpecText(true), 'utf8')
+      writeFileSync(join(wt, todoRel), [
+        '---',
+        'kind: todo',
+        'title: "Plan Finalize Todo"',
+        'status: active',
+        'created: 2026-11-20',
+        'updated: 2026-11-22',
+        'owner: plan-x',
+        'approved: false',
+        'implemented: false',
+        'related_prd: null',
+        'related_spec: ../specs/261120-p-fin-spec.md',
+        'task_id: p-fin',
+        '---',
+        '',
+        '# Todo',
+        '',
+        '## 验收标准',
+        '- [x] C1: ok',
+        '',
+        '## 完成后的记录',
+        '- done',
+        '',
+      ].join('\n'), 'utf8')
+      await updateTaskLedger(dir, 'p-fin', (cur) => ({ ...cur, specFile: specRel, todoFile: todoRel }))
+
+      // 反面：未过审/未 approve 的 planning=true 任务调用 finalize 与 submit 均必须阻断 BLOCKED_PLAN_NOT_READY
+      const finUnapproved = await handleFinalize({ task: 'p-fin', 'no-tdd': true, json: true }, roots)
+      if (finUnapproved.exitCode !== 3) return `未过审 planning=true finalize 未阻断 exit 3：${JSON.stringify(finUnapproved)}`
+      const subUnapproved = await handleSubmit({ task: 'p-fin', json: true }, roots)
+      if (subUnapproved.exitCode !== 3) return `未过审 planning=true submit 未阻断 exit 3：${JSON.stringify(subUnapproved)}`
+      if (readTaskLedger(dir, 'p-fin')?.planning !== true) return '未过审 finalize 阻断后不得清除 planning 标记'
+
+      // 正面：独立 Critique 过审并 approve 后，接管认领并直接 finalize -> verify -> submit 解除 planning
+      await critiquePassDoc({ repoRoot: wt, mainRoot: dir, file: specRel, reviewer: 'critic-x', summary: 'pass', taskId: 'p-fin' })
+      approveSpec({ repoRoot: wt, mainRoot: dir, file: specRel, taskId: 'p-fin' })
+      gitSync(wt, ['add', '-A'])
+      gitCommitFast(wt, 'docs: approve p-fin')
+      const clRes = await handleClaim({ task: 'p-fin', agent: 'impl-x', takeover: true, reason: 'handoff', json: true }, roots)
+      if (clRes.exitCode !== 0) return `claim --takeover 失败：${clRes.exitCode}`
+      writeFileSync(join(wt, 'src/app.mjs'), 'export const ok = true\nexport const v = 2\n', 'utf8')
+      gitSync(wt, ['add', '-A'])
+      gitCommitFast(wt, 'feat: impl p-fin')
+
+      const finOk = await handleFinalize({ task: 'p-fin', agent: 'impl-x', 'no-tdd': true, json: true }, roots)
+      if (finOk.exitCode !== 0) return `已过审 planning=true 直接 finalize 失败：${JSON.stringify(finOk)}`
+      gitSync(wt, ['add', '-A'])
+      gitCommitFast(wt, 'docs: finalize p-fin')
+      const lAfterFin = readTaskLedger(dir, 'p-fin')
+      if (lAfterFin?.planning !== false || lAfterFin?.status !== 'finalized') {
+        return `finalize 后未解除 planning 态：${JSON.stringify({ planning: lAfterFin?.planning, status: lAfterFin?.status })}`
+      }
+      if (!(lAfterFin?.previousImplementers ?? []).includes('plan-x')) {
+        return `finalize 接管未保留前序规划者 plan-x：${JSON.stringify(lAfterFin?.previousImplementers)}`
+      }
+      // 已归档 implemented SPEC 虽因 finalize 添加实现说明导致 SHA 变化，仍不应再报未过审
+      const archGate = evaluatePlanExitGate(wt, {
+        caseType: 4, taskId: 'p-fin',
+        docs: { spec: lAfterFin.archivedSpecFile, todo: lAfterFin.archivedTodoFile },
+        planCritique: lAfterFin.planCritique,
+      })
+      if (archGate.blocked) return `已归档 finalized SPEC 误报 BLOCKED_PLAN_NOT_READY：${JSON.stringify(archGate)}`
+
+      const vOk = await handleVerify({ task: 'p-fin', mode: 'gate', json: true }, roots)
+      if (vOk.exitCode !== 0) return `finalize 后 verify 失败：${vOk.exitCode}`
+      const subOk = await handleSubmit({ task: 'p-fin', agent: 'impl-x', json: true }, roots)
+      if (subOk.exitCode !== 0) return `finalize 解除 planning 后 submit 失败：${JSON.stringify(subOk)}`
+      return true
+    } finally {
+      rmTree(dir)
+    }
   }])
 }
 

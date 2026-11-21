@@ -75,6 +75,17 @@ function normalizeStatus(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
 }
 
+function isArchivedFinalizedPrd(doc) {
+  return posixPath(String(doc?.rel ?? '')).toLowerCase().startsWith('docs/archive/prd/')
+    && normalizeStatus(doc?.data?.status) === 'done'
+}
+
+function isArchivedFinalizedSpec(doc) {
+  return posixPath(String(doc?.rel ?? '')).toLowerCase().startsWith('docs/archive/specs/')
+    && normalizeStatus(doc?.data?.status) === 'implemented'
+    && doc?.data?.approved === true
+}
+
 /** 读一份规划文档；不存在时返回 `{ exists: false }`，不抛错——缺文档本身就是一种结论。 */
 function readPlanDoc(repoRoot, rel) {
   if (!rel) return null
@@ -327,6 +338,15 @@ export function resolveCritiqueReadiness(doc) {
       ...(verdict.warning ? { warning: verdict.warning } : {}),
     }
   }
+  if ((verdict.basis === APPROVAL_BASIS.CRITIQUE_STALE || verdict.basis === APPROVAL_BASIS.OVERRIDE_STALE)
+    && isArchivedFinalizedSpec(doc)) {
+    return {
+      blocked: false,
+      message: '',
+      fixHint: '',
+      basis: verdict.basis === APPROVAL_BASIS.OVERRIDE_STALE ? APPROVAL_BASIS.HUMAN_OVERRIDE : APPROVAL_BASIS.PASSED,
+    }
+  }
 
   if (verdict.basis === APPROVAL_BASIS.OVERRIDE_STALE) {
     return {
@@ -383,6 +403,7 @@ function evaluateDoc(doc, { requireApproval = true, warnings = null } = {}) {
     })
     return reasons
   }
+  if (doc.kind === 'prd' && isArchivedFinalizedPrd(doc)) return reasons
 
   // 待拍板清零：两种规划态的共同下限。区别只在谁来拍板，不在要不要拍。
   const pending = analyzePendingDecisions(doc.text ?? '')
@@ -452,6 +473,7 @@ function evaluateMasterPrd(repoRoot, specDoc, { requireApproval = true, warnings
   const prd = readPlanDoc(repoRoot, prdRelFromRoot)
   if (!prd || !prd.exists) return []
   if (prd.data?.multi_spec !== true) return []
+  if (isArchivedFinalizedPrd(prd)) return []
   const ledgerEntry = planCritique?.[prd.rel] ?? null
   return evaluateDoc({ ...prd, kind: 'prd', ledgerEntry }, { requireApproval, warnings }).map((r) => ({
     ...r,

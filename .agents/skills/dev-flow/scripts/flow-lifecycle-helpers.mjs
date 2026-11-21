@@ -15,8 +15,9 @@ import { escalateToBackend } from '../../lib/escalation.mjs'
 import { mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { gitRun, posixPath, readTextSafe, syncDetachedWorktree, writeAtomic } from '../../lib/git.mjs'
 import { resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { recordMountedDepsInLedger, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { recordMountedDepsInLedger, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
+import { evaluatePlanExitGate, PLAN_EXIT_BLOCK_CODE } from '../../lib/plan-exit-gate.mjs'
 import { parseMilestoneNumber } from '../../lib/platform.mjs'
 import {
   buildE2eDiagnosticPacket,
@@ -494,6 +495,44 @@ export function recordVerifyEvidenceForFlow({
     gates, skipped: [...skipped],
   })
   return { overallExit: finalOverallExit, smokeVerifiedOnHead, e2eObservation, shallowE2eEvidence, precheck }
+}
+
+export function validatePlanningReadyForFinalize({ implRoot, ledger, taskId, specRel, todoRel, prdRel }) {
+  if (ledger?.planning !== true && ledger?.status !== 'planning') {
+    return { ok: true, blocked: false, shouldPromotePlanning: false }
+  }
+  if (Number(ledger?.caseType) >= 4 && !specRel) {
+    return {
+      ok: false,
+      blocked: true,
+      code: PLAN_EXIT_BLOCK_CODE,
+      exitCode: EXIT.FACT,
+      message: `${PLAN_EXIT_BLOCK_CODE}: Case 4 任务 ${taskId} 处于 planning 态且尚未绑定 SPEC，禁止 finalize；请先生成 SPEC、过 Critique 并 approve。`,
+    }
+  }
+  const planGate = evaluatePlanExitGate(implRoot, {
+    caseType: ledger?.caseType,
+    slug: ledger?.slug,
+    taskId,
+    issue: ledger?.linkedIssues?.[0] ?? null,
+    docs: { spec: specRel, todo: todoRel, prd: prdRel },
+    allowBootstrap: false,
+    planCritique: ledger?.planCritique ?? null,
+  })
+  if (planGate.blocked) return planGate
+  return { ok: true, blocked: false, shouldPromotePlanning: true }
+}
+
+export function promotePlanningInLedgerOnFinalize(ledger, opts = {}) {
+  if (!ledger || typeof ledger !== 'object') return
+  ledger.planning = false
+  const actor = String(opts.agent ?? '').trim()
+  if (actor && !/(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i.test(actor)) {
+    ledger.previousImplementers = rememberPreviousImplementer(ledger, actor)
+    ledger.agent = actor
+    ledger.implementerId = actor
+    if (!ledger.claimedBy) ledger.claimedBy = actor
+  }
 }
 
 export function ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note }) {

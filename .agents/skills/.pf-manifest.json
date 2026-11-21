@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T18:42:43.608Z",
+  "installedAt": "2026-11-21T19:02:01.844Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "1c6c158011fb5b2d70fdf8f80258a683e464e49905b37374e02bc87c234c4fd5"
@@ -43,13 +43,13 @@
       "sha256": "f44ae1bc78dcdb1876aab2c8950f1d35c8ef84f98631eb2a48f4874aa7c6adbf"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
-      "sha256": "5ab31f0b39455e43923512fbe677051781330cb99f605194e0a55ce0c6d70be5"
+      "sha256": "14fcb668f9743642c27354fc5417ed65c7cd7516b6fb3b783f804f0e7d1cc569"
     },
     "dev-flow/scripts/flow-lifecycle-hooks.mjs": {
       "sha256": "ecb2f48b76abc054474d019fffbfcfd07678c65baf741fe46fab4fec12af0ea2"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "18a692e7fc00876f146cc622cc85e6e83cd01fdd55c78a26ad7053ec0f58063f"
+      "sha256": "5ca3ab5e2c45d01a4b5eaa8574e2eb1cd66a24f1f86ad6aaa743b0a0d7cc6723"
     },
     "dev-flow/scripts/flow-merge.mjs": {
       "sha256": "24605db379491b91ab7283da9d50a3b815e14116fde9934ae7d7edafe9ca301d"
@@ -307,7 +307,7 @@
       "sha256": "ed3154694199ca1970dbdc1a493bb19d1a839366eb9d758fe996bed70f1bf0e2"
     },
     "lib/plan-exit-gate.mjs": {
-      "sha256": "72601de5d2ddf13020d21c6d1fed0fc57a3b015fe001e870306d4d2794983ea2"
+      "sha256": "1892440884e6e809b5c7ce8a9dc217eac9033e2055f290394930902ae9070eed"
     },
     "lib/plan-sync.mjs": {
       "sha256": "bed4f55a31f8a253e6b2d4a4d11ee3010eef7f2eb11bcbf9706b790d3138aaa7"

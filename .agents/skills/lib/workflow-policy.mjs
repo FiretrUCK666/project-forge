@@ -675,7 +675,7 @@ export function evaluateNextState({
     phase = 'needs-rework'
     ownerRole = 'implementer'
     blockingReasons.push('CHANGES_REQUESTED')
-    nextAction = `Round ${lastRound.round} 已退回修改，请在 ${t.worktreePath ?? '原分支'} 修复并提交新 commit 后执行 verify + submit --rework`
+    nextAction = `Round ${lastRound.round} 已退回修改，请在 ${t.worktreePath ?? '原分支'} 修复并提交新 commit 后执行 verify + submit`
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" rework --task ${t.taskId}`
   } else if (nothingImplementedYet) {
     // 还没提交过任何东西，下一步是实施，不是归档。
@@ -705,9 +705,8 @@ export function evaluateNextState({
   } else if (!['submitted', 'local-ready', 'awaiting-upstream-merge'].includes(t.status) || (t.lastSubmittedHead && currentHead && t.lastSubmittedHead !== currentHead)) {
     phase = 'needs-submit'
     ownerRole = 'implementer'
-    const reworkFlag = rounds.length > 0 ? ' --rework' : ''
     nextAction = '实证已锁定当前 HEAD，由实施者执行 submit 推送并提 PR/同步审查工作位'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId}${reworkFlag}`
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId}`
   } else if (t.role === 'contributor-fork') {
     phase = 'awaiting-upstream-merge'
     ownerRole = 'human'

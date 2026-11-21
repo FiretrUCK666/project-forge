@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T02:23:26.762Z",
+  "installedAt": "2026-11-21T02:28:26.940Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -43,7 +43,7 @@
       "sha256": "8368dc2ecd75070fad76734e288bf6691500367aa2b995222f0e89a6159ec30e"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
-      "sha256": "2c77a4281ad6d58d8a024bb11deb915129f698af7d17cdc236c4b3cf67e6b791"
+      "sha256": "dcbe1fe9449d7d957d0d8dc75259b1e44e4fc09b5f41538988e248de82b5e7c5"
     },
     "dev-flow/scripts/flow-lifecycle-hooks.mjs": {
       "sha256": "9bdc3d70eeea273653cc74daa4038be6656bc4d3ad210b64b8d1050584d4714a"
@@ -322,7 +322,7 @@
       "sha256": "79070b95383ab65eb0007005af19fe12468cc3e5abcca6e069e58abe4e9f80ce"
     },
     "lib/review-comment-render.mjs": {
-      "sha256": "399b48640dc9c1f9c487ac60657dbecb837d892c76fa112f1ec9172ed4b00384"
+      "sha256": "7ba51798f1556d1cc2a6f6cd337878b3be973c0881d0e456b3988a1bb023d1a5"
     },
     "lib/session-orient.mjs": {
       "sha256": "4c1546eff14e9640bf7c75267cba2b2f4ac10473bac18ab628ecad7254a51a03"
@@ -382,7 +382,7 @@
       "sha256": "108e197f2444a4890d7fff9515256bd86ba519548b9a07ea0e70ec92e5b1de70"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "870d0458ee00544f8373b2275b966128f6d32dfe992dea169b025422fd841a82"
+      "sha256": "ee7bdcbd5a3248e6a7a06fa8972a9268623436490d4b44c5942340375f7d8ccb"
     },
     "templates/docs-prd.md": {
       "sha256": "7e8b29b9a129f29d1777e7b6885ddfa06e9c2f533ba59435cd416ed60598869e"

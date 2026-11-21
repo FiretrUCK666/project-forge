@@ -98,7 +98,7 @@ export function buildReviewComments({
     ? '已触发停损熔断，请人类维护者复核后运行 `review-pack.mjs override --human-approved --reason "..."`。'
     : (nextSteps.length > 0 ? nextSteps.join('；') : (verdict === 'pass'
       ? (role === 'contributor-fork' ? '等待上游维护者合并 PR。' : '由当前独立审查上下文执行 `flow.mjs merge` 收尾。')
-      : `请在原分支逐项修复后执行 \`flow.mjs rework\` -> \`verify\` -> \`submit --rework\` 推进 Round ${round + 1}。`))
+      : `请在原分支逐项修复后执行 \`flow.mjs rework\` -> \`verify\` -> \`submit\` 推进 Round ${round + 1}。`))
   prLines.push('', `> **下一步**：${nextNote}`)
 
   const labelNote = labelName ? `（标签：\`${labelName}\`${staleLabel ? `，移除 \`${staleLabel}\`` : ''}）` : ''

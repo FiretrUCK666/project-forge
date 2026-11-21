@@ -10,7 +10,7 @@
  * 而失效的表现是「明明有标记却说干净」——那会把不可逆动作变成默认动作。
  */
 
-import { COMMON_SKIP_DIRS } from '../../kit/skills/lib/git.mjs'
+import { COMMON_SKIP_DIRS, isMacMetadataName, isMacOsJunkPath } from '../../kit/skills/lib/git-core.mjs'
 import {
   discoverCustomSkills,
   discoverKitSkills,
@@ -56,23 +56,6 @@ export {
   TOOL_SKELETON_FILES,
   USER_EXTENSION_SLOTS,
 } from '../../kit/skills/lib/tool-owned.mjs'
-
-/**
- * 数一个文本有多少行。
- *
- * 行数是「真实通读成本」的一个维度，而文件数不是——实测 30000 行 / 10 文件的仓与
- * 500 行 / 10 文件的仓，文件数一模一样，通读成本差 60 倍。
- *
- * 结尾的空行不算：它是换行符的产物，不是内容。CRLF 与 LF 在这里等价——
- * 同一份源码在两台机器上不该算出两个数字。
- */
-export function countTextLines(text) {
-  const normalized = String(text ?? '').replace(/\r\n/g, '\n')
-  if (normalized === '') return 0
-  const lines = normalized.split('\n')
-  if (lines[lines.length - 1] === '') lines.pop()
-  return lines.length
-}
 
 /** 标记里的命名空间。所有标记都以它开头。**写入与读取都从这里取**，不各写一遍字面量。 */
 export const NS = 'project-forge'
@@ -123,15 +106,6 @@ export function markerSyntaxFor(file) {
   if (name.endsWith('.md') || name.endsWith('.mdx')) return 'html'
   if (name.endsWith('.yml') || name.endsWith('.yaml')) return 'hash'
   return null
-}
-
-/** 生成一行标记。`syntax` 由 `markerSyntaxFor` 给出；没有注释语法的文件返回 undefined。 */
-export function emitMarker(file, body) {
-  const syntax = markerSyntaxFor(file)
-  const text = String(body ?? '').trim()
-  if (syntax === 'html') return `<!-- ${NS}: ${text} -->`
-  if (syntax === 'hash') return `# ${NS}: ${text}`
-  return undefined
 }
 
 /** 从一行里取出标记正文；不是标记行返回 undefined。 */
@@ -186,11 +160,6 @@ export function parseMarkers(text, file) {
     })
   }
   return out
-}
-
-/** 这份文本里有没有标记。`file` 用来判断该用哪种语法。 */
-export function hasMarkers(text, file) {
-  return parseMarkers(text, file).length > 0
 }
 
 /**
@@ -347,30 +316,10 @@ export function getKitSkills(kitSkillsRoot) {
 export const KIT_SKILLS = getKitSkills()
 
 /** macOS Finder / 归档器常见元数据条目名，跨全链路扫描与打包校验统一过滤。 */
-export const MACOS_METADATA_NAMES = Object.freeze([
-  '.DS_Store',
-  '__MACOSX',
-  '.Spotlight-V100',
-  '.Trashes',
-  '.fseventsd',
-  '.AppleDouble',
-  '.TemporaryItems',
-])
+export { isMacMetadataName as isMacOsMetadata, isMacOsJunkPath as isMacOsMetadataPath }
 
-export function isMacOsMetadata(name) {
-  const base = String(name ?? '')
-  if (!base) return false
-  if (base.startsWith('._')) return true
-  return MACOS_METADATA_NAMES.includes(base)
-}
-
-export function isMacOsMetadataPath(rel) {
-  return String(rel ?? '').replace(/\\/g, '/').split('/').some((seg) => isMacOsMetadata(seg))
-}
-
-/** 受管套件清单与工作区状态相对路径。 */
+/** 受管套件清单相对路径。 */
 export const PF_MANIFEST_REL = '.agents/skills/.pf-manifest.json'
-export const WORKTREES_STATE_REL = '.worktrees/.state'
 
 /** 对外产物层严禁出现的非 GitHub 托管平台或旧式版本库字样。 */
 export const FORBIDDEN_PLATFORM_RE = new RegExp(

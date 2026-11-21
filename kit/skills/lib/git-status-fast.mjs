@@ -7,12 +7,31 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { canonicalPath, posixPath, readTextSafe } from './git.mjs'
-import { readGitObjectFast, readHeadFast, readSystemGitConfigMapFast, resolveGitDirFast } from './git-fast.mjs'
+import { readGitObjectFast, readHeadFast, readSystemGitConfigMapFast, resolveGitDirFast, resolveRefShaFast } from './git-fast.mjs'
+
+const FAST_STATUS_MAX_ENTRIES = 250
+
+function readIndexEntryCountFast(idxPath) {
+  let fd = -1
+  try {
+    fd = openSync(idxPath, 'r')
+    const hdr = Buffer.allocUnsafe(12)
+    if (readSync(fd, hdr, 0, 12, 0) < 12) return null
+    if (hdr.toString('ascii', 0, 4) !== 'DIRC') return null
+    const ver = hdr.readUInt32BE(4)
+    if (ver !== 2 && ver !== 3) return null
+    return hdr.readUInt32BE(8)
+  } catch {
+    return null
+  } finally {
+    if (fd >= 0) try { closeSync(fd) } catch { /* ignore */ }
+  }
+}
 
 function readCoreSettingsFast(commonDir, targetBranch) {
   if (process.env.GIT_CONFIG_GLOBAL || process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_COUNT) return null
@@ -31,6 +50,8 @@ function readCoreSettingsFast(commonDir, targetBranch) {
     if (k.startsWith('core.')) core[k] = v
   }
   let hasUpstream = false
+  let upstreamRemote = null
+  let upstreamMerge = null
   const branchSecLower = targetBranch ? targetBranch.toLowerCase() : null
 
   for (const cfg of [globalCfg, localCfg]) {
@@ -47,7 +68,8 @@ function readCoreSettingsFast(commonDir, targetBranch) {
       const v = line.slice(eq + 1).trim()
       if (curSec === 'core') core[`core.${k}`] = v
       else if (curSec === 'branch' && branchSecLower && curSub.toLowerCase() === branchSecLower) {
-        if (k === 'remote' || k === 'merge') hasUpstream = true
+        if (k === 'remote') { hasUpstream = true; upstreamRemote = v }
+        else if (k === 'merge') { hasUpstream = true; upstreamMerge = v }
       }
     }
   }
@@ -58,6 +80,8 @@ function readCoreSettingsFast(commonDir, targetBranch) {
     autocrlf: autocrlf === 'true',
     filemode: String(core['core.filemode'] ?? (process.platform === 'win32' ? 'false' : 'true')).toLowerCase() !== 'false',
     hasUpstream,
+    upstreamRemote,
+    upstreamMerge,
   }
 }
 
@@ -68,7 +92,7 @@ function parseIndexFullFast(idxPath) {
   const ver = buf.readUInt32BE(4)
   if (ver !== 2 && ver !== 3) return null
   const count = buf.readUInt32BE(8)
-  if (count > 250) return null
+  if (count > FAST_STATUS_MAX_ENTRIES) return null
 
   const entries = []
   let off = 12
@@ -116,7 +140,7 @@ function collectHeadTreeMap(commonDir, treeSha, prefix = '', out = new Map()) {
       if (!collectHeadTreeMap(commonDir, shaHex, rel, out)) return null
     } else {
       out.set(rel, { mode, shaHex })
-      if (out.size > 250) return null
+      if (out.size > FAST_STATUS_MAX_ENTRIES) return null
     }
   }
   return out
@@ -144,15 +168,23 @@ function compileIgnoreRules(repoRoot, commonDir) {
     for (const rawLine of txt.split('\n')) {
       const line = rawLine.replace(/\r$/, '').trim()
       if (!line || line.startsWith('#')) continue
+      if (line === '*.py[cod]') {
+        rules.push({ kind: 'ext', suffix: '.pyc', dirOnly: false })
+        rules.push({ kind: 'ext', suffix: '.pyo', dirOnly: false })
+        rules.push({ kind: 'ext', suffix: '.pyd', dirOnly: false })
+        continue
+      }
       if (/[!\\[\]?]/.test(line) || line.includes('**')) return null
       const dirOnly = line.endsWith('/')
       const anchored = line.startsWith('/') || line.slice(0, -1).includes('/')
       const clean = line.replace(/^\/+/, '').replace(/\/+$/, '')
       if (!clean) continue
       if (clean.includes('*')) {
-        const starM = /^\*\.([A-Za-z0-9_.-]+)$/.exec(clean)
-        if (!starM || anchored) return null
-        rules.push({ kind: 'ext', suffix: `.${starM[1]}`, dirOnly })
+        if (!anchored && !clean.includes('/') && clean.startsWith('*') && clean.length > 1 && !clean.slice(1).includes('*')) {
+          rules.push({ kind: 'ext', suffix: clean.slice(1), dirOnly })
+          continue
+        }
+        return null
       } else {
         rules.push({ kind: 'exact', clean, anchored, dirOnly })
       }
@@ -174,11 +206,43 @@ function compileIgnoreRules(repoRoot, commonDir) {
   }
 }
 
+function readBlockingGitAttributes(repoRoot) {
+  const gaPath = join(repoRoot, '.gitattributes')
+  if (!existsSync(gaPath)) return { alwaysBlock: false, matchesAny: () => false }
+  const gaTxt = readTextSafe(gaPath)
+  if (gaTxt === undefined) return null
+  if (/(?:filter|working-tree-encoding|ident)\s*=/i.test(gaTxt)) {
+    return { alwaysBlock: true, matchesAny: () => true }
+  }
+  const matchers = []
+  for (const line of gaTxt.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#') || !/\beol=crlf\b/i.test(trimmed)) continue
+    const pat = trimmed.split(/\s+/)[0]
+    if (!pat || pat === '*' || pat === '**') return { alwaysBlock: true, matchesAny: () => true }
+    if (/^\*\.[a-z0-9_.-]+$/i.test(pat)) {
+      const extLow = pat.slice(1).toLowerCase()
+      matchers.push((rel) => rel.toLowerCase().endsWith(extLow))
+    } else {
+      const esc = pat.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+      const re = new RegExp(pat.includes('/') ? `^${esc}$` : `(?:^|/)${esc}$`)
+      matchers.push((rel) => re.test(rel))
+    }
+  }
+  return {
+    alwaysBlock: false,
+    matchesAny: matchers.length === 0 ? () => false : (entries) => entries.some((e) => matchers.some((fn) => fn(e.path))),
+  }
+}
+
 /** 零子进程核验当前工作区是否完全干净；任何不满足严格前提或存在改动的情况返回 `null`。 */
 export function isCleanWorktreeFast(repoRoot, { needIgnored = false } = {}) {
   if (process.env.GIT_DIR || process.env.GIT_WORK_TREE) return null
   const wtGitDir = resolveGitDirFast(repoRoot)
   if (!wtGitDir) return null
+  const idxPath = join(wtGitDir, 'index')
+  const idxCount = readIndexEntryCountFast(idxPath)
+  if (idxCount === null || idxCount > FAST_STATUS_MAX_ENTRIES) return null
   const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
   const commonDir = cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir
 
@@ -195,11 +259,8 @@ export function isCleanWorktreeFast(repoRoot, { needIgnored = false } = {}) {
     || existsSync(join(repoRoot, '.gitmodules'))) {
     return null
   }
-  const gaPath = join(repoRoot, '.gitattributes')
-  if (existsSync(gaPath)) {
-    const gaTxt = readTextSafe(gaPath)
-    if (gaTxt === undefined || /(?:filter|working-tree-encoding|ident)\s*=|\beol=crlf\b/i.test(gaTxt)) return null
-  }
+  const gaRule = readBlockingGitAttributes(repoRoot)
+  if (!gaRule || gaRule.alwaysBlock) return null
   const infoAttrs = readTextSafe(join(commonDir, 'info', 'attributes'))
   if (infoAttrs && infoAttrs.split('\n').some((l) => l.trim() && !l.trim().startsWith('#'))) return null
 
@@ -211,9 +272,9 @@ export function isCleanWorktreeFast(repoRoot, { needIgnored = false } = {}) {
   const cfgTxt = readTextSafe(join(commonDir, 'config')) ?? ''
   if (/^\s*objectformat\s*=\s*sha256\b/im.test(cfgTxt)) return null
 
-  const idxPath = join(wtGitDir, 'index')
   const entries = parseIndexFullFast(idxPath)
   if (!entries) return null
+  if (gaRule.matchesAny(entries)) return null
   let idxMtimeS = Math.floor(Date.now() / 1000)
   try { idxMtimeS = Math.floor(lstatSync(idxPath).mtimeMs / 1000) } catch { return null }
 
@@ -276,7 +337,7 @@ export function isCleanWorktreeFast(repoRoot, { needIgnored = false } = {}) {
         continue
       }
       visited += 1
-      if (visited > 250) return null
+      if (visited > FAST_STATUS_MAX_ENTRIES) return null
       const rel = posixPath(cur.rel ? `${cur.rel}/${de.name}` : de.name)
       if (de.isSymbolicLink()) {
         if (isIgnored(rel, true) && !indexSet.has(rel) && !trackedDirs.has(rel)) {
@@ -326,6 +387,9 @@ export function inspectSurveyStatusFast(repoRoot) {
   if (process.env.GIT_DIR || process.env.GIT_WORK_TREE) return null
   const wtGitDir = resolveGitDirFast(repoRoot)
   if (!wtGitDir) return null
+  const idxPath = join(wtGitDir, 'index')
+  const idxCount = readIndexEntryCountFast(idxPath)
+  if (idxCount !== null && idxCount > FAST_STATUS_MAX_ENTRIES) return null
   const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
   const commonDir = cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir
 
@@ -342,22 +406,24 @@ export function inspectSurveyStatusFast(repoRoot) {
     || existsSync(join(repoRoot, '.gitmodules'))) {
     return null
   }
-  const gaPath = join(repoRoot, '.gitattributes')
-  if (existsSync(gaPath)) {
-    const gaTxt = readTextSafe(gaPath)
-    if (gaTxt === undefined || /(?:filter|working-tree-encoding|ident)\s*=|\beol=crlf\b/i.test(gaTxt)) return null
-  }
+  const gaRule = readBlockingGitAttributes(repoRoot)
+  if (!gaRule || gaRule.alwaysBlock) return null
   const infoAttrs = readTextSafe(join(commonDir, 'info', 'attributes'))
   if (infoAttrs && infoAttrs.split('\n').some((l) => l.trim() && !l.trim().startsWith('#'))) return null
 
   const headInfo = readHeadFast(wtGitDir, commonDir)
   if (!headInfo) return null
   const core = readCoreSettingsFast(commonDir, headInfo.detached ? null : headInfo.branch)
-  if (!core || core.hasUpstream) return null
+  if (!core) return null
+  if (core.hasUpstream) {
+    if (!core.upstreamRemote || core.upstreamRemote === '.' || !core.upstreamMerge?.startsWith('refs/heads/')) return null
+    const trackingRef = `refs/remotes/${core.upstreamRemote}/${core.upstreamMerge.slice(11)}`
+    const trackingOid = resolveRefShaFast(commonDir, trackingRef)
+    if (!trackingOid || !headInfo.oid || trackingOid !== headInfo.oid) return null
+  }
   const cfgTxt = readTextSafe(join(commonDir, 'config')) ?? ''
   if (/^\s*objectformat\s*=\s*sha256\b/im.test(cfgTxt)) return null
 
-  const idxPath = join(wtGitDir, 'index')
   const indexSet = new Set()
   const trackedDirs = new Set()
   let dirty = 0
@@ -367,6 +433,7 @@ export function inspectSurveyStatusFast(repoRoot) {
   } else {
     const entries = parseIndexFullFast(idxPath)
     if (!entries) return null
+    if (gaRule.matchesAny(entries)) return null
     let idxMtimeS = Math.floor(Date.now() / 1000)
     try { idxMtimeS = Math.floor(lstatSync(idxPath).mtimeMs / 1000) } catch { return null }
 
@@ -426,7 +493,7 @@ export function inspectSurveyStatusFast(repoRoot) {
         continue
       }
       visited += 1
-      if (visited > 250) return null
+      if (visited > FAST_STATUS_MAX_ENTRIES) return null
       const rel = posixPath(relDir ? `${relDir}/${de.name}` : de.name)
       if (de.isSymbolicLink()) {
         if (isIgnored(rel, true) && !indexSet.has(rel) && !trackedDirs.has(rel)) {

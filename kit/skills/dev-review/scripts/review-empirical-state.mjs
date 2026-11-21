@@ -14,7 +14,7 @@ import { escalateToBackend } from '../../lib/escalation.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { artifactPathsOf, evaluateObservationSubstance, validateArtifactsAndVisual } from '../../lib/empirical-artifacts.mjs'
 import {
-  canonicalPath, execShellCommand, gitStatusPorcelainZ,
+  canonicalPath, execShellCommand, gitStatusPorcelainZ, isInsideDir,
   posixPath, readJsonSafe, samePath, sha256File, sha256Text, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { nextReviewRound, sanitizeTaskId } from '../../lib/ledger.mjs'
@@ -110,14 +110,6 @@ export function resolveReviewObservationInputs(opts = {}) {
     blockedReasonText = check.text
   }
   return { ok: true, code: null, reason: null, field: null, e2eText, blockedReasonText }
-}
-
-function isInsideDir(candidateAbs, parentAbs) {
-  const c = canonicalPath(candidateAbs)
-  const p = canonicalPath(parentAbs)
-  if (samePath(c, p)) return true
-  const rel = relative(p, c)
-  return Boolean(rel && !rel.startsWith('..') && !/^[A-Za-z]:/.test(rel) && !rel.startsWith('/'))
 }
 
 async function loadOutboundLinks(reviewRoot) {

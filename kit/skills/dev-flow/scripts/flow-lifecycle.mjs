@@ -45,8 +45,8 @@ import {
   handleForkFinalize,
   handleRework,
   handleVerifyE2eFailure,
-  recordVerifyEvidenceForFlow,
-  syncReviewSlotForSubmit,
+  pickSignalBlameFile, promotePlanningInLedgerOnFinalize, recordVerifyEvidenceForFlow,
+  syncReviewSlotForSubmit, validatePlanningReadyForFinalize,
 } from './flow-lifecycle-helpers.mjs'
 
 export { handleRework }
@@ -117,6 +117,13 @@ export async function handleFinalize(opts, roots) {
     return { exitCode: prdGate.exitCode }
   }
 
+  const planningCheck = validatePlanningReadyForFinalize({ implRoot, ledger, taskId, specRel, todoRel, prdRel })
+  if (planningCheck.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(planningCheck, null, 2)}\n`)
+    process.stderr.write(`${planningCheck.message}\n`)
+    return { exitCode: planningCheck.exitCode ?? EXIT.FACT }
+  }
+
   for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', prdGate.checkPrdInFinalize ? prdRel : null]]) {
     if (!relDoc) continue
     const absDoc = join(implRoot, relDoc)
@@ -183,6 +190,7 @@ export async function handleFinalize(opts, roots) {
     return { exitCode: governHook.exitCode ?? EXIT.FACT }
   }
 
+  if (planningCheck.shouldPromotePlanning) promotePlanningInLedgerOnFinalize(ledger, opts)
   ledger.finalized = true
   ledger.finalizedHead = currentHead
   ledger.status = 'finalized'
@@ -509,7 +517,7 @@ export async function handleVerify(opts, roots) {
   ledger.status = allOk ? 'verified' : 'verify-failed'
   await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-  await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? changedFiles[0] ?? '', taskId, message: `verify (${mode}) exit=${finalExit}: ${redactDiagnosticText(cmd, 240)}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
+  await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? pickSignalBlameFile(changedFiles, ''), taskId, message: `verify (${mode}) exit=${finalExit}: ${redactDiagnosticText(cmd, 240)}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
   emitVerifyOutcomeOutput({
     opts, roots, taskId, mode, rawTarget, cmd, targetTip, allOk, finalExit, ledger, policy,
     evRec, e2eFailureReport, docStaticRes, visualFilesChanged, empiricalVisualCheckRequired, runRes, currentHead,

@@ -11,9 +11,19 @@
       "modules": [
         "scripts/survey.mjs",
         "scripts/lib/platform/index.mjs",
+        "scripts/lib/platform/github.mjs",
+        "scripts/lib/platform/registry.mjs",
         "scripts/lib/survey-scan.mjs",
+        "scripts/lib/survey-workspace.mjs",
+        "scripts/lib/survey-ecosystem.mjs",
+        "scripts/lib/survey-docs.mjs",
+        "scripts/lib/survey-reentry.mjs",
+        "scripts/lib/survey-git-fast.mjs",
         "scripts/lib/survey-questions.mjs",
-        "scripts/lib/survey-gap-rules.mjs"
+        "scripts/lib/survey-gap-rules.mjs",
+        "kit/skills/lib/git-fast.mjs",
+        "kit/skills/lib/git-status-fast.mjs",
+        "kit/skills/lib/git-fast-objects.mjs"
       ],
       "businessFlows": [
         "只读扫描目标仓生态、Git 拓扑与文档现状并输出 JSON/Markdown",
@@ -215,7 +225,9 @@
         "kit/skills/dev-plan/scripts/doc-plan.mjs",
         "kit/skills/dev-plan/scripts/doc-plan-ops.mjs",
         "kit/skills/dev-plan/scripts/doc-audit.mjs",
+        "kit/skills/dev-plan/scripts/doc-audit-helpers.mjs",
         "kit/skills/dev-plan/scripts/triage-rules.mjs",
+        "kit/skills/lib/plan-sync.mjs",
         "kit/skills/lib/plan-exit-gate.mjs",
         "kit/skills/lib/doc-slice-graph.mjs",
         "kit/skills/lib/pending-decisions.mjs",
@@ -258,7 +270,9 @@
       "modules": [
         "kit/skills/dev-edit/scripts/edit-gate.mjs",
         "kit/skills/lib/static-gates.mjs",
-        "kit/skills/lib/static-gates-lexer.mjs"
+        "kit/skills/lib/static-gates-comment-hygiene.mjs",
+        "kit/skills/lib/static-gates-lexer.mjs",
+        "kit/skills/lib/git-core.mjs"
       ],
       "businessFlows": [
         "改前核对 do-not-edit、紧文件预警与相邻复用符号",
@@ -300,6 +314,13 @@
         "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
         "kit/skills/lib/workflow-policy.mjs",
         "kit/skills/lib/pr-template-hydrate.mjs",
+        "kit/skills/lib/issue-template-hydrate.mjs",
+        "kit/skills/lib/task-backend.mjs",
+        "kit/skills/lib/task-backend-local.mjs",
+        "kit/skills/dev-flow/scripts/flow-issues.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs",
+        "kit/skills/dev-flow/scripts/flow-sync.mjs",
+        "kit/skills/dev-flow/scripts/flow-trial-merge.mjs",
         "kit/skills/dev-flow/scripts/flow-batch.mjs"
       ],
       "businessFlows": [
@@ -330,7 +351,7 @@
         "scripts/dev/fixtures-attribution-routing.mjs",
         "scripts/dev/fixtures-plan-wave.mjs",
         "docs/archive/specs/261120-issue113-flow-truth-spec.md",
-        "docs/specs/261120-issue116-w25-flow-defects-spec.md"
+        "docs/archive/specs/261120-issue116-w25-flow-defects-spec.md"
       ]
     },
     {
@@ -422,8 +443,13 @@
       "modules": [
         "kit/skills/dev-govern/scripts/govern-audit.mjs",
         "kit/skills/dev-govern/scripts/govern-checks.mjs",
+        "kit/skills/dev-govern/scripts/govern-docs.mjs",
+        "kit/skills/dev-govern/scripts/govern-evergreen.mjs",
         "kit/skills/dev-govern/scripts/govern-retro.mjs",
+        "kit/skills/dev-govern/scripts/govern-state.mjs",
         "kit/skills/dev-govern/scripts/govern-tests.mjs",
+        "kit/skills/lib/escalation.mjs",
+        "kit/skills/lib/issue-template-hydrate.mjs",
         "kit/skills/lib/signals.mjs"
       ],
       "businessFlows": [
@@ -496,7 +522,13 @@
       "modules": [
         "scripts/dev/preflight.mjs",
         "scripts/dev/preflight-suite.mjs",
+        "scripts/dev/preflight-kernel-parity.mjs",
         "scripts/dev/preflight-contracts.mjs",
+        "scripts/dev/preflight-e2e.mjs",
+        "scripts/dev/fixtures-kernel-dedup.mjs",
+        "scripts/dev/injections-data-kernel-dedup.mjs",
+        "scripts/dev/evidence.mjs",
+        "scripts/dev/bench.mjs",
         "scripts/dev/write-probe-audit.mjs"
       ],
       "businessFlows": [

@@ -1,14 +1,15 @@
 ---
 kind: spec
 title: 性能门禁从事实判据重建：快路径按已跟踪文件命中决定，预算按同轮校准推导
-status: draft
+status: superseded
 tier: L3
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-22
 issue: 114
 pr: null
 branch: fix/w25-perf-budget
 owner: plan-wave25
+plan_mode: interactive
 approved: false
 implemented: false
 plan_critique: pending
@@ -16,9 +17,9 @@ related_prd: null
 related_todo: ../todo/261120-issue114-w25-perf-budget-todo.md
 high_risk_paths: [kit/, scripts/dev/]
 task_id: w25-perf-budget
-plan_mode: interactive
 depends_on: []
-scope_files: ["kit/skills/lib/git-status-fast.mjs", "kit/skills/lib/git-fast.mjs", "scripts/dev/bench.mjs", "scripts/dev/fixtures-perf-budget.mjs"]
+scope_files: [kit/skills/lib/git-status-fast.mjs, kit/skills/lib/git-fast.mjs, scripts/dev/bench.mjs, scripts/dev/fixtures-perf-budget.mjs]
+superseded_by: 261120-issue115-w25-kernel-dedup-spec.md
 ---
 
 # 性能门禁从事实判据重建（Issue `#114`）

@@ -7,11 +7,12 @@
  */
 
 import path from 'node:path'
-import { gitRun, readJsonSafe, writeJsonAtomic } from './git.mjs'
+import { parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { gitRun, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { readTaskLedger, sanitizeTaskId, updateTaskLedger } from './ledger.mjs'
 import {
-  detectDeclaredRepo, getHostingProvider, githubRepoFull, parseRemoteUrls, probeForWrite,
+  detectDeclaredRepo, githubRepoFull, parseRemoteUrls, probeForWrite, resolveRemoteDescriptor,
 } from './platform.mjs'
 import { createTaskBackend } from './task-backend.mjs'
 
@@ -26,6 +27,21 @@ export const PLAN_SYNC_PHASES = Object.freeze({
 const ALL_PLAN_LABELS = Object.freeze([
   'planning', 'changes-requested', 'needs-human-decision', 'approved',
 ])
+
+export function resolveDocIssueNumber(repoRoot, file, explicitIssue = null) {
+  const explicitNum = Number(explicitIssue)
+  if (Number.isInteger(explicitNum) && explicitNum > 0) return explicitNum
+  if (!file) return null
+  const abs = path.isAbsolute(file) ? file : path.join(repoRoot, file)
+  const raw = readTextSafe(abs)
+  if (raw) {
+    const fm = parseDocFrontmatter(raw)
+    const fmNum = Number(fm?.data?.issue)
+    if (Number.isInteger(fmNum) && fmNum > 0) return fmNum
+  }
+  const fnNum = Number(parseDocFilename(file)?.issue)
+  return Number.isInteger(fnNum) && fnNum > 0 ? fnNum : null
+}
 
 function normalizeIssueList(opts, ledger) {
   const set = new Set()
@@ -162,7 +178,7 @@ export async function syncPlanPhaseToBackend(opts = {}) {
     const upstreamFull = githubRepoFull(remoteUrls.upstream)
     const primaryUrl = remoteUrls.upstream ?? remoteUrls.origin ?? declaredRepo
     const providerId = opts.providerId ?? ledger?.providerId
-      ?? (primaryUrl ? (getHostingProvider(primaryUrl)?.id ?? 'generic-git') : 'none')
+      ?? (primaryUrl ? (resolveRemoteDescriptor(primaryUrl)?.providerId ?? 'generic-git') : 'none')
     const role = opts.role ?? ledger?.role
       ?? ((remoteUrls.origin || remoteUrls.upstream) ? 'maintainer' : 'local-only')
     targetRepo = targetRepo ?? (role === 'contributor-fork'

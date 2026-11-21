@@ -12,8 +12,9 @@ import {
   readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
+import { isInsideDir } from '../../kit/skills/lib/git-core.mjs'
 import { writeAtomic } from './fs-atomic.mjs'
 import { isMacOsMetadata, isMacOsMetadataPath, isRepoOnlyPath } from './protocol.mjs'
 import { frontmatterBlock, posixPath, skillVersion } from './text.mjs'
@@ -167,13 +168,6 @@ function isSafeRelativeEntry(rel) {
   return !parts.some((seg) => seg === '' || seg === '.' || seg === '..')
 }
 
-function isInsideDir(baseDir, candidate) {
-  const root = canonicalRealPath(baseDir)
-  const full = canonicalRealPath(candidate)
-  if (full === root) return true
-  return full.startsWith(root.endsWith(sep) ? root : root + sep)
-}
-
 function hasAnyRegularFile(dirPath) {
   if (!existsSync(dirPath)) return false
   try {
@@ -223,7 +217,7 @@ export function stageAndValidatePackage(entries, skillRoot, {
         continue
       }
       const stagedPath = join(stageDir, rel)
-      if (!isInsideDir(stageDir, stagedPath)) {
+      if (!isInsideDir(stagedPath, stageDir)) {
         skipped.push(e.name)
         continue
       }
@@ -309,8 +303,8 @@ export function snapshotTargetBackups(stagedEntries, skillRoot, extraPaths = [])
     }
   }
   for (const relOrAbs of extraPaths) {
-    const full = isInsideDir(skillRoot, relOrAbs) ? resolve(relOrAbs) : join(skillRoot, relOrAbs)
-    if (backups.has(full) || !existsSync(full)) continue
+    const full = isAbsolute(relOrAbs) ? resolve(relOrAbs) : join(skillRoot, relOrAbs)
+    if (!isInsideDir(full, skillRoot) || backups.has(full) || !existsSync(full)) continue
     try {
       const st = statSync(full)
       if (st.isFile()) {

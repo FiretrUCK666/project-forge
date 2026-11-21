@@ -141,6 +141,7 @@ export async function protectBranch(targetDir, {
   const facts = providedFacts ?? await survey(target, {})
   const caps = facts.git?.capabilities ?? null
   const providerId = caps?.providerId ?? facts.git?.providerId ?? null
+  const bpPlan = (facts.artifactPlan ?? []).find((item) => item.id === 'branch-protection')
   const targetBranch = String(
     branch
     || facts.conventions?.defaultBranch
@@ -149,16 +150,19 @@ export async function protectBranch(targetDir, {
     || 'main',
   ).trim() || 'main'
 
-  if (caps?.branchProtection !== true) {
-    const message = `当前远端（providerId=${providerId ?? '无/未知'}）不支持通过统一 API 自动写入分支保护（branchProtection=false）。`
-      + `请在托管界面为默认分支「${targetBranch}」手动启用开关 A（禁直推/强推/删分支、要求变更提案与检查通过，且不要强制他人审批），`
-      + `并安装本地推送护栏：node scripts/equip.mjs ${target} --with-hooks`
+  if (bpPlan?.action === 'skip' || caps?.branchProtection !== true) {
+    const message = bpPlan?.action === 'skip'
+      ? `按 artifactPlan（${bpPlan.status}）跳过分支保护写入：${bpPlan.detail}`
+      : `当前远端（providerId=${providerId ?? '无/未知'}）不支持通过统一 API 自动写入分支保护（branchProtection=false）。`
+        + `请在托管界面为默认分支「${targetBranch}」手动启用开关 A（禁直推/强推/删分支、要求变更提案与检查通过，且不要强制他人审批），`
+        + `并安装本地推送护栏：node scripts/equip.mjs ${target} --with-hooks`
     return {
       ok: true,
       status: 'SKIPPED_UNSUPPORTED',
       providerId,
       branch: targetBranch,
       fallbackToHooks: true,
+      ...(bpPlan ? { artifactPlanAction: bpPlan.action } : {}),
       message,
     }
   }
@@ -302,14 +306,17 @@ async function main(argv = process.argv.slice(2)) {
   const facts = await survey(target, {})
   const caps = facts.git?.capabilities ?? null
   const providerId = caps?.providerId ?? facts.git?.providerId ?? null
+  const planId = args.kind === 'check' ? 'ci-check' : 'ci-release'
+  const planItem = (facts.artifactPlan ?? []).find((item) => item.id === planId)
 
-  // 发版工作流是 GitHub Release 专用：远端不是 GitHub 时它不可能工作。
-  // 不做「生成一份跑不起来的文件」这种假动作。
-  if (args.kind === 'release' && providerId !== 'github') {
-    const msg = `这个远端不是 GitHub（providerId=${providerId ?? '未知'}），GitHub Release 发版工作流在这里不可能工作。`
-      + '请改走该托管自己的发布流程，不要照搬这份模板。'
-    if (args.json) process.stdout.write(`${JSON.stringify({ status: 'SKIPPED_NON_GITHUB', providerId, message: msg }, null, 2)}\n`)
-    else process.stdout.write(`${msg}\n`)
+  // 直接消费 survey.computeArtifactPlan 产出的 facts.artifactPlan 决定是否落盘 CI 模板
+  if (planItem?.action === 'skip') {
+    const msg = `按勘察产物计划（${planId}: ${planItem.status}）跳过生成：${planItem.detail}`
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify({ status: 'SKIPPED_BY_ARTIFACT_PLAN', planId, action: planItem.action, providerId, message: msg }, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${msg}\n`)
+    }
     return 0
   }
 

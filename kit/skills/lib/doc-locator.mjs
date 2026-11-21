@@ -591,7 +591,20 @@ export function locateTopSlicesForPaths(repoRoot, {
 }
 
 /** 发现高价值上下文文档：`ARCHITECTURE.md`、`*\/AGENTS.md`（跳过 `COMMON_SKIP_DIRS`/`.agents/`）及无头文档。 */
-export function discoverContextDocs(repoRoot, { maxHeadless = 10 } = {}) {
+export function listIndexableDocs(repoRoot, { scope = 'docs', kind = null, includeArchive = false, limit = 100 } = {}) {
+  const root = canonicalPath(repoRoot)
+  if (!existsSync(root) || !statSync(root).isDirectory()) {
+    return { ok: true, mode: 'list', repoRoot: root, scope, kind: kind ?? null, count: 0, files: [] }
+  }
+  const walked = walkRepoFiles(root, { scope, includeArchive })
+  const items = walked.active
+    .filter((item) => !kind || item.kind === kind)
+    .slice(0, Math.max(1, limit))
+    .map((item) => ({ file: item.rel, kind: item.kind, locateCommand: buildLocateCommand(item.rel) }))
+  return { ok: true, mode: 'list', repoRoot: root, scope, kind: kind ?? null, count: items.length, files: items }
+}
+
+export function discoverContextDocs(repoRoot, { maxHeadless = 10, maxContext = 30 } = {}) {
   const root = canonicalPath(repoRoot)
   if (!existsSync(root) || !statSync(root).isDirectory()) {
     return { architecture: null, subAgents: [], headlessDocs: [], contextIndex: [], docLocateHints: [] }
@@ -604,7 +617,8 @@ export function discoverContextDocs(repoRoot, { maxHeadless = 10 } = {}) {
     const isArch = low === 'architecture.md' || low === 'docs/architecture.md'
     const isSubAgents = /\/agents\.md$/.test(low)
     const isTopDoc = low === 'docs/tdd.md' || low === 'agents.md' || low === 'readme.md' || low === 'skill.md'
-    const isDocsMd = /^docs\/.+\.md$/i.test(item.rel) || /^references\/.+\.md$/i.test(item.rel)
+    const isRefDoc = /^references\/.+\.md$/i.test(item.rel)
+    const isDocsMd = /^docs\/.+\.md$/i.test(item.rel) || isRefDoc
     if (!isArch && !isSubAgents && !isTopDoc && !isDocsMd) continue
     const text = readTextFast(item.abs)
     if (!text) continue
@@ -621,7 +635,7 @@ export function discoverContextDocs(repoRoot, { maxHeadless = 10 } = {}) {
     }
     if (isArch) { if (!architecture || low === 'architecture.md') architecture = entry; contextIndex.push(entry) }
     else if (isSubAgents) { subAgents.push(entry); contextIndex.push(entry) }
-    else if (isTopDoc) contextIndex.push(entry)
+    else if (isTopDoc || isRefDoc) contextIndex.push(entry)
     else if (!entry.hasFrontmatter && !['prd', 'spec', 'todo'].includes(entry.kind)) headlessDocs.push(entry)
   }
 
@@ -629,7 +643,7 @@ export function discoverContextDocs(repoRoot, { maxHeadless = 10 } = {}) {
   if (architecture) docLocateHints.push(`node .agents/skills/dev-explore/scripts/doc-locate.mjs --file ${quoteCliArg(architecture.file)}`)
   if (existsSync(join(root, 'docs', 'TDD.md'))) docLocateHints.push('node .agents/skills/dev-explore/scripts/doc-locate.mjs --file "docs/TDD.md" --section "<章节名>"')
   if (subAgents.length > 0) docLocateHints.push(`node .agents/skills/dev-explore/scripts/doc-locate.mjs --file ${quoteCliArg(subAgents[0].file)}`)
-  return { architecture, subAgents, headlessDocs: headlessDocs.slice(0, maxHeadless), contextIndex: contextIndex.slice(0, 12), docLocateHints }
+  return { architecture, subAgents, headlessDocs: headlessDocs.slice(0, maxHeadless), contextIndex: contextIndex.slice(0, maxContext), docLocateHints }
 }
 
 /** 将定位结果格式化为紧凑人类可读文本（多切片默认收敛至 ~1.5–2.2 KB 预算内）。 */

@@ -1,14 +1,15 @@
 ---
 kind: spec
 title: 功能地图与验证工具自校：脚本路径进指纹、零执行非零退出、过期不自动吸收
-status: draft
+status: superseded
 tier: L3
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-22
 issue: 117
 pr: null
 branch: fix/w25-verify-map
 owner: plan-wave25
+plan_mode: interactive
 approved: false
 implemented: false
 plan_critique: pending
@@ -16,9 +17,9 @@ related_prd: ../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue117-w25-verify-map-todo.md
 high_risk_paths: [kit/, docs/feature-map.json]
 task_id: w25-verify-map
-plan_mode: interactive
 depends_on: [w25-kernel-dedup]
-scope_files: ["kit/skills/dev-verify-tools/scripts/verify-tools.mjs", "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs", "kit/skills/lib/verify-state.mjs", "kit/skills/lib/feature-map.mjs", "docs/feature-map.json", "kit/skills/dev-verify-tools/SKILL.md", "scripts/dev/fixtures-verify-map.mjs", "scripts/dev/verify-injections.mjs"]
+scope_files: [kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs, kit/skills/lib/verify-state.mjs, kit/skills/lib/feature-map.mjs, docs/feature-map.json, kit/skills/dev-verify-tools/SKILL.md, scripts/dev/fixtures-verify-map.mjs, scripts/dev/verify-injections.mjs]
+superseded_by: 261120-issue115-w25-kernel-dedup-spec.md
 ---
 
 # 功能地图与验证工具自校（Issue `#117`）

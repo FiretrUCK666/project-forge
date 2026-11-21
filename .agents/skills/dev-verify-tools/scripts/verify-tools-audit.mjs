@@ -5,7 +5,9 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+
+import { isInsideDir } from '../../lib/git.mjs'
 
 import {
   FEATURE_MAP_REL, destroyTaskScratchDir, detectScratchSolidificationHints,
@@ -66,8 +68,21 @@ export async function handleAudit(opts, roots) {
       }
     }
     for (const tool of f.verificationTools ?? []) {
-      if (tool.scriptPath && !existsSync(join(workRoot, tool.scriptPath))) {
-        zombies.push({ kind: 'missing-script', featureId: f.id, toolId: tool.id, path: tool.scriptPath })
+      if (tool.scriptPath) {
+        const absTool = resolve(workRoot, tool.scriptPath)
+        if (!isInsideDir(absTool, workRoot)) {
+          zombies.push({ kind: 'script-outside-repo', featureId: f.id, toolId: tool.id, path: tool.scriptPath })
+        } else if (!existsSync(absTool)) {
+          zombies.push({ kind: 'missing-script', featureId: f.id, toolId: tool.id, path: tool.scriptPath })
+        }
+      } else if (tool.command) {
+        const nodeScriptM = /\bnode\s+["']?([^\s"']+\.[cm]?js)["']?/i.exec(String(tool.command))
+        if (nodeScriptM && !nodeScriptM[1].startsWith('-')) {
+          const absCmdScript = resolve(workRoot, nodeScriptM[1])
+          if (!isInsideDir(absCmdScript, workRoot) || !existsSync(absCmdScript)) {
+            zombies.push({ kind: 'missing-script', featureId: f.id, toolId: tool.id, path: nodeScriptM[1] })
+          }
+        }
       }
       const staleRes = await evaluateToolStaleness({
         repoRoot: workRoot, gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot, feature: f, tool, baseRef,
@@ -97,18 +112,22 @@ export async function handleAudit(opts, roots) {
   const orphanScratchDirs = scratchDirs.filter((d) => !activeTaskIds.has(d.taskId))
 
   const hasHardIssues = !schema.ok || zombies.length > 0 || staleTools.some((s) => s.riskLevel === 'high')
+  const toolCount = map.features.reduce((acc, f) => acc + (f.verificationTools?.length ?? 0), 0)
+  const isEmptyFeatureMap = exists && !st.corrupt && schema.ok && map.features.length === 0 && toolCount === 0
+  const status = isEmptyFeatureMap ? 'NOT_APPLICABLE' : (hasHardIssues ? 'FAILED' : 'OK')
   const payload = {
     ok: !hasHardIssues,
+    status,
     exists,
     corrupt: st.corrupt,
     path: FEATURE_MAP_REL,
     featureCount: map.features.length,
-    toolCount: map.features.reduce((acc, f) => acc + (f.verificationTools?.length ?? 0), 0),
+    toolCount,
     schema, zombies, staleTools, duplicateFlows, blindSpots, solidificationHints, scratchDirs, orphanScratchDirs,
   }
   const lines = [
     `=== VERIFY-TOOLS AUDIT (${FEATURE_MAP_REL}) ===`,
-    `Features: ${payload.featureCount} | Tools: ${payload.toolCount} | SchemaOk: ${schema.ok}`,
+    `Status: ${status} | Features: ${payload.featureCount} | Tools: ${payload.toolCount} | SchemaOk: ${schema.ok}`,
     `Zombies: ${zombies.length} | StaleTools: ${staleTools.length} | BlindSpots: ${blindSpots.length} | OrphanScratch: ${orphanScratchDirs.length}`,
   ]
   for (const err of schema.errors) lines.push(`  - [SCHEMA_ERR] ${err}`)

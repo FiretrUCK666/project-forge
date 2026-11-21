@@ -35,7 +35,7 @@ import {
   critiqueContinueDoc, critiqueOverrideDoc, critiquePassDoc, critiqueRejectDoc,
   parseCritiqueRounds, readPlanCritiqueEntrySync,
 } from '../../lib/critique-rounds.mjs'
-import { syncPlanPhaseToBackend } from '../../lib/plan-sync.mjs'
+import { resolveDocIssueNumber, syncPlanPhaseToBackend } from '../../lib/plan-sync.mjs'
 import { renderVerificationForReviewer, verifyDocClaims } from '../../lib/doc-verify.mjs'
 import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
@@ -589,6 +589,7 @@ async function main(argv) {
         repoRoot, mainRoot, gitDir: roots.gitDir,
         phase: 'critique-pass', file: res.file, round: res.round, sha: res.sha,
         actor: res.reviewer, summary: res.summary ?? '', taskId: opts.task ?? null,
+        issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
       }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
@@ -615,6 +616,7 @@ async function main(argv) {
         phase: res.stopLossTriggered ? 'stop-loss' : 'critique-reject',
         file: res.file, round: res.round, sha: res.sha, actor: res.reviewer,
         summary: res.summary || res.findings?.[0] || '', taskId: opts.task ?? null,
+        issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
       }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
@@ -678,11 +680,11 @@ async function main(argv) {
       }
       const fn = parseDocFilename(res.file)
       const slugVal = fn?.slug ?? 'task'
-      const issueNum = Number.isInteger(Number(fm.data?.issue)) && Number(fm.data.issue) > 0 ? Number(fm.data.issue) : (fn?.issue ?? null)
+      const issueNum = resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null)
       res.planSync = await syncPlanPhaseToBackend({
         repoRoot, mainRoot, gitDir: roots.gitDir,
         phase: 'approve', file: res.file, taskId: taskKey ?? null,
-        issueNumber: issueNum ?? null, summary: `已批准 ${res.file}（C1..Cn=${res.criteriaCount}）`,
+        issueNumber: issueNum, summary: `已批准 ${res.file}（C1..Cn=${res.criteriaCount}）`,
       }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
       const startHint = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case ${fm.data?.kind === 'todo' ? 3 : 4}${issueNum ? ` --issue ${issueNum}` : ' [--issue <N> | --create-issue --title "<标题>"]'}`
       if (res.status === 'approved' || res.status === 'active') res.nextStep = startHint

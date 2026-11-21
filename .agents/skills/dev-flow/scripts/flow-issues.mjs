@@ -8,6 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { printNextStep } from '../../lib/cli.mjs'
 import { slugify } from '../../lib/docs.mjs'
 import { formatWorkTitle } from '../../lib/escalation.mjs'
+import { hydrateIssueBody } from '../../lib/issue-template-hydrate.mjs'
 import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { closeLocalIssue, getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
 import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv, resolveIdentityLayers } from '../../lib/platform.mjs'
@@ -91,21 +92,20 @@ export async function createIssueForStart({
   const rawTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
   const issueTitle = formatWorkTitle(rawTitle, caseType)
   const docRefs = [opts.spec, opts.todo, opts.prd].filter(Boolean).map((p) => `\`${p}\``).join('、')
-  const issueBody = String(opts.body ?? [
-    '## 背景与现象',
-    '',
-    `推进「${rawTitle}」任务（Case ${caseType}）。`,
-    '',
-    '## 范围与依据',
-    '',
-    `- 任务标识：\`${opts.task ?? slugify(opts.slug ?? rawTitle)}\``,
-    docRefs ? `- 关联文档：${docRefs}` : null,
-    opts.files ? `- 预计写域：${String(opts.files).split(/[\s,]+/).filter(Boolean).slice(0, 8).map((f) => `\`${f}\``).join('、')}` : null,
-    '',
-    '## 验收标准',
-    '',
-    `- [ ] C1: 完成「${rawTitle}」实现并通过对应正反双向测试与完整门禁`,
-  ].filter((x) => x !== null).join('\n')).trim()
+  const issueBody = hydrateIssueBody(
+    roots.mainRoot,
+    caseType === 2 ? 'bug' : 'feature',
+    {
+      rawBody: opts.body,
+      title: rawTitle,
+      caseType,
+      taskId: opts.task ?? slugify(opts.slug ?? rawTitle),
+      summary: `推进「${rawTitle}」任务（Case ${caseType}）。`,
+      docRefs,
+      files: opts.files,
+      criteria: [`完成「${rawTitle}」实现并通过对应正反双向测试与完整门禁`],
+    },
+  ).trim()
   const issueLabels = parseCsvList(opts.labels)
   const milestone = await resolveMilestoneId(
     backend,
@@ -162,11 +162,20 @@ export async function handleIssue(opts, roots) {
       role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
     })
     const milestone = await resolveMilestoneId(backend, targetRepo, opts.milestone)
+    const createCase = opts.case !== undefined ? Number(opts.case) : undefined
+    const createLabels = parseCsvList(opts.labels)
+    const issueKind = createCase === 2 || createLabels.some((l) => /bug|fix|defect/i.test(l)) ? 'bug' : 'feature'
+    const body = hydrateIssueBody(roots.mainRoot, issueKind, {
+      rawBody: opts.body,
+      title: rawTitle,
+      caseType: createCase,
+      summary: opts.body ? undefined : `创建工单「${rawTitle}」。`,
+    }).trim()
     const res = await backend.createIssue({
       repo: targetRepo,
       title,
-      body: String(opts.body ?? '').trim(),
-      labels: parseCsvList(opts.labels),
+      body,
+      labels: createLabels,
       ...(milestone ? { milestone } : {}),
     })
     if (res.delegated) {

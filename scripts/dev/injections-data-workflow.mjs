@@ -76,12 +76,12 @@ export const INJECTIONS_WORKFLOW = [
     to: "  if (false && ledger.role === 'generic-git' && !opts['human-approved']) {",
     alsoPatches: [
       {
-        file: 'kit/skills/lib/task-backend.mjs',
+        file: 'kit/skills/lib/task-backend-local.mjs',
         from: '    if (!fetched && !humanApproved) {',
         to: '    if (false && !fetched && !humanApproved) {',
       },
       {
-        file: 'kit/skills/lib/task-backend.mjs',
+        file: 'kit/skills/lib/task-backend-local.mjs',
         from: '    if (!mergedStates.has(state.state)) {',
         to: '    if (false && !mergedStates.has(state.state)) {',
       },

@@ -2,12 +2,11 @@
  * survey-git-fast.mjs —— `.git` 配置文件、index 二进制条目与松散引用快读辅助。
  */
 
-import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
-import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
+import { readSystemGitConfigMapAsync } from '../../kit/skills/lib/git-fast.mjs'
 import { isMacMetadataName, readTextSafe } from './text.mjs'
 
 export function parseConfigList(text) {
@@ -273,39 +272,23 @@ export function parseTagsAndOriginHead(forEachRefOut) {
 
 let cachedSystemGitConfig
 let pendingSystemGitConfig
-export function getSystemGitConfigEntriesAsync() {
-  if (cachedSystemGitConfig !== undefined) return Promise.resolve(cachedSystemGitConfig)
+export async function getSystemGitConfigEntriesAsync() {
+  if (cachedSystemGitConfig !== undefined) return cachedSystemGitConfig
   if (pendingSystemGitConfig) return pendingSystemGitConfig
-  pendingSystemGitConfig = new Promise((resolveDone) => {
+  pendingSystemGitConfig = readSystemGitConfigMapAsync().then((sysMap) => {
     const entries = []
-    try {
-      const inv = process.platform === 'win32'
-        ? prepareExecInvocation('git', ['config', '--system', '--list'], {})
-        : { cmd: 'git', args: ['config', '--system', '--list'], windowsVerbatimArguments: false }
-      execFile(inv.cmd, inv.args, {
-        encoding: 'utf8', timeout: 5000, windowsHide: true,
-        ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-      }, (err, stdout) => {
-        if (!err && stdout) {
-          for (const rawLine of String(stdout).split('\n')) {
-            const eq = rawLine.indexOf('=')
-            if (eq <= 0) continue
-            const key = rawLine.slice(0, eq).trim().toLowerCase()
-            const value = rawLine.slice(eq + 1).trim()
-            if (/^(?:user|credential|init)\./.test(key) || key === 'core.excludesfile' || key === 'core.hookspath') {
-              entries.push({ key, scope: 'system', value })
-            }
-          }
-        }
-        cachedSystemGitConfig = entries
-        pendingSystemGitConfig = null
-        resolveDone(entries)
-      })
-    } catch {
-      cachedSystemGitConfig = entries
-      pendingSystemGitConfig = null
-      resolveDone(entries)
+    for (const [key, value] of sysMap.entries()) {
+      if (/^(?:user|credential|init)\./.test(key) || key === 'core.excludesfile' || key === 'core.hookspath') {
+        entries.push({ key, scope: 'system', value })
+      }
     }
+    cachedSystemGitConfig = entries
+    pendingSystemGitConfig = null
+    return entries
+  }).catch(() => {
+    cachedSystemGitConfig = []
+    pendingSystemGitConfig = null
+    return cachedSystemGitConfig
   })
   return pendingSystemGitConfig
 }

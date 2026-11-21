@@ -7,10 +7,10 @@
 
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, relative } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
-  canonicalPath, gitRun, posixPath, readJsonSafe, readTextSafe, samePath,
+  canonicalPath, gitRun, isInsideDir, posixPath, readJsonSafe, readTextSafe, samePath,
   sha256Text, writeJsonAtomic,
 } from './git.mjs'
 import { evaluateTextSubstance } from './evidence-substance.mjs'
@@ -241,6 +241,7 @@ export function writeVerifyCacheEntry(gitCommonDir, mainRoot, toolId, entry) {
     featureId: entry.featureId ?? null,
     symbolHash: entry.symbolHash,
     moduleTreeHash: entry.moduleTreeHash,
+    ...(entry.scriptHash !== undefined ? { scriptHash: entry.scriptHash } : {}),
     verifiedSha: entry.verifiedSha ?? null,
     passedAtCommit: entry.passedAtCommit ?? entry.verifiedSha ?? null,
     ...(entry.symbolsByFile ? { symbolsByFile: entry.symbolsByFile } : {}),
@@ -261,7 +262,7 @@ async function readFileAtRefOrDisk(repoRoot, relPath, ref = null) {
 }
 
 /** 计算单个功能的符号摘要哈希与模块树内容哈希（零时间戳依赖，ref 与工作区同口径求值）。 */
-export async function computeFeatureFingerprint(repoRoot, feature, { ref = null } = {}) {
+export async function computeFeatureFingerprint(repoRoot, feature, { ref = null, tool = null } = {}) {
   const targets = uniqPaths([...(feature?.entrypoints ?? []), ...(feature?.modules ?? [])]).sort()
   const symbolRecords = []
   const treeRecords = []
@@ -284,10 +285,25 @@ export async function computeFeatureFingerprint(repoRoot, feature, { ref = null 
     treeRecords.push([rel, sha256Text(fileData.text.replace(/\r\n/g, '\n').replace(/\n+$/, ''))])
   }
 
+  let scriptHash = null
+  if (tool?.scriptPath) {
+    const scriptRel = normRelPath(tool.scriptPath)
+    if (!isInsideDir(resolve(repoRoot, scriptRel), repoRoot)) {
+      scriptHash = 'OUTSIDE_REPO'
+    } else {
+      const scriptData = await readFileAtRefOrDisk(repoRoot, scriptRel, ref)
+      scriptHash = scriptData.exists
+        ? sha256Text(scriptData.text.replace(/\r\n/g, '\n').replace(/\n+$/, ''))
+        : 'MISSING'
+    }
+    treeRecords.push([`tool:${tool.id ?? 'script'}`, scriptRel, scriptHash])
+  }
+
   return {
     targets,
     missingFiles,
     symbolsByFile,
+    scriptHash,
     symbolHash: sha256Text(JSON.stringify(symbolRecords)),
     moduleTreeHash: sha256Text(JSON.stringify(treeRecords)),
   }
@@ -314,12 +330,23 @@ export async function evaluateToolStaleness({
   repoRoot, gitCommonDir, mainRoot = repoRoot, feature, tool, baseRef = null,
 } = {}) {
   const riskLevel = VALID_RISK_LEVELS.includes(tool?.riskLevel) ? tool.riskLevel : 'medium'
-  if (tool?.scriptPath && !existsSync(join(repoRoot, tool.scriptPath))) {
-    return {
-      toolId: tool.id, featureId: feature?.id ?? null, riskLevel,
-      status: 'missing-script', action: 'block-missing-script', code: 'BLOCKED_MISSING_TOOL_SCRIPT',
-      reasons: [`工具脚本路径不存在：${tool.scriptPath}`],
-      changedModules: [tool.scriptPath], addedSymbols: [], removedSymbols: [], baseline: null, current: null,
+  if (tool?.scriptPath) {
+    const absScript = resolve(repoRoot, tool.scriptPath)
+    if (!isInsideDir(absScript, repoRoot)) {
+      return {
+        toolId: tool.id, featureId: feature?.id ?? null, riskLevel,
+        status: 'missing-script', action: 'block-missing-script', code: 'BLOCKED_MISSING_TOOL_SCRIPT',
+        reasons: [`验证工具脚本路径越出仓库边界：${tool.scriptPath}`],
+        changedModules: [tool.scriptPath], addedSymbols: [], removedSymbols: [], baseline: null, current: null,
+      }
+    }
+    if (!existsSync(absScript)) {
+      return {
+        toolId: tool.id, featureId: feature?.id ?? null, riskLevel,
+        status: 'missing-script', action: 'block-missing-script', code: 'BLOCKED_MISSING_TOOL_SCRIPT',
+        reasons: [`工具脚本路径不存在：${tool.scriptPath}`],
+        changedModules: [tool.scriptPath], addedSymbols: [], removedSymbols: [], baseline: null, current: null,
+      }
     }
   }
 
@@ -333,8 +360,8 @@ export async function evaluateToolStaleness({
     if (br.ok) resolvedBaseSha = br.stdout.trim()
   }
   const useBaseTree = Boolean(resolvedBaseSha && headSha && resolvedBaseSha !== headSha)
-  const currentFp = await computeFeatureFingerprint(repoRoot, feature)
-  const treeFp = useBaseTree ? await computeFeatureFingerprint(repoRoot, feature, { ref: resolvedBaseSha }) : currentFp
+  const currentFp = await computeFeatureFingerprint(repoRoot, feature, { tool })
+  const treeFp = useBaseTree ? await computeFeatureFingerprint(repoRoot, feature, { ref: resolvedBaseSha, tool }) : currentFp
 
   if (!baseline) {
     return {
@@ -347,7 +374,8 @@ export async function evaluateToolStaleness({
 
   const symbolDrift = currentFp.symbolHash !== baseline.symbolHash
   const treeDrift = treeFp.moduleTreeHash !== baseline.moduleTreeHash
-  if (!symbolDrift && !treeDrift) {
+  const scriptDrift = Boolean(tool?.scriptPath && currentFp.scriptHash !== (baseline.scriptHash ?? null))
+  if (!symbolDrift && !treeDrift && !scriptDrift) {
     return {
       toolId: tool.id, featureId: feature?.id ?? null, riskLevel,
       status: 'fresh', action: 'run', code: null,
@@ -358,6 +386,7 @@ export async function evaluateToolStaleness({
   const symDiff = diffSymbolsByFile(baseline.symbolsByFile, currentFp.symbolsByFile)
   const reasons = []
   if (symbolDrift) reasons.push(`导出符号哈希漂移（新增=${symDiff.addedSymbols.length}，移除=${symDiff.removedSymbols.length}）`)
+  if (scriptDrift) reasons.push(`工具脚本内容哈希漂移（${tool.scriptPath}）`)
   if (treeDrift) {
     reasons.push(useBaseTree
       ? `基准分支 (${baseRef}) 模块树哈希与基线提交 ${String(baseline.passedAtCommit ?? '').slice(0, 8)} 不一致`

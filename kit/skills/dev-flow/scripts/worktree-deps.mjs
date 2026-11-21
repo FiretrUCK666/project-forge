@@ -19,7 +19,7 @@ import {
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
-import { canonicalPath, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
+import { canonicalPath, isInsideDir, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
 import { isPathInGitIndexFast } from '../../lib/git-fast.mjs'
 import { discoverWorkspacePackages } from '../../lib/profile.mjs'
 
@@ -33,14 +33,6 @@ function lstatSafe(p) {
 
 function statSafe(p) {
   try { return statSync(p) } catch { return null }
-}
-
-function isInsideDir(candidateAbs, parentAbs) {
-  const c = canonicalPath(candidateAbs)
-  const p = canonicalPath(parentAbs)
-  if (samePath(c, p)) return true
-  const rel = relative(p, c)
-  return Boolean(rel && !rel.startsWith('..') && !/^[A-Za-z]:/.test(rel) && !rel.startsWith('/'))
 }
 
 function hashLockfile(filePath) {

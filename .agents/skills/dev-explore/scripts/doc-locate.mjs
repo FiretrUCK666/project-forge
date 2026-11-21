@@ -10,7 +10,7 @@
 
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import {
-  VALID_LOCATE_KINDS, VALID_LOCATE_SCOPES, formatLocateText, locateDocuments,
+  VALID_LOCATE_KINDS, VALID_LOCATE_SCOPES, formatLocateText, listIndexableDocs, locateDocuments,
 } from '../../lib/doc-locator.mjs'
 import { isMainModule } from '../../lib/git.mjs'
 
@@ -28,6 +28,7 @@ function usageText() {
     '  --limit <N>            返回切片数量上限（默认 5，别名 --max-slices）',
     '  --budget-lines <N>     切片总行数预算（默认 220）',
     '  --worktree <path>      指定目标仓库或工作树根目录',
+    '  --list                 仅列出可索引文档与路径（不做检索或切片读取）',
     '  --json                 输出结构化 JSON',
     '  --help, -h             显示帮助',
     '',
@@ -40,7 +41,7 @@ export async function runCli(argv = []) {
   try {
     cli = parseStandardCli(argv, {
       positionalDir: 'auto',
-      booleanFlags: ['json', 'help'],
+      booleanFlags: ['list', 'json', 'help'],
       valueFlags: [
         'file', 'query', 'symbol', 'section', 'kind', 'scope',
         'limit', 'max-slices', 'worktree', 'budget-lines', 'dir', 'repo',
@@ -64,6 +65,19 @@ export async function runCli(argv = []) {
 
   try {
     const repoRoot = cli.opts.worktree ?? cli.targetDir
+    if (cli.opts.list) {
+      const listRes = listIndexableDocs(repoRoot, {
+        scope: cli.opts.scope || 'docs',
+        kind: cli.opts.kind || null,
+        limit: cli.opts.limit !== undefined ? Number(cli.opts.limit) : 100,
+      })
+      if (cli.json) {
+        process.stdout.write(`${JSON.stringify(listRes, null, 2)}\n`)
+      } else {
+        process.stdout.write(`可索引文档（${listRes.count} 篇，scope=${listRes.scope}）：\n${listRes.files.map((f) => `- [${f.kind}] ${f.file}`).join('\n')}${listRes.files.length ? '\n' : ''}`)
+      }
+      return 0
+    }
     const result = locateDocuments(repoRoot, {
       file: cli.opts.file,
       query: cli.opts.query,

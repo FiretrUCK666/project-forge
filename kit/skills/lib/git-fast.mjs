@@ -7,9 +7,9 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
-import { prepareExecInvocation } from './exec.mjs'
+import { prepareExecInvocation, resolveExecutable } from './exec.mjs'
 import { LIKELY_DEFAULT_BRANCHES, readTextSafe } from './git-core.mjs'
 import {
   collectAncestorsDagFast,
@@ -89,8 +89,54 @@ function parseSysConfigLines(out) {
   return map
 }
 
+function parseSystemGitConfigIniFast() {
+  if (process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_NOSYSTEM || process.env.GIT_CONFIG_COUNT) return null
+  const candidates = []
+  if (process.platform === 'win32') {
+    const gitExeRes = resolveExecutable('git')
+    const gitExe = typeof gitExeRes === 'string' ? gitExeRes : (gitExeRes?.path ?? gitExeRes?.cmd ?? null)
+    if (gitExe) {
+      const rootDir = dirname(dirname(gitExe))
+      candidates.push(
+        join(rootDir, 'etc', 'gitconfig'),
+        join(dirname(rootDir), 'etc', 'gitconfig'),
+        join(rootDir, 'mingw64', 'etc', 'gitconfig'),
+      )
+    }
+  } else {
+    candidates.push('/etc/gitconfig')
+  }
+  for (const cfgPath of candidates) {
+    if (!existsSync(cfgPath)) continue
+    const txt = readTextSafe(cfgPath)
+    if (txt === undefined || /^\s*\[(?:include|includeif)\b/im.test(txt)) return null
+    const map = new Map()
+    let curSec = ''
+    let curSub = ''
+    for (const raw of txt.split(/\r?\n/)) {
+      const line = raw.replace(/(?:^|\s)[;#].*$/, '').trim()
+      if (!line) continue
+      const sec = /^\[([a-z0-9-]+)(?:\s+"(.*)")?\]$/i.exec(line)
+      if (sec) { curSec = sec[1].toLowerCase(); curSub = sec[2] ?? ''; continue }
+      const eq = line.indexOf('=')
+      if (eq <= 0 || !curSec) continue
+      const k = line.slice(0, eq).trim().toLowerCase()
+      const v = line.slice(eq + 1).trim()
+      const fullKey = curSub ? `${curSec}.${curSub.toLowerCase()}.${k}` : `${curSec}.${k}`
+      map.set(fullKey, v)
+    }
+    return map
+  }
+  return null
+}
+
 export function readSystemGitConfigMapFast() {
   if (cachedSysConfigMap !== undefined) return cachedSysConfigMap
+  const iniMap = parseSystemGitConfigIniFast()
+  if (iniMap) {
+    cachedSysConfigMap = iniMap
+    return cachedSysConfigMap
+  }
   try {
     const inv = process.platform === 'win32'
       ? prepareExecInvocation('git', ['config', '--system', '--list'], {})
@@ -108,6 +154,11 @@ export function readSystemGitConfigMapFast() {
 
 export function readSystemGitConfigMapAsync() {
   if (cachedSysConfigMap !== undefined) return Promise.resolve(cachedSysConfigMap)
+  const iniMap = parseSystemGitConfigIniFast()
+  if (iniMap) {
+    cachedSysConfigMap = iniMap
+    return Promise.resolve(cachedSysConfigMap)
+  }
   if (pendingSysConfigPromise) return pendingSysConfigPromise
   pendingSysConfigPromise = new Promise((done) => {
     try {
@@ -137,7 +188,9 @@ export function readSystemGitConfigMapAsync() {
 export function readGitConfigFast(gitCommonDir, opts = {}) {
   if (!gitCommonDir) return null
   if (process.env.GIT_CONFIG_GLOBAL || process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_COUNT) return null
-  const localCfg = readTextSafe(join(gitCommonDir, 'config'))
+  const commonRel = readTextSafe(join(gitCommonDir, 'commondir'))
+  const effectiveCommonDir = commonRel ? resolve(gitCommonDir, commonRel.trim()) : gitCommonDir
+  const localCfg = readTextSafe(join(effectiveCommonDir, 'config'))
   if (localCfg === undefined) return null
   const xdgHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
   const globalPaths = [join(homedir(), '.gitconfig'), join(xdgHome, 'git', 'config')]
@@ -431,7 +484,7 @@ export function readLooseCommitLogFast(repoRoot, gitCommonDir, headOid, maxCommi
     if (/^(?:encoding|gpgsig)\s/m.test(hdr)) return null
     const parents = []
     for (const m of hdr.matchAll(/^parent ([0-9a-f]{40})$/gm)) parents.push(m[1])
-    if (parents.length > 1) return null
+    if (parents.length > 1) break
     const authM = /^author (.+? <[^>]*>) \d+ [+-]\d{4}$/m.exec(hdr)
     if (!authM) return null
     const body = text.slice(sep + 2)
@@ -445,7 +498,8 @@ export function readLooseCommitLogFast(repoRoot, gitCommonDir, headOid, maxCommi
     }
     cur = parents[0]
   }
-  return complete ? { complete: true, entries } : null
+  if (entries.length === 0) return null
+  return { complete, entries }
 }
 
 

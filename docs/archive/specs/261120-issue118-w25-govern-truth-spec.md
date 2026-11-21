@@ -1,14 +1,15 @@
 ---
 kind: spec
 title: 治理真相与规则纠偏：发版证据从事实算、生成物不入归因、陈旧命令规则可表达本地变体
-status: draft
+status: superseded
 tier: L3
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-22
 issue: 118
 pr: null
 branch: fix/w25-govern-truth
 owner: plan-wave25
+plan_mode: interactive
 approved: false
 implemented: false
 plan_critique: pending
@@ -16,9 +17,9 @@ related_prd: ../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue118-w25-govern-truth-todo.md
 high_risk_paths: [scripts/lib/, kit/, scripts/dev/]
 task_id: w25-govern-truth
-plan_mode: interactive
 depends_on: []
-scope_files: ["scripts/dev/evidence.mjs", "scripts/lib/protocol.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle.mjs", "kit/skills/dev-flow/scripts/flow-context.mjs", "kit/skills/dev-govern/scripts/govern-checks.mjs", "kit/skills/dev-govern/scripts/govern-retro.mjs", "kit/skills/dev-govern/scripts/govern-state.mjs", "scripts/lib/review-helpers.mjs", "scripts/lib/survey-ecosystem.mjs", "scripts/lib/survey-workspace.mjs", "scripts/dev/preflight-suite.mjs", "scripts/dev/fixtures-govern-truth.mjs"]
+scope_files: [scripts/dev/evidence.mjs, scripts/lib/protocol.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-context.mjs, kit/skills/dev-govern/scripts/govern-checks.mjs, kit/skills/dev-govern/scripts/govern-retro.mjs, kit/skills/dev-govern/scripts/govern-state.mjs, scripts/lib/review-helpers.mjs, scripts/lib/survey-ecosystem.mjs, scripts/lib/survey-workspace.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/fixtures-govern-truth.mjs]
+superseded_by: 261120-issue115-w25-kernel-dedup-spec.md
 ---
 
 # 治理真相与规则纠偏（Issue `#118`）

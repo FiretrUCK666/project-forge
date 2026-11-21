@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import {
   existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { execSafe } from './exec.mjs'
@@ -25,7 +25,9 @@ export const COMMON_SKIP_DIRS = new Set([
 
 export const DEFAULT_WALK_SKIP_DIRS = COMMON_SKIP_DIRS
 
-const MACOS_JUNK_NAMES = new Set(['.DS_Store', '__MACOSX', '.Spotlight-V100', '.Trashes', '.fseventsd'])
+const MACOS_JUNK_NAMES = new Set([
+  '.DS_Store', '__MACOSX', '.Spotlight-V100', '.Trashes', '.fseventsd', '.AppleDouble', '.TemporaryItems',
+])
 
 let atomicCounter = 0
 
@@ -76,16 +78,29 @@ export function isMainModule(metaUrl, argv1) {
   return samePath(argv1, fileURLToPath(metaUrl))
 }
 
+/** 检测单个路径段是否属于 macOS Finder / AppleDouble 元数据条目。 */
+export function isMacMetadataName(name) {
+  const seg = String(name ?? '')
+  if (!seg) return false
+  return MACOS_JUNK_NAMES.has(seg) || seg.startsWith('._')
+}
+
 /** 检测路径是否属于 macOS Finder / 索引垃圾文件（._*、.DS_Store、__MACOSX 等）。 */
 export function isMacOsJunkPath(relOrName) {
   const norm = posixPath(relOrName)
   if (!norm) return false
-  const parts = norm.split('/')
-  for (const seg of parts) {
-    if (!seg) continue
-    if (MACOS_JUNK_NAMES.has(seg) || seg.startsWith('._')) return true
-  }
-  return false
+  return norm.split('/').some((seg) => isMacMetadataName(seg))
+}
+
+/** 判断候选路径是否位于目标父目录之内（含相等；严防 `/tmp/repo2` 误判在 `/tmp/repo` 内）。 */
+export function isInsideDir(candidateAbs, parentAbs) {
+  const c = canonicalPath(candidateAbs)
+  const p = canonicalPath(parentAbs)
+  const ca = process.platform === 'win32' ? c.toLowerCase() : c
+  const pa = process.platform === 'win32' ? p.toLowerCase() : p
+  if (ca === pa) return true
+  const prefix = pa.endsWith(sep) ? pa : `${pa}${sep}`
+  return ca.startsWith(prefix)
 }
 
 /** 安全读取 UTF-8 文本文件（去掉 BOM、统一换行）；不可读或二进制返回 undefined。 */
@@ -198,4 +213,42 @@ export function unescapeGitPath(rawPath) {
   }
   return posixPath(Buffer.from(bytes).toString('utf8'))
 }
+
+export const CODE_EXT_RE = /\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1)$/i
+
+export function matchGlob(filePath, pattern) {
+  const f = posixPath(filePath).replace(/^\.\//, '').replace(/^\/+/, '')
+  const p = posixPath(pattern).trim().replace(/^`+|`+$/g, '').replace(/^\.\//, '').replace(/^\/+/, '')
+  if (!f || !p) return false
+  if (p.endsWith('/')) return f.startsWith(p)
+  if (p.endsWith('/**') && !p.slice(0, -3).includes('*') && !p.slice(0, -3).includes('?')) {
+    const base = p.slice(0, -3)
+    return f === base || f.startsWith(`${base}/`)
+  }
+  if (!/[*?]/.test(p)) return f === p || f.startsWith(`${p}/`)
+
+  let reStr = '^'
+  for (let i = 0; i < p.length; i += 1) {
+    if (p[i] === '*') {
+      if (p[i + 1] === '*') {
+        if (p[i + 2] === '/') {
+          reStr += '(?:.*/)?'
+          i += 2
+        } else {
+          reStr += '.*'
+          i += 1
+        }
+      } else {
+        reStr += '[^/]*'
+      }
+    } else if (p[i] === '?') {
+      reStr += '[^/]'
+    } else {
+      reStr += p[i].replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  reStr += '$'
+  return new RegExp(reStr).test(f)
+}
+
 

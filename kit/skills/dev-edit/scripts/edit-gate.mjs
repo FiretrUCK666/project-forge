@@ -26,8 +26,9 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  checkProcessArtifactFilename, evaluateArchRules, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
+  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
 } from '../../lib/static-gates.mjs'
+import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 
@@ -289,7 +290,7 @@ export async function runEditGate(opts = {}) {
       if (!existsSync(abs) || !CODE_EXT_RE.test(rel) || FIXTURE_FILE_RE.test(rel) || TEST_FILE_RE.test(rel)) continue
       const txt = readTextSafe(abs, 512 * 1024)
       if (!txt) continue
-      const lineCount = txt.replace(/\r\n/g, '\n').split('\n').length
+      const lineCount = countTextLines(txt)
       if (lineCount > 800) {
         warnings.push({ ruleId: 'edit.existing-oversized', severity: 'medium', file: rel, lines: lineCount, message: `目标文件当前已有 ${lineCount} 行（> 800 行上限），请先拆分模块再继续扩展：${rel}` })
       } else if (lineCount >= NEAR_LIMIT_LINES) {
@@ -307,6 +308,9 @@ export async function runEditGate(opts = {}) {
   }
 
   const tierMeta = detectTestTierMetadata(workTreeRoot, checkedFiles)
+  const enableCommentPathCheck = opts.changed === true || !(
+    (Array.isArray(opts.files) && opts.files.length > 0) || (typeof opts.files === 'string' && opts.files.trim())
+  )
   const codeRelList = []
 
   for (const entry of dedupEntries) {
@@ -319,10 +323,44 @@ export async function runEditGate(opts = {}) {
     codeRelList.push(rel)
 
     const lines = txt.replace(/\r\n/g, '\n').split('\n')
-    const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullLineCount: lines.length, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES })
+    const fullLineCount = countTextLines(txt)
+    const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullLineCount, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES })
 
     for (const s of hyg.excuseSuppressions) {
-      blockers.push({ ruleId: 'edit.suppression-bypass', defectClass: 'suppression-bypass', severity: 'high', file: rel, line: s.line, excerpt: s.excerpt, message: `检测到无正当锚点的压制/借口注释：${rel}:${s.line}`, fixHint: '直接修复根因类型或静态检查错误，禁止使用 @ts-ignore/eslint-disable/HACK/WORKAROUND/TEMP/noqa/#[allow( 压制。' })
+      const isIssueMissing = s.kind === 'missing-issue-link'
+      blockers.push({
+        ruleId: isIssueMissing ? 'edit.hack-without-issue' : 'edit.suppression-bypass',
+        defectClass: 'suppression-bypass',
+        severity: 'high',
+        file: rel,
+        line: s.line,
+        excerpt: s.excerpt,
+        message: isIssueMissing
+          ? `检测到未关联追踪单号（#<issue>）的 HACK/WORKAROUND/TEMP 注释：${rel}:${s.line}`
+          : `检测到无正当锚点的压制/借口注释：${rel}:${s.line}`,
+        fixHint: isIssueMissing
+          ? '临时 HACK/WORKAROUND/TEMP 必须先通过 node .agents/skills/dev-flow/scripts/flow.mjs issue create 或 escalation.mjs 建单并在注释中注明 #<N>，或直接根治。'
+          : '直接修复根因类型或静态检查错误，禁止使用 @ts-ignore/eslint-disable/HACK/WORKAROUND/TEMP/noqa/#[allow( 压制。',
+      })
+    }
+    if (enableCommentPathCheck && !isTestOrFixtureFile(rel)) {
+      let headText = null
+      if (isGit) {
+        const showRes = await gitRun(workTreeRoot, ['show', `HEAD:${rel}`])
+        if (showRes.ok) headText = showRes.stdout
+      }
+      for (const bp of scanBrokenCommentPaths({ repoRoot: workTreeRoot, fileRel: rel, text: txt, headText })) {
+        blockers.push({
+          ruleId: 'edit.broken-comment-path',
+          defectClass: 'stale-contract',
+          severity: 'high',
+          file: rel,
+          line: bp.line,
+          excerpt: bp.raw,
+          message: `注释引用了不存在的仓库路径 \`${bp.path}\`：${rel}:${bp.line}`,
+          fixHint: '同步更新或删除失效的反引号路径引用，保持注释与真实文件树一致。',
+        })
+      }
     }
     for (const t of hyg.tombstoneComments) {
       blockers.push({ ruleId: 'edit.tombstone-comment', defectClass: 'stale-contract', severity: 'high', file: rel, line: t.line, excerpt: t.excerpt, message: `检测到履历墓碑注释：${rel}:${t.line}`, fixHint: '仅描述当前不变量与现状，历史改动交由 Git 提交记录保存。' })
@@ -331,10 +369,10 @@ export async function runEditGate(opts = {}) {
       blockers.push({ ruleId: 'edit.dead-code-block', defectClass: 'dead-code', severity: 'high', file: rel, line: db.line, endLine: db.endLine, excerpt: db.excerpt, message: `检测到连续注释死代码块（${db.length} 行）：${rel}:${db.line}-${db.endLine}`, fixHint: '直接删除废弃注释代码块，依靠版本历史追溯。' })
     }
     if (hyg.godFile) {
-      blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: lines.length, lines: lines.length, message: `源文件超出 800 行上限（当前 ${lines.length} 行）：${rel}`, fixHint: '按单一职责拆分为内聚子模块，保持每个源文件 <= 800 行。' })
+      blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 800 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: '按单一职责拆分为内聚子模块，保持每个源文件 <= 800 行。' })
     } else if (hyg.nearLimitFile) {
       nearLimitFiles.push(hyg.nearLimitFile)
-      warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: lines.length, message: `紧文件预警（${lines.length}/800 行），建议提前规划模块拆分：${rel}` })
+      warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: fullLineCount, message: `紧文件预警（${fullLineCount}/800 行），建议提前规划模块拆分：${rel}` })
     }
 
     const isMetaHarness = /(?:^|\/)(?:fixtures|verify-injections|gap-coverage)\.[^/]+$/i.test(rel) || /\bfunction\s+tmpProject\s*\(/.test(txt)

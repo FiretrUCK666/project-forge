@@ -361,8 +361,11 @@ process.exit(1)
   }
 }
 
-async function runScenarioH(pkgRoot, sandbox, baseEnv, mockEnv, mockSrv, helpers) {
-  const { assertOk, initGitRepo, recordWithToken, runGit, runNodeScript, writeFiles } = helpers
+async function runScenarioH(pkgRoot, sandbox, baseEnv, helpers) {
+  const mockSrv = await startMockGitHubHttpServer(sandbox)
+  const mockEnv = buildMockGhEnv(sandbox, mockSrv.baseUrl)
+  try {
+    const { assertOk, initGitRepo, recordWithToken, runGit, runNodeScript, writeFiles } = helpers
   const repoH = join(sandbox, 'repo-h')
   initGitRepo(repoH, {
     '.gitignore': '.worktrees/\n',
@@ -451,6 +454,9 @@ async function runScenarioH(pkgRoot, sandbox, baseEnv, mockEnv, mockSrv, helpers
   const stAfterMerge = await mockSrv.getState()
   const closedIss = stAfterMerge.issues.find((x) => x.number === remoteIssNum)
   if (closedIss?.state !== 'CLOSED') throw new Error(`Scenario H merge failed to close remote issue: ${JSON.stringify(stAfterMerge.issues)}`)
+  } finally {
+    mockSrv.close()
+  }
 }
 
 async function runScenarioI(pkgRoot, sandbox, env, helpers) {
@@ -660,14 +666,14 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
   assertOk(runNodeScript(flowJ, ['merge', '--task', 'j1'], repoJ, env), 'Scenario J generic-git merge')
 }
 
+export const STAGE_B_SCENARIOS = {
+  'b-h': runScenarioH,
+  'b-i': runScenarioI,
+  'b-j': runScenarioJ,
+}
+
 export async function runStageBScenarios(pkgRoot, sandbox, env, helpers) {
-  const mockSrv = await startMockGitHubHttpServer(sandbox)
-  const mockEnv = buildMockGhEnv(sandbox, mockSrv.baseUrl)
-  try {
-    await runScenarioH(pkgRoot, sandbox, env, mockEnv, mockSrv, helpers)
-    await runScenarioI(pkgRoot, sandbox, env, helpers)
-    await runScenarioJ(pkgRoot, sandbox, env, helpers)
-  } finally {
-    mockSrv.close()
+  for (const fn of [runScenarioH, runScenarioI, runScenarioJ]) {
+    await fn(pkgRoot, sandbox, env, helpers)
   }
 }

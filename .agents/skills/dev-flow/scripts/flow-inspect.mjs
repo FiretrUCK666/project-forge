@@ -81,7 +81,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
         needSysCfg ? readSystemGitConfigMapAsync() : Promise.resolve(null),
         skipLog
           ? Promise.resolve({ ok: true, stdout: '' })
-          : (fastLog
+          : (fastLog?.complete
               ? Promise.resolve({ ok: true, stdout: fastLog.entries.map((e) => `${e.author}\x1f${e.subject}`).join('\n') })
               : gitRun(workRoot, ['--no-optional-locks', 'log', '-n', '500', '--format=%an <%ae>\x1f%s'])),
         needRefsExec ? gitRun(mainRoot, ['for-each-ref', '--format=%(refname)\t%(symref:short)', 'refs/heads', 'refs/remotes/origin']) : Promise.resolve(null),

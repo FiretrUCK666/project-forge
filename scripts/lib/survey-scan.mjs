@@ -33,7 +33,6 @@ import { readTextSafe } from './text.mjs'
  */
 export async function scanProjectStaticFacts(root) {
   const { relFiles, dirs, readPromise } = startWorkspaceWalkAsync(root)
-  const rawWs = await readPromise
   const relSet = new Set(relFiles)
   const dirSet = new Set(dirs)
   const ecosystem = detectEcosystem(root, relFiles)
@@ -43,6 +42,7 @@ export async function scanProjectStaticFacts(root) {
   const workspace = detectWorkspace(root, relFiles)
   const artifacts = detectArtifacts(root, ecosystem, relFiles)
   const universal = detectUniversalCommands(root, { neutralCi, runners: taskEntryMeta.runners })
+  const rawWs = await readPromise
 
   const textByRel = new Map()
   const bufByRel = new Map()
@@ -51,7 +51,7 @@ export async function scanProjectStaticFacts(root) {
     if (f.rawBuf) bufByRel.set(f.rel, f.rawBuf)
   }
   const docs = detectDocs(root, { files: relFiles, textByRel, neutralCi })
-  const kit = detectKit(root, { rawFiles: { textByRel, bufByRel, relSet } })
+  const kit = detectKit(root, { rawFiles: { textByRel, bufByRel, relSet, dirs } })
   const localSkills = buildLocalSkillsFromKit(root, kit)
 
   const agentsText = docs?.agents ? (textByRel.get(docs.agents.file) ?? readTextSafe(join(root, docs.agents.file)) ?? '') : ''

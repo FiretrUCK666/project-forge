@@ -137,7 +137,7 @@ async function checkRunsOnRealTarget({ ROOT, readText, fail, note }) {
 }
 
 async function smoke({ ROOT, fail, note }) {
-  const { reviewProject, handoffScan } = await loadE2eDeps()
+  const { runSurvey, reviewProject, handoffScan } = await loadE2eDeps()
   const tmp = mkdtempSync(join(tmpdir(), 'pf-smoke-'))
   try {
     writeFileSync(join(tmp, 'package.json'), JSON.stringify({
@@ -147,10 +147,7 @@ async function smoke({ ROOT, fail, note }) {
     writeFileSync(join(tmp, 'README.md'), '# demo-app\n\n一个用来跑冒烟验证的示例项目，说明足够长。\n')
     writeFileSync(join(tmp, '.gitignore'), 'node_modules/\n')
 
-    const s = await runAsync(ROOT, 'survey.mjs', [tmp])
-    if (s.status !== 0) { fail(`survey 冒烟失败：${(s.stderr || '').trim()}`); return }
-    let facts
-    try { facts = JSON.parse(s.stdout) } catch { fail('survey 的输出不是 JSON'); return }
+    const facts = await runSurvey(tmp)
     for (const field of ['maturity', 'git', 'ecosystem', 'commands', 'docs', 'risks', 'gaps', 'questions']) {
       if (facts[field] === undefined) fail(`survey 的输出缺字段 ${field}`)
     }

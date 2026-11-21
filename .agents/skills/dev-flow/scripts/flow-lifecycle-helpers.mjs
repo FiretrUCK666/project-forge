@@ -15,8 +15,9 @@ import { escalateToBackend } from '../../lib/escalation.mjs'
 import { mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { gitRun, posixPath, readTextSafe, syncDetachedWorktree, writeAtomic } from '../../lib/git.mjs'
 import { resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { recordMountedDepsInLedger, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { recordMountedDepsInLedger, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
+import { evaluatePlanExitGate, PLAN_EXIT_BLOCK_CODE } from '../../lib/plan-exit-gate.mjs'
 import { parseMilestoneNumber } from '../../lib/platform.mjs'
 import {
   buildE2eDiagnosticPacket,
@@ -253,9 +254,20 @@ export function cmdContainsSubcommand(fullCmd, subCmd) {
   return full.split(/\s*(?:&&|;|\n)\s*/).map((s) => s.trim()).includes(target)
 }
 
+const SIGNAL_BLAME_NOISE_RE = /(?:^|\/)\.pf-manifest\.json$|^\.worktrees\//
+
+export function pickSignalBlameFile(changedFiles = [], fallback = '') {
+  const real = (Array.isArray(changedFiles) ? changedFiles : [])
+    .map((f) => posixPath(f))
+    .filter((f) => f && !SIGNAL_BLAME_NOISE_RE.test(f))
+  return real[0] ?? fallback
+}
+
 export async function handleVerifyE2eFailure({
   roots, taskId, ledger, mode, cmd, runRes, currentHead, changedFiles = [], opts = {},
 }) {
+  const blameFile = pickSignalBlameFile(changedFiles, '')
+  const filteredChanged = blameFile ? [blameFile, ...changedFiles.filter((f) => f !== blameFile && !SIGNAL_BLAME_NOISE_RE.test(posixPath(f)))] : []
   const diagnostic = buildE2eDiagnosticPacket({
     cmd,
     exitCode: runRes?.code ?? 1,
@@ -264,15 +276,15 @@ export async function handleVerifyE2eFailure({
     headSha: currentHead,
     taskId,
     mode,
-    changedFiles,
+    changedFiles: filteredChanged,
   })
   await emitFlowSignal(roots, {
     category: 'e2e',
-    module: changedFiles[0] ? undefined : 'e2e',
+    module: blameFile ? undefined : 'e2e',
     pattern: 'e2e.runtime-fail',
     severity: 'high',
     source: 'flow-verify',
-    file: changedFiles[0] ?? '',
+    file: blameFile,
     taskId,
     message: diagnostic.Evidence.slice(0, 2).join(' | '),
     meta: { exitCode: runRes?.code ?? 1, headSha: currentHead ?? null, mode },
@@ -483,6 +495,44 @@ export function recordVerifyEvidenceForFlow({
     gates, skipped: [...skipped],
   })
   return { overallExit: finalOverallExit, smokeVerifiedOnHead, e2eObservation, shallowE2eEvidence, precheck }
+}
+
+export function validatePlanningReadyForFinalize({ implRoot, ledger, taskId, specRel, todoRel, prdRel }) {
+  if (ledger?.planning !== true && ledger?.status !== 'planning') {
+    return { ok: true, blocked: false, shouldPromotePlanning: false }
+  }
+  if (Number(ledger?.caseType) >= 4 && !specRel) {
+    return {
+      ok: false,
+      blocked: true,
+      code: PLAN_EXIT_BLOCK_CODE,
+      exitCode: EXIT.FACT,
+      message: `${PLAN_EXIT_BLOCK_CODE}: Case 4 任务 ${taskId} 处于 planning 态且尚未绑定 SPEC，禁止 finalize；请先生成 SPEC、过 Critique 并 approve。`,
+    }
+  }
+  const planGate = evaluatePlanExitGate(implRoot, {
+    caseType: ledger?.caseType,
+    slug: ledger?.slug,
+    taskId,
+    issue: ledger?.linkedIssues?.[0] ?? null,
+    docs: { spec: specRel, todo: todoRel, prd: prdRel },
+    allowBootstrap: false,
+    planCritique: ledger?.planCritique ?? null,
+  })
+  if (planGate.blocked) return planGate
+  return { ok: true, blocked: false, shouldPromotePlanning: true }
+}
+
+export function promotePlanningInLedgerOnFinalize(ledger, opts = {}) {
+  if (!ledger || typeof ledger !== 'object') return
+  ledger.planning = false
+  const actor = String(opts.agent ?? '').trim()
+  if (actor && !/(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i.test(actor)) {
+    ledger.previousImplementers = rememberPreviousImplementer(ledger, actor)
+    ledger.agent = actor
+    ledger.implementerId = actor
+    if (!ledger.claimedBy) ledger.claimedBy = actor
+  }
 }
 
 export function ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note }) {

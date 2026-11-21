@@ -122,8 +122,3 @@ export function writeAtomic(path, content) {
 export function exists(p) {
   return existsSync(p)
 }
-
-/** 父目录（给 `mkdirSync` 用）。 */
-export function parentOf(p) {
-  return dirname(p)
-}

@@ -8,7 +8,10 @@
 import { existsSync } from 'node:fs'
 import { join, posix as pathPosix, resolve } from 'node:path'
 
+import { CODE_EXT_RE, matchGlob } from './git-core.mjs'
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
+
+export { CODE_EXT_RE, matchGlob }
 import {
   computePatchRawDigest, getCachedCommitDiff, getCachedEntriesDiffText, parseRawAndUnifiedDiff,
   readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedCommitDiff,
@@ -39,7 +42,6 @@ export const PACKAGE_LOCKFILES = Object.freeze([
 export const LOCKFILE_NAMES = new Set(PACKAGE_LOCKFILES.map((n) => n.toLowerCase()))
 
 export const UI_VISUAL_EXT_RE = /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i
-export const CODE_EXT_RE = /\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1)$/i
 export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs|e2e|src\/test|src\/it)\/|(?:\.(?:test|spec)\.[^/]+$)|_test\.[^/]+$|(?:^|\/)test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$|\.Tests\//i
 export const FIXTURE_FILE_RE = /(?:^|\/)(?:fixtures?|__fixtures__|testdata|__mocks__)\/|(?:\.(?:fixtures?|mocks?|testdata)\.[^/]+$)|(?:^|\/)fixtures(?:-[^/]+)?\.[^/]+$|(?:^|\/)injections-data(?:-[^/]+)?\.[^/]+$/i
 
@@ -62,46 +64,24 @@ export const TOMBSTONE_COMMENT_RE = /\b(?:used to be|previously (?:was|were|call
 export const TOMBSTONE_DATE_RE = /\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\s*(?:fixed|changed|updated|migrated|removed|replaced|修复|改为|改成|迁移|删除|替换)/i
 export const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
 export const EXCUSE_TEMP_RE = /\bTEMP\b/
+export const EXCUSE_HACK_RE = /\b(?:hack|workaround)\b|\bTEMP\b/i
+export const ISSUE_REF_RE = /(?:issue\s*#\d+|#\d+\b|https?:\/\/[^\s)]+\/issues\/\d+)/i
 export const RUST_ALLOW_RE = /^\s*#\[\s*allow\(/
 export const JUSTIFICATION_ANCHOR_RE = /\b(?:pf-allow|justification|justified-by|issue\s*#\d+)\s*[:：]/i
 export const NEAR_LIMIT_LINES = 730
 
-/** 通用路径 glob 匹配（支持 `*`、`**`、`?` 及目录前缀斜杠）。 */
-export function matchGlob(filePath, pattern) {
-  const f = posixPath(filePath).replace(/^\.\//, '').replace(/^\/+/, '')
-  const p = posixPath(pattern).trim().replace(/^`+|`+$/g, '').replace(/^\.\//, '').replace(/^\/+/, '')
-  if (!f || !p) return false
-  if (p.endsWith('/')) return f.startsWith(p)
-  if (p.endsWith('/**') && !p.slice(0, -3).includes('*') && !p.slice(0, -3).includes('?')) {
-    const base = p.slice(0, -3)
-    return f === base || f.startsWith(`${base}/`)
-  }
-  if (!/[*?]/.test(p)) return f === p || f.startsWith(`${p}/`)
-
-  let reStr = '^'
-  for (let i = 0; i < p.length; i += 1) {
-    if (p[i] === '*') {
-      if (p[i + 1] === '*') {
-        if (p[i + 2] === '/') {
-          reStr += '(?:.*/)?'
-          i += 2
-        } else {
-          reStr += '.*'
-          i += 1
-        }
-      } else {
-        reStr += '[^/]*'
-      }
-    } else if (p[i] === '?') {
-      reStr += '[^/]'
-    } else {
-      reStr += p[i].replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    }
-  }
-  reStr += '$'
-  return new RegExp(reStr).test(f)
+/**
+ * 统计文本行数：统一将 CRLF 转为 LF 并剥离末尾换行产生的空行，保证 799/800 行边界口径在全仓一致。
+ */
+export function countTextLines(text) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n')
+  if (normalized === '') return 0
+  const lines = normalized.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines.length
 }
 
+/** 通用路径 glob 匹配（支持 `*`、`**`、`?` 及目录前缀斜杠）。 */
 function parseArchRuleItem(rawRule) {
   if (rawRule && typeof rawRule === 'object') {
     const from = String(rawRule.fromGlob ?? rawRule.from ?? '').trim()
@@ -701,8 +681,15 @@ export function scanStructuralHygiene({ fileRel, lines = [], fullLineCount = 0, 
         tombstoneComments.push({ file: rel, line: i + 1, excerpt: line.trim().slice(0, 120) })
       }
       const hasJustify = JUSTIFICATION_ANCHOR_RE.test(commentText || line)
-      if (!hasJustify && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {
-        excuseSuppressions.push({ file: rel, line: i + 1, excerpt: line.trim().slice(0, 120) })
+      const isHackLike = Boolean(commentText && EXCUSE_HACK_RE.test(commentText))
+      const hasIssueRef = Boolean(commentText && ISSUE_REF_RE.test(commentText))
+      if (!hasJustify && !(isHackLike && hasIssueRef) && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {
+        excuseSuppressions.push({
+          file: rel,
+          line: i + 1,
+          kind: isHackLike ? 'missing-issue-link' : 'suppression-bypass',
+          excerpt: line.trim().slice(0, 120),
+        })
       }
     }
   }

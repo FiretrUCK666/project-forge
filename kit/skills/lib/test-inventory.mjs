@@ -424,11 +424,6 @@ export function resolveNativeTestDir(repoRoot, { ecosystem = null, tier = 'integ
   }
 }
 
-export function readFeatureMapDocHint(repoRoot) {
-  const txt = readTextSafe(join(repoRoot, FEATURE_MAP_REL))
-  return Boolean(txt && txt.trim())
-}
-
 export function slugTestToken(raw) {
   return String(raw ?? '')
     .toLowerCase()

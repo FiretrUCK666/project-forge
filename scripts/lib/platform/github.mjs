@@ -10,6 +10,7 @@ import {
   hasForkModeMarker,
   hasLocalOnlyMarker,
   hasStandaloneModeMarker,
+  parseBodyRelations,
 } from '../../../kit/skills/lib/platform.mjs'
 import { githubRepoPath, parseSshConfigHostMap } from '../text.mjs'
 import {
@@ -134,6 +135,14 @@ export const GITHUB_PROVIDER = Object.freeze({
   },
   normalizeRepo(remoteUrl, sshHostMap) {
     return normalizeGitHubRepo(remoteUrl, sshHostMap)
+  },
+  parseRelations(body) {
+    return parseBodyRelations(body)
+  },
+  formatIssueRef(repo, number) {
+    const n = Number(number)
+    if (!Number.isInteger(n) || n <= 0) return ''
+    return repo ? `${repo}#${n}` : `#${n}`
   },
   async probeTransport(ctx = {}) {
     const safeEnv = buildNonInteractiveEnv(ctx.env ?? process.env)

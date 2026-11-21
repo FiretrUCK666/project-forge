@@ -38,31 +38,31 @@ scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/lib/cli.mjs", "kit/
 ## 二、不做什么
 
 <!-- section: non-goals -->
-不改「未提及是否等于已解决」的账本语义（归 `#113`）；不改受管区间与手写区边界；不改真幂等与写前快照；不改停损机制本身；不改工作树清理的确认闸与解绑顺序；不新增关掉检查的开关；不碰 `docs/archive/`。
+不改受管区间与手写区边界；不改真幂等与写前快照；不改停损机制本身；不改工作树清理的确认闸与依赖解绑顺序；不新增关掉检查的开关；不改 `edit-gate.mjs` 无目标退出码；不重做 `flow.mjs --help` 帮助结构；不碰 `docs/archive/`。
 
 不以任何形式打补丁：不加条件挡住「不认识」的输入、不用重试掩盖解析失败、不留「空集也算通过」的软通道。
 <!-- section: non-goals-end -->
 
 ## 三、实施任务清单
 
-- [ ] **T1（`C1` 引用一等对象）**：`github-parse.mjs` 的完整引用入口提升为基础实现，旧数字入口改为薄包装；`flow-intake.mjs` 与 `flow-inspect.mjs` 的自定义解析改为调用同一实现；`flow-intake.mjs` 增加写操作前的目标仓唯一性判定，跨仓阻断并给出下一步文案；两条入口接受同一批位置参数写法。
-- [ ] **T2（`C2` 拒绝带修法 + 两路径同结论）**：`scripts/equip.mjs` 的报告格式化对每类问题补一句可执行修法；写入路径在产生待裁决冲突时返回非零；核对两条路径对同一输入给出同一结论。
-- [ ] **T3（`C3` 起步态独立判据）**：`survey.mjs` 增加「无源码且提交数不超过极小阈值」的起步态；技术设计文档条目的跳过判据改为读起步态，不再直接吃项目类型；保留长历史纯文档仓库的原判定。
-- [ ] **T4（`C4` 路径归一 + 三通道报出）**：`review-locks.mjs` 的文件行号解析前统一路径归一（复用 `git-core.mjs` 的归一工具）；`iterate-cycle.mjs` 的待拍板门禁、进度历史、轮次上限三处改为带原因的返回结构，报出项、失败原因与截断告警；`iterate.mjs` 把三者写进报告。
-- [ ] **T5（`C5` 输出通道）**：`flow-inspect.mjs` 非 JSON 模式列出未使用输入；`flow-batch.mjs` 零条目不落盘；`flow-next.mjs` 与 `flow.mjs` 的正文命令在未装套件时与提示同降级；`flow.mjs` 帮助按任务组织并写明参数归属子命令。
-- [ ] **T6（`C6` 未适用独立成档）**：`doc-audit-repo.mjs` 在目标集合为空时返回带「未适用」与两种情形区分的结果，`doc-plan.mjs` 侧退出码非零；`edit-gate.mjs` 无目标文件时输出未适用并返回「有事先处理」档，不返回通过档。
-- [ ] **T7（`C7` 与 `#113` 核对）**：确认同一问题判定与轮次收口两处全仓零改动；若 `#113` 已合入则只跑夹具确认，若未合入则确认本片输出中不含对该语义的第二份实现。
-- [ ] **T8（夹具）**：新增 `scripts/dev/fixtures-flow-defects.mjs` (new)，承接 `C1..C7` 每条的正反断言。
-- [ ] **T9（行数核对）**：逐文件核对 `.mjs <= 800` 行，重点 `flow-inspect.mjs` 与 `equip.mjs`；超限则把报出与格式化下沉到同目录辅助模块。
-- [ ] **T10（同步）**：`kit/` 改动后重跑 `node scripts/equip.mjs .` 刷新镜像；CLI 行为变化同提交同步对应技能文档与 `docs/TDD.md` 相关行。
+- [ ] **T1（`C1` 引用一等对象）**：`github-parse.mjs` 的完整引用入口提升为基础实现（`parseFlowInputs`），`judgeCrossRepoReference` 做三态判定；`flow-intake.mjs` 复用同套解析与跨仓写阻断。
+- [ ] **T2（`C2` 拒绝带修法 + 两路径同结论）**：`scripts/lib/merge3.mjs` 抽六值封闭枚举；`scripts/equip.mjs` 校验与写入两条路径共读该判定，非同步非豁免均退 `3` 并给出三种合法处置。
+- [ ] **T3（`C3` 纯文档判据与起步提交）**：`survey.mjs` 用 `isDocsOnlyByDocuments` 判纯文档并在零提交时报「尚未首次提交」；`scripts/lib/equip-bootstrap.mjs`（`createFirstCommit`）落首次提交；`scripts/lib/agents-defaults.mjs` 将 `unknown`+0 代码收口为 `Dev Profile: none`。
+- [ ] **T4（`C4` 定位点、三态收口与三通道告警）**：`review-locks.mjs` 归一路径分隔符并支持中文行号，`sameBlockerItem` 按行区间相交去重；`review-ledger.mjs` 落 `unmentionedFromPrev` 三态收口；`iterate-cycle.mjs` 三通道进 `warnings` 不改语义。
+- [ ] **T5（`C5` 输出降级、零工作量与回告真实性）**：`flow.mjs` 正文列出 `inputs.unknown`；`flow-batch.mjs` 零工作量不落盘；`cli.mjs` 与 `session-orient.mjs` 同步降级正文命令；`flow-merge.mjs` `judgeCommentOutcome` 显式报未发出与补发命令。
+- [ ] **T6（`C6` 未适用独立成档）**：`doc-audit-repo.mjs` 在零目标或非受管文档时返回 `applicable: false` 并区分 `none`/`unmanaged`，`doc-plan.mjs` 返回非零退出码。
+- [ ] **T7（`C7` 与 `#113` 对齐）**：交集文件（`flow-batch`/`intake`/`merge`/`flow`、`doc-plan`、`review-ledger`/`locks`、`fixtures-docs.mjs`、`docs/TDD.md`）保留 `#113` 与 `#116` 双方完整逻辑并全绿。
+- [ ] **T8（夹具与故障注入）**：新增 `scripts/dev/fixtures-flow-defects.mjs`（16 条双向断言）与 `scripts/dev/injections-data-flow-defects.mjs`（`I310–I316`），并更新 `scripts/dev/injections-data-gates.mjs`（`I131`）。
+- [ ] **T9（行数核对）**：逐文件核对所有 `.mjs <= 800` 行（含 `flow-lifecycle.mjs` 787 行、`scripts/equip.mjs` 781 行）。
+- [ ] **T10（同步）**：`kit/` 改动后重跑 `node scripts/equip.mjs .` 刷新镜像；同步 `docs/TDD.md`。
 - [ ] **T11（`C8` Wave 2 五处遗留缺陷修复）**：修复 `review-empirical.mjs`/`review-pack.mjs`（`workspaceFingerprint`、结构化返回值与账本实证回查）、`flow-lifecycle.mjs`（`isExplicitNone` 透传与阻断、`hasVisualCheckFlag` 补全、precheck `reason`/`errors`）、`flow-lifecycle-helpers.mjs`/`empirical-artifacts.mjs`（`visual.headSha` 与 `sameClean` 合并过滤）、`doc-audit-repo.mjs`/`doc-slice-graph.mjs`（单源切片图覆盖与活跃 SPEC 过滤），并在 `fixtures-review-empirical.mjs`、`fixtures-empirical-cycle.mjs`、`fixtures-plan-wave-slices.mjs` 补齐正反双向夹具。
 
 ## 四、验收与合前检查
 
-- [ ] `node scripts/dev/fixtures.mjs --domain flow-defects` 全绿，`C1..C7` 每条正反各一条断言。
+- [ ] `node scripts/dev/fixtures.mjs --domain flow-defects` 与 `--domain review-empirical`/`empirical-cycle`/`plan-wave-slices` 全绿。
 - [ ] 对零目标范围执行审计，退出码非零且输出含「未适用」。
 - [ ] 本地有同号单据时跨仓引用被阻断，写操作未发生。
-- [ ] `node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs` 全绿。
+- [ ] `node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs --jobs 4` 全绿。
 - [ ] `.agents/skills/` 与 `kit/skills/` 字节级一致。
-- [ ] 改动未触及未合入的并行切片写域（`workflow-policy.mjs`、`workflow-helpers.mjs`、`git-core.mjs`、`git-status-fast.mjs`、`bench.mjs` 均不在本片写域）。
-- [ ] `doc-plan.mjs audit . --json` 返回 `ok: true`。
+- [ ] 改动未触及并行切片禁碰写域外无关文件（`workflow-policy.mjs`、`workflow-helpers.mjs`、`git-core.mjs`、`git-status-fast.mjs`、`bench.mjs`）。
+- [ ] `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit docs/specs/261120-issue116-w25-flow-defects-spec.md --json` 与 `audit docs/todo/261120-issue116-w25-flow-defects-todo.md --json` 返回 `ok: true`。

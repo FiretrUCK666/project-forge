@@ -9,16 +9,19 @@ issue: 116
 pr: null
 branch: fix/w25-flow-defects
 owner: plan-wave25
+plan_mode: interactive
 approved: false
 implemented: false
-plan_critique: pending
+plan_critique: "rejected (reviewer=critic-116, round=1, sha=3c9874d8bb68, summary=R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）)"
+critique_rounds: "[{\"round\":1,\"verdict\":\"rejected\",\"reviewerId\":\"critic-116\",\"sha\":\"3c9874d8bb68\",\"artifact_baseline\":{\"sha\":\"3c9874d8bb68d395b1feb92000902dc3ea8b7f297a90b12652e2f366b3885995\",\"shortSha\":\"3c9874d8bb68\",\"criteriaCount\":8,\"anchorCount\":62},\"summary\":\"R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）\",\"findings\":[\"R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）\"],\"stopLossTriggered\":false,\"stopLossReasons\":[],\"recordedAt\":\"2026-11-21T13:36:52.326Z\"}]"
 related_prd: ../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue116-w25-flow-defects-todo.md
 high_risk_paths: [kit/, scripts/]
 task_id: w25-flow-defects
-plan_mode: interactive
 depends_on: []
-scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/lib/cli.mjs", "kit/skills/lib/session-orient.mjs", "kit/skills/lib/empirical-artifacts.mjs", "kit/skills/lib/doc-slice-graph.mjs", "kit/skills/dev-flow/scripts/flow-intake.mjs", "kit/skills/dev-flow/scripts/flow-batch.mjs", "kit/skills/dev-flow/scripts/flow-merge.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs", "kit/skills/dev-flow/scripts/flow.mjs", "kit/skills/dev-iterate/scripts/iterate-cycle.mjs", "kit/skills/dev-plan/scripts/doc-audit-repo.mjs", "kit/skills/dev-plan/scripts/doc-audit.mjs", "kit/skills/dev-plan/scripts/doc-plan.mjs", "kit/skills/dev-review/scripts/review-empirical.mjs", "kit/skills/dev-review/scripts/review-pack.mjs", "kit/skills/dev-review/scripts/review-ledger.mjs", "kit/skills/dev-review/scripts/review-locks.mjs", "scripts/equip.mjs", "scripts/survey.mjs", "scripts/lib/agents-defaults.mjs", "scripts/lib/equip-bootstrap.mjs", "scripts/lib/merge3.mjs", "scripts/dev/fixtures-docs.mjs", "scripts/dev/fixtures-flow-defects.mjs", "scripts/dev/fixtures-empirical-cycle.mjs", "scripts/dev/fixtures-plan-wave-slices.mjs", "scripts/dev/fixtures-review-empirical.mjs", "scripts/dev/injections-data-flow-defects.mjs", "scripts/dev/injections-data-gates.mjs", "docs/TDD.md"]
+scope_files: [kit/skills/lib/github-parse.mjs, kit/skills/lib/cli.mjs, kit/skills/lib/session-orient.mjs, kit/skills/lib/empirical-artifacts.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/dev-flow/scripts/flow-intake.mjs, kit/skills/dev-flow/scripts/flow-batch.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-iterate/scripts/iterate-cycle.mjs, kit/skills/dev-plan/scripts/doc-audit-repo.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, scripts/equip.mjs, scripts/survey.mjs, scripts/lib/agents-defaults.mjs, scripts/lib/equip-bootstrap.mjs, scripts/lib/merge3.mjs, scripts/dev/fixtures-docs.mjs, scripts/dev/fixtures-flow-defects.mjs, scripts/dev/fixtures-empirical-cycle.mjs, scripts/dev/fixtures-plan-wave-slices.mjs, scripts/dev/fixtures-review-empirical.mjs, scripts/dev/injections-data-flow-defects.mjs, scripts/dev/injections-data-gates.mjs, docs/TDD.md]
+critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!`docs/archive/`\",\"!「未提及是否等于已解决」的账本语义**\",\"!任何「关掉检查」的开关\",\"!停损机制本身\",\"!工作树清理的确认闸与依赖解绑顺序\",\"!真幂等语义与写前快照语义\",\"!装配脚本的「受管区间 vs 手写区」边界\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C8\",\"JSON\",\"`#113`\",\"`C1`\",\"`C2`\",\"`C3`\",\"`C4`\",\"`C5`\",\"`C6`\",\"`C8`\",\"`docs/archive/`\"]},\"alternatives\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!变行为\",\"!自由度\",\"`#113`\",\"`kit/skills/lib/git-core.mjs`\",\"`kit/skills/lib/github-parse.mjs`\",\"`scripts/dev/fixtures.mjs`\",\"kit/skills/lib/git-core.mjs\",\"kit/skills/lib/github-parse.mjs\",\"scripts/dev/fixtures.mjs\"]}},\"anchors\":[\"!`docs/archive/`\",\"!「未提及是否等于已解决」的账本语义**\",\"!任何「关掉检查」的开关\",\"!停损机制本身\",\"!变行为\",\"!工作树清理的确认闸与依赖解绑顺序\",\"!正文\",\"!真幂等语义与写前快照语义\",\"!自由度\",\"!装配脚本的「受管区间 vs 手写区」边界\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C7\",\"C8\",\"HEAD\",\"JSON\",\"UI_VISUAL_EXT_RE\",\"UNCOVERED_ACCEPTANCE_CRITERIA\",\"`#113`\",\"`#N`\",\"`--apply`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`--visual-checked`\",\"`C1`\",\"`C2`\",\"`C3`\",\"`C4`\",\"`C5`\",\"`C6`\",\"`C8`\",\"`ReferenceError`\",\"`UI_VISUAL_EXT_RE`\",\"`UNCOVERED_ACCEPTANCE_CRITERIA`\",\"`auditRepoDocs`\",\"`checkSliceMetadata`\",\"`docs/archive/`\",\"`evidence.json`\",\"`explicit-none`\",\"`flow verify`\",\"`inspect`\",\"`intake`\",\"`kit/skills/lib/git-core.mjs`\",\"`kit/skills/lib/github-parse.mjs`\",\"`receipt`\",\"`review-pack`\",\"`scripts/dev/fixtures.mjs`\",\"`todo`\",\"`visual.headSha`\",\"`visualVerifiedHead`\",\"auditRepoDocs\",\"checkSliceMetadata\",\"evidence.json\",\"headSha\",\"kit/skills/lib/git-core.mjs\",\"kit/skills/lib/github-parse.mjs\",\"scripts/dev/fixtures.mjs\",\"visualVerifiedHead\"],\"coreSections\":[\"alternatives\",\"non-goals\"],\"pendingResolved\":9,\"pendingUnresolved\":0,\"criteriaCount\":8}"
+critique_findings: "1|must|R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）"
 ---
 
 # 流程缺陷收口（Issue `#116`）
@@ -27,7 +30,7 @@ scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/lib/cli.mjs", "kit/
 >
 > **基线**：`a0fe4df`。本切片认领总控 PRD `261120-w25-hardening-prd.md` 的 `C3`。
 
-十二条边界缺陷里十一条在范围内（第十二条归 `#113`，见非目标），它们不是同一个字面现象，而是同一个病根的两面：**输出的结论与真实状态不一致**。七个是「沉默放过」——没做、没查到、不认识、解析失败，全部转成通过或空集；四个是「声称了没发生的事」——拒绝了却承诺能用、只做了第一步却在措辞上按完成态写、空跑也落盘、提示降级而正文不降。两面一起治，才不会出现「沉默的修好了，声称的还在说」。
+十三条边界缺陷（`#116`）与 Wave 2 五处遗留缺陷同源：**输出的结论与真实状态不一致**——没做、没查到、不认识或跨仓被静默折成通过或空集，或失败被吞掉。本切片逐处把「沉默放过」改为如实报出并给修法，且补齐 Wave 2 实证/生命周期/切片图五处缺陷。
 
 ## 一、目标、红线与非目标
 
@@ -42,25 +45,25 @@ scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/lib/cli.mjs", "kit/
 ### 1.2 非目标（Explicit Non-Goals）
 
 <!-- section: non-goals -->
-- **不改「未提及是否等于已解决」的账本语义**。本条与立项单 `#113` 是同一个病根、同一批函数（同一问题判定与轮次收口），已由该切片承担。本切片只在验收里加一条核对：若 `#113` 先合入，本片只跑夹具确认该语义生效，不重复实现；若本片先合入，`#113` 落地时复用本片收敛后的解析与报出形状。
 - 不改装配脚本的「受管区间 vs 手写区」边界。手写的契约文件被拒绝改写是设计意图，不是缺陷；本片只修「拒绝时不给修法」与「写路径与校验路径对同一情况结论不同」这两点。
 - 不改真幂等语义与写前快照语义。
-- 不改停损机制本身，只修「三个输入通道静默丢弃」。
+- 不改停损机制本身，只修「三个输入通道静默丢弃」与 `review-locks.mjs` / `review-ledger.mjs` 的定位点同一性与未提及三态收口。
 - 不改工作树清理的确认闸与依赖解绑顺序。
 - 不新增任何「关掉检查」的开关；相反，本切片的目标是让检查无法被静默绕过。
+- 不触及 `kit/skills/dev-edit/scripts/edit-gate.mjs`（本片不改改码门禁无目标退出码），也不重做 `flow.mjs --help` 按任务重组。
 - 不动 `docs/archive/`。
 <!-- section: non-goals-end -->
 
-### 1.3 十二条缺陷到判据的对应
+### 1.3 缺陷到判据的对应
 
 | 判据 | 覆盖 | 一句话 |
 | --- | --- | --- |
-| `C1` | 跨仓引用坍缩、裸链接入口分叉 | 引用保留目标仓；写操作前置唯一目标仓判定；两条入口共用一套解析 |
-| `C2` | 校验报错无修法、写路径与校验路径结论不同 | 拒绝必须带修法；同一情况两条路径同结论 |
-| `C3` | 只放说明文档被判成纯文档项目 | 无源码且提交数极少的目录保留起步态，技术设计文档不被跳过 |
-| `C4` | 反斜杠路径丢文件行号、三个输入通道静默丢弃/截断 | 路径归一后再解析；超出上限与解析失败都显式报出 |
-| `C5` | 非 JSON 模式丢输入、空跑落盘、未装套件仍打印套件命令 | 无法识别的输入显式报出；零工作量不落盘；正文与提示同一降级 |
-| `C6` | 审计对零文档报全部通过、门禁无参数报通过 | 「什么都没查」报未适用，退出码非零 |
+| `C1` | 跨仓引用坍缩、裸链接入口分叉 | 引用保留目标仓；写操作前置唯一目标仓判定；两条入口共用 `parseFlowInputs` |
+| `C2` | 校验报错无修法、写路径与校验路径结论不同 | 拒绝必须带修法；同一情况两条路径同结论（`merge3.mjs` 六值枚举） |
+| `C3` | 纯文档误判、零提交勘察/起步缺失 | `isDocsOnlyByDocuments` 看文档数、零提交报「尚未首次提交」、空仓落首次提交与 `none` 配置 |
+| `C4` | 反斜杠路径丢定位点、轮次收口失真、三通道静默 | 路径归一并解析中文行号；定位点交集 + 三态收口；三通道进告警不改语义 |
+| `C5` | 非 JSON 丢输入、空跑落盘、降级不一致、回告吞失败 | 未知输入报出；零工作量不落盘；正文与提示同降级；`judgeCommentOutcome` 读返回值 |
+| `C6` | 审计对零文档报全部通过 | `doc-audit-repo.mjs` 零目标报「未适用」并由 `doc-plan.mjs` 退非零 |
 | `C8` | Wave 2（PR #111 / #112）5 处实证/生命周期/切片图缺陷 | 取消未定义变量崩溃、透传实证与陈旧清理、单源切片图审计 |
 <!-- section: goal-end -->
 
@@ -79,55 +82,35 @@ flowchart TD
 
 ### 2.1 `C1` 引用是一等对象
 
-- **影响文件**：`kit/skills/lib/github-parse.mjs`、`kit/skills/dev-flow/scripts/flow-intake.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`。
-- **现状**：编号解析函数返回纯数字数组；调用方拿到数字就去读本地同号单。实测：本地已有某号时，一个指向完全不同仓库的单据链接被判为可接受，依据读的是本地那一份；换成当地不存在的号才报待补。也就是说，**判定结果取决于本地恰好有没有那个号**，而不是取决于引用指向谁。
-- **改法**：
-  1. 解析函数增加一个返回完整引用的入口（目标仓 + 编号 + 原始串），保留旧入口但让它的实现建立在完整引用之上，不再各写一套匹配。
-  2. 写操作（评论、标签、关单）前置一步「目标仓唯一性判定」：引用里带仓且与本地不同时，必须阻断并说明「这是跨仓引用，请在对应仓执行或先切换目标」。
-  3. 分诊与状态查询共用同一个判定，不各写一份。
-- **反例边界**：本地号与引用号相同但引用不带仓（裸号、`#N`、`issue#N`）时，仍按本地处理——那是明确指向本地的写法，不是跨仓。
+- **影响文件**：`kit/skills/lib/github-parse.mjs`、`kit/skills/dev-flow/scripts/flow-intake.mjs`。
+- **现状**：编号解析返回纯数字数组，跨仓引用被当成同号本地单；`flow-intake.mjs` 不接位置参数且各写解析。
+- **改法**：`parseFlowInputs` 保留 `{ repo, number, raw }`；`judgeCrossRepoReference` 做三态判定（同仓本地、异仓阻断、本仓不可判定只报出不阻断）；分诊与 `inspect` 共用 `parseFlowInputs`。
+- **反例边界**：裸号、`#N`、`issue#N` 不带仓时按本地处理。
 
 ### 2.2 `C2` 拒绝必须带修法，两条路径同结论
 
-- **影响文件**：`scripts/equip.mjs`。
-- **现状**：校验路径对「托管文件被改动」只打印「字节不一致」并退 1；写入路径对同一情况退 0 并把它记成一条待裁决冲突。于是「校验红了」与「写一遍就绿了」同时成立，而写完之后再校验仍然是红。
-- **改法**：
-  1. 报告格式化函数对每一类问题都给出一句可执行的修法（分歧在哪、三种合法处置各是什么）。
-  2. 写入路径对「产生了待裁决冲突」不再退 0——它没有修复任何东西，只是记录了一份分歧。
-  3. 两条路径的结论来自同一个判定：一个输入要么是「一致」，要么是「不一致且已登记待裁决」，不允许出现第三种。
-- **为什么不是统一退 0**：把校验放松到与写入一致，等于让「字节不一致」这件事不再是问题。分歧是真实存在的，只能被处置，不能被宣布不存在。
+- **影响文件**：`scripts/equip.mjs`、`scripts/lib/merge3.mjs`。
+- **改法**：`merge3.mjs` 定义逐文件六值封闭枚举；`equip.mjs` 校验与写入两条路径共读该判定，非同步非豁免定制均退 `3`，拒绝输出三种合法处置（手工合并+`--adopt-custom`、`--restore`、pendingConflicts 留痕）。
 
-### 2.3 `C3` 起步态与纯文档目录分开
+### 2.3 `C3` 纯文档判据、零提交勘察与空仓首次提交
 
-- **影响文件**：`scripts/survey.mjs`。
-- **现状**：只有「无源码文件 + 有文档 + 有说明文件」三条同时成立就判成纯文档项目，技术设计文档那一项于是以「纯文档目录无需」为由跳过。实测：一个只放了说明文件的新项目被这么判，起步当天就没有技术设计文档。
-- **改法**：判据加入提交数——无源码、且提交数不超过极小阈值时，保留「起步态」而不是「纯文档项目」；技术设计文档的跳过判据改为读「起步态」这一条，不再直接吃项目类型。两项判据各自成立，不互相推导。
-- **反例边界**：真的只有文档的仓库（提交历史长、长期无源码）仍必须能被判成纯文档项目，否则每次勘察都会要求它写技术设计文档。
+- **影响文件**：`scripts/survey.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/lib/agents-defaults.mjs`。
+- **改法**：放弃提交数阈值，`survey.mjs` 按 `isDocsOnlyByDocuments`（「文档不止一份说明文件」）判纯文档，零提交仓显式报「尚未首次提交」；`equip-bootstrap.mjs` 的 `createFirstCommit` 在 `--bootstrap-empty` 落首次提交；`agents-defaults.mjs` 对 `unknown` 且 0 代码文件将 Dev Profile 收口为 `none`。
 
-### 2.4 `C4` 路径先归一再解析；上限与解析失败都显式
+### 2.4 `C4` 定位点同一性、轮次三态收口与三通道显式告警
 
-- **影响文件**：`kit/skills/dev-review/scripts/review-locks.mjs`（只读引用其解析逻辑，实际改动落在 `kit/skills/lib/github-parse.mjs` 之外的同目录工具若有需要）、`kit/skills/dev-iterate/scripts/iterate-cycle.mjs`、`kit/skills/dev-iterate/scripts/iterate.mjs`。
-- **现状**：测试脚本里的文件路径正则只认正斜杠，反斜杠路径判出空文件与空行号；优化循环三个参数通道各有静默行为——缺摘要的门禁项被直接丢掉（单向门因此消失、停损失效）、进度历史解析失败返回空（零进展停损永不触发）、轮次上限被截断到硬上限但不告警。
-- **改法**：路径在进入解析前统一归一到平台无关形式（复用既有路径归一工具）；三个通道的失败改为返回带原因的结果：被丢弃的项要报出、解析失败要报出、被截断要报出。三项都进报告，不静默。
-- **反例边界**：不因为「报出」就把原本合法的输入判红。缺摘要的门禁项报出之后，仍按它本来的语义推进（只是不再静默消失）。
+- **影响文件**：`kit/skills/dev-review/scripts/review-locks.mjs`、`kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-iterate/scripts/iterate-cycle.mjs`。
+- **改法**：`review-locks.mjs` 先归一正反斜杠与盘符，支持 `path:line`、`第 N 行`、`第 N-M 行`、`N 行` 并以 `sameBlockerItem`（判据编号只排除不认定，行区间相交才同项）去重；`review-ledger.mjs` 落三态收口（`resolved`/`remaining`/`unmentionedFromPrev`，整轮 `pass` 不批量置已解决）；`iterate-cycle.mjs` 将丢弃、解析失败与截断进 `warnings` 并保持原语义。
 
-### 2.5 `C5` 输出通道与提示文本
+### 2.5 `C5` 输出降级、零工作量与合并回告真实性
 
-- **影响文件**：`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-batch.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`。
-- **契约细节**：
-  - 非 JSON 模式不再静默丢弃无法识别的输入，在正文里列出并给出「这些输入没被使用」的说明。
-  - 批量合并队列在零条目时不落盘：写一份空队列与写一份「本次无事可做」的记录是两件事，前者会被后续读取当成真实状态。
-  - 未装套件的目录里，正文命令与降级提示用同一套判定：提示降级时正文也必须降级，不能一个说「用原生 Git」、另一个仍打印套件命令。
-  - 帮助文本按任务组织，并把「哪些参数属于哪个子命令」写清（本条只做结构整理，与参数注册表的机械对拍归另一片）。
+- **影响文件**：`kit/skills/dev-flow/scripts/flow.mjs`、`flow-batch.mjs`、`flow-merge.mjs`、`kit/skills/lib/cli.mjs`、`kit/skills/lib/session-orient.mjs`。
+- **改法**：`flow.mjs` 非 JSON 正文列出 `inputs.unknown`；`flow-batch.mjs` `merge-queue` 零工作量不落盘；`cli.mjs`（`degradeSkillCommands`）与 `session-orient.mjs`（`degradeOrientationLines`）在未装套件时同步降级正文命令；`flow-merge.mjs` 的 `judgeCommentOutcome` 以 `ok === true` 判回告是否发出，未发出（含后端 `delegated`）在报告列出并给补发命令。
 
 ### 2.6 `C6` 「什么都没查」必须报未适用
 
-- **影响文件**：`kit/skills/dev-plan/scripts/doc-audit-repo.mjs`、`scripts/dev/preflight-suite.mjs`（只读核对）、`kit/skills/dev-edit/scripts/edit-gate.mjs`。
-- **现状**：审计命令对空目录输出「共零份：全部通过」并退 0；改码门禁无参数时检查的是一批未跟踪的规划文档，却输出通过——弱模型会把它读成「我的改动通过了」。
-- **改法**：
-  - 审计在目标集合为空时输出「未适用（范围内没有可审计的规划文档）」并给出非零退出码，同时区分「真的一份都没有」与「有但都不是受管文档」两种情形并分别说明。
-  - 改码门禁在没有任何目标文件时输出「未适用」而不是通过，退出码沿用既有语义的「有事先处理但可继续」档，不得返回通过档。
-- **为什么不能只加一句提示**：提示与结论分离时，读的人只看结论。结论本身必须是「未适用」。
+- **影响文件**：`kit/skills/dev-plan/scripts/doc-audit-repo.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`。
+- **改法**：`doc-audit-repo.mjs` 区分 `none`（无文档）与 `unmanaged`（有非受管文档），返回 `applicable: false` 并由 `doc-plan.mjs` 返回非零退出码。
 
 ### 2.7 行数与拆分
 
@@ -147,24 +130,25 @@ flowchart TD
 <!-- section: gates -->
 - **门型**：`one-way`。原因不是代码量：跨仓引用的处置与「未适用」的退出码会改变「什么叫通过」，历史上依赖「空集即通过」的调用方必须按新口径重算。
 - **风险等级**：`medium`。命中 `kit/` 与 `scripts/` 两条高风险路径，但改动都是判据替换与报出方式，不触及标记语法、模板求值、报告排版。
-- **故障注入**：把「目标仓唯一性判定」改成恒真，跨仓用例必须变红；把「未适用」改回通过档，对应用例必须变红；把三个通道的报出改成不报，对应用例必须变红。
+- **故障注入**：对齐 `scripts/dev/injections-data-flow-defects.mjs`（`I310–I316`：跨仓判定、未识别输入、定位点交集、三态收口、零工作量写盘、正文降级、`judgeCommentOutcome`）与 `scripts/dev/injections-data-gates.mjs`（`I131` `evaluateIncludeDiffGate` 拦截）。
 - **验证命令**：
   - `node scripts/dev/fixtures.mjs --domain flow-defects`
   - `node scripts/dev/preflight.mjs`
-  - `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit docs`（对零目标范围应非零退出）
+  - `node scripts/dev/verify-injections.mjs --jobs 4`
+  - `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit docs/specs/261120-issue116-w25-flow-defects-spec.md --json`
 <!-- section: gates-end -->
 
 <!-- section: acceptance -->
 ### 验收标准（正例 / 反例双向可判定）
 
 <!-- criteria:start -->
-- [ ] C1: 本地已存在同号单据、引用指向另一个仓库时，分诊结论必须标为跨仓并在 `--apply` 前阻断；引用为裸号或 `#N` 时仍按本地处理；`inspect` 与 `intake` 两个入口对同一引用给出同一判定。反例：只让分诊打印一条警告但允许 `--apply` 继续——写操作仍会落到错误的单上。
-- [ ] C2: 校验路径对每个问题都输出至少一句可执行修法；写入路径在产生待裁决冲突时返回非零；同一输入在两条路径上的结论一致（要么一致，要么不一致且已登记）。反例：把写入路径改成退 0 且把校验也放宽到退 0——分歧被宣布不存在，而文件仍然不一致。
-- [ ] C3: 无源码、有说明文件、提交数极少的目录被判为起步态，技术设计文档一项不被跳过；无源码且提交历史长的目录仍被判为纯文档项目，技术设计文档一项仍以纯文档为由跳过。反例：把纯文档判定整个删掉，于是长期文档仓库每次勘察都被要求写技术设计文档。
-- [ ] C4: 反斜杠路径与正斜杠路径解析出相同的文件与行号；缺摘要的门禁项被报出且仍按其语义推进；进度历史解析失败被报出且不返回空进度；轮次上限被截断时输出告警与实际上限值。反例：只补路径归一，三个通道照旧静默——另三条断言会红。
-- [ ] C5: 非 JSON 模式列出未被使用的输入；批量队列零条目时不产生落盘文件；未装套件目录里正文命令与降级提示同时降级，搜不到套件命令字样。反例：只改提示不改正文，于是同一条输出里两种口径并存。
-- [ ] C6: 对空目录审计输出「未适用」且退出码非零；对「有文档但不是受管文档」的目录也输出未适用并说明区别；改码门禁无目标文件时输出「未适用」且不返回通过档。反例：只把提示文案换成未适用而退出码仍是 0——脚本调用方照样把它当通过。
-- [ ] C7: 与立项单 `#113` 的关系已核对——同一问题判定与轮次收口两处保留双方完整实现；相关夹具全绿。反例：简单覆盖掉 `#113` 的定位点同一性或三态收口语义。
+- [ ] C1: 本地已存在同号单据、引用指向另一个仓库时，`judgeCrossRepoReference` 判为跨仓并在写操作前阻断；引用为裸号或 `#N` 时按本地处理；`inspect` 与 `intake` 共用 `parseFlowInputs`。反例：只打告警仍继续写入。
+- [ ] C2: 校验与写入共用 `merge3.mjs` 六值枚举，拒绝输出三种合法处置且两条路径对非同步非豁免均退 `3`。反例：写入路径对冲突退 `0`。
+- [ ] C3: 单一说明文件仓由 `isDocsOnlyByDocuments` 判保留 `docs/TDD.md`、多文档才判纯文档；零提交报「尚未首次提交」；`--bootstrap-empty` 落首次提交；`unknown`+0 代码收口 Dev Profile 为 `none`。反例：仍用提交数阈值或跳过 `TDD`。
+- [ ] C4: `review-locks.mjs` 归一正反斜杠并识别中文行号，定位点相交才同项；`review-ledger.mjs` 保留 `unmentionedFromPrev`；`iterate-cycle.mjs` 三通道进 `warnings`。反例：跨行合并或 `pass` 批量置已解决。
+- [ ] C5: 非 JSON 列出 `inputs.unknown`；`merge-queue` 零工作量不落盘；未装套件时 `cli.mjs` 与 `session-orient.mjs` 同步降级正文；`flow-merge.mjs` `judgeCommentOutcome` 对 `ok !== true`（含 `delegated`）报未发出与补发命令。反例：裸 `await` 吞掉失败。
+- [ ] C6: 对空目录或非受管文档目录审计输出「未适用」且退出码非零，有受管文档全通过仍退 `0`。反例：空目录退 `0`。
+- [ ] C7: 与立项单 `#113` 的交集文件保留双方完整逻辑，`fixtures-docs.mjs` 与 `fixtures-flow-truth.mjs` 全绿。反例：用旧版简单覆盖 `#113` 逻辑。
 - [ ] C8: `UI_VISUAL_EXT_RE` diff 下 `review-pack` 未核验按合约阻断不抛 `ReferenceError`、已核验（含仅落盘 `evidence.json`/`receipt`）则放行；`flow verify` `explicit-none` 阻断裸 `--visual-checked` 且透传 `--artifact`/`--visual-blocked-reason` 绑定 `visual.headSha` 与 `visualVerifiedHead`、跨 HEAD 不携带旧附件；`auditRepoDocs` 不重复报 `UNCOVERED_ACCEPTANCE_CRITERIA` 且 `checkSliceMetadata` 不误伤 `todo`/已完成/已归档切片。反例：跨 HEAD 仍带旧附件或重复报两条缺失判据。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
@@ -174,7 +158,7 @@ flowchart TD
 <!-- section: reuse -->
 - `kit/skills/lib/github-parse.mjs` 已有完整引用的解析形态（含目标仓的入口），本片把它提升为唯一基础，旧入口改为薄包装。
 - `kit/skills/lib/git-core.mjs` 的路径归一工具（正反斜杠统一）已是全仓单点，本片直接复用，不自写正则。
-- 退出码档位语义由 `#113` 同批落地的单点模块提供；「未适用」走「前提事实不成立」中间档，不新造档位。该模块尚未落地时，本片按现有常量表达同一语义，并在待拍板里注明兼容，不预先创建它。
+- 退出码档位语义由 `#113` 同批落地的单点模块提供；「未适用」走 `EXIT.FACT` 中间档，不新造档位。
 - `scripts/dev/fixtures.mjs` 自动发现功能域，新增夹具无需登记。
 <!-- section: reuse-end -->
 
@@ -188,13 +172,9 @@ flowchart TD
 ## 五、待拍板问题
 
 <!-- section: pending -->
-- 已定：引用在解析处保留目标仓；写操作前置唯一目标仓判定，跨仓必须阻断并给出下一步；裸号仍按本地处理。
-- 已定：分诊与状态查询共用同一份引用判定，不各写一份。
-- 已定：校验路径必须给修法；写入路径在产生待裁决冲突时返回非零；两条路径结论同源。
-- 已定：起步态与纯文档项目各自独立判据——无源码且提交数极少为起步态，提交历史长的无源码目录仍是纯文档项目。
-- 已定：路径在解析前统一归一；三个输入通道的丢弃、失败与截断全部显式报出，但报出不改变原有语义。
-- 已定：批量队列零条目不落盘；未装套件时正文与提示同一降级；非 JSON 模式列出未使用输入。
-- 已定：审计与改码门禁在零目标时输出「未适用」并返回非零，「未适用」不得折成通过。
-- 已定：与立项单 `#113` 的同一问题判定与轮次收口不重复实现，只加核对项；两片谁先合入都不改对方写的判定。
-- 已定：本切片无前置，可与性能门禁、治理真相、并行度三片同时开工；写域已按文件划清，`flow-batch.mjs` 与 `flow-next.mjs` 归本片，`workflow-policy.mjs` 与 `workflow-helpers.mjs` 不归本片。
+- 已定：引用保留目标仓并三态判定；`inspect` 与 `intake` 共用 `parseFlowInputs`。
+- 已定：`equip.mjs` 两条路径共读 `merge3.mjs` 六值枚举并给三种处置。
+- 已定：`survey.mjs` 按 `isDocsOnlyByDocuments` 判纯文档；`createFirstCommit` 落首次提交；`agents-defaults.mjs` 收口为 `none`。
+- 已定：`review-locks.mjs` 定位点交集 + `review-ledger.mjs` 三态收口；`iterate-cycle.mjs` 三通道进 `warnings`。
+- 已定：零工作量不落盘；`cli.mjs` 与 `session-orient.mjs` 同降级；`judgeCommentOutcome` 读返回值；`doc-audit-repo.mjs` 零目标报未适用；Wave 2 五处缺陷同分支修复并配正反夹具。
 <!-- section: pending-end -->

@@ -1,51 +1,99 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500" role="img" aria-labelledby="hero-en-title hero-en-desc">
-  <title id="hero-en-title">project-forge: Git workflow harness for documented, gated GitHub repos</title>
-  <desc id="hero-en-desc">Shows a setup branch leaving main, passing through four white stage pills (Read-only Survey, Docs and Contracts, 5 Everyday Skills, Proof and Merge), and merging cleanly back into main.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" width="1200" height="480" role="img" aria-labelledby="h-t h-d">
+  <title id="h-t">project-forge: Repository governance &amp; 8 daily skills for any Git repo</title>
+  <desc id="h-d">Swiss editorial poster paired with a pure geometric chaos-to-order composition showing loose files calibrated through S1-S4 and a .zip backup seal into governed repository artifacts.</desc>
   <defs>
     <style>
-      .sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-      .mono { font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Consolas, monospace; }
+      .sans { font-family: 'Inter', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif; }
+      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', Consolas, monospace; }
     </style>
+    <marker id="a-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#161614"/>
+    </marker>
+    <marker id="a-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#C93B2B"/>
+    </marker>
   </defs>
+  <!-- Matte Archival Print Sheet (Zero Cards, Zero Drop Shadows, Zero Color Stripes) -->
+  <rect x="0.75" y="0.75" width="1198.5" height="478.5" rx="4" fill="#F2EFE9" stroke="#CBC4B6" stroke-width="1.5"/>
+  <!-- Swiss Editorial Running Folio -->
+  <text x="48" y="40" class="mono" font-size="16" font-weight="600" letter-spacing="1.4" fill="#161614">01</text>
+  <text x="92" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.4" fill="#5E5A53">PROJECT-FORGE</text>
+  <text x="1152" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.2" fill="#5E5A53" text-anchor="end">NODE 18+ · ZERO DEPS</text>
+  <line x1="48" y1="56" x2="1152" y2="56" stroke="#161614" stroke-width="1.2"/>
 
-  <!-- Stone paper outer card (light & dark GitHub safe) -->
-  <rect x="1" y="1" width="1198" height="498" rx="18" fill="#F5F3EE" stroke="#DFDBD2" stroke-width="1.5"/>
+  <!-- Left Editorial Typography Field (Open Paper, Zero Boxes) -->
+  <text x="48" y="168" class="sans" font-size="64" font-weight="700" fill="#161614" letter-spacing="-2.2">project-forge</text>
+  <line x1="48" y1="196" x2="128" y2="196" stroke="#C93B2B" stroke-width="3.5"/>
 
-  <!-- Editorial title block -->
-  <text x="64" y="68" class="mono" font-size="16" font-weight="600" letter-spacing="2" fill="#526075">GIT WORKFLOW HARNESS · GITHUB</text>
-  <text x="64" y="130" class="sans" font-size="50" font-weight="700" fill="#172033" letter-spacing="-1">project-forge</text>
-  <text x="64" y="172" class="sans" font-size="20" font-weight="400" fill="#526075">Turn a loose folder into a documented, gated, self-maintaining GitHub repo</text>
+  <text x="48" y="246" class="sans" font-size="18" font-weight="500" fill="#161614">Inspect any repository read-only, then align Git, docs &amp; 8 skills</text>
+  <text x="48" y="278" class="sans" font-size="18" font-weight="400" fill="#5E5A53">Keeps handwritten files intact; backs up to an external .zip first</text>
 
-  <!-- Main baseline track -->
-  <line x1="72" y1="364" x2="1128" y2="364" stroke="#B7B0A4" stroke-width="2.5" stroke-linecap="round"/>
-  <text x="72" y="396" class="mono" font-size="16" font-weight="600" fill="#526075">main</text>
+  <!-- Unboxed Swiss Typographic Index Columns -->
+  <line x1="48" y1="336" x2="544" y2="336" stroke="#CBC4B6" stroke-width="1.2"/>
+  <line x1="208" y1="336" x2="208" y2="432" stroke="#CBC4B6" stroke-width="1"/>
+  <line x1="376" y1="336" x2="376" y2="432" stroke="#CBC4B6" stroke-width="1"/>
 
-  <!-- Setup branch cubic Bezier arc -->
-  <path d="M 96 364 C 130 364, 132 276, 168 276 L 1036 276 C 1072 276, 1074 364, 1108 364" fill="none" stroke="#1F6F5B" stroke-width="3" stroke-linecap="round"/>
+  <text x="48" y="384" class="mono" font-size="34" font-weight="700" fill="#C93B2B">0</text>
+  <text x="48" y="420" class="sans" font-size="18" font-weight="500" fill="#5E5A53">Zero Deps</text>
 
-  <!-- Branch-off and merge anchors on main -->
-  <circle cx="96" cy="364" r="6.5" fill="#F5F3EE" stroke="#4E7496" stroke-width="3"/>
-  <circle cx="1108" cy="364" r="7" fill="#1F6F5B"/>
+  <text x="228" y="384" class="mono" font-size="34" font-weight="700" fill="#161614">8</text>
+  <text x="228" y="420" class="sans" font-size="18" font-weight="500" fill="#5E5A53">Local Skills</text>
 
-  <!-- Four workflow stage pills -->
-  <g>
-    <rect x="158" y="248" width="204" height="56" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="180" cy="276" r="5" fill="#4E7496"/>
-    <text x="270" y="282" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Read-only Survey</text>
+  <text x="396" y="382" class="sans" font-size="26" font-weight="700" fill="#161614">Any Git</text>
+  <text x="396" y="420" class="sans" font-size="18" font-weight="500" fill="#5E5A53">Remote &amp; Local</text>
 
-    <rect x="394" y="248" width="204" height="56" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="416" cy="276" r="5" fill="#4E7496"/>
-    <text x="506" y="282" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Docs &amp; Contracts</text>
+  <!-- Vertical Architectural Divider -->
+  <line x1="576" y1="84" x2="576" y2="436" stroke="#CBC4B6" stroke-width="1.2"/>
 
-    <rect x="630" y="248" width="208" height="56" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="652" cy="276" r="5" fill="#D96B27"/>
-    <text x="744" y="282" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">5 Everyday Skills</text>
+  <!-- Right Pure Geometric Artwork: Chaos Shards -> Vermilion Registration Axis -> Aligned Strata -->
+  <g id="chaos-to-strata">
+    <g fill="none" stroke="#8A8479" stroke-width="1.3">
+      <rect x="614" y="108" width="112" height="44" transform="rotate(-14 670 130)" stroke-dasharray="5 4"/>
+      <rect x="628" y="184" width="118" height="46" transform="rotate(9 687 207)"/>
+      <rect x="606" y="264" width="106" height="42" transform="rotate(-7 659 285)" stroke-dasharray="4 4"/>
+      <rect x="636" y="340" width="108" height="42" transform="rotate(11 690 361)"/>
+      <line x1="600" y1="158" x2="742" y2="196" stroke-opacity="0.5"/>
+      <line x1="608" y1="330" x2="746" y2="278" stroke-opacity="0.5"/>
+    </g>
+    <text x="670" y="136" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle" transform="rotate(-14 670 130)">README?</text>
+    <text x="687" y="213" class="mono" font-size="16" fill="#161614" text-anchor="middle" transform="rotate(9 687 207)">src/</text>
+    <text x="659" y="291" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle" transform="rotate(-7 659 285)">.env?</text>
+    <text x="690" y="367" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle" transform="rotate(11 690 361)">ci?</text>
 
-    <rect x="870" y="248" width="174" height="56" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="892" cy="276" r="5" fill="#1F6F5B"/>
-    <text x="967" y="282" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Proof &amp; Merge</text>
+    <!-- Vermilion Registration Axis + Concentric .zip Seal -->
+    <line x1="786" y1="84" x2="786" y2="436" stroke="#C93B2B" stroke-width="2.4"/>
+    <text x="772" y="104" class="mono" font-size="16" font-weight="700" fill="#C93B2B" text-anchor="end">S1–S4</text>
+    <circle cx="786" cy="260" r="37" fill="#C93B2B"/>
+    <circle cx="786" cy="260" r="30" fill="none" stroke="#F2EFE9" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <text x="786" y="256" class="mono" font-size="16" font-weight="700" fill="#FAF8F4" text-anchor="middle">.zip</text>
+    <text x="786" y="277" class="sans" font-size="16" font-weight="500" fill="#F2EFE9" text-anchor="middle">Backup</text>
+
+    <!-- Horizontal Registration Rays -->
+    <g stroke="#161614" stroke-width="1.4">
+      <line x1="786" y1="149" x2="848" y2="149"/>
+      <line x1="823" y1="225" x2="848" y2="225"/>
+      <line x1="823" y1="301" x2="848" y2="301"/>
+      <line x1="786" y1="377" x2="848" y2="377"/>
+    </g>
+
+    <!-- Four Sharp Parallel Architectural Strata -->
+    <path d="M 858 100 L 848 100 L 848 424 L 858 424" fill="none" stroke="#161614" stroke-width="1.8"/>
+    <text x="866" y="103" class="mono" font-size="16" font-weight="600" fill="#5E5A53">&lt;!-- begin / end --&gt;</text>
+
+    <rect x="864" y="120" width="288" height="58" fill="#161614"/>
+    <text x="882" y="155" class="mono" font-size="18" font-weight="600" fill="#FAF8F4">AGENTS.md</text>
+    <text x="1134" y="155" class="sans" font-size="16" fill="#CBC4B6" text-anchor="end">Contract</text>
+
+    <rect x="864" y="196" width="288" height="58" fill="#FAF8F4" stroke="#161614" stroke-width="1.4"/>
+    <text x="882" y="231" class="mono" font-size="18" font-weight="600" fill="#161614">docs/TDD.md</text>
+    <text x="1134" y="231" class="sans" font-size="16" fill="#5E5A53" text-anchor="end">Architecture</text>
+
+    <rect x="864" y="272" width="288" height="58" fill="#E6E0D5" stroke="#161614" stroke-width="1.4"/>
+    <text x="882" y="307" class="mono" font-size="16" font-weight="600" fill="#161614">feature-map.json</text>
+    <text x="1134" y="307" class="sans" font-size="16" fill="#5E5A53" text-anchor="end">Index</text>
+
+    <rect x="864" y="348" width="288" height="58" fill="#FAF8F4" stroke="#C93B2B" stroke-width="1.6"/>
+    <text x="882" y="383" class="mono" font-size="17" font-weight="600" fill="#161614">.agents/skills/</text>
+    <text x="1134" y="383" class="sans" font-size="16" font-weight="700" fill="#C93B2B" text-anchor="end">8 Skills</text>
   </g>
-
-  <!-- Repository artifacts cue -->
-  <text x="600" y="446" class="mono" font-size="16" font-weight="500" fill="#526075" text-anchor="middle">AGENTS.md  ·  docs/TDD.md  ·  docs/{prd,specs,todo}  ·  .agents/skills/  ·  GitHub CI</text>
 </svg>

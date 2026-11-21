@@ -77,6 +77,8 @@ export function checkReadmeVisualsAndDocFrontmatter({ ROOT, readText, fail, note
     'assets/readme/hero.svg', 'assets/readme/hero-en.svg',
     'assets/readme/workflow.svg', 'assets/readme/workflow-en.svg',
     'assets/readme/architecture.svg', 'assets/readme/architecture-en.svg',
+    'assets/readme/skills-cycle.svg', 'assets/readme/skills-cycle-en.svg',
+    'assets/readme/docs-layers.svg', 'assets/readme/docs-layers-en.svg',
   ]
   const heights = new Set()
   for (const relPath of requiredSvgs) {
@@ -104,7 +106,7 @@ export function checkReadmeVisualsAndDocFrontmatter({ ROOT, readText, fail, note
       if (typeof fm.data[k] !== 'string' || !fm.data[k].trim()) fail(`${tplRel} YAML Frontmatter 字段「${k}」不可为空`)
     }
   }
-  note(`视觉与文档前导：6 张 README SVG（${heights.size} 种独立高度）、双语徽章与 3 份 docs-* YAML frontmatter 齐全合规`)
+  note(`视觉与文档前导：${requiredSvgs.length} 张 README SVG（${heights.size} 种独立高度）、双语徽章与 3 份 docs-* YAML frontmatter 齐全合规`)
 }
 
 export function checkOwnInstances({ ROOT, rel, readText, walk, fail, note }) {

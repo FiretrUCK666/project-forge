@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/readme/hero-en.svg" alt="project-forge workflow diagram: turning a loose folder into a documented GitHub repository" width="100%">
+  <img src="assets/readme/hero-en.svg" alt="project-forge: read-only survey first, then fit Git baselines, three-layer docs, eight daily skills, and merge gates" width="100%">
 </p>
 
 <p align="center">
@@ -14,29 +14,31 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-526075?style=flat-square" alt="MIT License"></a>
 </p>
 
-A brand-new folder, or a repository that has been maintained for months, usually costs the most time outside the product code itself: `.gitignore` misses local secrets, design notes drift away from the implementation, branches land without real test output, and editing one file gives no warning about the other four that must change with it.
+In a new folder or a repository maintained for months, most wasted time sits outside the product code: `.gitignore` misses local secrets, design docs drift away from the codebase, branches merge without real test output, and changing one file gives no hint about which linked files must move with it.
 
-**project-forge** surveys a folder read-only first, then fills in the Git baseline, the four-layer design docs, the `AGENTS.md` contract, GitHub check workflows, and a local development skill suite, sized to the project. It never overwrites what you wrote by hand, and it installs no third-party dependencies, so Node.js 18 or newer is all you need.
+**project-forge** surveys a folder read-only first, then fits the Git baseline, three-layer evergreen docs, the `AGENTS.md` contract, remote-aware CI workflows (supporting GitHub, `generic-git`, and `local-only`—skipping GitHub Actions when not applicable), and eight local development skills. It preserves handwritten files, installs zero third-party packages, and runs on Node.js 18 or newer.
 
 ## What It Does
 
 | Capability | What that means |
 | --- | --- |
-| **Your handwritten content survives** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, custom templates, CI workflows, and custom skills stay as they are. An external `.zip` snapshot is saved before any write (with `.tar.gz` restore compatibility) |
-| **Clarify first, then eight stages** | Follows Requirement, Clarification, Design, Implementation, Review, Empirical & Formal Verification, Acceptance, and Merge. Complex requests propose a master PRD, run multi-round clarification to clear open questions, and pass distinct-reviewer, 3-round stop-loss Critique before coding starts |
-| **Full Worktree isolation and evidence** | Repos with commit history isolate in `.worktrees/` with reusable `impl`/`review` slots; whoever implements owns `claim`/`finalize`/`verify`/`submit` with zero dirty tracked files on push; merges require generic run-and-observe E2E (`--e2e-evidence`), dual gates, three-way `headSha` checks, Mermaid `16/12`, and CI |
-| **Adaptive remotes and topologies** | Unified `TaskBackend` handles GitHub, local-only repos without leaking remote terms, and `generic-git` without local merge overreach; also supports linked Issue+PR graphs, stacked PRs, and parallel wave queues |
-| **Unified equip and retro patches** | Installs the complete on-disk skill suite without tier-splitting friction (compact contract `< 24KB`, skipping team-only files for solo/local repos). Runtime signals flow into `signals.jsonl` so `retro` proposes concrete gate and rule patches |
+| **Keep handwritten files intact** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, custom templates, CI workflows, and custom skills stay untouched. An external `.zip` snapshot is saved before any write (with `.tar.gz` restore compatibility) |
+| **Dual-mode plans and wave scheduling** | Supports `interactive` and `autonomous` planning modes, isolated planning worktrees with `plan-sync`, a single 3-state slice dependency graph checking coverage and file overlap, and slim subagent handoff packets |
+| **Worktree isolation and real proof** | Repositories with commit history use reusable `.worktrees/` slots where the implementer owns claim and PR submission. Verification checks real non-empty `--artifact` files and blocks UI changes that rely on `--visual-checked` alone |
+| **Adaptive remotes and local fallback** | A unified `TaskBackend` handles GitHub (including multi-remote setups and SSH aliases), `local-only` repos, and `generic-git` non-GitHub remotes without forcing local merges on unverified upstreams |
+| **PoC-first and bounded iteration** | Minimal runtime reproduction (`PoC-first`) weeds out false alarms before any patch is written, and `iterate.mjs cycle` runs a bounded loop with three hard stop-loss exits. Gates lock objective outputs only, and recurring patterns promote into static checks |
 
 ## Contents
 
 <!-- toc:start -->
 
 - [What It Does](#what-it-does)
-- [How One Change Travels](#how-one-change-travels)
+- [External Governance and Upgrades](#external-governance-and-upgrades)
+- [Eight Daily Skills and Workflow](#eight-daily-skills-and-workflow)
+- [Bounded Optimization Loop and PoC-First](#bounded-optimization-loop-and-poc-first)
+- [Three-Layer Evergreen Docs and Slicing](#three-layer-evergreen-docs-and-slicing)
 - [Supported Languages](#supported-languages)
 - [Install](#install)
-- [What the First Run Does](#what-the-first-run-does)
 - [Automatic Updates](#automatic-updates)
 - [Guardrails](#guardrails)
 - [Script Reference](#script-reference)
@@ -44,138 +46,174 @@ A brand-new folder, or a repository that has been maintained for months, usually
 
 <!-- toc:end -->
 
-## How One Change Travels
+## External Governance and Upgrades
 
 <p align="center">
-  <img src="assets/readme/architecture-en.svg" alt="Role flow across the five everyday skills and the four proof gates required before merging" width="100%">
+  <img src="assets/readme/workflow-en.svg" alt="Three repository starting points entering the S1 to S4 pipeline with external snapshots before writes" width="100%">
 </p>
 
-Daily work follows an 8-stage path: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**. `equip` installs all on-disk skills uniformly. Describe what you want in plain language, or paste Issue, PR, or Milestone links directly, and `AGENTS.md` routes it to the matching skill (with zero-write `doc-locate` context slicing, `flow intake` business triage, and thin pure-orchestrator wave dispatch when ready specs can run in parallel).
+Empty directories, partially configured repositories, and older setups returning for an upgrade all move through the same four steps: **S1 Read-only Survey → S2 Scope and Fusion → S3 Backup and Ordered Write → S4 Review and Handoff**:
 
-Suppose you want to add an "export to CSV" feature:
+| Step | What happens | Key safeguard |
+| --- | --- | --- |
+| **S1 Read-only Survey** | Inventories directory layout, ecosystems, Git remotes, local credentials, existing design docs, and custom skills | Writes nothing; an empty folder answers 3 to 4 questions first |
+| **S2 Scope and Fusion** | Keeps evergreen docs, scripts, and existing AI rules, archives stale notes, and skips team-only files for solo repos | License, visibility, and release strategy always wait for human choice |
+| **S3 Backup and Write** | Creates an external `pre-forge` `.zip` snapshot for non-empty repos, runs existing tests as a baseline, then writes in order | Order is fixed: **Repo → docs → remote → automation** |
+| **S4 Review and Handoff** | Checks contract alignment and claim reality, then files discovered legacy issues into `TaskBackend` for normal follow-up | Lists scaffold markers before cleaning; keeps `.pf-manifest.json` when skills stay |
 
-| Step | What you say | Skill | What you get |
+Step 3 keeps a strict order because `.gitattributes` and `.gitignore` must be in place before the first commit, docs and remote URLs must exist before the first push, and CI must run the exact commands listed in `AGENTS.md` and `README.md`.
+
+Across upgrades, `equip.mjs` tracks managed files through `.agents/skills/.pf-manifest.json` (`v3` manifest):
+
+- **Tombstone protection**: skills or single files removed by the user are recorded in `disabledSkills` and `removedFiles` and never re-added unless `--restore` is passed.
+- **Custom exemptions and 3-way merge**: files registered via `--adopt-custom` pass `--check`; non-script edits merge cleanly with `merge3.mjs`, while `.mjs` conflicts keep the local file without conflict markers.
+- **Instant rollback**: if ESM syntax or export checks fail after an upgrade, `equip-integrity.mjs` restores the whole suite from the external `.zip` snapshot.
+
+## Eight Daily Skills and Workflow
+
+<p align="center">
+  <img src="assets/readme/architecture-en.svg" alt="Role division across the eight built-in skills and the four merge gates" width="100%">
+</p>
+
+Daily work installs all eight skills across eight stages: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**.
+
+Describe your goal in plain language—or paste Issue, PR, or Milestone URLs—and `AGENTS.md` routes to the matching skill silently. You can also run each underlying CLI script directly.
+
+| Skill | Plain-language example | Skill & CLI entry | Role and core gates |
 | --- | --- | --- | --- |
-| 1 | "Where does the export module live, and which commands verify it?" | `dev-explore` | Module entry points, `Feature Map`, and `reusableModules`. Read-only, nothing modified |
-| 2 | "Clarify requirements and plan CSV export with checkable criteria" | `dev-plan` | Multi-round clarification until open items are zero, PRD/SPEC/Todo (`C1`, `C2`), and distinct-reviewer, 3-round stop-loss Critique |
-| 3 | "Start on that plan" | `dev-flow` | Isolated `.worktrees/` slot, implementer-owned `claim`/`finalize`/`verify`/`submit`, run-and-observe E2E gate (`--e2e-evidence`, sanitized failure signals + escalation), 4-state master PRD closure, cross-backend milestones & state labels, and PR |
-| 4 | "Review this PR from an independent angle" | `dev-review` | External PR `--untrusted-scan`, E2E + fault-injection gates enforced before `--include-diff` unlocks substantive `business-flows`/`C*` review, Round 2+ full-history distinct-reviewer fresh context, six-lock convergence, and structured escalation on 3-round stop-loss |
-| 5 | "Merge if it passes, then clean up" | `dev-flow` | Reviewer merges after trial merge; 7-step cleanup runs only after you confirm the cleanup list |
-| Audits / retro | "Audit repo health or turn rework signals into rule patches" | `dev-govern` | Runs `audit`, `reconcile` (evergreen docs & feature-map alignment), and `sample` anytime; `retro` reads `signals.jsonl` to produce rule patches for the next planning round |
-| Test iteration | "Add integration/regression/E2E/perf tests or probe blindspots" | `dev-iterate` | Combines feature-map gaps, hotspot signals, and `--focus` topics to generate `edit-gate`-verified native tests in the repo's own test directories, runs them concurrently, and escalates real failures into the normal fix flow |
+| `dev-explore` | "Map the export module and test commands" | `repo-map.mjs`, `doc-locate.mjs` | Read-only; returns line-range slices, entry points, and feature-map seeds |
+| `dev-plan` | "Clarify scope and plan slices" | `doc-plan.mjs` | 5-case triage, `interactive` / `autonomous` modes, `plan-sync`, 3-state slice graph, distinct Critique |
+| `dev-edit` | "Check boundaries and static gates" | `edit-gate.mjs` | Checks `do-not-edit` and reuse; blocks unanchored suppressions, dead comments, `arch-rules`, test cheats, >800 lines |
+| `dev-flow` | "Work in an isolated slot and open a PR" | `flow.mjs` | Reusable `.worktrees/` slots, `batch plan --handoff` packets, implementer submit, `1:N` closure, `--artifact`, 7-step cleanup |
+| `dev-verify-tools` | "Check or add feature-map verification tools" | `verify-tools.mjs` | Keeps `docs/feature-map.json`, prototypes in external `scratch/`, checks symbol & tree hashes |
+| `dev-review` | "Review this PR independently" | `review-pack.mjs` | External `--untrusted-scan`, proof-first before `--include-diff`, fresh Round 2+ reviewer, 6-lock convergence |
+| `dev-iterate` | "Probe test gaps and run a bounded cycle" | `iterate.mjs` | Generates `edit-gate`-checked native tests, concurrent runs, `PoC-first` + `escalation.mjs`, bounded `cycle` |
+| `dev-govern` | "Audit repo health or extract retro rules" | `govern-audit.mjs` | Static audit, `reconcile`, signal clustering, commit `sample`, and `retro` (promotes >=2 recurrences) |
 
-**What you can skip:**
+**What can be skipped by tier:**
 
-- Typo or one-line formatting fix (Case 1): skip steps 1 and 2, make the edit, run the relevant check.
-- Clear local bugfix without contract changes (Case 2): skip planning docs in step 2, but write a failing regression test first (Red-Green).
-- Touching `high-risk` paths, `one-way` boundaries, or Case 4 changes: step 4 must run in a separate independent context with fault injection. Reviewing your own work does not count.
+- **Case 1 (typos or single-line formatting)**: skip exploration and planning docs, make the edit, and run the matching check.
+- **Case 2 (local bugfix without contract changes)**: skip planning docs, but write a failing regression test first before fixing (Red-Green).
+- **`high-risk`, `one-way`, or Case 4 changes**: review must run in a separate independent context with fault injection. Reviewing your own changes does not count.
 
-**Why the order is what it is:** surveying and clearing open questions before freezing `C*` criteria keeps invented paths and guesswork out of the plan; separating implementation and review into isolated contexts and worktrees prevents regressions from slipping past.
+## Bounded Optimization Loop and PoC-First
+
+<p align="center">
+  <img src="assets/readme/skills-cycle-en.svg" alt="Four-phase iterate.mjs cycle state machine and three hard stop-loss limits" width="100%">
+</p>
+
+When investigating gaps or review findings, `dev-iterate`, `dev-review`, and `dev-govern` share one rule: **run a minimal reproduction (`PoC-first`) to confirm the issue before writing any fix**.
+
+1. **Observe**: rank test gaps and hotspots from `docs/feature-map.json`, `signals.jsonl`, and recent diffs without editing source files.
+2. **PoC-first**: execute one minimal reproduction command. If a suspected static issue cannot be reproduced, drop it as a false alarm without writing a patch.
+3. **Escalate & Fix**: file an issue via `escalation.mjs` with `pocCommand` and `reproEvidence`, fix it on the normal `dev-plan → dev-edit → dev-flow → dev-review` path, and re-run the same PoC with `--artifact` proof.
+4. **Reflect**: check whether the bug reflects a whole class of errors—prioritize a Tier 1 architectural or shared-boundary refactor, and add a Tier 2 deterministic static rule or type gate. All gates lock objective output boundaries (artifacts, schemas, exit codes, and bidirectional tests) instead of fragile internal steps.
+
+`iterate.mjs cycle` orchestrates these four read-only phases and halts with exit code `4` for a human decision whenever any stop-loss limit fires:
+
+- **`ROUND_LIMIT_REACHED`**: reaches the round limit (`3` rounds by default, hard cap `10`).
+- **`NO_PROGRESS_STALL`**: `2` consecutive rounds produce no new verified progress.
+- **`ONE_WAY_GATE_HIT`**: hits an irreversible or high-risk change awaiting approval.
+
+## Three-Layer Evergreen Docs and Slicing
+
+<p align="center">
+  <img src="assets/readme/docs-layers-en.svg" alt="Three evergreen doc layers, on-demand doc-locate slicing, and four-layer planning closure" width="100%">
+</p>
+
+Project knowledge lives in **three evergreen layers** alongside **four planning folders**. During daily tasks, `doc-locate.mjs` returns `startLine..endLine` slices by heading or symbol so long files are never dumped whole into context:
+
+| Layer | File | Purpose and freshness check |
+| --- | --- | --- |
+| **L1 Entry contract** | `AGENTS.md` | Compact session contract: intent routing, engineering principles, `Dev Profile`, collaboration rules, `high-risk` paths, and coupled-edit map (`< 24KB` target, `<= 30KB` cap) |
+| **L2 System architecture** | `docs/TDD.md` | Current module boundaries, workflows, `16/12` Mermaid diagrams, and invariants; checked by `tdd-structure.mjs` and `tdd-parity.mjs` |
+| **L3 Machine index** | `docs/feature-map.json` | Single machine-readable map of features, entry points, business flows, and verification tools checked via symbol and tree hashes by `verify-tools.mjs` |
+| **Planning & archive** | `docs/{prd,specs,todo}/` → `docs/archive/` | `doc-plan.mjs` cleans scaffold placeholders and respects custom repo templates; `flow finalize` verifies all `[x]` criteria and `1:N` master PRD closure before moving pairs with `git mv` |
 
 ## Supported Languages
 
-**Any language works.** Language only affects how precisely the tool can infer your commands; it never decides whether the workflow runs.
+**Any language works.** Language only decides how precisely commands are inferred from manifests; it never blocks the workflow.
 
 | Situation | What happens |
 | --- | --- |
-| **A recognized manifest (12)** | `Node.js` `Python` `Rust` `Go` `Java` `Ruby` `PHP` `.NET` `C/C++` `Dart` `Swift` `Elixir`. You get that language's idiomatic build, test, and install commands |
-| **Any other language** | Haskell, OCaml, Zig, Nim, Crystal, Julia, or an in-house DSL are all the same: commands are read from what your project **already runs** — the `run:` blocks in CI, `Makefile`, `justfile`, `Taskfile`. Those commands were really executed, which beats any inference |
-| **Starting from an empty folder** | `equip.mjs --bootstrap-empty` lays down a universal engineering baseline for **any stack** (Git baseline, four-layer docs, `docs/TDD.md`, self-consistent `AGENTS.md`, and `.agents/skills/`) with zero toy business code; supports `14` stack presets (the `12` languages above plus `universal` and `docs`, defaulting to `universal`) while preserving existing `README.md` and `LICENSE` |
+| **Recognized manifests (12)** | `Node.js`, `Python`, `Rust`, `Go`, `Java`, `Ruby`, `PHP`, `.NET`, `C/C++`, `Dart`, `Swift`, and `Elixir` yield idiomatic build, test, and install commands |
+| **Any other language** | Haskell, OCaml, Zig, Nim, Crystal, Julia, or an internal DSL: commands are read from what the repo **already runs** in CI `run:` blocks, `Makefile`, `justfile`, or `Taskfile` |
+| **Empty folder bootstrap** | `equip.mjs --bootstrap-empty` generates a universal baseline (Git baseline, three-layer docs, `docs/TDD.md`, `AGENTS.md`, and 8 skills) with zero toy business code across `14` stack presets (`12` languages plus `universal` and `docs`, defaulting to `universal`) while preserving `README.md` and `LICENSE` |
 
-Documentation-only folders, editor extensions, Obsidian plugins, and capability directories are also supported.
-
-**If there is no CI and no task file either**, the survey says plainly that no command was found and gives three places to look, rather than inventing one from a language convention. An invented command fails in CI, and that failure looks like "the code is broken".
+Documentation-only repos, editor extensions, Obsidian plugins, and capability folders are also supported. When neither manifests nor CI/task files exist, the survey reports honestly that no command was found and lists where to look instead of guessing.
 
 ## Install
 
-**Requirements**: `Windows`, `macOS`, or `Linux`, with `Node.js 18` (`>= 18`) or newer. Every script uses only built-in Node modules, so there is no `npm install` step.
+**Requirements**: `Windows`, `macOS`, or `Linux`, with `Node.js 18` (`>= 18`) or newer. Every script uses built-in Node modules only, so there is no `npm install` step.
 
 | Option | How | Updates | For whom |
 | --- | --- | --- | --- |
-| **Download the archive** | [Download project-forge.zip (latest)](https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip) | Automatic | Everyday users |
-| **`git clone`** | `git clone https://github.com/FiretrUCK666/project-forge.git` | Reports only, never overwrites; you run `git pull` | People changing the tool itself |
+| **Download archive** | [Download project-forge.zip (latest)](https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip) | Automatic | Everyday users |
+| **`git clone`** | `git clone https://github.com/FiretrUCK666/project-forge.git` | Reports only; you run `git pull` | People modifying the tool itself |
 
-Either way, **keep the folder named `project-forge`**. Adding a branch or version suffix (such as `project-forge-main`) makes the host skip loading it, because the folder name no longer matches the skill name.
+With either option, **keep the directory named `project-forge`**. Suffixes like `project-forge-main` prevent hosts from matching the folder name to the skill name.
 
-Once installed, open the project folder you want to organize and say:
+Once installed, open the project folder you want to organize and ask:
 
 ```text
 Survey the current folder first and list what is missing and how you would organize it.
 ```
 
-## What the First Run Does
-
-<p align="center">
-  <img src="assets/readme/workflow-en.svg" alt="Three repository starting points converging into four setup steps" width="100%">
-</p>
-
-An empty folder, a half-configured side project, and an active team repository all follow the same sequence:
-
-| Step | What happens | The part that matters |
-| --- | --- | --- |
-| 1. Read-only survey | Inventories structure, language ecosystems, Git remotes, local credentials, existing architecture docs | This step writes nothing |
-| 2. Scope from facts | Handwritten docs and custom skills are preserved, missing items are filled in, a tier is recommended | License, visibility, and release strategy are questions for you |
-| 3. Snapshot, then write | A non-empty repository gets an external snapshot first, then files are written in order | The order is **Repo → docs → remote → automation**. It is not adjustable |
-| 4. Check up, hand off | A delivery check verifies links and contract consistency | If the project returns to manual maintenance, the cleanup list is shown first |
-
-Why step 3 has a fixed order: `.gitattributes` and `.gitignore` must exist before the first commit, docs and remote addresses must be ready before the first push, and the commands CI runs must match exactly what `AGENTS.md` and `README.md` tell people to type.
-
-If the folder is empty, it asks three or four questions first (language stack, project description, license, whether to create a remote) and then lays down the scaffold.
-
 ## Automatic Updates
 
-Only the **archive copy** updates automatically. A `git clone` copy does not.
+Only the **archive copy** checks and updates automatically. A `git clone` copy is never overwritten.
 
 | Question | Answer |
 | --- | --- |
-| **When does it check** | At most once every **1 hour** after a successful check; waits **15 minutes** after a failure, so working offline never stalls on the network; skips checking for **24 hours** after a completed update |
-| **What happens on a new version** | Download to a same-disk temp directory, unpack, validate, write supporting files first, then write `SKILL.md` atomically. An interruption rolls back; no half-updated copy is left behind |
-| **How to turn it off** | Set `PF_NO_UPDATE=1` (any non-empty value). Point at a mirror with `PF_UPDATE_SOURCE` |
+| **Check cadence** | Checks at most once every **1 hour** after a successful check, waits **15 minutes** after a failure so offline work never stalls, and skips checks for **24 hours** after an update |
+| **Atomic replacement** | Downloads to a same-disk staging folder, unpacks, validates, writes supporting files first, and replaces `SKILL.md` atomically. Any error rolls back cleanly |
+| **Disable or mirror** | Set `PF_NO_UPDATE=1` to turn off checks, or set `PF_UPDATE_SOURCE` to point at a mirror |
 
 ```sh
-# Check once right now; report only, never modifies files
+# Check once right now; reports status without modifying files
 node "<skill directory>/scripts/update.mjs" --check
 
-# Turn automatic checking off entirely
+# Turn automatic update checks off
 PF_NO_UPDATE=1
 
-# Point at a different update source, such as an internal mirror
+# Point at a mirror repository
 PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 ```
 
 ## Guardrails
 
-Daily operations split into two groups, and whether they can be undone is the only line between them.
+Daily operations split into two tiers based on **whether they can be undone**:
 
-| Group | What is in it | Confirmation needed |
+| Tier | Actions | Human confirmation |
 | --- | --- | --- |
-| **Undoable** | Committing, pushing your own branch, opening or editing a PR, running checks | None. Revert or redo at will |
-| **Not undoable** | Merging into the default branch, tagging a release, publishing a version, changing repository visibility, rewriting pushed history | Yes. The actions are listed for a person to approve first |
+| **Undoable** | Local commits, pushing your own branch, opening or editing a PR, running checks | None; revert or redo anytime |
+| **Not undoable** | Merging into the default branch, tagging a release, publishing, changing visibility, rewriting pushed history | Required; actions are listed for approval first |
 
-Two more hard rules:
+Two additional hard rules apply everywhere:
 
-- **Weakening a gate requires human sign-off**: deleting tests, relaxing assertions, adding skip markers, or loosening CI means a gate will check one less thing from then on.
-- **Force-push is never automatic**: nothing here runs `git push --force` or rewrites pushed history on its own.
+- **Weakening a gate requires human sign-off**: deleting tests, relaxing assertions, adding skip markers, or loosening CI checks must be approved by a person.
+- **Force-push is never automatic**: nothing runs `git push --force` or rewrites pushed history on its own.
 
-When an independent review passes with no open items, the person who reviewed merges directly. A reviewer is the gate, not an advisor.
+When an independent review passes with zero open findings, the **reviewer merges directly**—reviewers act as the gate, not just advisors.
 
 ## Script Reference
 
-Daily use is routed by `AGENTS.md`, so you never need these commands. They are here for troubleshooting or wiring checks into CI.
+Daily workflows route through `AGENTS.md`, so you do not need to memorize these commands. Use them when troubleshooting or wiring checks into CI.
 
 <details>
-<summary>Show the underlying scripts and their responsibilities</summary>
+<summary>Show underlying scripts and responsibilities</summary>
 
 | Script | Purpose |
 | --- | --- |
-| `node scripts/survey.mjs <dir>` | Read-only inventory of structure, docs, remote topology, and auth status |
-| `node scripts/backup.mjs create <dir>` | Create an incremental compressed snapshot outside the repository |
-| `node scripts/equip.mjs <dir>` | Install or losslessly refresh `.agents/skills/` (`--check`, `--adopt-custom`, `--restore`) |
-| `node scripts/compose-agents.mjs <dir>` | Generate or losslessly refresh `AGENTS.md` (target `< 24KB`, hard ceiling `<= 30KB`) |
-| `node scripts/review.mjs <dir>` | Delivery check: contract completeness and claim verification |
-| `node scripts/handoff.mjs <dir>` | Remove scaffold markers and temporary leftovers for handoff |
-| `node scripts/sync-toc.mjs README.md README.en.md` | Keep the bilingual README tables of contents in sync |
-| `node scripts/update.mjs [--check]` | Check for and atomically apply updates to the archive copy |
+| `node scripts/survey.mjs <dir>` | Read-only inventory of layout, docs, remote topology, and auth state |
+| `node scripts/backup.mjs create <dir>` | Create an incremental `.zip` snapshot outside the repository (`list` / `restore`) |
+| `node scripts/equip.mjs <dir>` | Install or losslessly refresh `.agents/skills/` (`--check`, `--adopt-custom`, `--restore`, `--bootstrap-empty`) |
+| `node scripts/compose-agents.mjs <dir>` | Generate or refresh `AGENTS.md` (`< 24KB` target, `<= 30KB` cap) |
+| `node scripts/equip-ci.mjs <dir>` | Write CI workflows from survey facts or configure branch protection |
+| `node scripts/review.mjs <dir>` | Delivery check for contract completeness and claim verification |
+| `node scripts/handoff.mjs <dir>` | Scan scaffold markers and temporary leftovers before handoff |
+| `node scripts/sync-toc.mjs README.md README.en.md` | Keep bilingual README tables of contents in sync |
+| `node scripts/update.mjs [--check]` | Check and atomically apply updates to the archive copy |
 
 </details>
 

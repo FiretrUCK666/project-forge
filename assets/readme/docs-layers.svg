@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="1200" height="520" role="img" aria-labelledby="dl-t dl-d">
+  <title id="dl-t">三层常青文档建筑轴测图与按需切片读取</title>
+  <desc id="dl-d">三块 30 度轴测平面展示 AGENTS.md、docs/TDD.md 与 docs/feature-map.json，中央朱砂剖切示意 doc-locate 按节按行读取。</desc>
+  <defs>
+    <style>
+      .sans { font-family: 'Inter', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif; }
+      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', Consolas, monospace; }
+    </style>
+    <marker id="a-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#161614"/>
+    </marker>
+    <marker id="a-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#C93B2B"/>
+    </marker>
+  </defs>
+  <!-- Matte Archival Print Sheet (Zero Cards, Zero Drop Shadows, Zero Color Stripes) -->
+  <rect x="0.75" y="0.75" width="1198.5" height="518.5" rx="4" fill="#F2EFE9" stroke="#CBC4B6" stroke-width="1.5"/>
+  <!-- Swiss Editorial Running Folio -->
+  <text x="48" y="40" class="mono" font-size="16" font-weight="600" letter-spacing="1.4" fill="#161614">05</text>
+  <text x="92" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.4" fill="#5E5A53">EVERGREEN DOCS · 3 LAYERS</text>
+  <text x="1152" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.2" fill="#5E5A53" text-anchor="end">按需定位 · 不灌全文</text>
+  <line x1="48" y1="56" x2="1152" y2="56" stroke="#161614" stroke-width="1.2"/>
+
+  <!-- Vertical Vermilion Section-Cut Axis -->
+  <line x1="368" y1="84" x2="368" y2="482" stroke="#C93B2B" stroke-width="2" stroke-dasharray="6 5"/>
+
+  <!-- L3 Bottom Plane (Deep Ink Feature Map Stratum) -->
+  <g id="iso-l3">
+    <polygon points="156,390 368,456 368,466 156,400" fill="#0A0A09" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
+    <polygon points="368,456 580,390 580,400 368,466" fill="#2B2B28" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
+    <polygon points="368,324 580,390 368,456 156,390" fill="#161614" stroke="#161614" stroke-width="1.6" stroke-linejoin="round"/>
+    <g stroke="#5E5A53" stroke-width="1" stroke-opacity="0.7">
+      <line x1="262" y1="390" x2="368" y2="357"/>
+      <line x1="308" y1="406" x2="414" y2="373"/>
+      <line x1="354" y1="422" x2="460" y2="389"/>
+    </g>
+  </g>
+
+  <!-- L2 Middle Plane (Warm Stone TDD Stratum + Vermilion Illuminated Slice) -->
+  <g id="iso-l2">
+    <polygon points="156,276 368,342 368,352 156,286" fill="#C9C1B2" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
+    <polygon points="368,342 580,276 580,286 368,352" fill="#D8D1C3" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
+    <polygon points="368,210 580,276 368,342 156,276" fill="#E6E0D5" stroke="#161614" stroke-width="1.6" stroke-linejoin="round"/>
+    <g stroke="#8A8479" stroke-width="0.9" stroke-opacity="0.55">
+      <line x1="262" y1="276" x2="368" y2="243"/>
+      <line x1="315" y1="292" x2="421" y2="259"/>
+      <line x1="368" y1="309" x2="474" y2="276"/>
+      <line x1="315" y1="259" x2="421" y2="292"/>
+      <line x1="368" y1="243" x2="474" y2="276"/>
+    </g>
+    <polygon points="368,256 432,276 368,296 304,276" fill="#C93B2B" fill-opacity="0.88" stroke="#161614" stroke-width="1.2"/>
+  </g>
+
+  <!-- L1 Top Plane (Crisp Alabaster Entry Contract Stratum) -->
+  <g id="iso-l1">
+    <polygon points="156,162 368,228 368,238 156,172" fill="#D6CFC2" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
+    <polygon points="368,228 580,162 580,172 368,238" fill="#E5DFD3" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
+    <polygon points="368,96 580,162 368,228 156,162" fill="#FAF8F4" stroke="#161614" stroke-width="1.6" stroke-linejoin="round"/>
+    <line x1="278" y1="162" x2="458" y2="162" stroke="#CBC4B6" stroke-width="1"/>
+    <circle cx="368" cy="162" r="5" fill="#C93B2B"/>
+  </g>
+
+  <!-- Left Section-Cut Callout -->
+  <line x1="156" y1="276" x2="302" y2="276" stroke="#C93B2B" stroke-width="1.8" marker-end="url(#a-red)"/>
+  <text x="48" y="254" class="mono" font-size="19" font-weight="700" fill="#C93B2B">doc-locate</text>
+  <text x="48" y="282" class="mono" font-size="16" font-weight="600" fill="#161614">L120..L180</text>
+  <text x="48" y="308" class="sans" font-size="16" font-weight="500" fill="#5E5A53">按节按行读取</text>
+
+  <!-- Right Side: Unboxed Editorial Callouts and Leader Lines -->
+  <line x1="582" y1="162" x2="676" y2="162" stroke="#161614" stroke-width="1.4"/>
+  <circle cx="582" cy="162" r="4" fill="#161614"/>
+  <text x="696" y="156" class="mono" font-size="18" font-weight="700" fill="#8A8479">L1</text>
+  <text x="732" y="156" class="mono" font-size="22" font-weight="700" fill="#161614">AGENTS.md</text>
+  <text x="732" y="186" class="sans" font-size="18" fill="#5E5A53">路由表与核心约束（建议 &lt;24KB）</text>
+
+  <line x1="582" y1="276" x2="676" y2="276" stroke="#C93B2B" stroke-width="1.6"/>
+  <circle cx="582" cy="276" r="4" fill="#C93B2B"/>
+  <text x="696" y="270" class="mono" font-size="18" font-weight="700" fill="#C93B2B">L2</text>
+  <text x="732" y="270" class="mono" font-size="22" font-weight="700" fill="#161614">docs/TDD.md</text>
+  <text x="732" y="300" class="sans" font-size="18" fill="#5E5A53">系统架构与模块边界</text>
+
+  <line x1="582" y1="390" x2="676" y2="390" stroke="#161614" stroke-width="1.4"/>
+  <circle cx="582" cy="390" r="4" fill="#161614"/>
+  <text x="696" y="384" class="mono" font-size="18" font-weight="700" fill="#8A8479">L3</text>
+  <text x="732" y="384" class="mono" font-size="21" font-weight="700" fill="#161614">docs/feature-map.json</text>
+  <text x="732" y="414" class="sans" font-size="18" fill="#5E5A53">代码模块与验证工具映射</text>
+
+  <!-- Bottom-Right Minimal Swiss Lifecycle Strip -->
+  <line x1="696" y1="448" x2="1152" y2="448" stroke="#CBC4B6" stroke-width="1.2"/>
+  <text x="696" y="482" class="mono" font-size="16" font-weight="600" fill="#5E5A53">docs/{prd,specs,todo}</text>
+  <line x1="912" y1="476" x2="994" y2="476" stroke="#161614" stroke-width="1.6" marker-end="url(#a-ink)"/>
+  <text x="953" y="468" class="mono" font-size="16" fill="#C93B2B" text-anchor="middle">finalize</text>
+  <text x="1006" y="482" class="mono" font-size="16" font-weight="700" fill="#161614">docs/archive/</text>
+</svg>

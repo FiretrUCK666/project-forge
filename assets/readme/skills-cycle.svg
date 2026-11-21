@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 580" width="1200" height="580" role="img" aria-labelledby="sc-t sc-d">
+  <title id="sc-t">iterate.mjs cycle 有界循环与 EXIT 4 硬停损表盘</title>
+  <desc id="sc-d">以工业表盘几何展示 Observe、PoC-First、Escalate &amp; Fix 与 Reflect 四步闭环，中心为 EXIT 4 三项真实停损枚举。</desc>
+  <defs>
+    <style>
+      .sans { font-family: 'Inter', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif; }
+      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', Consolas, monospace; }
+    </style>
+    <marker id="a-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#161614"/>
+    </marker>
+    <marker id="a-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#C93B2B"/>
+    </marker>
+  </defs>
+  <!-- Matte Archival Print Sheet (Zero Cards, Zero Drop Shadows, Zero Color Stripes) -->
+  <rect x="0.75" y="0.75" width="1198.5" height="578.5" rx="4" fill="#F2EFE9" stroke="#CBC4B6" stroke-width="1.5"/>
+  <!-- Swiss Editorial Running Folio -->
+  <text x="48" y="40" class="mono" font-size="16" font-weight="600" letter-spacing="1.4" fill="#161614">04</text>
+  <text x="92" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.4" fill="#5E5A53">BOUNDED CYCLE · iterate.mjs cycle</text>
+  <text x="1152" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.2" fill="#5E5A53" text-anchor="end">先复现再建单 · 有界停损</text>
+  <line x1="48" y1="56" x2="1152" y2="56" stroke="#161614" stroke-width="1.2"/>
+
+  <!-- Braun Precision Chronometer Ring -->
+  <circle cx="600" cy="326" r="210" fill="none" stroke="#CBC4B6" stroke-width="1.2"/>
+  <line x1="600.0" y1="144.0" x2="600.0" y2="118.0" stroke="#C93B2B" stroke-width="3.2"/>
+  <line x1="620.7" y1="129.1" x2="621.7" y2="119.1" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="641.2" y1="132.3" x2="643.2" y2="122.5" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="661.2" y1="137.7" x2="664.3" y2="128.2" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="680.5" y1="145.1" x2="684.6" y2="136.0" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="696.0" y1="159.7" x2="704.0" y2="145.9" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="716.4" y1="165.8" x2="722.3" y2="157.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="732.5" y1="178.9" x2="739.2" y2="171.4" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="747.1" y1="193.5" x2="754.6" y2="186.8" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="760.2" y1="209.6" x2="768.3" y2="203.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="766.3" y1="230.0" x2="780.1" y2="222.0" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="780.9" y1="245.5" x2="790.0" y2="241.4" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="788.3" y1="264.8" x2="797.8" y2="261.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="793.7" y1="284.8" x2="803.5" y2="282.8" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="796.9" y1="305.3" x2="806.9" y2="304.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="786.0" y1="326.0" x2="808.0" y2="326.0" stroke="#161614" stroke-width="2.2"/>
+  <line x1="796.9" y1="346.7" x2="806.9" y2="347.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="793.7" y1="367.2" x2="803.5" y2="369.2" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="788.3" y1="387.2" x2="797.8" y2="390.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="780.9" y1="406.5" x2="790.0" y2="410.6" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="766.3" y1="422.0" x2="780.1" y2="430.0" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="760.2" y1="442.4" x2="768.3" y2="448.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="747.1" y1="458.5" x2="754.6" y2="465.2" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="732.5" y1="473.1" x2="739.2" y2="480.6" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="716.4" y1="486.2" x2="722.3" y2="494.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="696.0" y1="492.3" x2="704.0" y2="506.1" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="680.5" y1="506.9" x2="684.6" y2="516.0" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="661.2" y1="514.3" x2="664.3" y2="523.8" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="641.2" y1="519.7" x2="643.2" y2="529.5" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="620.7" y1="522.9" x2="621.7" y2="532.9" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="600.0" y1="512.0" x2="600.0" y2="534.0" stroke="#161614" stroke-width="2.2"/>
+  <line x1="579.3" y1="522.9" x2="578.3" y2="532.9" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="558.8" y1="519.7" x2="556.8" y2="529.5" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="538.8" y1="514.3" x2="535.7" y2="523.8" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="519.5" y1="506.9" x2="515.4" y2="516.0" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="504.0" y1="492.3" x2="496.0" y2="506.1" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="483.6" y1="486.2" x2="477.7" y2="494.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="467.5" y1="473.1" x2="460.8" y2="480.6" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="452.9" y1="458.5" x2="445.4" y2="465.2" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="439.8" y1="442.4" x2="431.7" y2="448.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="433.7" y1="422.0" x2="419.9" y2="430.0" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="419.1" y1="406.5" x2="410.0" y2="410.6" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="411.7" y1="387.2" x2="402.2" y2="390.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="406.3" y1="367.2" x2="396.5" y2="369.2" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="403.1" y1="346.7" x2="393.1" y2="347.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="414.0" y1="326.0" x2="392.0" y2="326.0" stroke="#161614" stroke-width="2.2"/>
+  <line x1="403.1" y1="305.3" x2="393.1" y2="304.3" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="406.3" y1="284.8" x2="396.5" y2="282.8" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="411.7" y1="264.8" x2="402.2" y2="261.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="419.1" y1="245.5" x2="410.0" y2="241.4" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="433.7" y1="230.0" x2="419.9" y2="222.0" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="439.8" y1="209.6" x2="431.7" y2="203.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="452.9" y1="193.5" x2="445.4" y2="186.8" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="467.5" y1="178.9" x2="460.8" y2="171.4" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="483.6" y1="165.8" x2="477.7" y2="157.7" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="504.0" y1="159.7" x2="496.0" y2="145.9" stroke="#8A8479" stroke-width="1.4"/>
+  <line x1="519.5" y1="145.1" x2="515.4" y2="136.0" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="538.8" y1="137.7" x2="535.7" y2="128.2" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="558.8" y1="132.3" x2="556.8" y2="122.5" stroke="#8A8479" stroke-width="0.9"/>
+  <line x1="579.3" y1="129.1" x2="578.3" y2="119.1" stroke="#8A8479" stroke-width="0.9"/>
+
+  <!-- Four Clockwise Quadrant Orbital Arcs -->
+  <g fill="none" stroke-width="3.6" stroke-linecap="round">
+    <path d="M 488 202 A 166 166 0 0 1 704 198" stroke="#161614" marker-end="url(#a-ink)"/>
+    <path d="M 728 220 A 166 166 0 0 1 730 426" stroke="#C93B2B" marker-end="url(#a-red)"/>
+    <path d="M 708 452 A 166 166 0 0 1 492 452" stroke="#161614" marker-end="url(#a-ink)"/>
+    <path d="M 472 432 A 166 166 0 0 1 472 224" stroke="#161614" marker-end="url(#a-ink)"/>
+  </g>
+
+  <!-- Central Charcoal Industrial Rotary Knob (EXIT 4 Breaker) -->
+  <circle cx="600" cy="326" r="126" fill="#161614"/>
+  <circle cx="600" cy="326" r="114" fill="none" stroke="#5E5A53" stroke-width="1.2"/>
+  <circle cx="600" cy="230" r="6.5" fill="#C93B2B"/>
+  <text x="600" y="276" class="mono" font-size="26" font-weight="700" fill="#FAF8F4" text-anchor="middle" letter-spacing="1">EXIT 4</text>
+  <line x1="516" y1="292" x2="684" y2="292" stroke="#5E5A53" stroke-width="1.1"/>
+  <text x="600" y="324" class="mono" font-size="16" font-weight="500" fill="#F2EFE9" text-anchor="middle">ROUND_LIMIT_REACHED</text>
+  <text x="600" y="352" class="mono" font-size="16" font-weight="500" fill="#C93B2B" text-anchor="middle">NO_PROGRESS_STALL</text>
+  <text x="600" y="380" class="mono" font-size="16" font-weight="500" fill="#F2EFE9" text-anchor="middle">ONE_WAY_GATE_HIT</text>
+
+  <!-- Four Unboxed Editorial Quadrant Callouts + Leader Lines -->
+  <polyline points="424,218 358,176 48,176" fill="none" stroke="#161614" stroke-width="1.3"/>
+  <circle cx="424" cy="218" r="4" fill="#161614"/>
+  <text x="48" y="160" class="mono" font-size="30" font-weight="700" fill="#8A8479">01</text>
+  <text x="104" y="160" class="mono" font-size="22" font-weight="700" fill="#161614">Observe</text>
+  <text x="48" y="208" class="sans" font-size="18" fill="#5E5A53">找测试盲区与异常信号</text>
+
+  <polyline points="776,218 842,176 1152,176" fill="none" stroke="#C93B2B" stroke-width="1.4"/>
+  <circle cx="776" cy="218" r="4" fill="#C93B2B"/>
+  <text x="1152" y="160" class="mono" font-size="22" font-weight="700" fill="#C93B2B" text-anchor="end">PoC-First  02</text>
+  <text x="1152" y="208" class="sans" font-size="18" fill="#5E5A53" text-anchor="end">先写最小脚本复现</text>
+
+  <polyline points="776,434 842,476 1152,476" fill="none" stroke="#161614" stroke-width="1.3"/>
+  <circle cx="776" cy="434" r="4" fill="#161614"/>
+  <text x="1152" y="460" class="mono" font-size="21" font-weight="700" fill="#161614" text-anchor="end">Escalate &amp; Fix  03</text>
+  <text x="1152" y="508" class="sans" font-size="18" fill="#5E5A53" text-anchor="end">建单走规划改码审查</text>
+
+  <polyline points="424,434 358,476 48,476" fill="none" stroke="#161614" stroke-width="1.3"/>
+  <circle cx="424" cy="434" r="4" fill="#161614"/>
+  <text x="48" y="460" class="mono" font-size="30" font-weight="700" fill="#8A8479">04</text>
+  <text x="104" y="460" class="mono" font-size="22" font-weight="700" fill="#161614">Reflect</text>
+  <text x="48" y="508" class="sans" font-size="18" fill="#5E5A53">复发满 2 次沉入静态检查</text>
+</svg>

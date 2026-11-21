@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T03:13:28.361Z",
+  "installedAt": "2026-11-21T03:20:25.998Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -247,7 +247,7 @@
       "sha256": "94acec09609cd5fd14e2f52d643fc55d8d7f4803454136c232f2bb65b64a90e0"
     },
     "lib/gate-truth.mjs": {
-      "sha256": "233800ad55b46a3aab2b9ef1ac3eece3361ee3436a75f7ef2638f807291f8998"
+      "sha256": "53432f27b65eddd911a0ea6fd12dd4b41c844198ddb4685f99bd0f4273bb0c50"
     },
     "lib/git-core.mjs": {
       "sha256": "1802ee6931ceca7cac7a335c1b4b698ad5ae0b5332962d055e0794dee394ab27"

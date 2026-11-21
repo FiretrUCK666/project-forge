@@ -324,7 +324,9 @@ export function deriveMergeGate(repoRoot) {
     skippedFiles: skipped,
     // 流水线自己声明的环境条件随派生结果一起交出去：编排脚本按它设置进程环境，
     // 才跑得出与远端同一张成绩单（例如按 CI 标记放大的性能预算）。
-    evidenceEnv: { CI: '1', ...(adopted.find((e) => e.env)?.env ?? {}) },
+    // 默认值取托管平台 runner 的惯例值 CI=true，不自造 1：脚本按 CI === 'true'
+    // 判断要不要放大预算，写成 1 等于没写，跑出来还是本地口径。
+    evidenceEnv: { CI: 'true', ...(adopted.find((e) => e.env)?.env ?? {}) },
     reasons: [`已派生 ${steps.length} 步，来自 ${adopted.length} 份流水线文件；尚未执行，所以还不是通过`],
   }
 }

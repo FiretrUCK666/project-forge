@@ -66,7 +66,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 - **结构腐化与跨层边界**：识别墓碑履历注释（`hygiene.tombstone-comment`）、借口/压制标记（`hygiene.excuse-suppression`）、连续注释死代码块（`deadcode.commented-block`）、`>800`/`>1500` 行超大源码（`hygiene.god-file`）与 `arch-rules:` 跨层禁引违规（`hygiene.arch-boundary`）。
 - **测试覆盖与 CI 对齐**：聚合根与多子包脚本（`package.json`、`Makefile`、`justfile`、`pom.xml`、`Cargo.toml` 等）、`.github/workflows/` 及中性 CI 配置（`.circleci/config.yml`、`azure-pipelines.yml`、`Jenkinsfile` 等）与 `Dev Profile` 输出 `testInventory`，揪出零断言、全跳过与孤儿测试套件（`tests.orphan-suite`）。
 - **Worktree 四态精细判定**：在 worktree 内运行同样以 `<mainRoot>/.worktrees/` 为基准，结合 `git cherry` 与 `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`（**仅报告并要求先问人核对未提交改动，绝不误删**）与 `unmerged`。
-- **清单与仓库卫生**：校验 `.agents/skills/.pf-manifest.json`（兼容 v2 定制豁免与跨系统换行）、明文凭据、`>1MB` 大文件、macOS 元数据过滤及未忽略输出目录。
+- **清单与仓库卫生**：校验 `.agents/skills/.pf-manifest.json`（v3 账本，兼容 v1/v2/v3 定制豁免、三方合并与跨系统换行）、明文凭据、`>1MB` 大文件、macOS 元数据过滤及未忽略输出目录。
 
 ## 测试分层、控频与质量治理
 

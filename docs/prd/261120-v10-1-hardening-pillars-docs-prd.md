@@ -160,10 +160,10 @@ Wave 2 的 Slice 2（`#101`）与 Slice 3（`#102`）共享唯一前置 Slice 1�
 - [ ] C10: （Slice 3 `#102`）触及 `UI_VISUAL_EXT_RE` 文件时禁止裸传 `--visual-checked` 放行，必须提供非空 `--artifact` 或实质视觉观察，无渲染环境时必须显式传 `--visual-blocked-reason` 诚实报阻。
 - [ ] C11: （Slice 3 `#102`）在 `kit/skills/lib/escalation.mjs`、`kit/skills/dev-iterate/SKILL.md`、`kit/skills/dev-govern/SKILL.md` 固化「最小运行复现消误报 -> 复跑证伪与回归 -> 评估 Tier 1/2 整类加固」原则及可选 `reproEvidence`/`pocCommand` 字段（零硬编码工具）。
 - [ ] C12: （Slice 3 `#102`）`kit/skills/dev-iterate/scripts/iterate.mjs` 新增只读编排子命令 `cycle --goal "{goal}" [--max-rounds 3] [--json]`（串联四阶段与硬停损），拆出 `kit/skills/lib/empirical-artifacts.mjs` (new) 保全 `.mjs <= 800` 行，在 `templates/agents-project.md` 与 `AGENTS.md` 确立「只锁客观输出边界」底线，刷新 `equip`/`compose-agents`（`AGENTS.md < 24576 B`），补齐 `fixtures-empirical-cycle.mjs` (new) 与 `I260–I269`。
-- [ ] C13: （Slice 4 `#103`）Wave 1 与 Wave 2 全部合入后，在本仓真实完成一轮 `dev-govern` + `dev-verify-tools` + `dev-iterate`（含 `cycle`）自举互转演练并修清实操发现缺陷，刷新 `docs/feature-map.json`。
-- [ ] C14: （Slice 4 `#103`）全面重写 `docs/TDD.md`，完整覆盖外部治理 `S1–S4`、全 8 个技能日常流转、双态规划门禁、波次图与 `handoff`、结构化实证与有界优化循环、三层常青文档与跨代升级。
-- [ ] C15: （Slice 4 `#103`）新版 `docs/TDD.md` 包含多张符合 Mermaid `16/12` 宽度上限且零 HTML 标签的清晰架构图与流程图，讲透流转跳转、拦截点与核心原则。
-- [ ] C16: （Slice 4 `#103`）`docs/TDD.md` 全文采用无 AI 味平实中文，人类用户不读源码即可完全看懂系统运转方式，并通过 `preflight`/`doc-plan`/`govern-audit`/`sync-toc` 全部校验。
+- [x] C13: （Slice 4 `#103`）Wave 1 与 Wave 2 全部合入后，在本仓真实完成一轮 `dev-govern` + `dev-verify-tools` + `dev-iterate`（含 `cycle`）自举互转演练并修清实操发现缺陷，刷新 `docs/feature-map.json`。
+- [x] C14: （Slice 4 `#103`）全面重写 `docs/TDD.md`，完整覆盖外部治理 `S1–S4`、全 8 个技能日常流转、双态规划门禁、波次图与 `handoff`、结构化实证与有界优化循环、三层常青文档与跨代升级。
+- [x] C15: （Slice 4 `#103`）新版 `docs/TDD.md` 包含多张符合 Mermaid `16/12` 宽度上限且零 HTML 标签的清晰架构图与流程图，讲透流转跳转、拦截点与核心原则。
+- [x] C16: （Slice 4 `#103`）`docs/TDD.md` 全文采用无 AI 味平实中文，人类用户不读源码即可完全看懂系统运转方式，并通过 `preflight`/`doc-plan`/`govern-audit`/`sync-toc` 全部校验。
 - [ ] C17: （Slice 5 `#104`）严格按 `oil-tone` 重写 `README.md` 与 `README.en.md`（消除文字墙与 AI 味），覆盖 `S1–S4`、全 8 个技能日常自然语言与斜杠触发用法、有界优化循环与跨代融合，通过 `sync-toc --check`。
 - [ ] C18: （Slice 5 `#104`）按 `beautify-github-readme` 重设计全套现有 6 张 `assets/readme/*.svg` 并补充关键章节新 SVG（如 8 技能闭环与三层文档图），严格按每张图实际内容自然定高、画幅宽松不堆小字。
 - [ ] C19: （Slice 5 `#104`）全部 SVG 通过 `preflight` 字体（`>= 16`）、卫生与双语产品层检查。

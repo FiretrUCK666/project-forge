@@ -666,10 +666,14 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
   assertOk(runNodeScript(flowJ, ['merge', '--task', 'j1'], repoJ, env), 'Scenario J generic-git merge')
 }
 
+export const STAGE_B_SCENARIOS = {
+  'b-h': runScenarioH,
+  'b-i': runScenarioI,
+  'b-j': runScenarioJ,
+}
+
 export async function runStageBScenarios(pkgRoot, sandbox, env, helpers) {
-  await Promise.all([
-    runScenarioH(pkgRoot, sandbox, env, helpers),
-    runScenarioI(pkgRoot, sandbox, env, helpers),
-    runScenarioJ(pkgRoot, sandbox, env, helpers),
-  ])
+  for (const fn of [runScenarioH, runScenarioI, runScenarioJ]) {
+    await fn(pkgRoot, sandbox, env, helpers)
+  }
 }

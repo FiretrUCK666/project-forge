@@ -8,14 +8,14 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpus, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
-import { runEvolutionScenarios } from './e2e-scenarios-evolution.mjs'
-import { runStageBScenarios } from './e2e-scenarios-lifecycle.mjs'
+import { EVOLUTION_SCENARIOS } from './e2e-scenarios-evolution.mjs'
+import { STAGE_B_SCENARIOS } from './e2e-scenarios-lifecycle.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..')
@@ -471,38 +471,103 @@ async function runScenarioG(pkgRoot, sandbox, env) {
   if (JSON.parse(mq.stdout).processed?.[0]?.status !== 'merged') throw new Error(`Scenario G merge-queue failed: ${mq.stdout}`)
 }
 
+function runScenarioWorkerAsync(scenarioKey, pkgRoot, workerSandbox, seedGitDir) {
+  mkdirSync(workerSandbox, { recursive: true })
+  return new Promise((resolveDone) => {
+    const child = spawn(process.execPath, [
+      fileURLToPath(import.meta.url),
+      '--worker', scenarioKey,
+      '--pkg-root', pkgRoot,
+      '--sandbox', workerSandbox,
+      '--seed-git', seedGitDir,
+      '--backup-dir', join(workerSandbox, 'backups'),
+    ], { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    let out = ''
+    let err = ''
+    child.stdout.on('data', (c) => { out += String(c) })
+    child.stderr.on('data', (c) => { err += String(c) })
+    child.on('error', (e) => resolveDone({ scenarioKey, code: 1, out, err: e.message }))
+    child.on('close', (code) => resolveDone({ scenarioKey, code: code ?? 1, out, err }))
+  })
+}
+
+async function runPoolWorkers(items, limit, fn) {
+  const results = new Array(items.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const idx = next++
+      results[idx] = await fn(items[idx])
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+function parseWorkerArgs(argv) {
+  const out = {}
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith('--') && i + 1 < argv.length) {
+      out[argv[i].slice(2)] = argv[i + 1]
+      i++
+    }
+  }
+  return out
+}
+
+async function runSingleScenario(scenarioKey, pkgRoot, sandbox, env) {
+  const helpers = {
+    assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
+  }
+  if (scenarioKey === 'a-c') {
+    const eng = await loadPkgEngines(pkgRoot)
+    await runScenarioA(pkgRoot, sandbox, env, eng)
+    await runScenarioBAndC(pkgRoot, sandbox, env, eng)
+    return
+  }
+  if (scenarioKey === 'd') return runScenarioD(pkgRoot, sandbox, env)
+  if (scenarioKey === 'e') return runScenarioE(pkgRoot, sandbox, env)
+  if (scenarioKey === 'f') return runScenarioF(pkgRoot, sandbox, env)
+  if (scenarioKey === 'g') return runScenarioG(pkgRoot, sandbox, env)
+  if (STAGE_B_SCENARIOS[scenarioKey]) return STAGE_B_SCENARIOS[scenarioKey](pkgRoot, sandbox, env, helpers)
+  if (EVOLUTION_SCENARIOS[scenarioKey]) return EVOLUTION_SCENARIOS[scenarioKey](pkgRoot, sandbox, env, helpers)
+  throw new Error(`Unknown e2e worker scenario: ${scenarioKey}`)
+}
+
 async function main() {
+  const workerArgs = parseWorkerArgs(process.argv.slice(2))
+  if (workerArgs.worker) {
+    try {
+      SEEDED_GIT_TEMPLATE = workerArgs['seed-git'] || null
+      const env = { PF_BACKUP_DIR: workerArgs['backup-dir'] || join(workerArgs.sandbox, 'backups'), PF_NO_REAL_AUTH_PROBE: '1' }
+      await runSingleScenario(workerArgs.worker, workerArgs['pkg-root'], workerArgs.sandbox, env)
+      return 0
+    } catch (err) {
+      process.stderr.write(`FAIL  e2e-zip-harness[${workerArgs.worker}]: ${err instanceof Error ? err.stack || err.message : String(err)}\n`)
+      return 1
+    }
+  }
+
   const sandbox = mkdtempSync(join(tmpdir(), 'pf-zip-e2e-'))
-  const env = { PF_BACKUP_DIR: join(sandbox, 'backups'), PF_NO_REAL_AUTH_PROBE: '1' }
   const t0 = performance.now()
   try {
     const { pkgRoot, entryCount } = extractRealArchivePackage(sandbox)
-    ensureSeededGitTemplate(sandbox)
-    const eng = await loadPkgEngines(pkgRoot)
-    const runFast = async () => {
-      await runScenarioA(pkgRoot, sandbox, env, eng)
-      await runScenarioBAndC(pkgRoot, sandbox, env, eng)
+    const seedGitDir = ensureSeededGitTemplate(sandbox)
+    const scenarioKeys = [
+      'a-c', 'd', 'e', 'f', 'g',
+      ...Object.keys(STAGE_B_SCENARIOS),
+      ...Object.keys(EVOLUTION_SCENARIOS),
+    ]
+    const jobs = Math.min(6, Math.max(2, cpus().length || 4), scenarioKeys.length)
+    const results = await runPoolWorkers(scenarioKeys, jobs, (key) =>
+      runScenarioWorkerAsync(key, pkgRoot, join(sandbox, `w-${key}`), seedGitDir))
+    const failed = results.filter((r) => r.code !== 0)
+    if (failed.length > 0) {
+      const detail = failed.map((f) => `[${f.scenarioKey}] exit=${f.code}\n${f.err || f.out}`).join('\n---\n')
+      throw new Error(detail)
     }
-    const helpers = {
-      assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
-    }
-    await Promise.all([
-      runFast(),
-      runScenarioD(pkgRoot, sandbox, env),
-      runScenarioE(pkgRoot, sandbox, env),
-      runScenarioF(pkgRoot, sandbox, env),
-      runScenarioG(pkgRoot, sandbox, env),
-    ])
-    const stageBSandbox = join(sandbox, 'stage-b')
-    const evoSandbox = join(sandbox, 'stage-evo')
-    mkdirSync(stageBSandbox, { recursive: true })
-    mkdirSync(evoSandbox, { recursive: true })
-    await Promise.all([
-      runStageBScenarios(pkgRoot, stageBSandbox, env, helpers),
-      runEvolutionScenarios(pkgRoot, evoSandbox, env, helpers),
-    ])
     const ms = Math.round(performance.now() - t0)
-    process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：基础场景 A–G + 生命周期与演化 Scenarios H–L（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
+    process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：基础场景 A–G + 生命周期与演化 Scenarios H–L（包条目 ${entryCount}，${jobs} 进程并发，耗时 ${ms} ms）。\n`)
     return 0
   } catch (err) {
     process.stderr.write(`FAIL  e2e-zip-harness: ${err instanceof Error ? err.stack || err.message : String(err)}\n`)

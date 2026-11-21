@@ -271,15 +271,19 @@ async function runScenarioL(pkgRoot, sandbox, env, h) {
   if (restoredText !== baseFlow) throw new Error(`Scenario L integrity rollback did not restore base file: ${restoredText}`)
 }
 
+export const EVOLUTION_SCENARIOS = {
+  'evo-h': runScenarioH,
+  'evo-i': runScenarioI,
+  'evo-j': runScenarioJ,
+  'evo-k': runScenarioK,
+  'evo-l': runScenarioL,
+}
+
 /** 运行全部离线演化端到端场景（Scenarios H–L）。 */
 export async function runEvolutionScenarios(pkgRoot, sandbox, env, helpers) {
-  await Promise.all([
-    runScenarioH(pkgRoot, sandbox, env, helpers),
-    runScenarioI(pkgRoot, sandbox, env, helpers),
-    runScenarioJ(pkgRoot, sandbox, env, helpers),
-    runScenarioK(pkgRoot, sandbox, env, helpers),
-    runScenarioL(pkgRoot, sandbox, env, helpers),
-  ])
+  for (const fn of [runScenarioH, runScenarioI, runScenarioJ, runScenarioK, runScenarioL]) {
+    await fn(pkgRoot, sandbox, env, helpers)
+  }
 }
 
 function defaultHelpers() {

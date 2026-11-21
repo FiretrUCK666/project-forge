@@ -273,8 +273,7 @@ export async function handleVerify(opts, roots) {
   const isExplicitNone = !opts.cmd && isProfileExplicitNone(profile, profileKey)
 
   let cmd = opts.cmd
-  // 层级到 Dev Profile 键的对应只在 profile.mjs 一处；gate 缺配套时退到全量再退到快速，
-  // 这条降级链也由它给，这里不再自己拼一遍。
+  // 层级到 Dev Profile 键的对应与降级链只在 profile.mjs 一处，这里不再自己拼一遍。
   if (!cmd && !isExplicitNone) cmd = resolveTierCommand(profile, mode, { fallback: true })
 
   const computeVerifyPolicy = async (stZReuse = null) => {
@@ -473,10 +472,9 @@ export async function handleVerify(opts, roots) {
   if (allOk && hasVisualCheckFlag) {
     ledger.visualVerifiedHead = currentHead
     // 这个字段只接受入参原文或既有真实记录；两者都没有就不写。
-    //
-    // 它不得由任何开关派生：给裸 `--visual-checked` 拼一句「已声明核验」，
-    // 会让「核验过」这件事在账本里有了文字，而文字不是观察。开关的语义由
-    // `visualVerifiedHead` 与 `empiricalVisualCheckRequired` 表达，不占用观察字段。
+    // 它不得由任何开关派生：给裸 `--visual-checked` 拼一句「已声明核验」，会让「核验过」
+    // 在账本里有了文字，而文字不是观察。开关的语义由 `visualVerifiedHead` 与
+    // `empiricalVisualCheckRequired` 表达，不占用观察字段。
     const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
     ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
@@ -713,8 +711,7 @@ export async function handleSubmit(opts, roots) {
   }
   // 返工与否由账本推导：末轮退回且令牌已消费。不收开关，也不靠「有没有 PR 号」猜。
   const reworkState = deriveReworkState(ledger)
-  // 「这一轮是不是返工」和「PR 在不在」是两件事：前者决定评论措辞，后者决定复用还是新建。
-  // 混用一个变量就会出现「PR 明明在，却又建了一个」。
+  // 「是不是返工」与「PR 在不在」是两件事：前者决定措辞，后者决定复用还是新建。混用一个变量就会出现「PR 明明在，却又建了一个」。
   const hasExistingPr = Boolean(ledger.prNumber)
 
   let prResult = null
@@ -733,9 +730,7 @@ export async function handleSubmit(opts, roots) {
   } else {
     const { title, titleSource } = resolveReadablePrTitleWithSource(implRoot, ledger, opts.title)
     ledger.prTitleSource = titleSource
-    // 提案正文由账本与模板确定性生成，不接受整段替换：正文里排着的实证上下文
-    // （验证绑定哪个 HEAD、门禁跑过什么、界面核验观测到什么）都能从账本读出来。
-    // 一旦允许传 `--body`，实证栏就成了自由发挥——它显示「他说的」，不是「记录里的」。
+    // 提案正文由账本与模板确定性生成：正文里排着的实证上下文都能从账本读出来，一旦允许传 `--body`，实证栏就成了「他说的」，不是「记录里的」。
     const body = hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
     prResult = await backend.createPr({ targetRepo, head: headSpec, base: ledger.baseBranch, title, body, draft: Boolean(opts.draft) })
     if (prResult.ok && prResult.number) {

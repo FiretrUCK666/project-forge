@@ -51,8 +51,8 @@ scope_files: [SKILL.md, AGENTS.md, CONTRIBUTING.md, RELEASING.md, .gitignore, do
 
 <!-- criteria:start -->
 - [ ] C1: 修复模板水合与门禁自相矛盾真 Bug（`templates/agents-project.md:113` 与 `equip-bootstrap.mjs`、`templates/ci-release.yml` 与 `equip-ci.mjs`、`templates/ci-check.yml` 非 Node 生态适配、`docs-tdd.md` 核心节与 `security` 二级标题、`docs-prd.md`/`docs-spec.md`/`doc-plan.mjs:169`），通过 `preflight.mjs`。
-- [ ] C2: 清除全仓多远端 `generic-git` 与纯本地 `local-only` 的隐性 GitHub 默认（`scripts/review.mjs`、`registry.mjs`、`ledger.mjs`、`task-backend.mjs`、`flow-*`、`review-sync.mjs`、`workflow-policy-next.mjs`、`govern-*`、`equip-bootstrap.mjs`、`profile.mjs`、`static-gates.mjs`）。
-- [ ] C3: 彻底收敛双端平台注册表与共享原语至 `kit/skills/lib/`（拆分 `platform-registry.mjs` (new) 保 `platform.mjs <= 800L`，收敛路径/原子写/退出码/分支/技能发现原语与 `kit/` 内部重复常量，`SKILL_INTERNAL_RE` 补 `equip-ci.mjs`，`cli-parity.mjs` 扩至 12 入口），通过 `preflight-kernel-parity.mjs`。
+- [ ] C2: 清除全仓多远端 `generic-git` 与纯本地 `local-only` 的隐性 GitHub 默认（`scripts/review.mjs` 按平台能力对 `collab.*`/`release.absent` 分流且保持 `local-only` 的 `ci.absent` 契约、`registry.mjs`、`ledger.mjs`、`task-backend.mjs`、`flow-*`、`review-sync.mjs`、`workflow-policy-next.mjs`、`govern-*`、`equip-bootstrap.mjs`、`profile.mjs`、`static-gates.mjs`）。
+- [ ] C3: 彻底收敛双端平台注册表与共享原语至 `kit/skills/lib/`（拆分 `platform-registry.mjs` (new) 保 `platform.mjs <= 800L`，收敛路径/原子写/退出码/分支/技能发现原语与 `kit/` 内部重复常量，`SKILL_INTERNAL_RE` 补 `equip-ci.mjs`，`cli-parity.mjs` 扩至 12 入口并统一 `doc-locate.mjs`/`repo-map.mjs`/`govern-retro.mjs`/`flow-intake.mjs` 的 `printHelp()`），通过 `preflight-kernel-parity.mjs`。
 - [ ] C4: 全量对齐 `templates/`、`.github/` 与根目录（修复 `issue-template-hydrate.mjs` 空节与裸列表残留、`feature_request.md` 补 `kit/`、对齐 8 技能/`generic-git`/CI/防乱码与 `.gitignore`），严禁修改 `README.md`/`README.en.md`/`assets/readme/*.svg`。
 - [ ] C5: 全量对齐 `references/`（10 份）、8 份 `kit/skills/*/SKILL.md`、`SKILL.md`（`<= 200L / 16384B`）、`AGENTS.md`（`< 24576B`）、`docs/TDD.md` 与 `docs/feature-map.json`，跑通 `equip.mjs . --check` 与 `compose-agents.mjs . --check`。
 - [ ] C6: 清理全仓 7 处 `manifest v2 -> v3`、漂移硬编码计数（含 `preflight-suite-checks.mjs` 动态 SVG 统计）、`bench.mjs` `Wave 4`、`survey-plan.mjs` 快照与夹具头立碑注释（保护 `DOC_REGRESSION_ANCHOR_LOST`/`M0-M5`）。

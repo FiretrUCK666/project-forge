@@ -9,16 +9,16 @@ issue: 128
 pr: null
 branch: fix/w3-repo-alignment
 owner: plan-align
-task_id: w3-repo-alignment
 plan_mode: interactive
 approved: false
 implemented: false
-plan_critique: pending
+plan_critique: "rejected (reviewer=critic-align, round=1, sha=ce7e6d721527, summary=发现2项真实阻塞：C2豁免ci.absent与local-only回归断言冲突；C3扩充cli-parity至12入口漏规划4个缺printHelp的脚本适配)"
 related_prd: null
 related_todo: ../todo/261122-issue128-w3-repo-alignment-todo.md
-depends_on: []
 high_risk_paths: [scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md, .github/workflows/]
-scope_files: [SKILL.md, AGENTS.md, CONTRIBUTING.md, RELEASING.md, .gitignore, docs/TDD.md, docs/feature-map.json, .github/workflows/check.yml, .github/pull_request_template.md, .github/ISSUE_TEMPLATE/bug_report.md, .github/ISSUE_TEMPLATE/feature_request.md, "templates/**", "references/**", "scripts/*.mjs", "scripts/lib/**", "scripts/dev/bench.mjs", "scripts/dev/cli-parity.mjs", "scripts/dev/gap-coverage.mjs", "scripts/dev/merge-gate.mjs", "scripts/dev/preflight-kernel-parity.mjs", "scripts/dev/preflight-suite.mjs", "scripts/dev/preflight-suite-checks.mjs", "scripts/dev/fixtures-*.mjs", "scripts/dev/injections-data-*.mjs", "kit/skills/**", ".agents/skills/**"]
+task_id: w3-repo-alignment
+depends_on: []
+scope_files: [SKILL.md, AGENTS.md, CONTRIBUTING.md, RELEASING.md, .gitignore, docs/TDD.md, docs/feature-map.json, .github/workflows/check.yml, .github/pull_request_template.md, .github/ISSUE_TEMPLATE/bug_report.md, .github/ISSUE_TEMPLATE/feature_request.md, "templates/**", "references/**", "scripts/*.mjs", "scripts/lib/**", scripts/dev/bench.mjs, scripts/dev/cli-parity.mjs, scripts/dev/gap-coverage.mjs, scripts/dev/merge-gate.mjs, scripts/dev/preflight-kernel-parity.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/preflight-suite-checks.mjs, "scripts/dev/fixtures-*.mjs", "scripts/dev/injections-data-*.mjs", "kit/skills/**", ".agents/skills/**"]
 ---
 
 # 全仓深度对齐与去硬编码清理（C1-C7） — 功能设计规范（SPEC）
@@ -82,7 +82,7 @@ flowchart LR
    - `kit/skills/dev-plan/scripts/doc-plan.mjs:169`：当 `profile.quickTest` 缺失或为 `'none'` 时，不再把尖括号占位串传给 `{{QUICK_CMD}}`，改为传入非尖括号合法文本 `无自动快测命令（按手动步骤实证替代）`。
 
 2. **C2：多远端 `generic-git` 与纯本地 `local-only` 去隐性 GitHub 默认**
-   - `scripts/review.mjs:442-462,543-572`：复用 `facts.git.providerId` 与 `facts.git.capabilities`（对齐 `survey.mjs:217-291`），在 `local-only` 与无对应远端能力的 `generic-git` 下豁免 `.github/pull_request_template.md`、`.github/ISSUE_TEMPLATE/`、远端分支保护与 GitHub Actions 缺失告警（或标为平台不适用 `ok`）。
+   - `scripts/review.mjs:452-462,543-572`：复用 `facts.git.providerId` 与 `facts.git.capabilities`（对齐 `survey.mjs:217-291`），仅对 `collab.pr-template`、`collab.issue-templates`、`collab.branch-protection` 与远端发布相关的 `release.absent` 按能力分流豁免（`local-only` 与无对应远端能力的 `generic-git` 不误报缺 `.github/pull_request_template.md`、`.github/ISSUE_TEMPLATE/`、远端分支保护）；**保持 `ci.absent`（`notice` / `no-ci`）在无远端 `local-only` 仓的既有契约输出**（兼容 `fixtures-core.mjs:139-150,203-217` 与 `fixtures-heterogeneous-survey.mjs:174-182`）。
    - `scripts/lib/platform/registry.mjs:352-354,392-394,413,437-442`：定义 `NONE_CAPABILITIES`（8 键全 `false`），`topology.mode === 'none'` 时 `classifyTopologyIdentity` / `resolveTopologyIdentity` / `probeTopologyEnv` 返回 `providerId: 'none'` 与全 `false` 能力表（不再伪装 `GITHUB_PROVIDER.capabilities` 全 `true`；`probeTopologyEnv` 探测本机建仓凭据仍保留凭据结果但工作区能力忠实报告 `none`）。
    - 清除全部 `?? 'github'` / `|| 'github'` 与 `githubRepoFull` 隐性默认：
      - `kit/skills/lib/ledger.mjs:131-132`：`role` 默认 `'local-only'` 时 `providerId` 默认 `partial.providerId ?? (role === 'local-only' ? 'none' : null)`；
@@ -105,7 +105,7 @@ flowchart LR
      - `EXTRA_CI_FILE_RE`、`FEATURE_MAP_REL`、`CODE_EXT` / `CODE_EXT_RE`、`OUTPUT_DIRS`、`parseArchRuleItem`、`looksLikeCommentedCode`、`extractCriteria`、`DECIDED_RE`、`AGENTS_MAX_BYTES` / `AGENTS_WARN_BYTES` 分别收敛至 `kit/skills/lib/git-core.mjs`、`kit/skills/lib/static-gates-lexer.mjs`、`kit/skills/lib/doc-substantive.mjs`、`kit/skills/lib/tool-owned.mjs` 等现有未满载单源库（禁止向 791L `docs.mjs` 与 `govern-checks.mjs` 堆砌新导出；`scripts/lib/protocol.mjs` 从 `kit/skills/lib/` 重导出 `AGENTS_MAX_BYTES`/`AGENTS_WARN_BYTES`）；
      - `TOOL_OWNED_PREFIXES`（`kit/skills/lib/tool-owned.mjs`）动态对齐 `skill-discovery.mjs` / `UNIFIED_SKILL_NAMES`；`scripts/handoff.mjs:69` `SKILL_INTERNAL_RE` 补全 `equip-ci`；`workflow-policy-next.mjs:234` 消除目标仓不存在的 `node scripts/equip.mjs .` 提示。
    - **门禁补齐**：
-     - `scripts/dev/cli-parity.mjs:34-40` `ENTRY_SPECS` 扩充至全部 12 个调用 `parseStandardCli` 的入口（增补 `doc-locate.mjs`、`repo-map.mjs`、`flow-intake.mjs`、`worktree-deps.mjs`、`govern-retro.mjs`、`iterate.mjs`、`verify-tools.mjs` 并登记对应 `DARK_BASELINE`）；
+     - `scripts/dev/cli-parity.mjs:34-40` `ENTRY_SPECS` 扩充至全部 12 个调用 `parseStandardCli` 的入口（在既有 5 个基础上增补 `doc-locate.mjs`、`repo-map.mjs`、`flow-intake.mjs`、`worktree-deps.mjs`、`govern-retro.mjs`、`iterate.mjs`、`verify-tools.mjs` 并登记对应 `DARK_BASELINE`）；同步适配 4 个尚缺标准 `function printHelp()` 的入口（其余 3 个已具备）：`doc-locate.mjs`（`usageText` 改为 `printHelp`）、`repo-map.mjs`（内联帮助抽为 `printHelp`）、`govern-retro.mjs`（内联帮助抽为多行 `printHelp`）、`flow-intake.mjs`（补齐 `printHelp()`、`booleanFlags` 加 `'help'` 与 `--help` 早退 `0`，4 文件均远低于 800L）；
      - `scripts/dev/preflight-suite.mjs:40-48` 改用 `kit/skills/lib/profile.mjs` `DEV_PROFILE_KEYS` 单源，并增补校验 `scripts/lib/agents-defaults.mjs:369-375`；
      - `scripts/dev/preflight-kernel-parity.mjs` 将本次收敛的共享原语（`canonicalPath`、`samePath`、`posixPath`、`isMainModule`、`writeAtomic`、`VERIFY_EXIT`、`LIKELY_DEFAULT_BRANCHES`、`summarizeSkillDescription`、`DEFAULT_KIT_SKILLS_DIR`、`parseRemoteUrlHost`、`githubRepoPath`、`NON_API_CLIENT_TIERS`、`PLACEHOLDER_TEXT_RE`、`parseArchRuleItem`、`looksLikeCommentedCode`、`extractCriteria`、`DECIDED_RE`、`AGENTS_MAX_BYTES`、`registerHostingProvider`）全部纳入 `SINGLE_SOURCE_DEFS`。
 
@@ -183,8 +183,8 @@ flowchart LR
 <!-- section: acceptance -->
 <!-- criteria:start -->
 - [ ] C1: 修复模板水合与门禁矛盾（`templates/agents-project.md:113` 与 `equip-bootstrap.mjs` 正则一致、`templates/ci-release.yml` 与 `equip-ci.mjs` 水合与裸标签适配、`templates/ci-check.yml` 按生态水合避免失效 `setup-node@v4`、`docs-tdd.md` 去除误标 `optional`/删 `build` 矛盾并改 `security` 为二级标题、`docs-prd.md`/`docs-spec.md`/`doc-plan.mjs:169` 修正字段与 `quick-test: none` 兜底），通过 `node scripts/dev/preflight.mjs`。
-- [ ] C2: 清除全仓隐性 GitHub 默认（`scripts/review.mjs` 按平台能力分流、`registry.mjs` 无远端返回 `none` 全 `false` 能力表、`ledger.mjs`/`task-backend.mjs`/`flow-*`/`review-sync.mjs` 清除 `?? 'github'`、`workflow-policy-next.mjs`/`govern-*`/`equip-bootstrap.mjs`/`profile.mjs`/`static-gates.mjs` 清除写死提示），通过 `local-only` / `generic-git` / `github` 三态正反用例。
-- [ ] C3: 双端平台注册表与共享原语彻底收敛至 `kit/skills/lib/`（拆分 `platform-registry.mjs` (new) 保持 `platform.mjs <= 800L`，统一 8 键能力/`.trim().toLowerCase()`/`file://`，收敛 `canonicalPath`/`samePath`/`posixPath`/`isMainModule`/`writeAtomic`/`VERIFY_EXIT`/`LIKELY_DEFAULT_BRANCHES`/`summarizeSkillDescription`/`DEFAULT_KIT_SKILLS_DIR`/`parseRemoteUrlHost`/`githubRepoPath` 及 `kit/` 内部重复常量，`SKILL_INTERNAL_RE` 补 `equip-ci.mjs`，`cli-parity.mjs` 扩至 12 入口），并通过 `node scripts/dev/preflight-kernel-parity.mjs`。
+- [ ] C2: 清除全仓隐性 GitHub 默认（`scripts/review.mjs` 按平台能力对 `collab.*` 与 `release.absent` 分流并保持 `local-only` 的 `ci.absent` 契约、`registry.mjs` 无远端返回 `none` 全 `false` 能力表、`ledger.mjs`/`task-backend.mjs`/`flow-*`/`review-sync.mjs` 清除 `?? 'github'`、`workflow-policy-next.mjs`/`govern-*`/`equip-bootstrap.mjs`/`profile.mjs`/`static-gates.mjs` 清除写死提示），通过 `local-only` / `generic-git` / `github` 三态正反用例。
+- [ ] C3: 双端平台注册表与共享原语彻底收敛至 `kit/skills/lib/`（拆分 `platform-registry.mjs` (new) 保持 `platform.mjs <= 800L`，统一 8 键能力/`.trim().toLowerCase()`/`file://`，收敛 `canonicalPath`/`samePath`/`posixPath`/`isMainModule`/`writeAtomic`/`VERIFY_EXIT`/`LIKELY_DEFAULT_BRANCHES`/`summarizeSkillDescription`/`DEFAULT_KIT_SKILLS_DIR`/`parseRemoteUrlHost`/`githubRepoPath` 及 `kit/` 内部重复常量，`SKILL_INTERNAL_RE` 补 `equip-ci.mjs`，`cli-parity.mjs` 扩至 12 入口并统一 `doc-locate.mjs`/`repo-map.mjs`/`govern-retro.mjs`/`flow-intake.mjs` 的 `printHelp()`），并通过 `node scripts/dev/preflight-kernel-parity.mjs`。
 - [ ] C4: 全量对齐 `templates/`、`.github/` 与根目录（`templates/readme.md`/`agents-project.md`/`contributing.md`/`releasing.md`/`pull-request-template.md`/`issue-*.md`/`githooks-pre-push.sh`、`.github/ISSUE_TEMPLATE/*` 与 `issue-template-hydrate.mjs` 缺字段不留裸列表/空标题且 `feature_request.md` 补 `kit/`、`.github/workflows/check.yml`、`CONTRIBUTING.md`、`RELEASING.md`、`.gitignore`），通过 `checkTemplates` 与 `checkOwnInstances` 且不修改 `README.md`/`README.en.md`/`assets/readme/*.svg`。
 - [ ] C5: 全量对齐 `references/`（10 份）、8 份 `kit/skills/*/SKILL.md`、`SKILL.md`（`<= 200L / 16384B`）、`AGENTS.md`（`< 24576B`）、`docs/TDD.md` 与 `docs/feature-map.json`，跑通 `node scripts/equip.mjs . --check` 与 `node scripts/compose-agents.mjs . --check`。
 - [ ] C6: 清理全仓 7 处 `manifest v2 -> v3`、漂移硬编码计数（含 `preflight-suite-checks.mjs` 动态 SVG 统计）、`bench.mjs` `Wave 4`、`survey-plan.mjs` 历史快照与夹具文件头阶段立碑注释（完整保留 `DOC_REGRESSION_ANCHOR_LOST`/`M0-M5` 等回归向量）。
@@ -205,6 +205,7 @@ flowchart LR
 ## 澄清与补充记录
 
 - 已定：依据三份全仓只读审计报告与 `main`（`caa5501`）源码核对确定全部 C1–C7 改动点、`I386–I397` 注入矩阵及 800L 行数防超方案；保留 `README.md`/`README.en.md`/`assets/readme/*.svg` 给 `#104` 处理，无未决事项。
+- 已确认（Round 1 Critique 修订）：`scripts/review.mjs` 仅按能力对 `collab.*` 与 `release.absent` 分流并保持 `local-only` 的 `ci.absent` 既有契约；`cli-parity.mjs` 12 入口扩充同步适配 `doc-locate.mjs`/`repo-map.mjs`/`govern-retro.mjs`/`flow-intake.mjs` 的 `printHelp()`（含 `flow-intake.mjs` `--help`）。
 
 ## 实现说明
 

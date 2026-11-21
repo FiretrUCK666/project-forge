@@ -109,6 +109,34 @@ function extractMeaningfulBullets(text, maxItems = 4) {
   return out
 }
 
+/**
+ * PR 模板的分节标题——派生正文时的唯一来源。
+ *
+ * 模板里没有某段时，兜底正文必须用同一批词去分段，否则「模板缺段」和「模板换了说法」
+ * 会产出两种不同的正文，读的人分不清哪份是准的。这份常量因此要跟
+ * `.github/pull_request_template.md` 实际标题保持一致；`preflight` 对拍两者。
+ */
+export const PR_SECTION_TITLES = Object.freeze({
+  summary: '变更摘要',
+  issues: '关联 Issue 与文档',
+  why: '改动理由',
+  verify: '验证证据',
+  impact: '影响面、风险与回滚方式',
+  mergeAuth: '合并授权',
+  selfCheck: '自查',
+})
+
+/**
+ * 标题来源：人工改名（`caller`）还是从文档与 Issue 派生（`derived`）。
+ *
+ * 通道保留，来源要记账：事后有人问「这个标题哪来的」，答案得在记录里。
+ */
+export function resolveReadablePrTitleWithSource(repoRoot, ledger, explicitTitle = null) {
+  const manual = String(explicitTitle ?? '').trim()
+  if (manual) return { title: formatWorkTitle(manual, ledger?.caseType), titleSource: 'caller' }
+  return { title: resolveReadablePrTitle(repoRoot, ledger, null), titleSource: 'derived' }
+}
+
 /** 优先从关联 SPEC / Todo / Issue 提取可读标题并附加工作类型前缀，避免裸拼英文 taskId。 */
 export function resolveReadablePrTitle(repoRoot, ledger, explicitTitle = null) {
   const manual = String(explicitTitle ?? '').trim()
@@ -350,7 +378,15 @@ export function hydratePrTemplateBody({
   const tplPath = repoRoot ? join(repoRoot, '.github', 'pull_request_template.md') : ''
   const tplRaw = tplPath && existsSync(tplPath) ? readTextSafe(tplPath) : null
   if (!tplRaw) {
-    return ['## 变更摘要', '', summaryText, '', '## 改动理由', '', whyText, '', '## 关联 Issue', '', fixesLine, '', '## 影响面与风险', '', riskLines, '', '## 验证证据', '', verifyText, '', '## 回滚方式', '', rollbackText, '', pfTag].join('\n')
+    // 兜底正文用与模板同一份标题常量分段：模板缺段时不该另起一套说法。
+    return [
+      `## ${PR_SECTION_TITLES.summary}`, '', summaryText,
+      '', `## ${PR_SECTION_TITLES.why}`, '', whyText,
+      '', `## ${PR_SECTION_TITLES.issues}`, '', fixesLine,
+      '', `## ${PR_SECTION_TITLES.impact}`, '', riskLines,
+      '', `## ${PR_SECTION_TITLES.verify}`, '', verifyText,
+      '', pfTag,
+    ].join('\n')
   }
 
   let body = stripHtmlCommentsOutsideFences(tplRaw)

@@ -92,11 +92,11 @@ export const INJECTIONS_EDIT_PYRAMID = [
   },
   {
     id: 'I195',
-    what: 'C7 govern-state recordGovernSkip 跳过空 reason 校验',
+    what: 'C7 govern-state recordGovernSkip 对占位词理由放行（只查非空等于给水话留门）',
     file: 'kit/skills/dev-govern/scripts/govern-state.mjs',
     alsoDropIn: ['.agents/skills/dev-govern/scripts/govern-state.mjs'],
-    from: "  if (!cleanReason) return { ok: false, error: '--skip-govern requires non-empty --reason \"<text>\"' }",
-    to: "  if (false && !cleanReason) return { ok: false, error: '--skip-govern requires non-empty --reason \"<text>\"' }",
+    from: '  if (!reasonCheck.ok) return { ok: false, error: `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason}` }',
+    to: '  if (false) return { ok: false, error: `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason}` }',
     expect: 'StageC C7',
   },
   {

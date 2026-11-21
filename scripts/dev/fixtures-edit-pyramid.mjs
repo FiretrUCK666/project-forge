@@ -451,9 +451,15 @@ export function registerEditPyramidCases(cases) {
         return `--changed --quiet 增量过滤不准：${JSON.stringify(bj.findings)}`
       }
 
-      // 3. --skip-govern 必传 reason 且同时写入 govern-state.json 与 signals.jsonl
+      // 3. --skip-govern 必传实质 reason 且同时写入 govern-state.json 与 signals.jsonl
       const skipFail = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--skip-govern'])
       if (skipFail.status !== 2) return `无 reason 的 --skip-govern 未报错退出 2：${skipFail.status}`
+      // 反例：理由非空但只是占位词，同样要拦——只查非空等于给水话留门。
+      const skipShallow = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--skip-govern', '--reason', '赶时间'])
+      if (skipShallow.status === 0) return '占位词的 --skip-govern 理由被放行了——理由就该是理由'
+      if (!/BLOCKED_SHALLOW_OVERRIDE_REASON/.test(skipShallow.stdout + skipShallow.stderr)) {
+        return `占位词理由被拒但没说明原因：${skipShallow.stdout}${skipShallow.stderr}`
+      }
       const skipOk = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--skip-govern', '--task', 'c7-task', '--reason', '紧急文档修复：只改了一处错别字，治理巡检的检查项不涉及它', '--json'])
       if (skipOk.status !== 0) return `带 reason 的 --skip-govern 失败：${skipOk.stderr}`
       const govState = loadGovernState(dir)

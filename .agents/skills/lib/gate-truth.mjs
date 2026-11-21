@@ -194,7 +194,16 @@ function readDeclaredEnv(lines) {
 /** 远端上下文的关键词：命中就说明这一步离不开远端，不属于本地可跑的门禁。 */
 const REMOTE_CONTEXT_RE = /(?:\bgh\s+(?:api|pr|release|workflow|run|secret)\b|\bgit\s+push\b|\bgit\s+fetch\b|\bgit\s+remote\b|\bnpm\s+publish\b|\bpip\s+(?:install\s+--upgrade\s+)?[^\n]*--index-url|\bcurl\s+https?:|\bwget\s+https?:|\bactions\/|\bworkflow_dispatch\b|\bsetup-node\b|\bcheckout\b)/i
 
-/** 三条结构谓词：触发形态、无写权限、步骤不需远端上下文。 */
+/**
+ * 只在平台上才有值的上下文：引用它们的步骤本地跑不出同一个结论。
+ *
+ * `needs.<job>.result`、`matrix.*`、`secrets.*`、`github.*` 这些值的来源是那次运行的编排状态，
+ * 本地没有对应物；代入空串会让条件判断落到「没给值」那一支，跑出来的结论与该步骤的意图相反。
+ * `runner.temp` 不在此列——它有本地等价物（系统临时目录），可以代入后照原样跑。
+ */
+const PLATFORM_ONLY_CONTEXT_RE = /\$\{\{\s*(?:needs\.|matrix\.|secrets\.|github\.|strategy\.|env\.)/i
+
+/** 三条结构谓词：触发形态、无写权限、步骤不需远端或平台上下文。 */
 export function evaluateStructuralPredicates(shape, blocks = []) {
   const triggers = shape?.triggers ?? []
   const triggerOk = triggers.includes('pull_request')
@@ -206,8 +215,12 @@ export function evaluateStructuralPredicates(shape, blocks = []) {
   // 显式声明了只读或没声明（默认交给平台设置）都算「没有写作用域」；
   // 默认设置被改成可写是平台侧风险，不是这份文件里读得出的结构事实。
   const permissionOk = !hasWriteScope && !writeAll
-  const remoteFree = blocks.length > 0 && blocks.every((b) => !REMOTE_CONTEXT_RE.test(b.cmd))
-  return { triggerOk, permissionOk, remoteFree, hasWriteScope, writeAll }
+  // 「步骤不需要远端上下文」是**逐条**判的，不是整份文件一刀切：
+  // 同一份校验流水线里，本地能跑的检查与只在平台上成立的汇总判断常常并存，
+  // 按文件判会把能跑的那些一起丢掉——那正是按文件名整段跳过换了个样子的做法。
+  const runnable = blocks.filter((b) => !REMOTE_CONTEXT_RE.test(b.cmd) && !PLATFORM_ONLY_CONTEXT_RE.test(b.cmd))
+  const platformOnly = blocks.filter((b) => REMOTE_CONTEXT_RE.test(b.cmd) || PLATFORM_ONLY_CONTEXT_RE.test(b.cmd))
+  return { triggerOk, permissionOk, hasWriteScope, writeAll, runnable, platformOnly }
 }
 
 /** 找出仓库里可识别的流水线文件（只看形状，不看名字是否含「release」）。 */
@@ -252,8 +265,8 @@ export function evaluatePipeline(repoRoot, rel) {
     return { file: rel, parsed: false, reason: shape.reason, adopted: false, predicates: null, blocks }
   }
   const predicates = evaluateStructuralPredicates(shape, blocks)
-  const adopted = predicates.triggerOk && predicates.permissionOk && predicates.remoteFree && blocks.length > 0
-  return { file: rel, parsed: true, reason: null, adopted, predicates, blocks, triggers: shape.triggers, env: shape.env }
+  const adopted = predicates.triggerOk && predicates.permissionOk && predicates.runnable.length > 0
+  return { file: rel, parsed: true, reason: null, adopted, predicates, blocks: predicates.runnable, skippedBlocks: predicates.platformOnly, triggers: shape.triggers, env: shape.env }
 }
 
 /**
@@ -296,10 +309,17 @@ export function deriveMergeGate(repoRoot) {
     reason: [
       e.predicates?.triggerOk ? null : '触发形态不是提案或推默认分支',
       e.predicates?.permissionOk ? null : '权限声明里有写作用域',
-      e.predicates?.remoteFree ? null : '步骤需要远端上下文',
-      (e.blocks ?? []).length > 0 ? null : '派生不出任何执行块',
+      (e.blocks ?? []).length > 0 ? null : '派生不出任何可在本地跑的执行块',
     ].filter(Boolean).join('；') || '三条结构谓词未全部成立',
   }))
+  // 被排除的步骤要逐条报出来：同一份流水线里既有本地能跑的检查也有只在平台上成立的判断，
+  // 静默丢掉后者，读的人会以为整份流水线都跑过了。
+  const skippedSteps = []
+  for (const e of evaluated) {
+    for (const b of e.skippedBlocks ?? []) {
+      skippedSteps.push({ file: b.file, startLine: b.startLine, cmd: b.cmd, reason: '步骤需要远端或平台上下文（needs/matrix/secrets/github），本地跑不出同一结论' })
+    }
+  }
 
   const steps = adopted.flatMap((e) => (e.blocks ?? []).map((b) => ({
     file: b.file, startLine: b.startLine, endLine: b.endLine, cmd: b.cmd, lineCount: b.lineCount,
@@ -322,6 +342,7 @@ export function deriveMergeGate(repoRoot) {
     steps,
     adoptedFiles: adopted.map((e) => e.file),
     skippedFiles: skipped,
+    skippedSteps,
     // 流水线自己声明的环境条件随派生结果一起交出去：编排脚本按它设置进程环境，
     // 才跑得出与远端同一张成绩单（例如按 CI 标记放大的性能预算）。
     // 默认值取托管平台 runner 的惯例值 CI=true，不自造 1：脚本按 CI === 'true'
@@ -340,6 +361,10 @@ export function formatMergeGate(gate) {
     for (const s of gate.steps) lines.push(`    ${s.file}:${s.startLine}${s.lineCount > 1 ? `-${s.endLine}` : ''}  ${s.cmd.split('\n')[0]}`)
   }
   for (const s of gate.skippedFiles ?? []) lines.push(`  未采纳 ${s.file}：${s.reason}`)
+  if ((gate.skippedSteps ?? []).length > 0) {
+    lines.push(`  跳过的步骤（${gate.skippedSteps.length} 条，本地跑不出同一结论）：`)
+    for (const s of gate.skippedSteps) lines.push(`    ${s.file}:${s.startLine}  ${s.cmd.split('\n')[0]}`)
+  }
   return lines
 }
 

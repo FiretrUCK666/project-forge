@@ -30,6 +30,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -105,14 +106,23 @@ async function main(argv) {
     return EXIT.OK
   }
 
-  // 流水线文件自己声明的环境条件（nv: 块里的 CI 标记与矩阵变量）按原样带上：ench 一类脚本
-  // 会按 CI 标记放大预算，本地不带上就会得到一张与远端不同的成绩单。
-  const pipelineEnv = derived.evidenceEnv ?? { CI: '1' }
+  // 流水线文件自己声明的环境条件（`env:` 块里的 CI 标记与矩阵变量）按原样带上：
+  // `bench` 一类脚本会按 CI 标记放大预算，本地不带上就会得到一张与远端不同的成绩单。
+  //
+  // 平台上下文变量要分开对待，一律抹成空串是错的：
+  // - `runner.temp` 有本地等价物（系统临时目录），代入它，这一步在本地才跑得出同样的结果；
+  // - `matrix.*` / `needs.*` 没有等价物，抹成空串，让步骤落到自己那条「平台没给值」的分支。
+  const pipelineEnv = derived.evidenceEnv ?? { CI: 'true' }
+  const localTemp = tmpdir().replace(/\\/g, '/')
+  const substitutePlatformContext = (cmd) => String(cmd)
+    .replace(/\$\{\{\s*runner\.temp\s*\}\}/g, localTemp)
+    .replace(/\$\{\{[^}]+?\}\}/g, '')
   const executed = []
   for (const step of derived.steps) {
-    const res = runStep(step, repoRoot, pipelineEnv)
+    const res = runStep({ ...step, cmd: substitutePlatformContext(step.cmd) }, repoRoot, pipelineEnv)
     executed.push(res)
-    if (!cli.json) process.stdout.write(`[${res.status === 0 ? 'ok' : 'FAIL'}] ${step.file}:${step.startLine} ${step.cmd.split('\n')[0].slice(0, 90)}\n`)
+    const ok = res.status === 0 ? 'ok' : 'FAIL'
+    if (!cli.json) process.stdout.write(`[${ok}] ${step.file}:${step.startLine} ${step.cmd.split('\n')[0].slice(0, 90)}\n`)
     if (res.status !== 0) break
   }
 

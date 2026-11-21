@@ -88,8 +88,25 @@ const DETERMINISTIC_FAILURE_RE = /\b(?:arch-?rules|preflight|fixtures|merge-?gat
 const FILE_LINE_RE = /(?:^|[\s`"'(\[])((?:[A-Za-z0-9_.\u4e00-\u9fa5-]+\/)*[A-Za-z0-9_.\u4e00-\u9fa5-]+\.[A-Za-z0-9]{1,10}):(\d+)(?:-(\d+))?(?::\d+)?(?=$|[\s`"',;.)\]：:])/
 const BARE_FILE_RE = /(?:^|[\s`"'(\[])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.\u4e00-\u9fa5-]+\.[A-Za-z0-9]{1,10})(?=$|[\s`"',;.)\]：:])/
 
+/** 中文行号写法：`第 88 行`、`第88行`、`第 88-90 行`。 */
+const CN_LINE_RE = /第\s*(\d+)(?:\s*[-–—~至到]\s*(\d+))?\s*行/
+/** 不带「第」的行号写法：`88 行`。前面的字符不能是数字或「第」，否则「第 88 行」会被重复计一次。 */
+const BARE_LINE_RE = /(?:^|[^第\d])\s*(\d+)\s*行/
+/** 盘符前缀：`C:/...` 里的盘符不是文件路径的一部分。字母前不能是字母，否则会误伤 `https://` 的 `s:`。 */
+const DRIVE_PREFIX_RE = /(?<![A-Za-z0-9])[A-Za-z]:(?=\/)/g
+
 function normRel(p) {
   return posixPath(String(p ?? '')).trim().replace(/^\.\//, '').replace(/^\/+/, '')
+}
+
+/**
+ * 归一摘要文本里的路径分隔符，供正则抽取文件与行号使用。
+ *
+ * 归一在这里做一次，而不是给每个正则各加一个反斜杠分支：后者每新增一处路径正则就要再补一遍，
+ * 漏掉一处就退回今天的病。
+ */
+function normalizePathSeparators(text) {
+  return String(text ?? '').replace(/\\/g, '/').replace(DRIVE_PREFIX_RE, '')
 }
 
 function normSummaryText(s) {
@@ -112,7 +129,7 @@ export function computeFingerprint(criterion, file, summary) {
 }
 
 function extractFileAndLines(text) {
-  const raw = String(text ?? '')
+  const raw = normalizePathSeparators(text)
   const m = FILE_LINE_RE.exec(raw)
   if (m && !/^https?:/i.test(m[1])) {
     const line = Number(m[2])
@@ -120,10 +137,15 @@ function extractFileAndLines(text) {
     return { file: normRel(m[1]), line: line > 0 ? line : null, endLine: endLine > 0 ? endLine : null }
   }
   const bm = BARE_FILE_RE.exec(raw)
-  if (bm && !/^https?:/i.test(bm[1])) {
-    return { file: normRel(bm[1]), line: null, endLine: null }
-  }
-  return { file: '', line: null, endLine: null }
+  const file = bm && !/^https?:/i.test(bm[1]) ? normRel(bm[1]) : ''
+  // 文件与行号分开取：摘要里写「第 88 行」时，路径仍可来自文件名正则，两者互不依赖。
+  // 两者都取不到才算真的没有定位点。
+  const range = CN_LINE_RE.exec(raw)
+  const bare = range ? null : BARE_LINE_RE.exec(raw)
+  const start = range ? Number(range[1]) : (bare ? Number(bare[1]) : null)
+  const end = range && range[2] ? Math.max(start, Number(range[2])) : start
+  const line = Number.isInteger(start) && start > 0 ? start : null
+  return { file, line, endLine: line ? end : null }
 }
 
 export function normalizeMustFixObj(obj, idx) {
@@ -178,16 +200,51 @@ export function parseMustFixItem(raw, idx) {
   }
 }
 
-/** 按完整 fingerprint 或 (file, normalizedSummary) 精准比对，绝不仅凭 C* 编号误判。 */
+/**
+ * 两个阻塞项是不是同一个。
+ *
+ * ## 判据编号只排除、不认定
+ *
+ * `criterion` 就是 SPEC 的 `C` 编号，同一判据下天然有多条互不相干的缺陷：一条修完，
+ * 另一条不该跟着消失。所以编号不同可以直接判「不是同一个」，编号相同什么也证明不了。
+ *
+ * ## 定位点层：同一文件且行区间相交
+ *
+ * 单一 `path:line` 落成区间 `[n, n]`。`88` 与 `89` 是两个不相交的单位区间——相邻
+ * 不是相同，用一个「差几行以内也算」的容差等于拿可调魔数换掉可证伪的判据。
+ *
+ * 两边都没有行号时退回「同一文件且归一化摘要逐字相等」：宁可漏并，也不误并。
+ */
 export function sameBlockerItem(a, b) {
   if (!a || !b) return false
+
+  const ca = String(a.criterion ?? '').trim().toUpperCase()
+  const cb = String(b.criterion ?? '').trim().toUpperCase()
+  if (ca && cb && ca !== cb) return false
+
   if (a.fingerprint && b.fingerprint && a.fingerprint === b.fingerprint) return true
+
   const fa = normRel(a.file).toLowerCase()
   const fb = normRel(b.file).toLowerCase()
   if (fa !== fb) return false
+
+  const ra = lineRange(a)
+  const rb = lineRange(b)
+  if (ra && rb) return ra.start <= rb.end && ra.end >= rb.start
+
+  // 行号只在一侧出现时，定位点层无从比较，退回文本相等而不是短路成「不同」。
   const sa = normSummaryText(a.summary)
   const sb = normSummaryText(b.summary)
   return Boolean(sa && sb && sa === sb)
+}
+
+/** 取条目的行区间；两边都没行号时返回 `null`，交给文本层兜底。 */
+function lineRange(item) {
+  const start = Number(item.line)
+  if (!Number.isInteger(start) || start <= 0) return null
+  const rawEnd = Number(item.endLine)
+  const end = Number.isInteger(rawEnd) && rawEnd >= start ? rawEnd : start
+  return { start, end }
 }
 
 /** 解析 unified diff 的新侧 hunk 行区间（纯删除 count=0 锚定在 start，省略 count 按 1，±contextPadding 行）。 */

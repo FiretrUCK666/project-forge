@@ -288,6 +288,7 @@ export function checkSliceMetadata(graph = null) {
   const g = graph ?? { slices: [], masters: [] }
   const out = []
   for (const s of g.slices) {
+    if (s.done || s.archived || s.kind !== 'spec') continue
     if (!s.masterRel) continue
     if (!g.masters.some((m) => m.rel === s.masterRel)) continue
     const missing = []

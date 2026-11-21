@@ -60,6 +60,19 @@ function normalizeArtifactList(raw) {
   return [...new Set(list.map((v) => String(v).trim()).filter(Boolean))]
 }
 
+async function handleVerifyPrecheckBlock({ opts, roots, taskId, mode, ledger, evRec, finalExit }) {
+  ledger.lastVerifyExitCode = finalExit
+  ledger.verifiedHead = null
+  ledger.status = 'verify-failed'
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+  if (opts.json) {
+    const reason = evRec.precheck?.reason ?? evRec.precheck?.message ?? null
+    const errors = Array.isArray(evRec.precheck?.errors) ? evRec.precheck.errors : []
+    process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.precheck?.code ?? 'BLOCKED_VERIFY_PRECHECK', exitCode: finalExit, reason, errors }, null, 2)}\n`)
+  }
+  return { exitCode: finalExit || EXIT.FACT }
+}
+
 export async function handleFinalize(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx
@@ -305,31 +318,65 @@ export async function handleVerify(opts, roots) {
     return { currentHead, dirty, stStdout, changedFiles, policy }
   }
 
+  // 证据只取人说过的原文（`--e2e-evidence` / `--visual-evidence`）。裸 `--visual-checked` 只是口头声明、
+  // 不带观察内容；这里不替它编一句「observed and verified」——编出来的句子会被当成观察写进
+  // evidence.json 并一路通过后面的门禁，而谁也没说看到了什么。缺什么就让它缺着，交给校验入口要求补齐。
+  const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
+    || ''
+  const artifactsInput = normalizeArtifactList(opts.artifact)
+  const visualCheckedRawInput = Boolean(opts['visual-checked'])
+  const visualBlockedReasonInput = typeof opts['visual-blocked-reason'] === 'string' ? opts['visual-blocked-reason'].trim() : ''
+  const hasVisualCheckFlag = Boolean(
+    visualCheckedRawInput
+    || opts['visual-evidence']
+    || opts['e2e-evidence']
+    || artifactsInput.length > 0
+    || visualBlockedReasonInput,
+  )
+
   if (!cmd && isExplicitNone) {
     const { currentHead, dirty, stStdout, changedFiles, policy } = await computeVerifyPolicy()
     const docStaticRes = policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles) : null
     const docOk = !docStaticRes || docStaticRes.ok
-    recordVerifyEvidenceForFlow({
+    const evRec = recordVerifyEvidenceForFlow({
       roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
       cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: EXIT.OK,
       explicitNoneSkipped: true, docStaticRes,
+      e2eObservationText: e2eEvidenceInput,
+      artifacts: artifactsInput,
+      visualCheckedRaw: visualCheckedRawInput,
+      visualBlockedReason: visualBlockedReasonInput,
     })
-    ledger.verifiedHead = docOk ? currentHead : null
+    if (evRec.precheck?.blocked) {
+      return handleVerifyPrecheckBlock({ opts, roots, taskId, mode, ledger, evRec, finalExit: evRec.overallExit || EXIT.FACT })
+    }
+    const allOk = docOk && evRec.overallExit === 0
+    ledger.verifiedHead = allOk ? currentHead : null
     ledger.verifiedCmd = 'none (explicitly disabled)'
     ledger.verifiedMode = mode
     ledger.verifiedTarget = rawTarget
     ledger.verifiedDirtyHash = sha256Text(stStdout)
-    ledger.lastVerifyExitCode = docOk ? 0 : EXIT.FACT
+    ledger.lastVerifyExitCode = allOk ? 0 : (evRec.overallExit || EXIT.FACT)
     ledger.visualFilesChanged = policy.visualFilesChanged
     ledger.empiricalVisualCheckRequired = policy.visualFilesChanged.length > 0
-    ledger.status = docOk ? 'verified' : 'verify-failed'
+    if (allOk && hasVisualCheckFlag) {
+      ledger.visualVerifiedHead = currentHead
+      const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
+      ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
+    }
+    ledger.status = allOk ? 'verified' : 'verify-failed'
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    await emitFlowSignal(roots, { category: docOk ? 'tests' : 'docs', module: 'workflow', pattern: docOk ? `verify.${mode}.pass` : `verify.${mode}.doc-static-fail`, severity: docOk ? 'info' : 'medium', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? '', taskId, message: docOk ? `verify (${mode}) explicit-none pass` : `verify (${mode}) static doc check failed` })
+    await emitFlowSignal(roots, { category: allOk ? 'tests' : 'docs', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.doc-static-fail`, severity: docOk ? 'info' : 'medium', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? '', taskId, message: allOk ? `verify (${mode}) explicit-none pass` : `verify (${mode}) explicit-none failed` })
     if (!docOk) {
       const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', errors: docStaticRes.errors }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
       return { exitCode: EXIT.FACT }
+    }
+    if (!allOk) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.shallowE2eEvidence?.code ?? 'BLOCKED_VERIFY_EVIDENCE', exitCode: evRec.overallExit || EXIT.FACT, reason: evRec.shallowE2eEvidence?.reason ?? null }, null, 2)}\n`)
+      return { exitCode: evRec.overallExit || EXIT.FACT }
     }
     if (opts.json) {
       process.stdout.write(`${JSON.stringify({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: EXIT.OK, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, null, 2)}\n`)
@@ -353,13 +400,6 @@ export async function handleVerify(opts, roots) {
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入（纯文档仓请配 \`${profileKey}: none\`）。\n`)
     return { exitCode: EXIT.ACTION }
   }
-
-  // 证据只取人说过的原文（`--e2e-evidence` / `--visual-evidence`）。裸 `--visual-checked` 只是口头声明、
-  // 不带观察内容；这里不替它编一句「observed and verified」——编出来的句子会被当成观察写进
-  // evidence.json 并一路通过后面的门禁，而谁也没说看到了什么。缺什么就让它缺着，交给校验入口要求补齐。
-  const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
-    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
-    || ''
   if ((mode === 'full' || mode === 'gate') && !profile.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify') && !opts.cmd && !e2eEvidenceInput) {
     const pre = await computeVerifyPolicy()
     const prevEv = readVerificationEvidence(roots.gitDir, taskId)
@@ -431,19 +471,14 @@ export async function handleVerify(opts, roots) {
     explicitNoneSkipped: false, docStaticRes, executed: true, errorOnly: false,
     e2eObservationText: e2eEvidenceInput, durationMs: runDurationMs, smokeDurationMs,
     smokeCmd: smokeCmdUsed, smokeExitCode: smokeRunRes?.code ?? null, smokeExecuted, smokeErrorOnly: false,
-    artifacts: normalizeArtifactList(opts.artifact),
-    visualCheckedRaw: Boolean(opts['visual-checked']),
-    visualBlockedReason: typeof opts['visual-blocked-reason'] === 'string' ? opts['visual-blocked-reason'].trim() : '',
+    artifacts: artifactsInput,
+    visualCheckedRaw: visualCheckedRawInput,
+    visualBlockedReason: visualBlockedReasonInput,
   })
   const finalExit = !execOk && runRes.ok && smokeRunRes && !smokeRunRes.ok ? (smokeRunRes.code || 1) : evRec.overallExit
   // 前置预检拦下时，实证已经写不进去，剩下的 ledger 收尾与输出都按「未通过」走。
   if (evRec.precheck?.blocked) {
-    ledger.lastVerifyExitCode = finalExit
-    ledger.verifiedHead = null
-    ledger.status = 'verify-failed'
-    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.precheck.code ?? 'BLOCKED_VERIFY_PRECHECK', exitCode: finalExit, reasons: evRec.precheck.reasons ?? null }, null, 2)}\n`)
-    return { exitCode: finalExit || EXIT.FACT }
+    return handleVerifyPrecheckBlock({ opts, roots, taskId, mode, ledger, evRec, finalExit })
   }
   let e2eFailureReport = null
   if ((mode === 'smoke' || smokeExecuted) && smokeRunRes && !smokeRunRes.ok) {
@@ -454,7 +489,6 @@ export async function handleVerify(opts, roots) {
   }
   const visualFilesChanged = policy.visualFilesChanged
   const empiricalVisualCheckRequired = visualFilesChanged.length > 0
-  const hasVisualCheckFlag = Boolean(opts['visual-checked'] || opts['visual-evidence'] || opts['e2e-evidence'])
 
   ledger.verifiedHead = allOk ? currentHead : null
   ledger.verifiedCmd = cmd

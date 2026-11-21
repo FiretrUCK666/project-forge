@@ -373,4 +373,52 @@ export function registerPlanWaveSliceCases(cases) {
     return true
   }])
 
+  cases.push(['auditRepoDocs 不再重复报 UNCOVERED_ACCEPTANCE_CRITERIA，checkSliceMetadata 只检未完成未归档 SPEC', async () => {
+    const { auditRepoDocs } = await import('../../kit/skills/dev-plan/scripts/doc-audit.mjs')
+    const dir = makeWaveRepo({
+      master: makeMaster({ criteria: ['C1', 'C2'] }),
+      specs: [
+        { file: 'docs/specs/261120-issue1-a-spec.md', text: makeSpec({ taskId: 'slice-a', issue: 1, scope: ['kit/a/**'], deps: [], criteria: ['C1'] }) },
+        // 已完成的 SPEC 不要求补 scope_files / depends_on
+        {
+          file: 'docs/specs/261120-issue2-done-spec.md',
+          text: makeDoc({
+            kind: 'spec', title: 'S-done', status: 'implemented',
+            extra: ['tier: L3', 'issue: 2', 'owner: p', 'approved: true', 'plan_critique: passed', 'related_prd: ../prd/261120-master-prd.md', 'task_id: slice-done'],
+            body: ['## 验收标准', '- [x] C1: 完成'],
+          }),
+        },
+        // 已归档的 SPEC 不要求补 scope_files / depends_on
+        {
+          file: 'docs/archive/specs/261120-issue3-arch-spec.md',
+          text: makeDoc({
+            kind: 'spec', title: 'S-arch', status: 'approved',
+            extra: ['tier: L3', 'issue: 3', 'owner: p', 'approved: true', 'plan_critique: passed', 'related_prd: ../../prd/261120-master-prd.md', 'task_id: slice-arch'],
+            body: ['## 验收标准', '- [ ] C1: 归档'],
+          }),
+        },
+      ],
+      extra: {
+        // Todo 不需要 scope_files / depends_on
+        'docs/todo/261120-issue1-a-todo.md': makeDoc({
+          kind: 'todo', title: 'T-a', status: 'active',
+          extra: ['tier: L3', 'issue: 1', 'owner: p', 'related_prd: ../prd/261120-master-prd.md', 'related_spec: ../specs/261120-issue1-a-spec.md', 'task_id: slice-a'],
+          body: ['## 待办', '- [ ] 任务'],
+        }),
+      },
+    })
+    try {
+      const aud = auditRepoDocs(dir, '.')
+      const uncoveredHits = (aud.coverageErrors ?? []).filter((e) => e.code === 'UNCOVERED_ACCEPTANCE_CRITERIA')
+      if (uncoveredHits.length !== 1) {
+        return `auditRepoDocs 重复或漏报 UNCOVERED_ACCEPTANCE_CRITERIA（期望 1 条，实际 ${uncoveredHits.length} 条）：${JSON.stringify(uncoveredHits)}`
+      }
+      const metaHits = (aud.coverageErrors ?? []).filter((e) => e.code === 'SLICE_METADATA_MISSING')
+      if (metaHits.length !== 0) {
+        return `checkSliceMetadata 误伤了 todo / implemented / archived 切片：${JSON.stringify(metaHits)}`
+      }
+      return true
+    } finally { rmTree(dir) }
+  }])
+
 }

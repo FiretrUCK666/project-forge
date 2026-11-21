@@ -45,6 +45,7 @@ import {
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
+import { describeAuditNotApplicable } from './doc-audit-repo.mjs'
 import { approveSpec, clarifyDoc, supersedeSpec } from './doc-plan-ops.mjs'
 import {
   isValidPlanMode, normalizePlanMode, PLAN_MODES, resolveDocPlanMode,
@@ -441,7 +442,11 @@ async function main(argv) {
         const batch = auditRepoDocs(auditRoot, auditScope)
         if (cli.json) process.stdout.write(`${JSON.stringify(batch, null, 2)}\n`)
         else {
-          process.stdout.write(`仓库工程文档审计（${batch.scope}，共 ${batch.auditedCount} 份）：${batch.ok ? '全部通过' : `${batch.failedCount} 份失败`}\n`)
+          // 零目标不折成通过：一份都没查却报「全部通过」，读的人会以为审过了。
+          const headline = batch.applicable
+            ? `${batch.ok ? '全部通过' : `${batch.failedCount} 份失败`}`
+            : describeAuditNotApplicable(batch.auditOutcome, { scope: batch.scope, preservedCount: batch.preservedCount })
+          process.stdout.write(`仓库工程文档审计（${batch.scope}，共 ${batch.auditedCount} 份）：${headline}\n`)
           for (const r of batch.results) {
             process.stdout.write(`- ${r.file} (${r.docType}): ${r.ok ? '通过' : `失败 (${r.errors.length})`}\n`)
             for (const e of r.errors) process.stdout.write(`  * [${e.code}] L${e.line}: ${e.message}\n    修法: ${e.fixHint}\n`)
@@ -450,7 +455,7 @@ async function main(argv) {
             process.stdout.write(`- ${e.file}：${e.message}\n`)
           }
         }
-        return batch.ok ? 0 : 1
+        return batch.ok && batch.applicable ? 0 : 1
       }
       const res = auditDoc({ repoRoot, file: target })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)

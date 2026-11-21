@@ -514,4 +514,106 @@ export function registerEmpiricalCycleCases(cases) {
       return true
     } finally { rmTree(dir) }
   }])
+
+  cases.push(['flow verify explicit-none 透传实证参数与阻断、hasVisualCheckFlag 含 artifact/blockedReason、evidence.visual.headSha 绑定且跨 HEAD 不携带旧附件', async () => {
+    const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+    const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { gitCommitFast, gitSync } = await import('./fixtures-helpers.mjs')
+
+    // 1. explicit-none 仓库：UI 变更传裸 --visual-checked 必须被拦，传真 --artifact 才放行并写 visualVerifiedHead
+    const noneDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# none-demo\n\n```yaml\nquick-test: none\nfull-test: none\nsmoke-verify: none\nmerge-gate: none\n```\n',
+      'src/View.tsx': 'export const View = () => "v1"\n',
+      'shots/ok.png': 'real-png-bytes\n',
+    })
+    gitInit(noneDir, { branch: 'main', name: 'dev', email: 'dev@emp.test' })
+    try {
+      const roots = await resolveRepoRoots(noneDir)
+      const st = await handleStart({ task: 'none-ui', case: '2', slug: 'none-ui', implementer: 'alice' }, roots)
+      if (st.exitCode !== 0) return `none-ui start 失败：${st.exitCode}`
+      const wt = join(noneDir, '.worktrees', 'impl-none-ui')
+      writeFileSync(join(wt, 'src/View.tsx'), 'export const View = () => "v2"\n')
+      gitCommitFast(wt, 'feat: view v2', { updateOnly: true })
+
+      const bare = await handleVerify({ task: 'none-ui', mode: 'gate', 'visual-checked': true }, roots)
+      if (bare.exitCode === 0) return 'explicit-none 路径未阻断裸 --visual-checked'
+      const bareLedger = readTaskLedger(noneDir, 'none-ui')
+      if (bareLedger?.status === 'verified') return 'explicit-none 阻断后仍将账本标成了 verified'
+
+      const okNone = await handleVerify({ task: 'none-ui', mode: 'gate', artifact: [join(wt, 'shots/ok.png')] }, roots)
+      if (okNone.exitCode !== 0) return `explicit-none 合法 --artifact 未放行：exit=${okNone.exitCode}`
+      const headSha = gitSync(wt, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+      const okLedger = readTaskLedger(noneDir, 'none-ui')
+      if (okLedger?.visualVerifiedHead !== headSha) {
+        return `explicit-none 合法 --artifact 未写 visualVerifiedHead：${JSON.stringify(okLedger)}`
+      }
+    } finally { rmTree(noneDir) }
+
+    // 2. 有测试命令的仓库：precheck json 输出真实 reason/errors、hasVisualCheckFlag 认出 blockedReason、同 HEAD 累加附件、跨 HEAD 清空旧附件且绑定 visual.headSha
+    const cmdDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# cmd-demo\n\n```yaml\nquick-test: node test.mjs\nfull-test: node test.mjs\nsmoke-verify: none\nmerge-gate: node test.mjs\n```\n',
+      'src/View.tsx': 'export const View = () => "v1"\n',
+      'test.mjs': 'process.exit(0)\n',
+      'shots/s1.png': 'shot1-bytes\n',
+      'shots/s2.png': 'shot2-bytes\n',
+    })
+    gitInit(cmdDir, { branch: 'main', name: 'dev', email: 'dev@emp.test' })
+    try {
+      const roots = await resolveRepoRoots(cmdDir)
+      await handleStart({ task: 'cmd-ui', case: '2', slug: 'cmd-ui', implementer: 'alice' }, roots)
+      const wt = join(cmdDir, '.worktrees', 'impl-cmd-ui')
+      writeFileSync(join(wt, 'src/View.tsx'), 'export const View = () => "v2"\n')
+      gitCommitFast(wt, 'feat: cmd-ui v2', { updateOnly: true })
+      const headA = gitSync(wt, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+
+      // 2a. precheck 阻断时 --json 输出真实 reason/errors
+      const origOut = process.stdout.write.bind(process.stdout)
+      let captured = ''
+      process.stdout.write = (chunk) => { captured += String(chunk); return true }
+      let badArtRes
+      try {
+        badArtRes = await handleVerify({ task: 'cmd-ui', mode: 'gate', artifact: [join(wt, 'missing.png')], json: true }, roots)
+      } finally { process.stdout.write = origOut }
+      if (badArtRes.exitCode === 0) return '坏 --artifact 在普通 verify 路径未阻断'
+      const badJson = JSON.parse(captured)
+      if (typeof badJson.reason !== 'string' || !badJson.reason || !Array.isArray(badJson.errors) || badJson.errors.length === 0) {
+        return `precheck 阻断 JSON 缺少真实 reason/errors：${captured}`
+      }
+
+      // 2b. 同 HEAD 两次传不同 --artifact：累加合并且 visual.headSha === headA
+      if ((await handleVerify({ task: 'cmd-ui', mode: 'gate', artifact: [join(wt, 'shots/s1.png')] }, roots)).exitCode !== 0) {
+        return 'cmd-ui 第一次 verify 失败'
+      }
+      if ((await handleVerify({ task: 'cmd-ui', mode: 'gate', artifact: [join(wt, 'shots/s2.png')] }, roots)).exitCode !== 0) {
+        return 'cmd-ui 第二次 verify 失败'
+      }
+      const evPath = join(cmdDir, '.git', 'project-forge-flow', 'tasks', 'cmd-ui', 'evidence.json')
+      const evA = JSON.parse(readFileSync(evPath, 'utf8'))
+      if (evA.visual?.headSha !== headA) return `evidence.visual.headSha 未绑定当前 HEAD：${JSON.stringify(evA.visual)}`
+      if ((evA.artifacts ?? []).length !== 2) return `同 HEAD 多次 verify 未合并累加附件：${JSON.stringify(evA.artifacts)}`
+
+      // 2c. 跨 HEAD（不传新附件）：旧 HEAD 视觉记录在 evaluateStoredVisualEvidence 下必须报 STALE；用 --visual-blocked-reason 重跑后旧 HEAD 附件必须清除且写 visualVerifiedHead
+      writeFileSync(join(wt, 'src/View.tsx'), 'export const View = () => "v3"\n')
+      gitCommitFast(wt, 'feat: cmd-ui v3', { updateOnly: true })
+      const headB = gitSync(wt, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+      const staleCheck = evaluateStoredVisualEvidence({
+        evidence: { ...evA, artifacts: [] }, policy: { visualFilesChanged: ['src/View.tsx'] }, headSha: headB,
+      })
+      if (staleCheck.ok || staleCheck.code !== 'BLOCKED_VISUAL_EVIDENCE_STALE') {
+        return `跨 HEAD 未触发 BLOCKED_VISUAL_EVIDENCE_STALE：${JSON.stringify(staleCheck)}`
+      }
+      const blockedRes = await handleVerify({
+        task: 'cmd-ui', mode: 'gate', 'visual-blocked-reason': '当前无图形会话无法渲染界面，待有界面环境人工核验',
+      }, roots)
+      if (blockedRes.exitCode !== 0) return `--visual-blocked-reason verify 失败：${blockedRes.exitCode}`
+      const evB = JSON.parse(readFileSync(evPath, 'utf8'))
+      if ((evB.artifacts ?? []).length !== 0) return `跨 HEAD 重跑 verify 仍携带了旧 HEAD 附件：${JSON.stringify(evB.artifacts)}`
+      if (evB.visual?.headSha !== headB) return `跨 HEAD verify 后 visual.headSha 未更新：${JSON.stringify(evB.visual)}`
+      const ledgerB = readTaskLedger(cmdDir, 'cmd-ui')
+      if (ledgerB?.visualVerifiedHead !== headB) return `--visual-blocked-reason 未写 visualVerifiedHead：${JSON.stringify(ledgerB)}`
+      return true
+    } finally { rmTree(cmdDir) }
+  }])
 }

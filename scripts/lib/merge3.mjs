@@ -17,6 +17,151 @@ export function isCodeLikePath(relPath) {
   return CODE_SAFE_EXT_RE.test(String(relPath ?? '').trim())
 }
 
+/**
+ * 装配逐文件判定的封闭枚举。
+ *
+ * ## 为什么必须是同一个判定
+ *
+ * 校验路径与写入路径过去各读一个字段：前者读字节比对后的 `drifted`，后者只读
+ * `pendingConflicts`。「本地改了、上游没改」这类情况进的是运行报告 `conflicts[]`，
+ * 不进 `pendingConflicts`——于是写路径永远看到空对象、永远退 0，而校验路径退 1。
+ * 同一个动作两个相反结论，根因不是退出码写错，是两条路径量的不是同一件事。
+ *
+ * 现在两边都算这一个判定：校验路径判完就报，写入路径判完再动作、动作完再判一次。
+ * **比较的是运行结束后的状态**——写入路径把它能解决的都解决了，剩下什么才是结论。
+ */
+export const EQUIP_FILE_STATES = Object.freeze({
+  SYNCED: '同步',
+  EXEMPT_CUSTOM: '豁免定制',
+  LOCAL_AHEAD: '本地已改且上游未变',
+  THREE_WAY_CONFLICT: '三方冲突待裁决',
+  MISSING: '缺失',
+  EXTRA: '多余',
+})
+
+/** 判定为「需要处置」的状态：这两类之外的四种都不是收工态。 */
+const BLOCKING_STATES = new Set([EQUIP_FILE_STATES.LOCAL_AHEAD, EQUIP_FILE_STATES.THREE_WAY_CONFLICT])
+
+/**
+ * 单文件判定。纯函数：只吃哈希与登记项，不读盘、不写盘。
+ *
+ * @returns {{state: string, blocking: boolean, fixHint: string}}
+ */
+export function judgeManagedFile({
+  rel = '', upstreamSha = null, diskSha = null, baselineSha = null, customEntry = null, pendingEntry = null,
+} = {}) {
+  // 缺文件 / 多余文件由调用方先判（那需要看盘），这里只管「三方都在」的情形。
+  if (!diskSha) return { state: EQUIP_FILE_STATES.MISSING, blocking: false, fixHint: fixHintFor(EQUIP_FILE_STATES.MISSING, rel) }
+  if (!upstreamSha) return { state: EQUIP_FILE_STATES.EXTRA, blocking: false, fixHint: fixHintFor(EQUIP_FILE_STATES.EXTRA, rel) }
+  if (pendingEntry) {
+    return { state: EQUIP_FILE_STATES.THREE_WAY_CONFLICT, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.THREE_WAY_CONFLICT, rel) }
+  }
+  if (diskSha === upstreamSha) {
+    return { state: EQUIP_FILE_STATES.SYNCED, blocking: false, fixHint: '' }
+  }
+  // 登记为定制、且磁盘仍是登记时那一版、上游也没动：这是一份被明确保留的定制。
+  if (customEntry && diskSha === customEntry.baseSha256 && customEntry.upstreamSha256 === upstreamSha) {
+    return { state: EQUIP_FILE_STATES.EXEMPT_CUSTOM, blocking: false, fixHint: '' }
+  }
+  // 上游也变了、本地也变了 → 两条改动撞在一起，得有人裁决。
+  // 登记过定制不代表「永远不跟上上游」：上游改了同一处却不告诉人，就是沉默放过。
+  if (customEntry && diskSha === customEntry.baseSha256 && customEntry.upstreamSha256 !== upstreamSha) {
+    return { state: EQUIP_FILE_STATES.THREE_WAY_CONFLICT, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.THREE_WAY_CONFLICT, rel) }
+  }
+  // 磁盘与清单基线不同、上游没改：本地改动被保留下来。
+  if (baselineSha && diskSha !== baselineSha && upstreamSha === baselineSha) {
+    return { state: EQUIP_FILE_STATES.LOCAL_AHEAD, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.LOCAL_AHEAD, rel) }
+  }
+  return { state: EQUIP_FILE_STATES.LOCAL_AHEAD, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.LOCAL_AHEAD, rel) }
+}
+
+/** 每类状态一句可执行修法：改了什么、三种合法处置各是什么。 */
+export function fixHintFor(state, rel = '') {
+  const name = rel || '<该文件>'
+  if (state === EQUIP_FILE_STATES.LOCAL_AHEAD) {
+    return `${name} 磁盘版本与清单基线不同、上游未改。三种合法处置：`
+      + `① 先复制一份你的版本留底，再 node scripts/equip.mjs . --restore ${name} 接受上游覆盖；`
+      + `② node scripts/equip.mjs . --adopt-custom ${name} 把改动登记为定制（上游升级时仍保留你的版本）；`
+      + `③ 手工改回上游内容后重跑，等于丢弃本地改动。`
+  }
+  if (state === EQUIP_FILE_STATES.THREE_WAY_CONFLICT) {
+    return `${name} 上游与本地改到了同一处，不能自动合并。现场已留下 ${name}.upstream（上游新本）与 ${name}.pf-conflict（冲突详情）：`
+      + `① 按冲突详情手工合并，再 node scripts/equip.mjs . --adopt-custom ${name} 登记；`
+      + `② node scripts/equip.mjs . --restore ${name} 放弃本地改动采用上游；`
+      + `③ 保留本地不动，但需在 .pf-manifest.json 的 pendingConflicts 里显式留痕，命令会一直退非零直到处置。`
+  }
+  if (state === EQUIP_FILE_STATES.MISSING) return `${name} 在本地不存在，跑 node scripts/equip.mjs . 会补回上游版本。`
+  if (state === EQUIP_FILE_STATES.EXTRA) return `${name} 上游已不再提供，跑 node scripts/equip.mjs . 会把它移出受管清单。`
+  return ''
+}
+
+/** 未通过判定的状态：两条路径用同一个谓词，结论不会分叉。 */
+export function isBlockingEquipState(state) {
+  return BLOCKING_STATES.has(state)
+}
+
+/**
+ * 把装配校验结论排成人能读的几行。
+ *
+ * 需要处置的状态各带一句可执行修法：只说「字节不一致」等于让人自己去猜怎么收场，
+ * 而这正是这条判据要治的「拒绝了却不告诉你怎么办」。
+ */
+export function formatEquipCheckReport(res) {
+  const lines = []
+  if (res.reason) lines.push(res.reason)
+  for (const p of res.missing ?? []) lines.push(`缺失：${p}`)
+  for (const d of res.drifted ?? []) {
+    if (d && typeof d === 'object') {
+      lines.push(`${d.state}：${d.path}`)
+      if (d.fixHint) lines.push(`  修法：${d.fixHint}`)
+    } else {
+      lines.push(`字节不一致：${d}`)
+    }
+  }
+  for (const p of res.unregistered ?? []) lines.push(`未登记哈希：${p}`)
+  for (const p of res.extraManaged ?? []) lines.push(`多余托管文件：${p}`)
+  for (const p of res.pendingConflicts ?? []) lines.push(`待裁决三方冲突：${p}（见 ${p}.pf-conflict 与 ${p}.upstream）`)
+  for (const b of res.brokenImports ?? []) lines.push(`相对导入断链：${b}`)
+  for (const f of res.invalidFrontmatters ?? []) lines.push(`frontmatter 缺少 name/description：${f}`)
+  for (const c of res.customized ?? []) {
+    lines.push(c.upstreamChanged ? `定制豁免：${c.path}（上游新版有变化，可供参考合并）` : `定制豁免：${c.path}（与上游基线一致）`)
+  }
+  return lines.join('\n')
+}
+
+/**
+ * 把一个工作区的逐文件状态算出来。
+ *
+ * 校验路径拿运行前的盘面算，写入路径拿动作完的账本算——**两边算的是同一个函数**，
+ * 所以对同一份工作区给出同一个状态序列。「本地改动被保留」这类事情在两条路径上落到
+ * 同一个状态、同一个退出码，不再是一边退 0 一边退 1。
+ *
+ * @param {{files: Map<string,{upstreamSha:string|null}>, diskHashes: Map<string,string|null>,
+ *   baseline: Map<string,string>, customized: object, pendingConflicts: object}} input
+ * @returns {{states: Map<string, object>, blocking: string[], byState: Map<string, string[]>}}
+ */
+export function computeFileStates({ files, diskHashes, baseline = new Map(), customized = {}, pendingConflicts = {} } = {}) {
+  const states = new Map()
+  const blocking = []
+  const byState = new Map()
+  const rels = new Set([...files.keys(), ...diskHashes.keys(), ...baseline.keys()])
+  for (const rel of [...rels].sort()) {
+    const verdict = judgeManagedFile({
+      rel,
+      upstreamSha: files.get(rel)?.upstreamSha ?? files.get(rel)?.sha256 ?? null,
+      diskSha: diskHashes.get(rel) ?? null,
+      baselineSha: baseline.get(rel) ?? null,
+      customEntry: customized[rel] ?? null,
+      pendingEntry: pendingConflicts[rel] ?? null,
+    })
+    states.set(rel, verdict)
+    if (verdict.blocking) blocking.push(rel)
+    if (!byState.has(verdict.state)) byState.set(verdict.state, [])
+    byState.get(verdict.state).push(rel)
+  }
+  return { states, blocking, byState }
+}
+
 function normLines(text) {
   const s = String(text ?? '').replace(/\r\n/g, '\n')
   if (!s) return []

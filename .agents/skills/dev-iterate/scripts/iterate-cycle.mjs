@@ -27,11 +27,37 @@ export const STALL_ROUNDS = 2
 
 const ONE_WAY_MARKER_RE = /(?:one[-_\s]?way|单向门|不可逆|高风险|high[-_\s]?risk|人工拍板|需人工)/i
 
-/** 归一化轮次上限：非法值回落默认值，超出硬上限一律截到硬上限。 */
-export function normalizeMaxRounds(raw) {
+/**
+ * 归一化轮次上限，并把「被改过的值」如实交出来。
+ *
+ * 非法值回落默认、超出硬上限截断，这两件事都改变调用方给的值。悄悄改掉它，
+ * 调用方会以为自己设定的就是生效的那个——轮次规划随之失真，而失真没有任何痕迹。
+ * 所以返回 `{ rounds, warnings }`，由调用方决定怎么显示。
+ */
+export function normalizeMaxRoundsDetail(raw) {
   const n = Number(raw)
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MAX_ROUNDS
-  return Math.min(Math.floor(n), HARD_MAX_ROUNDS)
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return { rounds: DEFAULT_MAX_ROUNDS, warnings: [] }
+  }
+  if (!Number.isFinite(n) || n <= 0) {
+    return {
+      rounds: DEFAULT_MAX_ROUNDS,
+      warnings: [`--max-rounds 收到非法值「${String(raw)}」，已回落默认 ${DEFAULT_MAX_ROUNDS} 轮`],
+    }
+  }
+  const wanted = Math.floor(n)
+  if (wanted > HARD_MAX_ROUNDS) {
+    return {
+      rounds: HARD_MAX_ROUNDS,
+      warnings: [`--max-rounds ${wanted} 超过硬上限，已截断为 ${HARD_MAX_ROUNDS} 轮（实际上限 ${HARD_MAX_ROUNDS}）`],
+    }
+  }
+  return { rounds: wanted, warnings: [] }
+}
+
+/** 归一化轮次上限：只取值，供不关心告警的调用方使用。 */
+export function normalizeMaxRounds(raw) {
+  return normalizeMaxRoundsDetail(raw).rounds
 }
 
 function parseJsonish(raw, fallback) {
@@ -45,6 +71,32 @@ function parseJsonish(raw, fallback) {
     return fallback
   } catch {
     return fallback
+  }
+}
+
+/**
+ * 解析进度历史，解析失败时把失败交出来而不是返回空进度。
+ *
+ * 返回空进度看起来与「这是第一轮，还没有历史」一模一样，而两者后果相反：
+ * 前者会让「连续零进展」停损永远数不到，后者是正常的起点。
+ */
+export function parseProgressHistoryDetail(raw) {
+  if (Array.isArray(raw)) return { rounds: normalizeProgressHistory(raw), warnings: [] }
+  const text = String(raw ?? '').trim()
+  if (!text) return { rounds: [], warnings: [] }
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) return { rounds: normalizeProgressHistory(parsed), warnings: [] }
+    if (parsed && typeof parsed === 'object') return { rounds: normalizeProgressHistory([parsed]), warnings: [] }
+    return {
+      rounds: [],
+      warnings: [`--progress-history 解析出的不是数组或对象（${typeof parsed}），进度历史按空处理；零进展停损因此从本轮开始计`],
+    }
+  } catch (err) {
+    return {
+      rounds: [],
+      warnings: [`--progress-history 不是合法 JSON（${err instanceof Error ? err.message : String(err)}），进度历史按空处理；零进展停损因此从本轮开始计`],
+    }
   }
 }
 
@@ -76,24 +128,40 @@ export function normalizeProgressHistory(raw) {
   return rounds.sort((a, b) => a.round - b.round)
 }
 
-/** 归一化待拍板门禁：支持字符串与对象两种形态，识别 one-way / 高风险标记。 */
-export function normalizePendingGates(raw) {
+/**
+ * 归一化待拍板门禁：支持字符串与对象两种形态，识别 one-way / 高风险标记。
+ *
+ * 缺摘要的项**报出来但仍按原语义推进**：把它丢了，等于那道单向门凭空消失，
+ * 停损也就少了一条能触发它的路径。报出而不改变结论，是既能看见、又不误伤的做法。
+ */
+export function normalizePendingGatesDetail(raw) {
   const items = parseJsonish(raw, [])
   const gates = []
-  for (const item of items) {
+  const warnings = []
+  for (const [idx, item] of items.entries()) {
     if (!item) continue
     const rec = typeof item === 'string' ? { summary: item } : item
-    if (!rec || typeof rec !== 'object') continue
+    if (!rec || typeof rec !== 'object') {
+      warnings.push(`--pending-gates 第 ${idx + 1} 项不是字符串或对象，已跳过`)
+      continue
+    }
     const summary = String(rec.summary ?? rec.title ?? rec.reason ?? '').trim()
-    if (!summary) continue
     const kindText = `${rec.kind ?? rec.type ?? rec.doorType ?? ''} ${summary}`
-    gates.push({
-      id: String(rec.id ?? `gate-${gates.length + 1}`).trim(),
-      summary: summary.slice(0, 300),
-      oneWay: Boolean(rec.oneWay || rec.oneWayGate || rec.highRisk) || ONE_WAY_MARKER_RE.test(kindText),
-    })
+    const oneWay = Boolean(rec.oneWay || rec.oneWayGate || rec.highRisk) || ONE_WAY_MARKER_RE.test(kindText)
+    if (!summary) {
+      // 缺摘要的门禁项照样进列表：它的 oneWay 标记仍然有效，丢了就等于少一道门。
+      warnings.push(`--pending-gates 第 ${idx + 1} 项没有摘要（summary/title/reason 都为空），已按「未命名门禁」保留${oneWay ? '，其单向门标记仍生效' : ''}`)
+      gates.push({ id: String(rec.id ?? `gate-${gates.length + 1}`).trim(), summary: '(未命名门禁)', oneWay })
+      continue
+    }
+    gates.push({ id: String(rec.id ?? `gate-${gates.length + 1}`).trim(), summary: summary.slice(0, 300), oneWay })
   }
-  return gates
+  return { gates, warnings }
+}
+
+/** 归一化待拍板门禁：只取值，供不关心告警的调用方使用。 */
+export function normalizePendingGates(raw) {
+  return normalizePendingGatesDetail(raw).gates
 }
 
 /**
@@ -209,9 +277,15 @@ function buildRoundStages(round, stop) {
  */
 export function buildCyclePlan({ goal = '', maxRounds = DEFAULT_MAX_ROUNDS, progressHistory = [], pendingGates = [] } = {}) {
   const goalText = String(goal ?? '').trim()
-  const rounds = normalizeMaxRounds(maxRounds)
-  const history = normalizeProgressHistory(progressHistory)
-  const gates = normalizePendingGates(pendingGates)
+  const roundsDetail = normalizeMaxRoundsDetail(maxRounds)
+  const historyDetail = parseProgressHistoryDetail(progressHistory)
+  const gatesDetail = normalizePendingGatesDetail(pendingGates)
+  const rounds = roundsDetail.rounds
+  const history = historyDetail.rounds
+  const gates = gatesDetail.gates
+  // 三个输入通道的丢弃、解析失败与截断都进报告：不静默。
+  // 报出不改变原有语义——该停的照样停，该走的照样走。
+  const warnings = [...roundsDetail.warnings, ...historyDetail.warnings, ...gatesDetail.warnings]
   const roundProgress = computeRoundProgress(history)
   const nextRound = (history.at(-1)?.round ?? 0) + 1
   const stop = detectStopLoss({ maxRounds: rounds, roundProgress, pendingGates: gates, nextRound })
@@ -231,6 +305,7 @@ export function buildCyclePlan({ goal = '', maxRounds = DEFAULT_MAX_ROUNDS, prog
     stages,
     roundProgress,
     pendingGates: gates,
+    warnings,
     stopped: stop.stopped,
     stopReason: stop.stopReason,
     stopDetail: stop.detail,
@@ -246,6 +321,8 @@ export function formatCycleText(plan) {
     `dev-iterate cycle: goal="${plan.goal || '(未提供)'}" maxRounds=${plan.maxRounds} (hard<=${plan.hardMaxRounds})`,
     `Progress : rounds=${plan.roundsCompleted} next=${plan.nextRound ?? 'none'} stalled=${plan.stalled}`,
   ]
+  // 输入通道被丢弃、解析失败或截断，都写在这里。不静默。
+  for (const w of plan.warnings ?? []) lines.push(`Warning  : ${w}`)
   if (plan.stopped) {
     lines.push(`STOPPED  : ${plan.stopReason}`)
     lines.push(`Reason   : ${plan.stopDetail}`)

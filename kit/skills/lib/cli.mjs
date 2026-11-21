@@ -13,7 +13,8 @@ export function getKnownKitSkills(kitDir) {
   return Object.freeze(discoverKitSkills(kitDir).map((s) => s.dirName))
 }
 
-function getSkillFallbacks(kitDir) {
+/** 各技能声明的降级文案。正文生成与提示段共用这一份，避免两处各写一套。 */
+export function getSkillFallbacks(kitDir) {
   const map = new Map()
   for (const s of discoverKitSkills(kitDir)) {
     if (s.fallback) map.set(s.dirName, s.fallback)
@@ -216,6 +217,24 @@ export function hasSkillSupport(repoRoot = process.cwd(), skillName = 'dev-revie
   return info.has(skillName)
 }
 
+/**
+ * 把一行里指向未装配技能的命令降级成通用做法。
+ *
+ * 只做「字符串进、字符串出」，因为它要服务的两边形态不同：`printNextStep` 拿到的是
+ * 结构化 step item，正文生成拿到的是拼好的整行字符串。两边各写一套判定，迟早分叉——
+ * 而分叉的表现就是「提示降级了、正文没降」，那正是这条判据要治的病。
+ *
+ * 降级不是「把话说少」：替换结果必须仍指向一个可执行的动作类别。
+ */
+export function degradeSkillCommands(line, skillsInfo, fallbackMap = new Map()) {
+  const text = String(line ?? '').trim()
+  if (!text || !skillsInfo) return text
+  const m = /\.agents\/skills\/([a-z0-9._-]+)\//i.exec(text)
+  if (!m || skillsInfo.has(m[1])) return text
+  return fallbackMap.get(m[1])
+    ?? text.replace(/node\s+["']?\.agents\/skills\/[^"'\s]+["']?[^\n]*/g, '按原生 git 与项目测试流程手动执行')
+}
+
 function formatStepItem(item, skillsInfo, fallbackMap) {
   if (item && typeof item === 'object') {
     const skill = item.skill
@@ -228,14 +247,7 @@ function formatStepItem(item, skillsInfo, fallbackMap) {
     return text
   }
 
-  const line = String(item ?? '').trim()
-  if (!line || !skillsInfo) return line
-
-  const m = /\.agents\/skills\/([a-z0-9._-]+)\//i.exec(line)
-  if (m && !skillsInfo.has(m[1])) {
-    return fallbackMap.get(m[1]) ?? line.replace(/node\s+["']?\.agents\/skills\/[^"'\s]+["']?[^\n]*/g, '按原生 git 与项目测试流程手动执行')
-  }
-  return line
+  return degradeSkillCommands(String(item ?? ''), skillsInfo, fallbackMap)
 }
 
 /**

@@ -31,7 +31,7 @@ import {
   walkKitFiles,
 } from './lib/equip-bootstrap.mjs'
 import { captureMemoryRollbackSnapshot, verifyEquippedIntegrityOrRollback } from './lib/equip-integrity.mjs'
-import { isCodeLikePath, resolveThreeWayEquipFile } from './lib/merge3.mjs'
+import { computeFileStates, EQUIP_FILE_STATES, formatEquipCheckReport, isCodeLikePath, judgeManagedFile, resolveThreeWayEquipFile } from './lib/merge3.mjs'
 import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
 import {
   PF_MANIFEST_REL,
@@ -193,19 +193,28 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) 
     const dest = join(skillsDir, rel)
     if (!existsSync(dest)) { missing.push(rel); return }
     const diskHash = normalizedSha256(readFileSync(dest))
-    if (diskHash === src.sha256) {
+    // 逐文件判定只算一次：校验路径与写入路径读它，状态与修法不会分叉。
+    const verdict = judgeManagedFile({
+      rel,
+      upstreamSha: src.sha256,
+      diskSha: diskHash,
+      baselineSha: prevFiles.get(rel) ?? null,
+      customEntry: customizedMap[rel] ?? null,
+      pendingEntry: pendingConflictsMap[rel] ?? null,
+    })
+    if (verdict.state === EQUIP_FILE_STATES.SYNCED) {
       if (existing.valid && prevFiles.get(rel) !== src.sha256) unregistered.push(rel)
       return
     }
-    const customEntry = customizedMap[rel]
-    if (customEntry && diskHash === customEntry.baseSha256) {
+    if (verdict.state === EQUIP_FILE_STATES.EXEMPT_CUSTOM) {
+      const customEntry = customizedMap[rel]
       customized.push({
         path: rel, adoptedAt: customEntry.adoptedAt, baseSha256: customEntry.baseSha256,
         upstreamSha256: customEntry.upstreamSha256, upstreamChanged: customEntry.upstreamSha256 !== src.sha256,
       })
       return
     }
-    drifted.push(rel)
+    drifted.push(verdict.blocking ? { path: rel, state: verdict.state, fixHint: verdict.fixHint } : rel)
   }
 
   for (const [rel, src] of kitFiles.entries()) {
@@ -585,6 +594,21 @@ export function equip(targetDir, {
     added, restored, upgraded, merged, unchanged, conflicts, retired,
     orphanedModified, adopted, customized,
     pendingConflicts: nextManifest.pendingConflicts,
+    // 写完之后再判一次：动作能解决的都解决了，剩下什么才是结论。
+    // 校验路径拿同一个判定算，两条路径对同一份工作区因此给出同一个状态序列。
+    endingStates: (() => {
+      const diskHashes = new Map()
+      for (const rel of kitFiles.keys()) {
+        const dest = join(skillsDir, rel)
+        diskHashes.set(rel, existsSync(dest) ? normalizedSha256(readFileSync(dest)) : null)
+      }
+      const files = new Map([...kitFiles].map(([rel, src]) => [rel, { sha256: src.sha256 }]))
+      return computeFileStates({
+        files, diskHashes,
+        baseline: new Map(Object.entries(nextFiles).map(([rel, info]) => [rel, info.sha256])),
+        customized: nextCustomized, pendingConflicts: nextPendingConflicts,
+      })
+    })(),
     ...(integrityCheck ? { integrityCheck } : {}),
     disabledSkills: nextManifest.disabledSkills, removedFiles: Object.keys(nextManifest.removedFiles), ensuredGitkeeps,
     ...(cleanedStaleLocalMode.length > 0 ? { cleanedStaleLocalMode } : {}),
@@ -592,19 +616,7 @@ export function equip(targetDir, {
 }
 
 function formatCheckReport(res) {
-  const lines = []
-  if (res.reason) lines.push(res.reason)
-  for (const p of res.missing) lines.push(`缺失：${p}`)
-  for (const p of res.drifted) lines.push(`字节不一致：${p}`)
-  for (const p of res.unregistered) lines.push(`未登记哈希：${p}`)
-  for (const p of res.extraManaged) lines.push(`多余托管文件：${p}`)
-  for (const p of res.pendingConflicts ?? []) lines.push(`待裁决三方冲突：${p}（见 ${p}.pf-conflict 与 ${p}.upstream）`)
-  for (const b of res.brokenImports ?? []) lines.push(`相对导入断链：${b}`)
-  for (const f of res.invalidFrontmatters ?? []) lines.push(`frontmatter 缺少 name/description：${f}`)
-  for (const c of res.customized ?? []) {
-    lines.push(c.upstreamChanged ? `定制豁免：${c.path}（上游新版有变化，可供参考合并）` : `定制豁免：${c.path}（与上游基线一致）`)
-  }
-  return lines.join('\n')
+  return formatEquipCheckReport(res)
 }
 
 function consumeOptionalValue(argv, idx, targetSpecified, kitDir = DEFAULT_KIT_SKILLS_DIR) {
@@ -706,7 +718,8 @@ async function main(argv) {
       const res = checkEquip(target, { kitDir })
       if (!res.ok) {
         process.stderr.write(`${formatCheckReport(res)}\n`)
-        return 1
+        // 和写入路径同一个非零码：「待处置」这件事不该有两个编号。
+        return 3
       }
       process.stdout.write(`套件校验通过：${res.manifestPath}\n`)
       if (res.customized.length > 0) {
@@ -744,7 +757,12 @@ async function main(argv) {
       ...(hooksResult ? { hooks: hooksResult } : {}),
       ...(agentsResult ? { agents: agentsResult } : {}),
     }, null, 2)}\n`)
-    return !dryRun && Object.keys(equipResult.pendingConflicts ?? {}).length > 0 ? 3 : 0
+    // 退出码只看逐文件判定：写入路径能解决的都解决了，结束状态里还有需要处置的，
+    // 就和校验路径一样退 3。「本地改动被保留」在过去只进运行报告，写路径因此永远退 0，
+    // 而校验路径退 1——同一个动作两个相反结论，根因是两条路径读的不是同一个判定。
+    const endingBlocking = equipResult.endingStates?.blocking ?? []
+    if (!dryRun && endingBlocking.length > 0) return 3
+    return 0
   } catch (err) {
     process.stderr.write(`equip 失败：${err instanceof Error ? err.message : String(err)}\n`)
     return 2

@@ -525,17 +525,34 @@ async function main(argv = process.argv.slice(2)) {
     let empiricalGate = evaluateIncludeDiffGate(evalGateArgs)
 
     if (includeDiff && !empiricalGate.readyForDiff) {
+      const onlyVisualMissing = !empiricalGate.dirtyFaultResidue
+        && !empiricalGate.shallowE2eEvidence
+        && !empiricalGate.artifactBlock
+        && empiricalGate.missingSteps.length > 0
+        && empiricalGate.missingSteps.includes('visual-check')
+        && empiricalGate.missingSteps.every((s) => s === 'visual-check' || s === 'e2e-observation')
       const blockCode = empiricalGate.dirtyFaultResidue
         ? 'BLOCKED_DIRTY_FAULT_RESIDUE'
-        : (empiricalGate.shallowE2eEvidence ? 'BLOCKED_SHALLOW_E2E_EVIDENCE' : 'BLOCKED_EMPIRICAL_FIRST')
+        : (empiricalGate.shallowE2eEvidence
+            ? 'BLOCKED_SHALLOW_E2E_EVIDENCE'
+            : (empiricalGate.artifactBlock
+                ? empiricalGate.artifactBlock.code
+                : (onlyVisualMissing ? 'BLOCKED_VISUAL_EVIDENCE_REQUIRED' : 'BLOCKED_EMPIRICAL_FIRST')))
       const msg = blockCode === 'BLOCKED_DIRTY_FAULT_RESIDUE'
         ? 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作位存在未还原复绿的故障注入残留，禁止输出 --include-diff。'
         : (blockCode === 'BLOCKED_SHALLOW_E2E_EVIDENCE'
             ? `${empiricalGate.shallowE2eEvidence.code}: ${empiricalGate.shallowE2eEvidence.reason}`
-            : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的业务流实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`)
+            : (empiricalGate.artifactBlock
+                ? empiricalGate.artifactBlock.reason
+                : (onlyVisualMissing && empiricalGate.visualBlock
+                    ? empiricalGate.visualBlock.reason
+                    : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的业务流实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`)))
       const payload = {
         status: blockCode, code: blockCode, exitCode: EXIT.FACT, mode, round, headSha,
         diffScope, workspaceFingerprint, missingSteps: empiricalGate.missingSteps,
+        ...(empiricalGate.artifactBlock
+          ? { artifactErrors: empiricalGate.artifactBlock.errors, uiFiles: empiricalGate.artifactBlock.uiFiles }
+          : {}),
         unblockCommands: empiricalGate.unblockCommands, nextSteps: empiricalGate.unblockCommands,
         affectedBusinessFlows: reviewContext.affectedBusinessFlows,
         adjacentModules: reviewContext.adjacentModules,
@@ -547,7 +564,7 @@ async function main(argv = process.argv.slice(2)) {
         blockCode,
         `Scope    : ${diffScope} (HEAD ${headSha === 'UNBORN' ? 'UNBORN' : headSha.slice(0, 8)})`,
         `Target   : ${posixPath(reviewRoot)} | Fingerprint: ${workspaceFingerprint.slice(0, 12)}`,
-        `Missing  : ${empiricalGate.missingSteps.length > 0 ? empiricalGate.missingSteps.join(', ') : 'restore verification required'}`,
+        `Missing  : ${empiricalGate.missingSteps.length > 0 ? empiricalGate.missingSteps.join(', ') : (empiricalGate.artifactBlock ? empiricalGate.artifactBlock.code : 'restore verification required')}`,
         ...(reviewContext.affectedBusinessFlows.length > 0 ? [`Flows    : ${reviewContext.affectedBusinessFlows.slice(0, 4).join(' ; ')}`] : []),
         `Strategy : ${reviewContext.empiricalTaskOrder.strategy}`,
         `Exit Code: ${EXIT.FACT}`, '', '[NEXT STEP]',

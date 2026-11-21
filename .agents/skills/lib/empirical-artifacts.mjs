@@ -312,7 +312,13 @@ export function precheckVisualAndArtifacts({
     repoRoot, artifacts, visualFilesChanged, visualCheckedRaw, observationSummary, visualBlockedReason,
   })
   if (!gate.ok) return gate
-  if (!evidencePath) return { ...gate, recorded: false }
+  if (!evidencePath) {
+    return {
+      ...gate,
+      visual: { ...gate.visual, headSha: headSha ?? null },
+      recorded: false,
+    }
+  }
   const prev = readJsonSafe(evidencePath)
   const records = mergeArtifactRecords(prev?.artifacts ?? [], gate.records ?? [])
   const visual = { ...gate.visual, headSha: headSha ?? prev?.headSha ?? null, recordedAt: new Date().toISOString() }

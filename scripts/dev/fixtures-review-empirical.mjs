@@ -499,4 +499,92 @@ export function registerReviewEmpiricalCases(cases) {
       return true
     } finally { rmTree(dir) }
   }])
+
+  cases.push(['UI_VISUAL_EXT_RE 变更时 evaluateIncludeDiffGate / review-pack 按合约阻断不崩溃，已核验则放行（含账本存量回查）', async () => {
+    const dir = makeTestRepo({
+      extraFiles: {
+        'src/App.tsx': 'export const App = () => "v1"\n',
+        'shots/ui.png': 'fake-png-bytes\n',
+      },
+    })
+    const uiSentinel = 'SENTINEL_UI_DIFF_PATCH_901'
+    try {
+      // 1. --local 触及 UI_VISUAL_EXT_RE 文件：未核验时包生成不崩溃（不返回数字 3 / 不抛 ReferenceError）
+      writeFileSync(join(dir, 'src/App.tsx'), `// ${uiSentinel}\nexport const App = () => "v2"\n`)
+      writeFileSync(join(dir, 'src/app.mjs'), 'export const computeVal = () => 2\n')
+
+      const packNoDiff = await runRp(['--local', '--json'], dir)
+      if (packNoDiff.status !== 0) {
+        return `UI diff 未核验时 --local（不带 --include-diff）崩溃或被误拦：exit=${packNoDiff.status} err=${packNoDiff.stderr} out=${packNoDiff.stdout}`
+      }
+      const packJson = JSON.parse(packNoDiff.stdout)
+      if (packJson.empiricalGate?.readyForDiff !== false || !packJson.empiricalGate?.missingSteps?.includes('visual-check')) {
+        return `UI diff 未核验时 empiricalGate 未标记 visual-check 缺失：${JSON.stringify(packJson.empiricalGate)}`
+      }
+
+      // 2. 未核验直接 --include-diff：按合约退出 3 阻断，不抛 ReferenceError/TypeError 且不泄露 diff
+      const blockedDiff = await runRp(['--local', '--include-diff', '--json'], dir)
+      if (blockedDiff.status !== 3 || /ReferenceError|TypeError/.test(blockedDiff.stderr)) {
+        return `UI diff 未核验 --include-diff 未按合约阻断或抛异常：exit=${blockedDiff.status} stderr=${blockedDiff.stderr}`
+      }
+      if (blockedDiff.stdout.includes(uiSentinel)) return 'UI diff 未核验阻断时仍泄露了 diffText'
+
+      // 3. 显式传入坏附件 --artifact missing.png 时也必须结构化阻断而不崩溃
+      const badArt = await runRp(['--local', '--include-diff', '--artifact', 'missing.png', '--json'], dir)
+      if (badArt.status !== 3 || !badArt.stdout.includes('BLOCKED_ARTIFACT_MISSING')) {
+        return `坏 --artifact 未按 BLOCKED_ARTIFACT_MISSING 阻断：exit=${badArt.status} out=${badArt.stdout} err=${badArt.stderr}`
+      }
+
+      // 4. 在 check-empirical 传入真实 --artifact 后，后续 --include-diff 不重传 --artifact 也必须放行
+      const empUi = await runRp(['check-empirical', '--local', '--cmd', 'node test.mjs', '--artifact', 'shots/ui.png', '--json'], dir)
+      if (empUi.status !== 0) return `UI check-empirical 失败：${empUi.stdout} ${empUi.stderr}`
+      writeFileSync(join(dir, 'src/app.mjs'), 'export const computeVal = () => 999\n')
+      const fFail = await runRp(['check-fault', '--phase', 'fail', '--local', '--cmd', 'node test.mjs', '--json'], dir)
+      if (fFail.status !== 0) return `UI check-fault fail 失败：${fFail.stdout} ${fFail.stderr}`
+      writeFileSync(join(dir, 'src/app.mjs'), 'export const computeVal = () => 2\n')
+      const fRest = await runRp(['check-fault', '--phase', 'restore', '--local', '--cmd', 'node test.mjs', '--json'], dir)
+      if (fRest.status !== 0) return `UI check-fault restore 失败：${fRest.stdout} ${fRest.stderr}`
+
+      const unlocked = await runRp(['--local', '--include-diff', '--json'], dir)
+      if (unlocked.status !== 0) {
+        return `已传 --artifact 完成实证后 --include-diff 未重传 --artifact 仍被误拦或崩溃：exit=${unlocked.status} out=${unlocked.stdout} err=${unlocked.stderr}`
+      }
+      const unlockedJson = JSON.parse(unlocked.stdout)
+      if (unlockedJson.diff?.diffIncluded !== true || !unlockedJson.diffText?.includes(uiSentinel)) {
+        return `UI diff 解锁后缺少 diffText：${unlocked.stdout.slice(0, 400)}`
+      }
+
+      // 5. --task 模式下 evidence.json 已落盘实证时，evaluateIncludeDiffGate 仅凭账本实证即可放行 visual-check
+      const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+      const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+      const { evaluateIncludeDiffGate } = await import('../../kit/skills/dev-review/scripts/review-empirical.mjs')
+      const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+      gitSync(dir, ['checkout', '--', 'src/App.tsx', 'src/app.mjs'])
+      const roots = await resolveRepoRoots(dir)
+      await handleStart({ task: 'ui-ev', case: '2', slug: 'ui-ev', implementer: 'alice' }, roots)
+      const implWt = join(dir, '.worktrees', 'impl-ui-ev')
+      writeFileSync(join(implWt, 'src/App.tsx'), `// ${uiSentinel}\nexport const App = () => "v3"\n`)
+      writeFileSync(join(implWt, 'src/app.mjs'), 'export const computeVal = () => 2\n')
+      gitCommitFast(implWt, 'feat: ui-ev', { updateOnly: true })
+      const vRes = await handleVerify({
+        task: 'ui-ev', mode: 'full', artifact: [join(implWt, 'shots/ui.png')],
+        'e2e-evidence': '在预览环境打开 App 页面核验浅深色对比与交互正常',
+      }, roots)
+      if (vRes.exitCode !== 0) return `ui-ev verify 失败：${vRes.exitCode}`
+      await handleSubmit({ task: 'ui-ev', agent: 'alice' }, roots)
+      const headSha = gitSync(implWt, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+      const gateOnlyFromEv = evaluateIncludeDiffGate({
+        gitDir: roots.gitDir, mode: 'task', task: { taskId: 'ui-ev' }, round: 1,
+        reviewRoot: join(dir, '.worktrees', 'review-ui-ev'), mainRoot: dir,
+        headSha, diffScope: 'main..HEAD', workspaceFingerprint: 'fp-ui-ev',
+        requirements: { isEmptyDiff: false, isLowRiskPureDoc: false, empiricalRequired: true, faultRequired: false, visualCheckRequired: true, smokeRequired: false, businessFlowEmpiricalRequired: false, e2eObservationRequired: true, autoCommands: [] },
+        behavioralGate: { visualFilesChanged: ['src/App.tsx'], visualVerifiedOnHead: false },
+        opts: {},
+      })
+      if (!gateOnlyFromEv || typeof gateOnlyFromEv !== 'object' || gateOnlyFromEv.steps?.visualCheck?.done !== true) {
+        return `evidence.json 已落盘实证但 evaluateIncludeDiffGate 未放行 visualCheck：${JSON.stringify(gateOnlyFromEv)}`
+      }
+      return true
+    } finally { rmTree(dir) }
+  }])
 }

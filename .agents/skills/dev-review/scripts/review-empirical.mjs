@@ -12,7 +12,7 @@ import {
   determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead,
   readVerificationEvidence, validateE2eEvidenceText,
 } from '../../lib/workflow-policy.mjs'
-import { mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
+import { evaluateStoredVisualEvidence, mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { EXIT } from './review-diff.mjs'
 import {
   buildModeTargetFlags, buildUnblockCommands, checkDirtyFaultResidueBeforeSync,
@@ -161,29 +161,39 @@ export function evaluateIncludeDiffGate({
     repoRoot: reviewRoot,
     visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
   })
-  if (!artifactVisual.ok) {
-    const targetFlagsForArtifact = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
-    return emitGateBlock({
-      opts,
-      code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED',
-      payload: {
-        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.FACT,
-        mode, round, headSha, workspaceFingerprint: currentFingerprint,
-        uiFiles: artifactVisual.visual.uiFiles,
-        artifactErrors: artifactVisual.errors,
-        error: artifactVisual.reason,
-        nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlagsForArtifact} --artifact "<真实非空产物路径>"`],
-      },
-      textLines: ['BLOCKED_VISUAL_EVIDENCE_REQUIRED', artifactVisual.reason],
-    })
-  }
+  // 在拦截前先核查账本与回执里已落盘的同 HEAD 实证，避免后续 `--include-diff` 未重传 `--artifact` 时误拦。
+  const storedVisualCheck = (evidence && !evidence.dirty && (!headSha || evidence.headSha === headSha))
+    ? evaluateStoredVisualEvidence({
+        evidence,
+        policy: { visualFilesChanged: behavioralGate?.visualFilesChanged ?? [] },
+        headSha,
+      })
+    : null
+  const evidenceVisualSatisfied = Boolean(storedVisualCheck && storedVisualCheck.ok && !storedVisualCheck.unclaimed)
+  const receiptVisualSatisfied = Boolean(
+    matchesBaseline && (
+      receipt?.empiricalVerified?.visualChecked
+      || receipt?.visualChecked
+      || (Array.isArray(receipt?.artifacts) && receipt.artifacts.length > 0)
+      || receipt?.empiricalVerified?.visual?.satisfiedBy
+    ),
+  )
   const visualSatisfied = Boolean(
     artifactVisual.visual.satisfiedBy !== null
-    || behavioralGate?.visualVerifiedOnHead
-    || (matchesBaseline && (receipt?.empiricalVerified?.visualChecked || receipt?.visualChecked)),
+    || evidenceVisualSatisfied
+    || receiptVisualSatisfied
+    || ((!storedVisualCheck || storedVisualCheck.ok) && behavioralGate?.visualVerifiedOnHead),
   )
+  const artifactBlock = artifactVisual.errors.length > 0
+    ? {
+        code: artifactVisual.code ?? 'BLOCKED_ARTIFACT_INVALID',
+        reason: artifactVisual.reason,
+        uiFiles: artifactVisual.visual.uiFiles,
+        errors: artifactVisual.errors,
+      }
+    : null
 
-  const visualDone = !requirements.visualCheckRequired || visualSatisfied
+  const visualDone = !requirements.visualCheckRequired || (!artifactBlock && visualSatisfied)
   const smokeOk = !requirements.smokeRequired || Boolean(
     (evidence && evidence.headSha === headSha && !evidence.dirty && evidence.smokeVerifiedOnHead !== false && evidence.gates?.smoke?.exitCode === 0)
     || (empiricalDone && receipt?.empiricalVerified?.executed !== false && !receipt?.empiricalVerified?.errorOnly
@@ -194,7 +204,9 @@ export function evaluateIncludeDiffGate({
       hasSubstantiveStoredObservation(receipt?.empiricalVerified, headSha)
       || hasSubstantiveStoredObservation(evidence, headSha)
       || Boolean(e2eEvidenceInput)
-      || behavioralGate?.visualVerifiedOnHead
+      || evidenceVisualSatisfied
+      || artifactVisual.visual.satisfiedBy !== null
+      || ((!storedVisualCheck || storedVisualCheck.ok) && behavioralGate?.visualVerifiedOnHead)
       || (matchesBaseline && (receipt?.empiricalVerified?.visualChecked || receipt?.visualChecked))
     ),
   )
@@ -212,7 +224,7 @@ export function evaluateIncludeDiffGate({
     missingSteps.push('e2e-observation')
   }
 
-  const readyForDiff = !dirtyFaultResidue && missingSteps.length === 0
+  const readyForDiff = !dirtyFaultResidue && !artifactBlock && missingSteps.length === 0
   const unblockCommands = readyForDiff
     ? []
     : buildUnblockCommands({
@@ -227,6 +239,10 @@ export function evaluateIncludeDiffGate({
     readyForDiff,
     dirtyFaultResidue,
     shallowE2eEvidence,
+    ...(artifactBlock ? { artifactBlock } : {}),
+    ...(requirements.visualCheckRequired && !visualDone && !artifactVisual.ok
+      ? { visualBlock: { code: artifactVisual.code, reason: artifactVisual.reason, uiFiles: artifactVisual.visual.uiFiles } }
+      : {}),
     mode, round, targetRoot: posixPath(reviewRoot), headSha, diffScope, workspaceFingerprint,
     baselineFingerprint: matchesBaseline ? receipt.baselineFingerprint : null,
     steps: {

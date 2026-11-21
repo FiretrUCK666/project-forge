@@ -691,5 +691,5 @@ export function checkOrphanSlices(repoRoot) {
 }
 
 export function auditRepoDocs(repoRoot, scope = '.') {
-  return runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCoverage, checkOrphanSlices, evaluateSliceGraph })
+  return runRepoDocsAudit(repoRoot, scope, { auditDoc, checkOrphanSlices, evaluateSliceGraph })
 }

@@ -300,38 +300,38 @@ export async function handleRecord(opts, roots) {
   const rebuttedItems = []
   const resolvedItems = []
   const remainingFromPrev = []
+  const unmentionedFromPrev = []
 
+  // 轮次收口三态：`已证实解决` / `仍在` / `本轮未提及`。
+  //
+  // 「本轮没再提到它」不等于「它没了」——换一次措辞就足以让旧写法认不出来，
+  // 而认不出来正是这一片要治的东西。所以未提及保持原状态、单列清单，
+  // 只有明写 `--resolved` 且被接受，或者本轮仍按定位点命中，才算有下文。
   for (const pm of prevOpen) {
     if (matchesItemIdSet(pm, rebutAccepted)) {
       pm.status = 'rebutted'
       pm.rebuttedInRound = round
       rebuttedItems.push(pm.id)
-    } else if (matchesItemIdSet(pm, resolvedAccepted) || verdict === 'pass') {
+    } else if (matchesItemIdSet(pm, resolvedAccepted)) {
       pm.status = 'resolved'
       pm.resolvedInRound = round
       resolvedItems.push(pm.id)
+    } else if (mustFixList.some((nm) => sameBlockerItem(pm, nm))) {
+      // 本轮再次出现且按实质判定命中：仍在，保持原状态等下一轮。
+      remainingFromPrev.push(pm)
     } else {
-      const stillOpen = mustFixList.some((nm) => sameBlockerItem(pm, nm))
-      if (!stillOpen) {
-        pm.status = 'resolved'
-        pm.resolvedInRound = round
-        resolvedItems.push(pm.id)
-      } else {
-        remainingFromPrev.push(pm)
-      }
+      unmentionedFromPrev.push(pm.id)
     }
   }
 
-  if (verdict === 'pass') {
-    for (const r of prevRounds) {
-      for (const m of r.mustFix ?? []) {
-        if (m.status !== 'rebutted' && m.status !== 'resolved') {
-          m.status = 'resolved'
-          m.resolvedInRound = round
-        }
-      }
-    }
-  }
+  // 整轮通过不等于所有历史阻塞项都被解决。
+  //
+  // 过去这里把「本轮 verdict=pass」当成「上一轮每一条都修好了」的证据，但那只是
+  // 「本轮没再提」，两件事之间没有因果关系：审查者这轮换了说法、换了视角，
+  // 或者根本没收进本轮视野，都会产出 pass。批量置 resolved 等于替审查者宣布结论。
+  //
+  // 现在的口径：pass 只说明本轮没有新的阻塞项。历史未终结项的去向由上一段的三态决定，
+  // 没被证实解决的继续挂着，未提及的单列进 `unmentionedFromPrev`。
 
   const sl = evaluateThreeRoundStopLoss({
     round,
@@ -404,6 +404,7 @@ export async function handleRecord(opts, roots) {
     rebutAccepted: [...rebutAccepted],
     rebuttedItems,
     resolvedItems,
+    unmentionedFromPrev,
     faultInjection: effectiveFaultInjection,
     visualChecked,
     ...(artifactRecords.length > 0 ? { artifacts: mergeArtifactRecords(prevRound?.artifacts ?? [], artifactRecords) } : {}),

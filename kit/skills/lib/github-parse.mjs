@@ -196,6 +196,55 @@ export function parseMilestoneNumber(raw, { strict = false } = {}) {
   return null
 }
 
+/**
+ * 一条引用是不是指向别的仓。
+ *
+ * ## 为什么引用不能坍缩成编号
+ *
+ * 解析处只取编号、丢掉仓库时，跨仓引用会被当成同号本地单——本地没有这个号就报「待补」，
+ * 本地恰好有就按那一条处理。带写操作时评论与标签会落到错误的单上，而且完全看不出来：
+ * 两种结果看起来都像正常流程。
+ *
+ * ## 三态，缺一个就会在真实仓库上误判
+ *
+ * - `local`：引用仓等于本仓，或引用本来就没写仓（裸号、`#N`、`issue#N`）→ 正常按本地处理；
+ * - `cross-repo`：引用仓与本仓不同 → 阻断，并说清目标仓是哪一个；
+ * - `undecidable`：本仓没有可判定的目标仓（无远端仓库）→ **只报出、不阻断**。
+ *   阻断等于让离线仓里的所有跨仓引用全部不可用；静默按本地处理又正是今天的病。
+ *   报出而不阻断，是唯一两者都不犯的做法。
+ *
+ * 「本仓」取 `buildTargetRepoContext` 算出来的 `targetRepo`，那已经是目标仓的单点定义，
+ * 这里只消费不重算。
+ *
+ * @param {{repo?: string|null, targetRepo?: string|null, raw?: string}} ref
+ * @returns {{state: 'local'|'cross-repo'|'undecidable', blocked: boolean, message: string}}
+ */
+export function judgeCrossRepoReference({ repo = null, targetRepo = null, raw = '' } = {}) {
+  const refRepo = String(repo ?? '').trim()
+  const here = String(targetRepo ?? '').trim()
+  const rawText = String(raw ?? '').trim()
+
+  // 没写仓就是明确指向本地：裸号、`#N`、`issue#N` 都走这一支，不进跨仓判定。
+  if (!refRepo) {
+    return { state: 'local', blocked: false, message: '' }
+  }
+  if (!here) {
+    return {
+      state: 'undecidable',
+      blocked: false,
+      message: `引用指向 ${refRepo}，但当前仓库没有可判定的目标仓，已按引用原文处理：${rawText || refRepo}`,
+    }
+  }
+  if (refRepo.toLowerCase() === here.toLowerCase()) {
+    return { state: 'local', blocked: false, message: '' }
+  }
+  return {
+    state: 'cross-repo',
+    blocked: true,
+    message: `这是跨仓引用（指向 ${refRepo}，本仓是 ${here}）：请在 ${refRepo} 上执行，或先把目标仓切过去再重试`,
+  }
+}
+
 /** 解析混合输入列表（任意 HTTP(S) Issue/PR/MR/Milestone URL / #N / issue#N / pr#N / !M）。 */
 export function parseFlowInputs(inputs = [], defaultRepo = null) {
   const issues = []
@@ -214,6 +263,9 @@ export function parseFlowInputs(inputs = [], defaultRepo = null) {
     m = /^(?:pr#|!)(\d+)$/i.exec(s)
     if (m) { prs.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
     m = /^(?:issue)?#(\d+)$/i.exec(s)
+    if (m) { issues.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
+    // 裸正整数与 `#N`、`issue#N` 同义：没有仓库，明确指向本地。
+    m = /^(\d+)$/.exec(s)
     if (m) { issues.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
     unknown.push(s)
   }

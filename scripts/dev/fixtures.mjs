@@ -128,7 +128,10 @@ function buildDispatchOrder(allCases) {
     .map((x) => x.index)
 }
 
-const WORKER_TASK_TIMEOUT_MS = 90000
+// 看门狗底限：一条用例在九路并行、CI 口径下跑完要多久。低风险用例大多几秒，
+// 真正需要放宽的是少数跑完整套件矩阵的长用例——它们用第三段声明自己的成本，
+// 看门狗按声明放宽；这里给的是没声明时的底限，要能容下一次完整 gate 的量级。
+const WORKER_TASK_TIMEOUT_MS = 180000
 const WORKER_MSG_PREFIX = '__PF_W__:'
 
 function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, caseNames = [], caseCosts = []) {

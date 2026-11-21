@@ -151,7 +151,6 @@ const HUMAN_CODES = Object.freeze([
   'STOP_LOSS_ESCALATE',
 ])
 
-
 export const BLOCK_CODE_TIERS = Object.freeze({
   ...Object.fromEntries(ACTION_CODES.map((c) => [c, EXIT.ACTION])),
   ...Object.fromEntries(USAGE_CODES.map((c) => [c, EXIT.USAGE])),

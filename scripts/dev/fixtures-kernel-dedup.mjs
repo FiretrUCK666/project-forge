@@ -28,6 +28,7 @@ import { handleFinalize, handleSubmit, handleVerify } from '../../kit/skills/dev
 import { pickSignalBlameFile } from '../../kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs'
 import { handleClaim } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
 import { handleRun as handleVerifyRun } from '../../kit/skills/dev-verify-tools/scripts/verify-tools.mjs'
+import { BENCH_CHECKS, computeCheckBudget } from './bench.mjs'
 import { SKILL_ROOT, gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerKernelDedupCases(cases) {
@@ -437,15 +438,34 @@ export function registerKernelDedupCases(cases) {
     }
   }])
 
-  cases.push(['C6：bench.mjs --strict-budget 禁用 CI 2.5x 放宽严格按 1x 校验', () => {
+  cases.push(['C6：bench.mjs 零 CI 分支同轮校准预算与 --strict-budget 1x 严格上限正反双向', () => {
     const benchSrc = readFileSync(join(SKILL_ROOT, 'scripts', 'dev', 'bench.mjs'), 'utf8')
-    if (/\bbudgetScale\b|\*\s*2\.5\b|process\.env\.CI\s*\?/.test(benchSrc)) {
-      return 'bench.mjs 仍残留 CI 2.5x budgetScale 放宽逻辑'
+    if (/\bbudgetScale\b|\*\s*2\.5\b|process\.env\.CI|GITHUB_ACTIONS/.test(benchSrc)) {
+      return 'bench.mjs 仍残留 CI / GITHUB_ACTIONS 环境变量放宽逻辑'
     }
-    if (!benchSrc.includes('--strict-budget') || !benchSrc.includes('const effectiveBudget = c.budget')) {
-      return 'bench.mjs 缺少 1x strict-budget 硬预算校验'
+    if (!benchSrc.includes('--strict-budget') || !benchSrc.includes('measureCalibrationUnit')) {
+      return 'bench.mjs 缺少同轮校准或 --strict-budget 1x 严格校验'
     }
-    return true
+    const prevCi = process.env.CI
+    try {
+      process.env.CI = 'true'
+      const withCi = BENCH_CHECKS.map((c) => computeCheckBudget(c, { unitMs: 100, strictBudget: false }))
+      delete process.env.CI
+      const withoutCi = BENCH_CHECKS.map((c) => computeCheckBudget(c, { unitMs: 100, strictBudget: false }))
+      if (JSON.stringify(withCi) !== JSON.stringify(withoutCi)) {
+        return `CI=true 与无 CI 变量预算推导不等价：withCi=${JSON.stringify(withCi)} vs withoutCi=${JSON.stringify(withoutCi)}`
+      }
+      const strictMap = Object.fromEntries(
+        BENCH_CHECKS.map((c) => [c.label, computeCheckBudget(c, { unitMs: 500, strictBudget: true })]),
+      )
+      if (strictMap['survey(self)'] !== 250 || strictMap['flow inspect(self)'] !== 300 || strictMap['preflight(self)'] !== 2500) {
+        return `--strict-budget 未强制 1x 绝对毫秒上限：${JSON.stringify(strictMap)}`
+      }
+      return true
+    } finally {
+      if (prevCi === undefined) delete process.env.CI
+      else process.env.CI = prevCi
+    }
   }])
 
   cases.push(['C7：planning=true 任务 finalize 规划退出门禁正反双向（未过审拦 BLOCKED_PLAN_NOT_READY；已过审直接 finalize 解除 planning 并放行 submit）', async () => {

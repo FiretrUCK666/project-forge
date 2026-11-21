@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T02:41:44.626Z",
+  "installedAt": "2026-11-21T02:56:54.059Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -49,7 +49,7 @@
       "sha256": "9bdc3d70eeea273653cc74daa4038be6656bc4d3ad210b64b8d1050584d4714a"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "76cf30b0a986c2be9987b2bc3868d4f283c9514a5f497443df221d9f38506b2f"
+      "sha256": "bbd75b24b1c78b2fb960ceac5d3b022a27f5276cb735bf1866980b2729dcbd23"
     },
     "dev-flow/scripts/flow-merge.mjs": {
       "sha256": "4ee6ea940937e47755d4e87cfee751ddcf86807612303cd26f7947b67ec0a530"
@@ -61,7 +61,7 @@
       "sha256": "60c01f5dd1e2a4c2e6321af41fd6810d05115cc83b0d1d6731838ea7dd58a2ca"
     },
     "dev-flow/scripts/flow-trial-merge.mjs": {
-      "sha256": "63fde93a5e18f3ea1ab31e4be6974d5da57f16e07dbd2f115d51877453be1545"
+      "sha256": "0faa0b7c80d1eb76062d30cb9a60777896d13cf1949df1e0c83841c6b8b646e4"
     },
     "dev-flow/scripts/flow.mjs": {
       "sha256": "9c87e3b8f96a91caee66385291c89850f0b6ee92ec8d45177e06be7b0f83906c"
@@ -319,7 +319,7 @@
       "sha256": "eee65f4d59cbd89094dcfb73c5d142b0d9e457412addb95b4b54ad5ce8c89a08"
     },
     "lib/profile.mjs": {
-      "sha256": "79070b95383ab65eb0007005af19fe12468cc3e5abcca6e069e58abe4e9f80ce"
+      "sha256": "61eb796215102c342323b563d40c4bec28bd81deccddfd5d95ccbfba6b3cb41a"
     },
     "lib/review-comment-render.mjs": {
       "sha256": "7ba51798f1556d1cc2a6f6cd337878b3be973c0881d0e456b3988a1bb023d1a5"
@@ -382,7 +382,7 @@
       "sha256": "32870e03844423a317675402490da59e58604632d044ec89a7d0e89cb42e4010"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "52e93993efe5dd87370f8145c7d4e27b50464c86bbccd87aff3911a56a39770e"
+      "sha256": "2e02e5f48162717b9c0f874e91a745fa51bf8069cf00b82b83e8c0d275707f25"
     },
     "templates/docs-prd.md": {
       "sha256": "7e8b29b9a129f29d1777e7b6885ddfa06e9c2f533ba59435cd416ed60598869e"

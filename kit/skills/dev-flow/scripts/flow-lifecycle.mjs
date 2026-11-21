@@ -18,7 +18,7 @@ import { deriveReworkState, hasExploredEvidence, nextReviewRound, resolveTaskCon
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
-import { isProfileExplicitNone, parseAgentsProfile, readDecisions } from '../../lib/profile.mjs'
+import { isProfileExplicitNone, parseAgentsProfile, readDecisions, resolveTierCommand, TIER_PROFILE_KEYS } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
@@ -273,12 +273,9 @@ export async function handleVerify(opts, roots) {
   const isExplicitNone = !opts.cmd && isProfileExplicitNone(profile, profileKey)
 
   let cmd = opts.cmd
-  if (!cmd && !isExplicitNone) {
-    if (mode === 'gate') cmd = profile.mergeGate ?? profile.fullTest ?? profile.quickTest
-    else if (mode === 'full') cmd = profile.fullTest ?? profile.quickTest
-    else if (mode === 'smoke') cmd = profile.smokeVerify
-    else cmd = profile.quickTest
-  }
+  // 层级到 Dev Profile 键的对应只在 profile.mjs 一处；gate 缺配套时退到全量再退到快速，
+  // 这条降级链也由它给，这里不再自己拼一遍。
+  if (!cmd && !isExplicitNone) cmd = resolveTierCommand(profile, mode, { fallback: true })
 
   const computeVerifyPolicy = async (stZReuse = null) => {
     const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null

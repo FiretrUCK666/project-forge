@@ -275,6 +275,49 @@ export function isProfileExplicitNone(profile, key) {
   return false
 }
 
+/**
+ * 层级名到 Dev Profile 键的唯一映射：`gate` → `merge-gate`，其余同名。
+ *
+ * 这套对应关系以前写在三个地方（分层证据校验、试合、verify 选命令），一处改了另两处
+ * 不知道，于是「verify 跑的是 merge-gate、试合跑的是 full-test」这种偏差没有任何东西
+ * 会报错。映射本身只有一份，取命令时再按「有没有显式 none」决定要不要用它。
+ */
+export const TIER_PROFILE_KEYS = Object.freeze({
+  quick: 'quick-test',
+  smoke: 'smoke-verify',
+  full: 'full-test',
+  gate: 'merge-gate',
+})
+
+/** 层级名 → Dev Profile 里的属性名（`merge-gate` → `mergeGate`）。 */
+export function tierProfileProp(tier) {
+  const key = TIER_PROFILE_KEYS[tier]
+  if (!key) return null
+  return key.replace(/-([a-z])/g, (_all, ch) => ch.toUpperCase())
+}
+
+/**
+ * 按层级取配置好的命令；该层被显式设为 `none` 时返回 `undefined`。
+ *
+ * `fallback` 只用于 `gate`：没配合并门禁时退到全量测试，再退到快速测试。
+ * 这条降级链只有一处，别的调用方不再各自拼。
+ */
+export function resolveTierCommand(profile, tier, { fallback = false } = {}) {
+  if (!profile) return undefined
+  const key = TIER_PROFILE_KEYS[tier]
+  const prop = tierProfileProp(tier)
+  if (!key || !prop) return undefined
+  if (isProfileExplicitNone(profile, key)) return undefined
+  const direct = profile[prop]
+  if (direct || !fallback) return direct
+  const chain = tier === 'gate' ? ['full', 'quick'] : tier === 'full' ? ['quick'] : []
+  for (const next of chain) {
+    const v = resolveTierCommand(profile, next)
+    if (v) return v
+  }
+  return undefined
+}
+
 /** 从全仓库清单三层嗅探测试与门禁命令，作为 Dev Profile 缺失时的安全兜底。 */
 export function detectEcosystemCommands(repoRoot) {
   return sniffLayeredCommands(repoRoot)

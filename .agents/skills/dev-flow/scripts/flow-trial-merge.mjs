@@ -10,18 +10,15 @@ import { join } from 'node:path'
 import { execShellCommand, gitRun, gitStatusPorcelainZ, readTextSafe } from '../../lib/git.mjs'
 import { isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
-import { isProfileExplicitNone } from '../../lib/profile.mjs'
+import { isProfileExplicitNone, resolveTierCommand } from '../../lib/profile.mjs'
 import { runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 function pickTrialVerifyCommand({ policy, profile, evidence, ledger }) {
   if (policy?.riskTier === 'low') return null
   const tier = policy?.requiredGates?.[0] ?? null
-  let cmd = null
-  if (tier === 'gate' && profile?.mergeGate && !isProfileExplicitNone(profile, 'merge-gate')) cmd = profile.mergeGate
-  else if (tier === 'full' && profile?.fullTest && !isProfileExplicitNone(profile, 'full-test')) cmd = profile.fullTest
-  else if (tier === 'smoke' && profile?.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify')) cmd = profile.smokeVerify
-  else if (tier === 'quick' && profile?.quickTest && !isProfileExplicitNone(profile, 'quick-test')) cmd = profile.quickTest
+  // 层级到 Dev Profile 键的对应只在 profile.mjs 一处；这里不再自己拼一份。
+  let cmd = tier ? (resolveTierCommand(profile, tier) ?? null) : null
 
   if (!cmd && evidence?.gates && evidence.mode) {
     const g = evidence.gates[evidence.mode]

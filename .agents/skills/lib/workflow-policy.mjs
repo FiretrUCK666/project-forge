@@ -14,7 +14,7 @@ import { evaluateStoredVisualEvidence, precheckVisualAndArtifacts } from './empi
 import { validateE2eEvidenceText } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { hasExploredEvidence, sanitizeTaskId, nextReviewRound } from './ledger.mjs'
-import { isProfileExplicitNone } from './profile.mjs'
+import { isProfileExplicitNone, resolveTierCommand } from './profile.mjs'
 import { GATE_WORKFLOW_FILE_RE, CODE_EXT_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
 import {
   analyzeIssueDependencies,
@@ -330,11 +330,7 @@ export function validateVerifyPrecheck({ repoRoot = null, gitCommonDir = null, t
 }
 
 function configuredCmdForTier(profile, tierName) {
-  if (!profile) return undefined
-  const map = { quick: ['quickTest', 'quick-test'], smoke: ['smokeVerify', 'smoke-verify'], full: ['fullTest', 'full-test'], gate: ['mergeGate', 'merge-gate'] }
-  const pair = map[tierName]
-  if (!pair || isProfileExplicitNone(profile, pair[1])) return undefined
-  return profile[pair[0]]
+  return resolveTierCommand(profile, tierName)
 }
 
 /**

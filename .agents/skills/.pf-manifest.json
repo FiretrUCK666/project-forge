@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T02:12:54.158Z",
+  "installedAt": "2026-11-21T02:16:21.190Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -109,7 +109,7 @@
       "sha256": "19814a2a9957bc0f0a11c22834fbfc2d337ce26816367121248a9784e8466780"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "981a2de3ed99d910d329df057b6ffe87193246563336093ba6acaa9b18523e36"
+      "sha256": "de28ed264c65a916579a33d25b846463cc75f69bd3e6fbf3c23521eed8a0a05b"
     },
     "dev-plan/scripts/doc-audit-helpers.mjs": {
       "sha256": "83567420c01228cd38e246b2539aa87f5feb52fc3e255c7f28f9d62f99e5c9b2"
@@ -130,7 +130,7 @@
       "sha256": "e1f2c88a121cf4c30e1301769f2493225502b7e6d0637a5c15a12de7ff518ab9"
     },
     "dev-review/SKILL.md": {
-      "sha256": "47bdb55e970fc2529ffd91348d1034daecb1f34fcc490a34cb819bd2b35f51ca"
+      "sha256": "89adb37363089f133e696098d7b59bbe894f8b025c393e532e2bc6a078b1f07d"
     },
     "dev-review/scripts/review-context.mjs": {
       "sha256": "fb04ec352586350b9f413eea70fdd65807c750b2a635be12e9413ce96091032e"

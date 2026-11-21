@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用基线 | 以仓库当前源码与 [SKILL.md](../SKILL.md) 当前 `metadata.version` 为准 |
-| 最近更新日期 | `2026-11-19` |
+| 最近更新日期 | `2026-11-21` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |
 | 托管平台适配范围 | 产品层注册表当前仅注册 `github`；未匹配托管远端降级为 `generic-git`，由 `TaskBackend` 统一对外操作 |
@@ -155,7 +155,10 @@ flowchart LR
 | `kit/skills/lib/doc-substantive.mjs` | 核心实质性校验与跨轮防退化 | `isStubValue`、`extractTechAnchors`、`checkCoreSubstantiveness`、`extractDocSnapshot`、`parseCritiqueAnchors`、`checkDocRegression`、`readGitHeadFileSync`、`resolveBaselineSnapshotSync`、`collectMasterPrdSpecTexts` |
 | `kit/skills/lib/doc-frontmatter.mjs` | Frontmatter 零依赖解析、受管判定与原子更新 | `parseDocFrontmatter`、`serializeDocFrontmatter`、`updateDocFrontmatter`、`isManagedPlanDoc`（由 `docs.mjs` 统一重导出） |
 | `kit/skills/lib/doc-comments.mjs` / `kit/skills/lib/review-comment-render.mjs` | PR / Issue 协同结构化评论渲染与双层归属格式化 | `formatAttribution`、`buildClaimComments`、`buildReviewComments`、`buildSubmitComments`、`buildMergeComments`、`buildIntakeDecisionComments`（由 `doc-templates.mjs` 与 `docs.mjs` 统一重导出） |
-| `kit/skills/lib/pr-template-hydrate.mjs` | PR 可读标题与实证正文回填 | `resolveReadablePrTitle`、`hydratePrTemplateBody`（由 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 统一重导出） |
+| `kit/skills/lib/exit-codes.mjs` | 退出码四档语义与阻断码登记 | `EXIT`（0 通过 / 1 有事待办 / 2 用法 / 3 前提事实不成立 / 4 人类拍板）、`VERIFY_EXIT` 交棒四态、`BLOCK_CODE_TIERS` 与 `REGISTERED_BLOCK_CODES` |
+| `kit/skills/lib/gate-truth.mjs` | 合入门禁的结构判定与派生 | `GATE_VERDICT` 四档互斥、`extractExecutionBlocks`（一条执行块一步）、`evaluateStructuralPredicates`（触发形态/写作用域/平台上下文逐条判）、`deriveMergeGate`、`evaluateRemoteChecks` 远端检查五档 |
+| `kit/skills/lib/evidence-substance.mjs` | 「这段文字算不算实证」的共用判据 | `evaluateTextSubstance`（提审与观察摘要共用）、`evaluateReleaseReason`（放行理由更严一档，不设措辞白名单） |
+| `kit/skills/lib/doc-approval.mjs` | 批准状态、负责人历史与属性归一 | `APPROVING_STATUS`、`isApprovingStatus`、`normOwnerId`、`collectOwnerHistory`、`PREVIOUS_OWNERS_KEY` || `kit/skills/lib/pr-template-hydrate.mjs` | PR 可读标题与实证正文回填 | `resolveReadablePrTitle`、`hydratePrTemplateBody`（由 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 统一重导出） |
 | `kit/skills/lib/command-lex.mjs` | 命令词法：切段、命令位置与动作词 | `splitCommandSegments`、`commandHeadOf`、`commandVerbOf`、`classifyByCommandPosition`、`classifyCommandText`、`COMMAND_DISPLAY_MAX_BYTES`；动作词只在**命令位置**匹配，路径只留最后一段，`--opt=` 取值与 `.属性名` 不是动作 |
 | `kit/skills/lib/tool-owned.mjs` | 工具产物归属声明 | `TOOL_OWNED_PREFIXES`、`isToolOwnedPath`、`TOOL_SKELETON_FILES`、`hasRealContent`；规模、可复用模块与契约失效路径三类判据一律先过它 |
 | `kit/skills/lib/symbol-index.mjs` | 定义符号抽取与语言覆盖三态 | `extractSymbols`（先剥注释再匹配定义形状）、`isSymbolRuleSupported`、`languageOf`、`summarizeSymbolCoverage`；没有规则的语言返回 `unsupported` 而非空数组 |
@@ -411,7 +414,10 @@ flowchart TD
 | `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、`Dev Profile` 单源、传递可达性、Mermaid 宽度、套件行数与端到端冒烟 | 每次提交前；退出码 `0` |
 | `scripts/dev/gap-coverage.mjs` | `survey` 全部 `GAP_RULE_IDS` 在 `review.mjs` 与文档指引中的配对覆盖率 | 每次改动勘察/体检规则后；`0` 项遗漏 |
 | `scripts/dev/fixtures.mjs` | 身份判定、统一装配、v2 墓碑/定制、`HostingProvider` 降级、工作流状态机、按需定位、业务分诊与增量审计正反断言 | 每次改动判定或工作流后；`0` 项失败 |
-| `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及字节预算校验（`--check`） | 修改契约或模板后；退出码 `0` |
+| `scripts/dev/merge-gate.mjs` | 合入门禁编排：从流水线结构派生清单，一条执行块一步、整块经 shell 实跑，输出 `passed`/`failed`/`unverified`/`not-applicable` 四档；`not-applicable` 不阻断 |
+| `scripts/dev/fixtures-flow-truth.mjs` | `C1..C10` 的正反双向定点用例（批准依据三种合法来源、门禁四档互斥、结构谓词单谓词隔离、参数三重对拍、分诊留源） |
+| `scripts/dev/injections-data-flow-truth.mjs` | 上述判据的故障注入复验表：拆掉任一判据都必须让对应用例变红 |
+| `scripts/dev/cli-parity.mjs` | 参数注册表、帮助声明、读取点三重对拍；声明只认行首与方括号分组两种形态，暗参数按名字锁基线 || `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及字节预算校验（`--check`） | 修改契约或模板后；退出码 `0` |
 | `scripts/equip.mjs` | `.agents/skills/` 与 `kit/skills/` 及 `.pf-manifest.json` 字节级一致（`--check`） | 修改 `kit/skills/` 后；退出码 `0` |
 | `scripts/review.mjs` | 交付成熟度体检、`claims.mjs` 真实路径/脚本回查与 `staleTddPaths` 检测 | 交付验收与合流前；`0` 个「缺」 |
 | `scripts/sync-toc.mjs` | 双语 README 目录标题与 GitHub 锚点双向一致性 | 修改 README 结构后；退出码 `0` |

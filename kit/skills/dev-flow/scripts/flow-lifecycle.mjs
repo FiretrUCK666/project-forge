@@ -356,12 +356,9 @@ export async function handleVerify(opts, roots) {
     return { exitCode: EXIT.ACTION }
   }
 
-  // 证据只取人说过的：`--e2e-evidence` / `--visual-evidence` 的原文。
-  //
-  // 裸 `--visual-checked` 是「我核验过了」的口头声明，它自身**不带观察内容**。
-  // 这里不替它编一句「observed and verified」——编出来的句子会被当成观察证据写进
-  // evidence.json，然后一路通过后面的门禁，而实际上谁也没说看到了什么。
-  // 缺什么就让它缺着，交给校验入口去要求补齐。
+  // 证据只取人说过的原文（`--e2e-evidence` / `--visual-evidence`）。裸 `--visual-checked` 只是口头声明、
+  // 不带观察内容；这里不替它编一句「observed and verified」——编出来的句子会被当成观察写进
+  // evidence.json 并一路通过后面的门禁，而谁也没说看到了什么。缺什么就让它缺着，交给校验入口要求补齐。
   const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
     || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
     || ''
@@ -471,10 +468,9 @@ export async function handleVerify(opts, roots) {
   ledger.empiricalVisualCheckRequired = empiricalVisualCheckRequired
   if (allOk && hasVisualCheckFlag) {
     ledger.visualVerifiedHead = currentHead
-    // 这个字段只接受入参原文或既有真实记录；两者都没有就不写。
-    // 它不得由任何开关派生：给裸 `--visual-checked` 拼一句「已声明核验」，会让「核验过」
-    // 在账本里有了文字，而文字不是观察。开关的语义由 `visualVerifiedHead` 与
-    // `empiricalVisualCheckRequired` 表达，不占用观察字段。
+    // 这个字段只接受入参原文或既有真实记录；两者都没有就不写。它不得由任何开关派生：
+    // 给裸 `--visual-checked` 拼一句「已声明核验」，会让「核验过」在账本里有了文字，而文字
+    // 不是观察。开关的语义由 `visualVerifiedHead` / `empiricalVisualCheckRequired` 表达。
     const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
     ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
@@ -668,8 +664,7 @@ export async function handleSubmit(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  // 提审要开 PR——那是平台写操作。用「不联网」的探测结果判断「能不能写」，
-  // 必然得到「不能」，然后安静地只记账本，看起来像成功。
+  // 提审要开 PR，那是平台写操作。用「不联网」的探测结果判断「能不能写」，必然得到「不能」，然后安静地只记账本、看起来像成功。
   const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const backend = createTaskBackend({
     role: ledger.role, providerId: ledger.providerId, targetRepo,

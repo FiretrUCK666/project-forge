@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-20
 updated: 2026-11-22
 issue: 115
-pr: null
+pr: 126
 branch: feat/w25-kernel-dedup
 owner: impl-prb
 plan_mode: interactive

@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "PR-B（#115）共享内核去重、多远端注册表收口、验证治理真实性与性能预算合并方案"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-22
@@ -11,14 +11,14 @@ branch: feat/w25-kernel-dedup
 owner: plan-prb
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-prb-r2, round=2, sha=b58631669e82, summary=Round 2 Critique PASS: C7 退役顺序与 doc-audit/flow-lifecycle 源码完全对齐，源码符号、800L 拆文件方案与 I370-I385 均已核实无阻塞项)"
 related_prd: ../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue115-w25-kernel-dedup-todo.md
 high_risk_paths: [kit/, scripts/lib/, scripts/dev/, templates/, AGENTS.md]
 task_id: w25-kernel-dedup
 depends_on: []
-scope_files: [kit/skills/lib/git-core.mjs, kit/skills/lib/git-status-fast.mjs, kit/skills/lib/git-fast.mjs, kit/skills/lib/platform.mjs, kit/skills/lib/platform-probe.mjs, kit/skills/lib/task-backend.mjs, kit/skills/lib/task-backend-local.mjs, kit/skills/lib/issue-template-hydrate.mjs, kit/skills/lib/escalation.mjs, kit/skills/lib/plan-sync.mjs, kit/skills/lib/doc-locator.mjs, kit/skills/lib/feature-map.mjs, kit/skills/lib/verify-state.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/static-gates-lexer.mjs, kit/skills/lib/static-gates-comment-hygiene.mjs, kit/skills/dev-explore/scripts/doc-locate.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-flow/scripts/flow-issues.mjs, kit/skills/dev-flow/scripts/worktree-deps.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-review/scripts/review-empirical-state.mjs, kit/skills/dev-edit/scripts/edit-gate.mjs, kit/skills/dev-edit/SKILL.md, kit/skills/dev-review/SKILL.md, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-govern/scripts/govern-checks.mjs, kit/skills/dev-govern/scripts/govern-retro.mjs, scripts/lib/fs-atomic.mjs, scripts/lib/protocol.mjs, scripts/lib/text.mjs, scripts/lib/update-ops.mjs, scripts/lib/platform/github.mjs, scripts/lib/platform/registry.mjs, scripts/lib/survey-ecosystem.mjs, scripts/lib/survey-workspace.mjs, scripts/lib/equip-bootstrap.mjs, scripts/lib/agents-defaults.mjs, scripts/survey.mjs, scripts/compose-agents.mjs, scripts/lib/review-helpers.mjs, scripts/equip-ci.mjs, scripts/dev/evidence.mjs, scripts/dev/preflight.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/preflight-kernel-parity.mjs, scripts/dev/bench.mjs, scripts/dev/fixtures.mjs, scripts/dev/fixtures-verify-tools.mjs, scripts/dev/fixtures-govern.mjs, scripts/dev/e2e-zip-harness.mjs, scripts/dev/merge-gate.mjs, scripts/dev/injections-data-kernel-dedup.mjs, docs/feature-map.json, AGENTS.md, docs/prd/261120-w25-hardening-prd.md, docs/specs/261120-issue114-w25-perf-budget-spec.md, docs/todo/261120-issue114-w25-perf-budget-todo.md, docs/specs/261120-issue117-w25-verify-map-spec.md, docs/todo/261120-issue117-w25-verify-map-todo.md, docs/specs/261120-issue118-w25-govern-truth-spec.md, docs/todo/261120-issue118-w25-govern-truth-todo.md, docs/specs/261120-issue119-w25-deadcode-split-spec.md, docs/todo/261120-issue119-w25-deadcode-split-todo.md]
+scope_files: [kit/skills/lib/git-core.mjs, kit/skills/lib/git-status-fast.mjs, kit/skills/lib/git-fast.mjs, kit/skills/lib/platform.mjs, kit/skills/lib/platform-probe.mjs, kit/skills/lib/task-backend.mjs, kit/skills/lib/task-backend-local.mjs, kit/skills/lib/issue-template-hydrate.mjs, kit/skills/lib/escalation.mjs, kit/skills/lib/plan-sync.mjs, kit/skills/lib/doc-locator.mjs, kit/skills/lib/feature-map.mjs, kit/skills/lib/verify-state.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/static-gates-lexer.mjs, kit/skills/lib/static-gates-comment-hygiene.mjs, kit/skills/dev-explore/scripts/doc-locate.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-flow/scripts/flow-issues.mjs, kit/skills/dev-flow/scripts/worktree-deps.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-review/scripts/review-empirical-state.mjs, kit/skills/dev-edit/scripts/edit-gate.mjs, kit/skills/dev-edit/SKILL.md, kit/skills/dev-review/SKILL.md, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-govern/scripts/govern-checks.mjs, kit/skills/dev-govern/scripts/govern-retro.mjs, scripts/lib/fs-atomic.mjs, scripts/lib/protocol.mjs, scripts/lib/text.mjs, scripts/lib/update-ops.mjs, scripts/lib/platform/github.mjs, scripts/lib/platform/registry.mjs, scripts/lib/survey-ecosystem.mjs, scripts/lib/survey-workspace.mjs, scripts/lib/equip-bootstrap.mjs, scripts/lib/agents-defaults.mjs, scripts/survey.mjs, scripts/compose-agents.mjs, scripts/lib/review-helpers.mjs, scripts/equip-ci.mjs, scripts/dev/evidence.mjs, scripts/dev/preflight.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/preflight-kernel-parity.mjs, scripts/dev/bench.mjs, scripts/dev/fixtures.mjs, scripts/dev/fixtures-verify-tools.mjs, scripts/dev/fixtures-govern.mjs, scripts/dev/e2e-zip-harness.mjs, scripts/dev/merge-gate.mjs, scripts/dev/injections-data-kernel-dedup.mjs, docs/feature-map.json, AGENTS.md, docs/archive/prd/261120-w25-hardening-prd.md, docs/specs/261120-issue114-w25-perf-budget-spec.md, docs/todo/261120-issue114-w25-perf-budget-todo.md, docs/specs/261120-issue117-w25-verify-map-spec.md, docs/todo/261120-issue117-w25-verify-map-todo.md, docs/specs/261120-issue118-w25-govern-truth-spec.md, docs/todo/261120-issue118-w25-govern-truth-todo.md, docs/specs/261120-issue119-w25-deadcode-split-spec.md, docs/todo/261120-issue119-w25-deadcode-split-todo.md]
 supersedes: 261120-issue119-w25-deadcode-split-spec.md
 ---
 
@@ -42,7 +42,7 @@ supersedes: 261120-issue119-w25-deadcode-split-spec.md
 
 ### 1.3 W25 主 PRD 覆盖映射
 
-本 SPEC 在归口 `C1–C8` 验收锚点的同时，承接 `docs/prd/261120-w25-hardening-prd.md` 中除 PR-A（`#120` 已归档）外全部剩余目标（`C1`/`C2`/`C4`/`C5`/`C6`），并由 `2.7` 在合入前规范退役该主 PRD 与 `#114`/`#117`/`#118`/`#119` 草案。
+本 SPEC 在归口 `C1–C8` 验收锚点的同时，承接 `docs/archive/prd/261120-w25-hardening-prd.md` 中除 PR-A（`#120` 已归档）外全部剩余目标（`C1`/`C2`/`C4`/`C5`/`C6`），并由 `2.7` 在合入前规范退役该主 PRD 与 `#114`/`#117`/`#118`/`#119` 草案。
 
 ## 二、技术设计与接口契约
 
@@ -114,8 +114,8 @@ flowchart LR
 ### 2.7 `C7`：同分支退役被吸收草案与 `261120-w25-hardening-prd.md`
 
 `impl-prb` 在完成 `C1–C6` 编码验证后，严格按以下无冲突顺序在 `feat/w25-kernel-dedup` 同分支退役文档（遵循 `buildArchivedDocPatch`、`shouldHold` 与 `BROKEN_RELATED_LINK` 约束）：
-1. **`flow finalize` 前先退役 `#114`/`#117`/`#118`/`#119`**：先运行 `node .agents/skills/dev-plan/scripts/doc-plan.mjs supersede <oldSpec> --by docs/specs/261120-issue115-w25-kernel-dedup-spec.md` 标为 `superseded`，再用 `git mv` 将 `#114`/`#117`/`#118`/`#119` 的 SPEC 与 Todo 迁入 `docs/archive/specs/` 与 `docs/archive/todo/` 并更新各自 `superseded_by`/`related_*` 相对链接（**不**调用会以 `buildArchivedDocPatch` 把 `superseded` 覆写为 `implemented`/`done` 的 `archive` 命令）。
-2. **预备 PRD 闭环条件（暂留 `docs/prd/`）**：在 `docs/prd/261120-w25-hardening-prd.md` 勾选全部 `C1..C7` 为 `[x]`（使 `evaluateMasterPrdClosure` 返回 `shouldHold: false`、`archivePrd: true`），此时**不提前归档**该 PRD，以免 `#115` `related_prd` 触发 `BROKEN_RELATED_LINK`。
+1. **`flow finalize` 前先退役 `#114`/`#117`/`#118`/`#119`**：先运行 `node .agents/skills/dev-plan/scripts/doc-plan.mjs supersede <oldSpec> --by docs/archive/specs/261120-issue115-w25-kernel-dedup-spec.md` 标为 `superseded`，再用 `git mv` 将 `#114`/`#117`/`#118`/`#119` 的 SPEC 与 Todo 迁入 `docs/archive/specs/` 与 `docs/archive/todo/` 并更新各自 `superseded_by`/`related_*` 相对链接（**不**调用会以 `buildArchivedDocPatch` 把 `superseded` 覆写为 `implemented`/`done` 的 `archive` 命令）。
+2. **预备 PRD 闭环条件（暂留 `docs/prd/`）**：在 `docs/archive/prd/261120-w25-hardening-prd.md` 勾选全部 `C1..C7` 为 `[x]`（使 `evaluateMasterPrdClosure` 返回 `shouldHold: false`、`archivePrd: true`），此时**不提前归档**该 PRD，以免 `#115` `related_prd` 触发 `BROKEN_RELATED_LINK`。
 3. **随 `flow finalize` 原子共归档**：运行 `flow.mjs finalize --task w25-kernel-dedup`，自动勾选 `#115` 验收条并调用 `archiveCompletedDocsGroup` 将 `#115` SPEC（`status: implemented`）、`#115` Todo（`status: done`）与 `261120-w25-hardening-prd.md`（合法设为 `status: done`）原子共归档至 `docs/archive/`。
 4. **终态审计**：运行 `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit . --json` 验证仅剩 `docs/prd/261120-v10-1-hardening-pillars-docs-prd.md`、`#103`、`#104` 且零报错。
 
@@ -188,3 +188,9 @@ flowchart LR
 - 已定：统一内核放置于 `kit/skills/lib/`（`git-core.mjs`/`platform.mjs`/`static-gates.mjs`），严格满足 `arch-rules` 与零第三方依赖。
 - 已定：所有注释卫生规则严限 `--changed` + 基线棘轮与 `dev-edit`/`dev-govern`/`dev-review` 内聚实现，不新增第 9 skill 与独立 ADR 目录。
 - 已定：`bench.mjs` 彻底移除 `2.5x` CI 系数，默认与 `--strict-budget` 均按 1x 基准度量。
+
+## 实现说明
+
+
+- 实现提交基线: 7abcae236820e0d7a1d23b23db32f6b9d8881aab
+- 关联任务: w25-kernel-dedup

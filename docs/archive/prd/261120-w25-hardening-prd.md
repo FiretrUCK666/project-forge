@@ -1,17 +1,17 @@
 ---
 kind: prd
 title: Wave 2.5 收口总控：七片各治一类病根，门禁与真相单点化
-status: active
+status: done
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-22
 issue: null
 pr: null
 owner: plan-wave25
+plan_mode: interactive
 plan_critique: pending
 related_spec: null
 related_todo: null
 multi_spec: true
-plan_mode: interactive
 ---
 
 # Wave 2.5 收口总控 PRD

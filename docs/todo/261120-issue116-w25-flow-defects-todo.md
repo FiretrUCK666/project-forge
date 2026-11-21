@@ -3,7 +3,7 @@ kind: todo
 title: 流程缺陷收口实施清单：引用成一等对象、降级显式报出、未适用独立成档
 status: active
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-21
 issue: 116
 pr: null
 branch: fix/w25-flow-defects
@@ -16,7 +16,7 @@ related_prd: ../prd/261120-w25-hardening-prd.md
 related_spec: ../specs/261120-issue116-w25-flow-defects-spec.md
 plan_mode: interactive
 depends_on: []
-scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/dev-flow/scripts/flow-intake.mjs", "kit/skills/dev-flow/scripts/flow-inspect.mjs", "kit/skills/dev-flow/scripts/flow-batch.mjs", "kit/skills/dev-flow/scripts/flow-next.mjs", "kit/skills/dev-flow/scripts/flow.mjs", "kit/skills/dev-iterate/scripts/iterate-cycle.mjs", "kit/skills/dev-iterate/scripts/iterate.mjs", "kit/skills/dev-plan/scripts/doc-audit-repo.mjs", "kit/skills/dev-edit/scripts/edit-gate.mjs", "scripts/equip.mjs", "scripts/survey.mjs", "scripts/dev/fixtures-flow-defects.mjs"]
+scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/lib/cli.mjs", "kit/skills/lib/session-orient.mjs", "kit/skills/lib/empirical-artifacts.mjs", "kit/skills/lib/doc-slice-graph.mjs", "kit/skills/dev-flow/scripts/flow-intake.mjs", "kit/skills/dev-flow/scripts/flow-batch.mjs", "kit/skills/dev-flow/scripts/flow-merge.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs", "kit/skills/dev-flow/scripts/flow.mjs", "kit/skills/dev-iterate/scripts/iterate-cycle.mjs", "kit/skills/dev-plan/scripts/doc-audit-repo.mjs", "kit/skills/dev-plan/scripts/doc-audit.mjs", "kit/skills/dev-plan/scripts/doc-plan.mjs", "kit/skills/dev-review/scripts/review-empirical.mjs", "kit/skills/dev-review/scripts/review-pack.mjs", "kit/skills/dev-review/scripts/review-ledger.mjs", "kit/skills/dev-review/scripts/review-locks.mjs", "scripts/equip.mjs", "scripts/survey.mjs", "scripts/lib/agents-defaults.mjs", "scripts/lib/equip-bootstrap.mjs", "scripts/lib/merge3.mjs", "scripts/dev/fixtures-docs.mjs", "scripts/dev/fixtures-flow-defects.mjs", "scripts/dev/fixtures-empirical-cycle.mjs", "scripts/dev/fixtures-plan-wave-slices.mjs", "scripts/dev/fixtures-review-empirical.mjs", "scripts/dev/injections-data-flow-defects.mjs", "scripts/dev/injections-data-gates.mjs", "docs/TDD.md"]
 ---
 
 # `w25-flow-defects` 实施 Todo（Issue `#116`）
@@ -55,6 +55,7 @@ scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/dev-flow/scripts/fl
 - [ ] **T8（夹具）**：新增 `scripts/dev/fixtures-flow-defects.mjs` (new)，承接 `C1..C7` 每条的正反断言。
 - [ ] **T9（行数核对）**：逐文件核对 `.mjs <= 800` 行，重点 `flow-inspect.mjs` 与 `equip.mjs`；超限则把报出与格式化下沉到同目录辅助模块。
 - [ ] **T10（同步）**：`kit/` 改动后重跑 `node scripts/equip.mjs .` 刷新镜像；CLI 行为变化同提交同步对应技能文档与 `docs/TDD.md` 相关行。
+- [ ] **T11（`C8` Wave 2 五处遗留缺陷修复）**：修复 `review-empirical.mjs`/`review-pack.mjs`（`workspaceFingerprint`、结构化返回值与账本实证回查）、`flow-lifecycle.mjs`（`isExplicitNone` 透传与阻断、`hasVisualCheckFlag` 补全、precheck `reason`/`errors`）、`flow-lifecycle-helpers.mjs`/`empirical-artifacts.mjs`（`visual.headSha` 与 `sameClean` 合并过滤）、`doc-audit-repo.mjs`/`doc-slice-graph.mjs`（单源切片图覆盖与活跃 SPEC 过滤），并在 `fixtures-review-empirical.mjs`、`fixtures-empirical-cycle.mjs`、`fixtures-plan-wave-slices.mjs` 补齐正反双向夹具。
 
 ## 四、验收与合前检查
 

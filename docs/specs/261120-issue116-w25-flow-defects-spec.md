@@ -4,7 +4,7 @@ title: 流程缺陷收口：引用成一等对象、静默降级全部改为显�
 status: draft
 tier: L3
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-21
 issue: 116
 pr: null
 branch: fix/w25-flow-defects
@@ -18,7 +18,7 @@ high_risk_paths: [kit/, scripts/]
 task_id: w25-flow-defects
 plan_mode: interactive
 depends_on: []
-scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/dev-flow/scripts/flow-intake.mjs", "kit/skills/dev-flow/scripts/flow-inspect.mjs", "kit/skills/dev-flow/scripts/flow-batch.mjs", "kit/skills/dev-flow/scripts/flow-next.mjs", "kit/skills/dev-flow/scripts/flow.mjs", "kit/skills/dev-iterate/scripts/iterate-cycle.mjs", "kit/skills/dev-iterate/scripts/iterate.mjs", "kit/skills/dev-plan/scripts/doc-audit-repo.mjs", "kit/skills/dev-edit/scripts/edit-gate.mjs", "scripts/equip.mjs", "scripts/survey.mjs", "scripts/dev/fixtures-flow-defects.mjs"]
+scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/lib/cli.mjs", "kit/skills/lib/session-orient.mjs", "kit/skills/lib/empirical-artifacts.mjs", "kit/skills/lib/doc-slice-graph.mjs", "kit/skills/dev-flow/scripts/flow-intake.mjs", "kit/skills/dev-flow/scripts/flow-batch.mjs", "kit/skills/dev-flow/scripts/flow-merge.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs", "kit/skills/dev-flow/scripts/flow.mjs", "kit/skills/dev-iterate/scripts/iterate-cycle.mjs", "kit/skills/dev-plan/scripts/doc-audit-repo.mjs", "kit/skills/dev-plan/scripts/doc-audit.mjs", "kit/skills/dev-plan/scripts/doc-plan.mjs", "kit/skills/dev-review/scripts/review-empirical.mjs", "kit/skills/dev-review/scripts/review-pack.mjs", "kit/skills/dev-review/scripts/review-ledger.mjs", "kit/skills/dev-review/scripts/review-locks.mjs", "scripts/equip.mjs", "scripts/survey.mjs", "scripts/lib/agents-defaults.mjs", "scripts/lib/equip-bootstrap.mjs", "scripts/lib/merge3.mjs", "scripts/dev/fixtures-docs.mjs", "scripts/dev/fixtures-flow-defects.mjs", "scripts/dev/fixtures-empirical-cycle.mjs", "scripts/dev/fixtures-plan-wave-slices.mjs", "scripts/dev/fixtures-review-empirical.mjs", "scripts/dev/injections-data-flow-defects.mjs", "scripts/dev/injections-data-gates.mjs", "docs/TDD.md"]
 ---
 
 # 流程缺陷收口（Issue `#116`）
@@ -61,6 +61,7 @@ scope_files: ["kit/skills/lib/github-parse.mjs", "kit/skills/dev-flow/scripts/fl
 | `C4` | 反斜杠路径丢文件行号、三个输入通道静默丢弃/截断 | 路径归一后再解析；超出上限与解析失败都显式报出 |
 | `C5` | 非 JSON 模式丢输入、空跑落盘、未装套件仍打印套件命令 | 无法识别的输入显式报出；零工作量不落盘；正文与提示同一降级 |
 | `C6` | 审计对零文档报全部通过、门禁无参数报通过 | 「什么都没查」报未适用，退出码非零 |
+| `C8` | Wave 2（PR #111 / #112）5 处实证/生命周期/切片图缺陷 | 取消未定义变量崩溃、透传实证与陈旧清理、单源切片图审计 |
 <!-- section: goal-end -->
 
 ## 二、技术设计与接口契约
@@ -130,8 +131,15 @@ flowchart TD
 
 ### 2.7 行数与拆分
 
-- 本片所有改动都在既有文件内替换判据与报出方式，不新增职责。逐文件核对 `.mjs <= 800`，尤其 `kit/skills/dev-flow/scripts/flow-inspect.mjs`（现约 695 行）与 `scripts/equip.mjs`（现约 763 行）：任何一片超出上限，就把报出与格式化部分下沉到同目录辅助模块。
+- 本片所有改动都在既有文件内替换判据与报出方式，不新增职责。逐文件核对 `.mjs <= 800`，尤其 `kit/skills/dev-flow/scripts/flow-lifecycle.mjs`（现 787 行）与 `scripts/equip.mjs`（现 781 行）：任何一片超出上限，就把报出与格式化部分下沉到同目录辅助模块。
 - 新增夹具独立成文件，遵守 `scripts/dev/fixtures-*.mjs` 单文件单域约定。
+
+### 2.8 `C8` Wave 2（PR #111 / #112）5 处遗留缺陷收口
+
+- `kit/skills/dev-review/scripts/review-empirical.mjs` & `review-pack.mjs`：`evaluateIncludeDiffGate` 改用 `workspaceFingerprint` 并恒返回结构化对象（禁直接 `return emitGateBlock` 返回数字 `3`）；拦截前先核查 `evidence.json`（`evaluateStoredVisualEvidence`）与 `receipt` 存量实证。
+- `kit/skills/dev-flow/scripts/flow-lifecycle.mjs`：`isExplicitNone` 路径向 `recordVerifyEvidenceForFlow` 透传 `artifacts`/`visualCheckedRaw`/`visualBlockedReason` 并严格执行阻断返回值；`hasVisualCheckFlag` 补入 `opts.artifact` 与 `opts['visual-blocked-reason']`；precheck 阻断 JSON 输出真实 `reason`/`errors`。
+- `kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs` & `kit/skills/lib/empirical-artifacts.mjs`：`record: false` 路径同样绑定 `visual.headSha`，使 `BLOCKED_VISUAL_EVIDENCE_STALE` 生效；`carriedArtifacts` 调 `mergeArtifactRecords` 并按 `sameClean` 过滤跨 HEAD 陈旧附件。
+- `kit/skills/dev-plan/scripts/doc-audit-repo.mjs`、`doc-audit.mjs` & `kit/skills/lib/doc-slice-graph.mjs`：移除重复调用旧 `checkMasterPrdCoverage`（单源依赖 `evaluateSliceGraph`）；`checkSliceMetadata` 仅检查 `!s.done && !s.archived && s.kind === 'spec'`。
 <!-- section: design-end -->
 
 ## 三、门型评估与验收标准
@@ -156,7 +164,8 @@ flowchart TD
 - [ ] C4: 反斜杠路径与正斜杠路径解析出相同的文件与行号；缺摘要的门禁项被报出且仍按其语义推进；进度历史解析失败被报出且不返回空进度；轮次上限被截断时输出告警与实际上限值。反例：只补路径归一，三个通道照旧静默——另三条断言会红。
 - [ ] C5: 非 JSON 模式列出未被使用的输入；批量队列零条目时不产生落盘文件；未装套件目录里正文命令与降级提示同时降级，搜不到套件命令字样。反例：只改提示不改正文，于是同一条输出里两种口径并存。
 - [ ] C6: 对空目录审计输出「未适用」且退出码非零；对「有文档但不是受管文档」的目录也输出未适用并说明区别；改码门禁无目标文件时输出「未适用」且不返回通过档。反例：只把提示文案换成未适用而退出码仍是 0——脚本调用方照样把它当通过。
-- [ ] C7: 与立项单 `#113` 的关系已核对——同一问题判定与轮次收口那两处，本片全仓零改动；若该单已合入，相关夹具全绿即算本项完成；若未合入，本片输出中不含对该语义的第二份实现。反例：两片各写一套「同一问题」的判据，于是同一个阻塞项在两条链路上有两个结论。
+- [ ] C7: 与立项单 `#113` 的关系已核对——同一问题判定与轮次收口两处保留双方完整实现；相关夹具全绿。反例：简单覆盖掉 `#113` 的定位点同一性或三态收口语义。
+- [ ] C8: `UI_VISUAL_EXT_RE` diff 下 `review-pack` 未核验按合约阻断不抛 `ReferenceError`、已核验（含仅落盘 `evidence.json`/`receipt`）则放行；`flow verify` `explicit-none` 阻断裸 `--visual-checked` 且透传 `--artifact`/`--visual-blocked-reason` 绑定 `visual.headSha` 与 `visualVerifiedHead`、跨 HEAD 不携带旧附件；`auditRepoDocs` 不重复报 `UNCOVERED_ACCEPTANCE_CRITERIA` 且 `checkSliceMetadata` 不误伤 `todo`/已完成/已归档切片。反例：跨 HEAD 仍带旧附件或重复报两条缺失判据。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

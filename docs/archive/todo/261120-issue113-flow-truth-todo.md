@@ -7,7 +7,7 @@ updated: 2026-11-21
 issue: 113
 pr: 121
 branch: feat/flow-truth
-owner: FiretrUCK666
+owner: impl-113-r3
 plan_mode: interactive
 approved: false
 done_at: 2026-11-21

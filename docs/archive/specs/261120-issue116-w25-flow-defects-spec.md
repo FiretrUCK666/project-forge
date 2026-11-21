@@ -1,26 +1,26 @@
 ---
 kind: spec
 title: 流程缺陷收口：引用成一等对象、静默降级全部改为显式报出
-status: draft
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-21
 issue: 116
 pr: null
 branch: fix/w25-flow-defects
-owner: plan-wave25
+owner: impl-116
 plan_mode: interactive
-approved: false
-implemented: false
-plan_critique: "rejected (reviewer=critic-116, round=1, sha=3c9874d8bb68, summary=R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）)"
-critique_rounds: "[{\"round\":1,\"verdict\":\"rejected\",\"reviewerId\":\"critic-116\",\"sha\":\"3c9874d8bb68\",\"artifact_baseline\":{\"sha\":\"3c9874d8bb68d395b1feb92000902dc3ea8b7f297a90b12652e2f366b3885995\",\"shortSha\":\"3c9874d8bb68\",\"criteriaCount\":8,\"anchorCount\":62},\"summary\":\"R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）\",\"findings\":[\"R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）\"],\"stopLossTriggered\":false,\"stopLossReasons\":[],\"recordedAt\":\"2026-11-21T13:36:52.326Z\"}]"
-related_prd: ../prd/261120-w25-hardening-prd.md
+approved: true
+implemented: true
+plan_critique: "passed (reviewer=critic-116-r2, round=2, sha=1feb834f6266, summary=R2 核验通过：#424 四项 BLOCKER 已全消解，SPEC/Todo/diff/scope_files 完全对齐，critique-scope 60 项事实、flow-defects 16 项断言与 equip --check 全绿)"
+critique_rounds: "[{\"round\":1,\"verdict\":\"rejected\",\"reviewerId\":\"critic-116\",\"sha\":\"3c9874d8bb68\",\"artifact_baseline\":{\"sha\":\"3c9874d8bb68d395b1feb92000902dc3ea8b7f297a90b12652e2f366b3885995\",\"shortSha\":\"3c9874d8bb68\",\"criteriaCount\":8,\"anchorCount\":62},\"summary\":\"R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）\",\"findings\":[\"R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）\"],\"stopLossTriggered\":false,\"stopLossReasons\":[],\"recordedAt\":\"2026-11-21T13:36:52.326Z\"},{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-116-r2\",\"sha\":\"1feb834f6266\",\"artifact_baseline\":{\"sha\":\"1feb834f62666471cc21dca32e54c41dd6e68d50e022a77318b86aec7e4b25d5\",\"shortSha\":\"1feb834f6266\",\"criteriaCount\":8,\"anchorCount\":117},\"summary\":\"R2 核验通过：#424 四项 BLOCKER 已全消解，SPEC/Todo/diff/scope_files 完全对齐，critique-scope 60 项事实、flow-defects 16 项断言与 equip --check 全绿\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-21T13:44:57.944Z\"}]"
+related_prd: ../../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue116-w25-flow-defects-todo.md
 high_risk_paths: [kit/, scripts/]
 task_id: w25-flow-defects
 depends_on: []
 scope_files: [kit/skills/lib/github-parse.mjs, kit/skills/lib/cli.mjs, kit/skills/lib/session-orient.mjs, kit/skills/lib/empirical-artifacts.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/dev-flow/scripts/flow-intake.mjs, kit/skills/dev-flow/scripts/flow-batch.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-iterate/scripts/iterate-cycle.mjs, kit/skills/dev-plan/scripts/doc-audit-repo.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, scripts/equip.mjs, scripts/survey.mjs, scripts/lib/agents-defaults.mjs, scripts/lib/equip-bootstrap.mjs, scripts/lib/merge3.mjs, scripts/dev/fixtures-docs.mjs, scripts/dev/fixtures-flow-defects.mjs, scripts/dev/fixtures-empirical-cycle.mjs, scripts/dev/fixtures-plan-wave-slices.mjs, scripts/dev/fixtures-review-empirical.mjs, scripts/dev/injections-data-flow-defects.mjs, scripts/dev/injections-data-gates.mjs, docs/TDD.md]
-critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!`docs/archive/`\",\"!「未提及是否等于已解决」的账本语义**\",\"!任何「关掉检查」的开关\",\"!停损机制本身\",\"!工作树清理的确认闸与依赖解绑顺序\",\"!真幂等语义与写前快照语义\",\"!装配脚本的「受管区间 vs 手写区」边界\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C8\",\"JSON\",\"`#113`\",\"`C1`\",\"`C2`\",\"`C3`\",\"`C4`\",\"`C5`\",\"`C6`\",\"`C8`\",\"`docs/archive/`\"]},\"alternatives\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!变行为\",\"!自由度\",\"`#113`\",\"`kit/skills/lib/git-core.mjs`\",\"`kit/skills/lib/github-parse.mjs`\",\"`scripts/dev/fixtures.mjs`\",\"kit/skills/lib/git-core.mjs\",\"kit/skills/lib/github-parse.mjs\",\"scripts/dev/fixtures.mjs\"]}},\"anchors\":[\"!`docs/archive/`\",\"!「未提及是否等于已解决」的账本语义**\",\"!任何「关掉检查」的开关\",\"!停损机制本身\",\"!变行为\",\"!工作树清理的确认闸与依赖解绑顺序\",\"!正文\",\"!真幂等语义与写前快照语义\",\"!自由度\",\"!装配脚本的「受管区间 vs 手写区」边界\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C7\",\"C8\",\"HEAD\",\"JSON\",\"UI_VISUAL_EXT_RE\",\"UNCOVERED_ACCEPTANCE_CRITERIA\",\"`#113`\",\"`#N`\",\"`--apply`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`--visual-checked`\",\"`C1`\",\"`C2`\",\"`C3`\",\"`C4`\",\"`C5`\",\"`C6`\",\"`C8`\",\"`ReferenceError`\",\"`UI_VISUAL_EXT_RE`\",\"`UNCOVERED_ACCEPTANCE_CRITERIA`\",\"`auditRepoDocs`\",\"`checkSliceMetadata`\",\"`docs/archive/`\",\"`evidence.json`\",\"`explicit-none`\",\"`flow verify`\",\"`inspect`\",\"`intake`\",\"`kit/skills/lib/git-core.mjs`\",\"`kit/skills/lib/github-parse.mjs`\",\"`receipt`\",\"`review-pack`\",\"`scripts/dev/fixtures.mjs`\",\"`todo`\",\"`visual.headSha`\",\"`visualVerifiedHead`\",\"auditRepoDocs\",\"checkSliceMetadata\",\"evidence.json\",\"headSha\",\"kit/skills/lib/git-core.mjs\",\"kit/skills/lib/github-parse.mjs\",\"scripts/dev/fixtures.mjs\",\"visualVerifiedHead\"],\"coreSections\":[\"alternatives\",\"non-goals\"],\"pendingResolved\":9,\"pendingUnresolved\":0,\"criteriaCount\":8}"
+critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!`docs/archive/`\",\"!任何「关掉检查」的开关\",\"!停损机制本身\",\"!工作树清理的确认闸与依赖解绑顺序\",\"!改码门禁无目标退出码）\",\"!真幂等语义与写前快照语义\",\"!装配脚本的「受管区间 vs 手写区」边界\",\"!语义 |\",\"--help\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C8\",\"JSON\",\"`C1`\",\"`C2`\",\"`C3`\",\"`C4`\",\"`C5`\",\"`C6`\",\"`C8`\",\"`doc-audit-repo.mjs`\",\"`doc-plan.mjs`\",\"`docs/archive/`\",\"`flow.mjs --help`\",\"`isDocsOnlyByDocuments`\",\"`judgeCommentOutcome`\",\"`kit/skills/dev-edit/scripts/edit-gate.mjs`\",\"`merge3.mjs`\",\"`none`\",\"`parseFlowInputs`\",\"`review-ledger.mjs`\",\"`review-locks.mjs`\",\"doc-audit-repo.mjs\",\"doc-plan.mjs\",\"flow.mjs\",\"isDocsOnlyByDocuments\",\"judgeCommentOutcome\",\"kit/skills/dev-edit/scripts/edit-gate.mjs\",\"merge3.mjs\",\"parseFlowInputs\",\"review-ledger.mjs\",\"review-locks.mjs\"]},\"alternatives\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!变行为\",\"!自由度\",\"EXIT\",\"FACT\",\"`#113`\",\"`EXIT.FACT`\",\"`kit/skills/lib/git-core.mjs`\",\"`kit/skills/lib/github-parse.mjs`\",\"`scripts/dev/fixtures.mjs`\",\"kit/skills/lib/git-core.mjs\",\"kit/skills/lib/github-parse.mjs\",\"scripts/dev/fixtures.mjs\"]}},\"anchors\":[\"!`docs/archive/`\",\"!任何「关掉检查」的开关\",\"!停损机制本身\",\"!变行为\",\"!工作树清理的确认闸与依赖解绑顺序\",\"!改码门禁无目标退出码）\",\"!真幂等语义与写前快照语义\",\"!自由度\",\"!装配脚本的「受管区间 vs 手写区」边界\",\"!语义 |\",\"--help\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C7\",\"C8\",\"EXIT\",\"FACT\",\"HEAD\",\"JSON\",\"TDD\",\"UI_VISUAL_EXT_RE\",\"UNCOVERED_ACCEPTANCE_CRITERIA\",\"`#113`\",\"`#N`\",\"`--artifact`\",\"`--bootstrap-empty`\",\"`--visual-blocked-reason`\",\"`--visual-checked`\",\"`0`\",\"`3`\",\"`C1`\",\"`C2`\",\"`C3`\",\"`C4`\",\"`C5`\",\"`C6`\",\"`C8`\",\"`EXIT.FACT`\",\"`ReferenceError`\",\"`TDD`\",\"`UI_VISUAL_EXT_RE`\",\"`UNCOVERED_ACCEPTANCE_CRITERIA`\",\"`auditRepoDocs`\",\"`await`\",\"`checkSliceMetadata`\",\"`cli.mjs`\",\"`delegated`\",\"`doc-audit-repo.mjs`\",\"`doc-plan.mjs`\",\"`docs/TDD.md`\",\"`docs/archive/`\",\"`evidence.json`\",\"`explicit-none`\",\"`fixtures-docs.mjs`\",\"`fixtures-flow-truth.mjs`\",\"`flow verify`\",\"`flow-merge.mjs`\",\"`flow.mjs --help`\",\"`inputs.unknown`\",\"`inspect`\",\"`intake`\",\"`isDocsOnlyByDocuments`\",\"`iterate-cycle.mjs`\",\"`judgeCommentOutcome`\",\"`judgeCrossRepoReference`\",\"`kit/skills/dev-edit/scripts/edit-gate.mjs`\",\"`kit/skills/lib/git-core.mjs`\",\"`kit/skills/lib/github-parse.mjs`\",\"`merge-queue`\",\"`merge3.mjs`\",\"`none`\",\"`ok !== true`\",\"`parseFlowInputs`\",\"`pass`\",\"`receipt`\",\"`review-ledger.mjs`\",\"`review-locks.mjs`\",\"`review-pack`\",\"`scripts/dev/fixtures.mjs`\",\"`session-orient.mjs`\",\"`todo`\",\"`unknown`\",\"`unmentionedFromPrev`\",\"`visual.headSha`\",\"`visualVerifiedHead`\",\"`warnings`\",\"auditRepoDocs\",\"checkSliceMetadata\",\"cli.mjs\",\"doc-audit-repo.mjs\",\"doc-plan.mjs\",\"docs/TDD.md\",\"evidence.json\",\"fixtures-docs.mjs\",\"fixtures-flow-truth.mjs\",\"flow-merge.mjs\",\"flow.mjs\",\"headSha\",\"isDocsOnlyByDocuments\",\"iterate-cycle.mjs\",\"judgeCommentOutcome\",\"judgeCrossRepoReference\",\"kit/skills/dev-edit/scripts/edit-gate.mjs\",\"kit/skills/lib/git-core.mjs\",\"kit/skills/lib/github-parse.mjs\",\"merge3.mjs\",\"parseFlowInputs\",\"review-ledger.mjs\",\"review-locks.mjs\",\"scripts/dev/fixtures.mjs\",\"session-orient.mjs\",\"unmentionedFromPrev\",\"visualVerifiedHead\"],\"coreSections\":[\"alternatives\",\"non-goals\"],\"pendingResolved\":5,\"pendingUnresolved\":0,\"criteriaCount\":8}"
 critique_findings: "1|must|R1 发现 4 处文档与真实实现不一致（C3/C6/非目标/遗漏 flow-merge 与注入对齐）"
 ---
 
@@ -135,21 +135,21 @@ flowchart TD
   - `node scripts/dev/fixtures.mjs --domain flow-defects`
   - `node scripts/dev/preflight.mjs`
   - `node scripts/dev/verify-injections.mjs --jobs 4`
-  - `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit docs/specs/261120-issue116-w25-flow-defects-spec.md --json`
+  - `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit docs/archive/specs/261120-issue116-w25-flow-defects-spec.md --json`
 <!-- section: gates-end -->
 
 <!-- section: acceptance -->
 ### 验收标准（正例 / 反例双向可判定）
 
 <!-- criteria:start -->
-- [ ] C1: 本地已存在同号单据、引用指向另一个仓库时，`judgeCrossRepoReference` 判为跨仓并在写操作前阻断；引用为裸号或 `#N` 时按本地处理；`inspect` 与 `intake` 共用 `parseFlowInputs`。反例：只打告警仍继续写入。
-- [ ] C2: 校验与写入共用 `merge3.mjs` 六值枚举，拒绝输出三种合法处置且两条路径对非同步非豁免均退 `3`。反例：写入路径对冲突退 `0`。
-- [ ] C3: 单一说明文件仓由 `isDocsOnlyByDocuments` 判保留 `docs/TDD.md`、多文档才判纯文档；零提交报「尚未首次提交」；`--bootstrap-empty` 落首次提交；`unknown`+0 代码收口 Dev Profile 为 `none`。反例：仍用提交数阈值或跳过 `TDD`。
-- [ ] C4: `review-locks.mjs` 归一正反斜杠并识别中文行号，定位点相交才同项；`review-ledger.mjs` 保留 `unmentionedFromPrev`；`iterate-cycle.mjs` 三通道进 `warnings`。反例：跨行合并或 `pass` 批量置已解决。
-- [ ] C5: 非 JSON 列出 `inputs.unknown`；`merge-queue` 零工作量不落盘；未装套件时 `cli.mjs` 与 `session-orient.mjs` 同步降级正文；`flow-merge.mjs` `judgeCommentOutcome` 对 `ok !== true`（含 `delegated`）报未发出与补发命令。反例：裸 `await` 吞掉失败。
-- [ ] C6: 对空目录或非受管文档目录审计输出「未适用」且退出码非零，有受管文档全通过仍退 `0`。反例：空目录退 `0`。
-- [ ] C7: 与立项单 `#113` 的交集文件保留双方完整逻辑，`fixtures-docs.mjs` 与 `fixtures-flow-truth.mjs` 全绿。反例：用旧版简单覆盖 `#113` 逻辑。
-- [ ] C8: `UI_VISUAL_EXT_RE` diff 下 `review-pack` 未核验按合约阻断不抛 `ReferenceError`、已核验（含仅落盘 `evidence.json`/`receipt`）则放行；`flow verify` `explicit-none` 阻断裸 `--visual-checked` 且透传 `--artifact`/`--visual-blocked-reason` 绑定 `visual.headSha` 与 `visualVerifiedHead`、跨 HEAD 不携带旧附件；`auditRepoDocs` 不重复报 `UNCOVERED_ACCEPTANCE_CRITERIA` 且 `checkSliceMetadata` 不误伤 `todo`/已完成/已归档切片。反例：跨 HEAD 仍带旧附件或重复报两条缺失判据。
+- [x] C1: 本地已存在同号单据、引用指向另一个仓库时，`judgeCrossRepoReference` 判为跨仓并在写操作前阻断；引用为裸号或 `#N` 时按本地处理；`inspect` 与 `intake` 共用 `parseFlowInputs`。反例：只打告警仍继续写入。
+- [x] C2: 校验与写入共用 `merge3.mjs` 六值枚举，拒绝输出三种合法处置且两条路径对非同步非豁免均退 `3`。反例：写入路径对冲突退 `0`。
+- [x] C3: 单一说明文件仓由 `isDocsOnlyByDocuments` 判保留 `docs/TDD.md`、多文档才判纯文档；零提交报「尚未首次提交」；`--bootstrap-empty` 落首次提交；`unknown`+0 代码收口 Dev Profile 为 `none`。反例：仍用提交数阈值或跳过 `TDD`。
+- [x] C4: `review-locks.mjs` 归一正反斜杠并识别中文行号，定位点相交才同项；`review-ledger.mjs` 保留 `unmentionedFromPrev`；`iterate-cycle.mjs` 三通道进 `warnings`。反例：跨行合并或 `pass` 批量置已解决。
+- [x] C5: 非 JSON 列出 `inputs.unknown`；`merge-queue` 零工作量不落盘；未装套件时 `cli.mjs` 与 `session-orient.mjs` 同步降级正文；`flow-merge.mjs` `judgeCommentOutcome` 对 `ok !== true`（含 `delegated`）报未发出与补发命令。反例：裸 `await` 吞掉失败。
+- [x] C6: 对空目录或非受管文档目录审计输出「未适用」且退出码非零，有受管文档全通过仍退 `0`。反例：空目录退 `0`。
+- [x] C7: 与立项单 `#113` 的交集文件保留双方完整逻辑，`fixtures-docs.mjs` 与 `fixtures-flow-truth.mjs` 全绿。反例：用旧版简单覆盖 `#113` 逻辑。
+- [x] C8: `UI_VISUAL_EXT_RE` diff 下 `review-pack` 未核验按合约阻断不抛 `ReferenceError`、已核验（含仅落盘 `evidence.json`/`receipt`）则放行；`flow verify` `explicit-none` 阻断裸 `--visual-checked` 且透传 `--artifact`/`--visual-blocked-reason` 绑定 `visual.headSha` 与 `visualVerifiedHead`、跨 HEAD 不携带旧附件；`auditRepoDocs` 不重复报 `UNCOVERED_ACCEPTANCE_CRITERIA` 且 `checkSliceMetadata` 不误伤 `todo`/已完成/已归档切片。反例：跨 HEAD 仍带旧附件或重复报两条缺失判据。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -178,3 +178,9 @@ flowchart TD
 - 已定：`review-locks.mjs` 定位点交集 + `review-ledger.mjs` 三态收口；`iterate-cycle.mjs` 三通道进 `warnings`。
 - 已定：零工作量不落盘；`cli.mjs` 与 `session-orient.mjs` 同降级；`judgeCommentOutcome` 读返回值；`doc-audit-repo.mjs` 零目标报未适用；Wave 2 五处缺陷同分支修复并配正反夹具。
 <!-- section: pending-end -->
+
+## 实现说明
+
+- 实现提交基线: a3ee4c1f12a53e5ec60e5ecdf34cfc16d955eb7d
+- 关联任务: w25-flow-defects
+- 实施摘要: 合并保留 `#113` 与 `#116` 全部逻辑并同分支修复 Wave 2 五处实证/生命周期/切片图遗留缺陷，补齐双向夹具与 `I310–I316`/`I131` 故障注入，完成 `equip.mjs .` 同步。

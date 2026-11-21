@@ -21,6 +21,7 @@ import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } fro
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { buildMultiTaskWavePlan, evaluateNextState, hasRepoCiWorkflow, scanUnstartedReadySlices } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
 import { assertPreMergeGates } from './flow-merge.mjs'
@@ -341,24 +342,11 @@ async function handleMergeQueue(opts, roots) {
       if (needsOnlineRemoteMerge && gate.currentHead) {
         const checks = await backend.getCommitChecks({ repo: originFull, ref: gate.currentHead })
         const ciRequired = hasRepoCiWorkflow(gate.implRoot)
-        let ciBlock = null
-        if (checks?.ok) {
-          if (checks.bucket === 'fail' && !opts['human-approved']) {
-            const list = (checks.failed ?? []).map((c) => `${c.name}[${c.state}]`).join(', ')
-            ciBlock = { code: 'BLOCKED_CI_FAILED', msg: `BLOCKED_CI_FAILED: 当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 检查未通过（${list}），禁止带病合并。` }
-          } else if (checks.bucket === 'pending' && !opts['human-approved']) {
-            const list = (checks.pending ?? []).map((c) => `${c.name}[${c.state}]`).join(', ')
-            ciBlock = { code: 'BLOCKED_CI_PENDING', msg: `BLOCKED_CI_PENDING: 当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 仍在运行或排队（${list}），请等待全部变绿后再执行 merge。` }
-          } else if (checks.bucket === 'none' && ciRequired && !opts['human-approved']) {
-            ciBlock = { code: 'BLOCKED_CI_PENDING', msg: `BLOCKED_CI_PENDING: 仓库存在检查工作流，但当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端尚未注册 check-run，请等待检查变绿后再执行 merge。` }
-          }
-        } else if (checks && !checks.skipped && ciRequired && !opts['human-approved']) {
-          ciBlock = { code: 'BLOCKED_CI_UNVERIFIED', msg: `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。` }
-        }
-        if (ciBlock) {
+        const verdict = evaluateRemoteChecks(checks, { ciRequired, headSha: gate.currentHead })
+        if (verdict.blocking && !opts['human-approved']) {
           queue.unshift(taskId)
-          process.stderr.write(`${ciBlock.msg}\n`)
-          results.push({ taskId, ok: false, blocked: true, code: ciBlock.code, exitCode: EXIT_POLICY_BLOCK, checks })
+          process.stderr.write(`${verdict.message}\n`)
+          results.push({ taskId, ok: false, blocked: true, code: verdict.code, exitCode: EXIT_POLICY_BLOCK, checks })
           stoppedWithFailure = true
           exitCode = EXIT_POLICY_BLOCK
           break

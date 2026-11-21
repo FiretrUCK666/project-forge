@@ -11,6 +11,7 @@ import { resolve } from 'node:path'
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMergeComments, formatAttribution } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
+import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { hasExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
@@ -263,23 +264,12 @@ export async function handleMerge(opts, roots) {
         return { exitCode: EXIT_POLICY_BLOCK }
       }
       if (checks?.ok) {
-        if (checks.bucket === 'fail' && !opts['human-approved']) {
-          const list = checks.failed.map((c) => `${c.name}[${c.state}]`).join(', ')
-          return ciBlock('BLOCKED_CI_FAILED', `BLOCKED_CI_FAILED: 当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 检查未通过（${list}），禁止带病合并。`)
-        }
-        if (checks.bucket === 'pending' && !opts['human-approved']) {
-          const list = checks.pending.map((c) => `${c.name}[${c.state}]`).join(', ')
-          return ciBlock('BLOCKED_CI_PENDING', `BLOCKED_CI_PENDING: 当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 仍在运行或排队（${list}），请等待全部变绿后再执行 merge。`)
-        }
-        if (checks.bucket === 'none' && ciRequired && !opts['human-approved']) {
-          return ciBlock('BLOCKED_CI_PENDING', `BLOCKED_CI_PENDING: 仓库存在检查工作流，但当前 HEAD (${currentHead.slice(0, 7)}) 远端尚未注册 check-run，请等待检查变绿后再执行 merge。`)
-        }
-        if (checks.bucket === 'unknown' && ciRequired && !opts['human-approved']) {
-          const warnList = (checks.warnings ?? []).join(', ') || 'unknown'
-          return ciBlock('BLOCKED_CI_UNVERIFIED', `BLOCKED_CI_UNVERIFIED: 无法完整核验当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 状态（${warnList}），拒绝盲目合并。`)
-        }
+        const verdict = evaluateRemoteChecks(checks, { ciRequired, headSha: currentHead })
+        if (verdict.blocking && !opts['human-approved']) return ciBlock(verdict.code, verdict.message)
       } else if (checks && !checks.skipped && ciRequired && !opts['human-approved']) {
-        return ciBlock('BLOCKED_CI_UNVERIFIED', `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。`)
+        const verdict = evaluateRemoteChecks(checks, { ciRequired, headSha: currentHead })
+        return ciBlock(verdict.code ?? 'BLOCKED_CI_UNVERIFIED', verdict.message
+          ?? `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。`)
       }
     }
     try {

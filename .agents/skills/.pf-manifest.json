@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T02:56:54.059Z",
+  "installedAt": "2026-11-21T02:59:49.763Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -22,7 +22,7 @@
       "sha256": "a83c8da68082c1c3feae17d1784bf50ff4a5cc98d8facf39bf213aa7568744bf"
     },
     "dev-flow/scripts/flow-batch.mjs": {
-      "sha256": "61222d88273c6450f835a75f4882d6f86749daadbb6a9832bf47d9619db9f7aa"
+      "sha256": "721f703bdbf2f1c80bde4db4ea90e4312fa71a3126900fc7af7b8275de01c4e0"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
       "sha256": "aba68eaf49691f3af492e9dde40a0e19129940581187b8a1480d79ebc56c2d4b"
@@ -52,7 +52,7 @@
       "sha256": "bbd75b24b1c78b2fb960ceac5d3b022a27f5276cb735bf1866980b2729dcbd23"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "4ee6ea940937e47755d4e87cfee751ddcf86807612303cd26f7947b67ec0a530"
+      "sha256": "3d67b2671d81c81cefea7eb2565e82b65921bf90ccbf9aaa10752fda986a7aa3"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "df41f455b1a4c3f86e7cbf2beae8cfeea04c1dac676d0fa2ab67894aaaaec1e4"
@@ -247,7 +247,7 @@
       "sha256": "94acec09609cd5fd14e2f52d643fc55d8d7f4803454136c232f2bb65b64a90e0"
     },
     "lib/gate-truth.mjs": {
-      "sha256": "6836028bba67ecde81b69387bd6a1b55f5ca065dd88d6b3e1689f5fb0a4cb8a0"
+      "sha256": "6d29732f5ca542163b143d9bac8e67b909d5fd9c4e174484e3c3722bfbdd4e09"
     },
     "lib/git-core.mjs": {
       "sha256": "1802ee6931ceca7cac7a335c1b4b698ad5ae0b5332962d055e0794dee394ab27"

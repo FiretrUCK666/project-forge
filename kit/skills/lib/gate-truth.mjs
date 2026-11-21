@@ -304,3 +304,77 @@ export function formatMergeGate(gate) {
   for (const s of gate.skippedFiles ?? []) lines.push(`  未采纳 ${s.file}：${s.reason}`)
   return lines
 }
+
+/**
+ * 远端检查的判定结论。互斥五档，`pending` 与 `unverified` 都不是通过。
+ *
+ * `NOT_REQUIRED` 只在「仓库根本没有检查工作流」时给——此时没有对象可判，
+ * 与「有工作流但一条 check-run 都没注册」是两件事，后者必须阻断。
+ */
+export const REMOTE_CHECK_VERDICT = Object.freeze({
+  PASSED: 'passed',
+  FAILED: 'failed',
+  PENDING: 'pending',
+  UNVERIFIED: 'unverified',
+  NOT_REQUIRED: 'not-required',
+})
+
+/**
+ * 远端必过检查的**唯一判定点**：合并入口与批量队列都调这里。
+ *
+ * 两处各写一份状态分桶，必然会漂移——事实上已经漂了：合并入口认四类桶加未知态，
+ * 批量队列只认三类，于是同一份检查在两条路上给出不同结论，而没有任何东西会报错。
+ *
+ * `humanApproved` 不在这里判：函数只回答「事实是什么」，能不能越过由调用点决定。
+ */
+export function evaluateRemoteChecks(checks, { ciRequired = false, headSha = null } = {}) {
+  const short = headSha ? String(headSha).slice(0, 7) : 'unknown'
+  const list = (arr) => (Array.isArray(arr) ? arr : []).map((c) => `${c.name}[${c.state}]`).join(', ')
+  const notRequired = { verdict: REMOTE_CHECK_VERDICT.NOT_REQUIRED, blocking: false, code: null, message: null }
+
+  if (!checks || checks.skipped) return notRequired
+  if (!checks.ok) {
+    if (!ciRequired) return notRequired
+    return {
+      verdict: REMOTE_CHECK_VERDICT.UNVERIFIED,
+      blocking: true,
+      code: 'BLOCKED_CI_UNVERIFIED',
+      message: `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${short}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。`,
+    }
+  }
+
+  switch (checks.bucket) {
+    case 'pass':
+      return { verdict: REMOTE_CHECK_VERDICT.PASSED, blocking: false, code: null, message: null }
+    case 'fail':
+      return {
+        verdict: REMOTE_CHECK_VERDICT.FAILED,
+        blocking: true,
+        code: 'BLOCKED_CI_FAILED',
+        message: `BLOCKED_CI_FAILED: 当前 HEAD (${short}) 远端 CI 检查未通过（${list(checks.failed)}），禁止带病合并。`,
+      }
+    case 'pending':
+      return {
+        verdict: REMOTE_CHECK_VERDICT.PENDING,
+        blocking: true,
+        code: 'BLOCKED_CI_PENDING',
+        message: `BLOCKED_CI_PENDING: 当前 HEAD (${short}) 远端 CI 仍在运行或排队（${list(checks.pending)}），请等待全部变绿后再执行 merge。`,
+      }
+    case 'none':
+      if (!ciRequired) return notRequired
+      return {
+        verdict: REMOTE_CHECK_VERDICT.PENDING,
+        blocking: true,
+        code: 'BLOCKED_CI_PENDING',
+        message: `BLOCKED_CI_PENDING: 仓库存在检查工作流，但当前 HEAD (${short}) 远端尚未注册 check-run，请等待检查变绿后再执行 merge。`,
+      }
+    default:
+      if (!ciRequired) return notRequired
+      return {
+        verdict: REMOTE_CHECK_VERDICT.UNVERIFIED,
+        blocking: true,
+        code: 'BLOCKED_CI_UNVERIFIED',
+        message: `BLOCKED_CI_UNVERIFIED: 无法完整核验当前 HEAD (${short}) 远端 CI 状态（${(checks.warnings ?? []).join(', ') || 'unknown'}），拒绝盲目合并。`,
+      }
+  }
+}

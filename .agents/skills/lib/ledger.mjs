@@ -185,6 +185,7 @@ export function createDefaultLedger(partial = {}) {
     prNumber: partial.prNumber ?? null,
     prState: partial.prState ?? null,
     prUrl: partial.prUrl ?? null,
+    prTitleSource: partial.prTitleSource ?? null,
     prContext: partial.prContext && typeof partial.prContext === 'object' && !Array.isArray(partial.prContext)
       ? partial.prContext
       : null,

@@ -12,9 +12,9 @@ import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-f
 import { gitRun, posixPath, readTextSafe } from './git.mjs'
 import { resolveRefShaFast } from './git-fast.mjs'
 import { parseBodyRelations } from './platform.mjs'
-import { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle } from './pr-template-hydrate.mjs'
+import { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle, resolveReadablePrTitleWithSource } from './pr-template-hydrate.mjs'
 
-export { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle }
+export { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle, resolveReadablePrTitleWithSource }
 
 const DIAGNOSTIC_SECRET_PATTERNS = [
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}\b/g,

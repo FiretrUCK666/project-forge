@@ -26,7 +26,7 @@ import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
   buildSubmitNextSteps, determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
-  readVerificationEvidence, redactDiagnosticText, resolveEffectiveBaseSha, resolveReadablePrTitle,
+  readVerificationEvidence, redactDiagnosticText, resolveEffectiveBaseSha, resolveReadablePrTitleWithSource,
   runLowRiskDocStaticCheck, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
@@ -734,7 +734,8 @@ export async function handleSubmit(opts, roots) {
     }
     await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework })
   } else {
-    const title = resolveReadablePrTitle(implRoot, ledger, opts.title)
+    const { title, titleSource } = resolveReadablePrTitleWithSource(implRoot, ledger, opts.title)
+    ledger.prTitleSource = titleSource
     // 提案正文由账本与模板确定性生成，不接受整段替换：正文里排着的实证上下文
     // （验证绑定哪个 HEAD、门禁跑过什么、界面核验观测到什么）都能从账本读出来。
     // 一旦允许传 `--body`，实证栏就成了自由发挥——它显示「他说的」，不是「记录里的」。

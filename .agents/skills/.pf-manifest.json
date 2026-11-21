@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T02:34:38.781Z",
+  "installedAt": "2026-11-21T02:39:46.934Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -49,7 +49,7 @@
       "sha256": "9bdc3d70eeea273653cc74daa4038be6656bc4d3ad210b64b8d1050584d4714a"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "fc154d8a9bc46bb16b79bcf9e85b871d7438b3ece166f05041c672f2e5036749"
+      "sha256": "76cf30b0a986c2be9987b2bc3868d4f283c9514a5f497443df221d9f38506b2f"
     },
     "dev-flow/scripts/flow-merge.mjs": {
       "sha256": "4ee6ea940937e47755d4e87cfee751ddcf86807612303cd26f7947b67ec0a530"
@@ -286,7 +286,7 @@
       "sha256": "f9002f9e6ba03679fb8dd19752b0c1b6d3812967cb8340550d8aae85533ed16a"
     },
     "lib/ledger.mjs": {
-      "sha256": "1354c2cd28a243fec3c70ca6dae40f0ed4546656f5ee7d2da5319ce6304ae7aa"
+      "sha256": "8cdc4d91bb0dfd2dd553d6c0b4b9b281dd65611ab2b76c3c36a9cf8da7a27ef6"
     },
     "lib/local-issues.mjs": {
       "sha256": "7f55a4729534cf314796d4121ac98175e5ed5140c9fd9f52f4c382dbf335ca3e"
@@ -379,10 +379,10 @@
       "sha256": "c5db8f8c7594ead9730ecae41e9def732f9a09bb8e7ccf70a637cfaf678d17fb"
     },
     "lib/workflow-helpers.mjs": {
-      "sha256": "108e197f2444a4890d7fff9515256bd86ba519548b9a07ea0e70ec92e5b1de70"
+      "sha256": "32870e03844423a317675402490da59e58604632d044ec89a7d0e89cb42e4010"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "ee7bdcbd5a3248e6a7a06fa8972a9268623436490d4b44c5942340375f7d8ccb"
+      "sha256": "52e93993efe5dd87370f8145c7d4e27b50464c86bbccd87aff3911a56a39770e"
     },
     "templates/docs-prd.md": {
       "sha256": "7e8b29b9a129f29d1777e7b6885ddfa06e9c2f533ba59435cd416ed60598869e"

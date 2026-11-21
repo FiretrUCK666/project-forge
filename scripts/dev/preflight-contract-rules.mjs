@@ -51,6 +51,15 @@ export const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注�
 export const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m
 export const ACCEPTANCE_ID_SITES = ['kit/skills/templates/docs-todo.md', 'kit/skills/templates/docs-spec.md']
 
+/**
+ * 兜底正文的分节标题必须与真实模板同一批词。
+ *
+ * 模板缺段时，派生正文用 `pr-template-hydrate.mjs` 里的 `PR_SECTION_TITLES` 兜底。
+ * 两份各写一套，就会出现「模板换了说法、兜底还用旧说法」——同一个 PR 里两段标题不一样，
+ * 读的人分不清哪份是准的。所以按标题逐个对拍：模板里有的，必须与常量同名。
+ */
+export const PR_TEMPLATE_TITLE_SITES = ['.github/pull_request_template.md', 'templates/pull-request-template.md']
+
 export const FINISH_ANCHOR = /合并收尾/
 export const FINISH_STEPS = [
   /把要写的东西写完/,

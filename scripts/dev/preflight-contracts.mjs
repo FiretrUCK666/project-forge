@@ -19,6 +19,7 @@ import {
   GATE_COMMANDS,
   MERGE_AUTHORITY_DOCS,
   PUSH_TIER_DOCS,
+  PR_TEMPLATE_TITLE_SITES,
   PUSH_TIER_RULE,
   REVIEW_FIELDS,
   SINGLE_SOURCE_RULES,
@@ -374,6 +375,45 @@ function checkSingleSources({ ROOT, readText, fail, note }) {
   note(`单一真相源：${SINGLE_SOURCE_RULES.length} 组跨文件判据 + 工作流对拍 + 权限声明，全部一致`)
 }
 
+/**
+ * 兜底正文的分节标题与真实模板必须同名。
+ *
+ * 模板缺段时，派生正文用 `pr-template-hydrate.mjs` 的 `PR_SECTION_TITLES` 兜底。
+ * 两份各写一套，模板换了说法兜底不知道，同一个 PR 里就会有两种标题——读的人分不清哪份准。
+ *
+ * 判据：常量里的每个标题，都必须在模板里作为二级标题真实存在。模板改名而常量没跟上，
+ * 这一条就会红——而「模板改名」恰恰是不跑这个 PR、只看代码时发现不了的那类改动。
+ */
+function checkPrTemplateTitles({ ROOT, readText, fail, note }) {
+  const constPath = join(ROOT, 'kit/skills/lib/pr-template-hydrate.mjs')
+  if (!existsSync(constPath)) { fail('兜底分节标题对拍：缺 kit/skills/lib/pr-template-hydrate.mjs'); return }
+  const src = readText(constPath)
+  const block = /PR_SECTION_TITLES\s*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/.exec(src)?.[1] ?? ''
+  const titles = [...block.matchAll(/:\s*'([^']+)'/g)].map((m) => m[1])
+  if (titles.length === 0) { fail('兜底分节标题对拍：PR_SECTION_TITLES 里读不出一条标题'); return }
+
+  const allHeadings = new Map()
+  for (const site of PR_TEMPLATE_TITLE_SITES) {
+    const abs = join(ROOT, site)
+    if (!existsSync(abs)) { fail(`兜底分节标题对拍：缺 ${site}`); continue }
+    const set = new Set()
+    for (const line of readText(abs).replace(/\r\n/g, '\n').split('\n')) {
+      const h = /^##\s+(.+?)\s*$/.exec(line)?.[1]
+      if (h) set.add(h)
+    }
+    allHeadings.set(site, set)
+  }
+  // 逐份核，不取并集：两份模板里只要有一份改了名，并集会被另一份盖住，检查就成了摆设。
+  for (const [site, headings] of allHeadings) {
+    const missing = titles.filter((t) => !headings.has(t))
+    if (missing.length > 0) {
+      fail(`${site} 里找不到与常量同名的二级标题「${missing.join('、')}」——`
+        + '模板改过名而 PR_SECTION_TITLES 没跟上，派生正文会与模板出现两种说法')
+    }
+  }
+  note(`兜底分节标题对拍：${titles.length} 个标题在 ${allHeadings.size} 处模板里逐份都能找到同名二级标题`)
+}
+
 function checkReviewContract({ ROOT, readText, fail, note }) {
   for (const site of ['templates/pull-request-template.md', '.github/pull_request_template.md', 'references/collaboration.md']) {
     const path = join(ROOT, site)
@@ -509,6 +549,7 @@ export async function runContractChecks(ctx) {
   await checkGapCoverage(ctx)
   checkPushSemantics(ctx)
   checkSingleSources(ctx)
+  checkPrTemplateTitles(ctx)
   checkReviewContract(ctx)
   checkStarterLanguageCoverage(ctx)
   checkWorkflowLifecycleContracts(ctx)

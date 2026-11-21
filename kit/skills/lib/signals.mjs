@@ -6,9 +6,9 @@
  * 读旧无指纹历史条目时实时补全虚拟指纹，兼容既有账本。
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { canonicalPath, posixPath, readTextSafe, sha256Text, withFileLock } from './git.mjs'
 
@@ -139,8 +139,36 @@ export function resolveGovernStateDir(mainRoot, gitDir = null, isGit = Boolean(g
   return join(tmpdir(), 'project-forge-govern', hash)
 }
 
-/** 读取并解析 `signals.jsonl`（跳过空行与半写入损坏行；旧条目读时实时补全虚拟指纹）。 */
-export function readSignalsJsonl(stateDirOrRoots) {
+function resolveWorktreeBranchFast(rootDir) {
+  if (!rootDir) return null
+  try {
+    const dotGit = join(rootDir, '.git')
+    if (!existsSync(dotGit)) return null
+    let gitDir = dotGit
+    if (statSync(dotGit).isFile()) {
+      const ptr = readTextSafe(dotGit) ?? ''
+      const m = /^gitdir:\s*(.+)$/im.exec(ptr)
+      if (!m) return null
+      gitDir = resolve(dirname(dotGit), m[1].trim())
+    }
+    const head = (readTextSafe(join(gitDir, 'HEAD')) ?? '').trim()
+    const refM = /^ref:\s*refs\/heads\/(.+)$/.exec(head)
+    return refM ? refM[1].trim() : null
+  } catch {
+    return null
+  }
+}
+
+function worktreeMatches(evWt, filterWt) {
+  if (!filterWt) return true
+  if (!evWt) return false
+  const a = posixPath(String(evWt)).replace(/\/+$/, '')
+  const b = posixPath(String(filterWt)).replace(/\/+$/, '')
+  return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
+}
+
+/** 读取并解析 `signals.jsonl`（支持按 `{ taskId, branch, worktree }` 隔离过滤）。 */
+export function readSignalsJsonl(stateDirOrRoots, filter = {}) {
   const stateDir = typeof stateDirOrRoots === 'string'
     ? stateDirOrRoots
     : resolveGovernStateDir(stateDirOrRoots?.mainRoot, stateDirOrRoots?.gitDir, stateDirOrRoots?.isGit ?? Boolean(stateDirOrRoots?.gitDir))
@@ -148,12 +176,20 @@ export function readSignalsJsonl(stateDirOrRoots) {
   if (!existsSync(signalsPath)) return { signalsPath, events: [] }
   const text = readTextSafe(signalsPath, 8 * 1024 * 1024) ?? ''
   const events = []
+  const wantTask = filter?.taskId ? String(filter.taskId).trim() : null
+  const wantBranch = filter?.branch ? String(filter.branch).trim() : null
+  const wantWorktree = filter?.worktree ? String(filter.worktree).trim() : null
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
     try {
       const obj = JSON.parse(trimmed)
-      if (obj && typeof obj === 'object') events.push(enrichSignalEvent(obj))
+      if (!obj || typeof obj !== 'object') continue
+      const ev = enrichSignalEvent(obj)
+      if (wantTask && ev.taskId !== wantTask) continue
+      if (wantBranch && ev.branch !== wantBranch) continue
+      if (wantWorktree && !worktreeMatches(ev.worktree, wantWorktree)) continue
+      events.push(ev)
     } catch { /* ignore corrupt partial line */ }
   }
   return { signalsPath, events }
@@ -183,6 +219,9 @@ export async function appendGovernSignal(opts = {}) {
     message = '',
     note = '',
     taskId = null,
+    branch = null,
+    worktree = null,
+    workRoot = null,
     round = null,
     verdict = null,
     meta = null,
@@ -210,6 +249,11 @@ export async function appendGovernSignal(opts = {}) {
     || computeSignalFingerprint({ ruleId: finalRuleId, pattern: finalPattern, defectClass: finalDefectClass, moduleRoot: moduleName })
   const finalTargetArtifact = String(explicitTargetArtifact || '').trim() || fileRel || moduleName
 
+  const resolvedBranch = (branch ? String(branch).trim() : null) ?? resolveWorktreeBranchFast(workRoot ?? mainRoot)
+  const resolvedWorktree = worktree
+    ? posixPath(String(worktree))
+    : (workRoot ? posixPath(String(workRoot)) : null)
+
   const event = {
     ts: new Date().toISOString(),
     category: normCategory,
@@ -226,6 +270,8 @@ export async function appendGovernSignal(opts = {}) {
     ...(Number.isInteger(line) ? { line } : {}),
     message: (rawMessage || finalPattern).slice(0, 500),
     ...(taskId ? { taskId: String(taskId) } : {}),
+    ...(resolvedBranch ? { branch: resolvedBranch } : {}),
+    ...(resolvedWorktree ? { worktree: resolvedWorktree } : {}),
     ...(round !== undefined && round !== null ? { round: Number(round) } : {}),
     ...(verdict ? { verdict: String(verdict) } : {}),
     ...(meta && typeof meta === 'object' ? { meta } : {}),

@@ -297,20 +297,30 @@ export async function syncReviewToGitHub({
       prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })
     const results = []
+    const syncFailures = []
     for (const num of issueNums) {
-      const commentRes = await backend.postComment({
-        taskId: ledger.taskId, number: num, body: issueCommentBody, author: reviewerId, statePayload,
-      })
-      const labelRes = typeof backend.syncStateLabel === 'function'
-        ? await backend.syncStateLabel({ taskId: ledger.taskId, number: num, state: labelName })
-        : await (async () => {
-            const addR = await backend.addLabels({ taskId: ledger.taskId, number: num, labels: [labelName] })
-            await backend.removeLabel({ taskId: ledger.taskId, number: num, label: staleLabel })
-            return addR
-          })()
-      results.push({ kind: 'issue', number: num, comment: commentRes, label: labelRes })
+      try {
+        const commentRes = await backend.postComment({
+          taskId: ledger.taskId, number: num, body: issueCommentBody, author: reviewerId, statePayload,
+        })
+        const labelRes = typeof backend.syncStateLabel === 'function'
+          ? await backend.syncStateLabel({ taskId: ledger.taskId, number: num, state: labelName })
+          : await (async () => {
+              const addR = await backend.addLabels({ taskId: ledger.taskId, number: num, labels: [labelName] })
+              await backend.removeLabel({ taskId: ledger.taskId, number: num, label: staleLabel })
+              return addR
+            })()
+        results.push({ kind: 'issue', number: num, comment: commentRes, label: labelRes })
+        if (!commentRes?.ok) {
+          syncFailures.push({ target: `issue#${num}`, phase: 'review', error: commentRes?.error || commentRes?.reason || 'comment_failed' })
+        }
+      } catch (err) {
+        const msg = err?.message ?? String(err)
+        results.push({ kind: 'issue', number: num, comment: { ok: false, error: msg }, label: { ok: false, error: msg } })
+        syncFailures.push({ target: `issue#${num}`, phase: 'review', error: msg })
+      }
     }
-    const synced = results.some((r) => r.comment?.ok)
+    const synced = results.length > 0 && results.every((r) => r.comment?.ok)
     const { labelSynced, labelDegraded, labelWarnings } = summarizeLabelSyncStatus(results)
     return {
       synced,
@@ -318,6 +328,7 @@ export async function syncReviewToGitHub({
       fullySynced: synced && labelSynced,
       labelDegraded,
       labelWarnings,
+      syncFailures,
       local: true,
       label: labelName,
       results,
@@ -419,22 +430,32 @@ export async function syncReviewToGitHub({
       client: ghClient, mainRoot, gitDir: opts.gitDir,
     })
     const results = []
+    const syncFailures = []
     for (const t of targets) {
       const targetBody = t.kind === 'pr' ? prCommentBody : issueCommentBody
-      const commentRes = await backend.postComment({
-        repo: targetRepo, number: t.number, body: targetBody, statePayload,
-      })
-      const labelRes = typeof backend.syncStateLabel === 'function'
-        ? await backend.syncStateLabel({ repo: targetRepo, number: t.number, state: labelName })
-        : await (async () => {
-            const addR = await backend.addLabels({ repo: targetRepo, number: t.number, labels: [labelName] })
-            await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
-            return addR
-          })()
-      results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })
+      try {
+        const commentRes = await backend.postComment({
+          repo: targetRepo, number: t.number, body: targetBody, statePayload,
+        })
+        const labelRes = typeof backend.syncStateLabel === 'function'
+          ? await backend.syncStateLabel({ repo: targetRepo, number: t.number, state: labelName })
+          : await (async () => {
+              const addR = await backend.addLabels({ repo: targetRepo, number: t.number, labels: [labelName] })
+              await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
+              return addR
+            })()
+        results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })
+        if (!commentRes?.ok) {
+          syncFailures.push({ target: `${t.kind}#${t.number}`, phase: 'review', error: commentRes?.error || commentRes?.reason || 'comment_failed' })
+        }
+      } catch (err) {
+        const msg = err?.message ?? String(err)
+        results.push({ kind: t.kind, number: t.number, comment: { ok: false, error: msg }, label: { ok: false, error: msg } })
+        syncFailures.push({ target: `${t.kind}#${t.number}`, phase: 'review', error: msg })
+      }
     }
 
-    const synced = results.some((r) => r.comment?.ok)
+    const synced = results.length > 0 && results.every((r) => r.comment?.ok)
     const { labelSynced, labelDegraded, labelWarnings } = summarizeLabelSyncStatus(results)
     const hints = []
     if (!synced) hints.push('远端评论同步未成功（可能处于离线或无写权限环境），审查结论已写入本地账本，请使用 delegatedPayloads 原样双写。')
@@ -445,6 +466,7 @@ export async function syncReviewToGitHub({
       fullySynced: synced && labelSynced,
       labelDegraded,
       labelWarnings,
+      syncFailures,
       targetRepo,
       label: labelName,
       delegatedPayloads,

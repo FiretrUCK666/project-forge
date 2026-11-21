@@ -14,7 +14,7 @@ import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { hasExploredEvidence, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveIdentityLayers, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -23,7 +23,7 @@ import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged, checkUnresolvedDependencies } from '../../lib/task-graph.mjs'
 import {
   determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence,
-  resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateVerificationEvidence,
+  resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateReviewRecordClosure, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
@@ -87,11 +87,11 @@ export async function assertPreMergeGates({
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 实施工作区存在未提交改动，请先提交并验证后再执行 merge。\n')
     return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_DIRTY_WORKTREE' }
   }
-  if (ledger.role !== 'inbound-external-pr' && !hasExploredEvidence(ledger)) {
-    const msg = `BLOCKED_NOT_EXPLORED: 任务 ${taskId} 缺少只读探索证据（ledger.explored），请先运行 flow.mjs explore --task ${taskId} 记录后再合并。`
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_NOT_EXPLORED', taskId }, null, 2)}\n`)
+  if (ledger.planning === true || ledger.status === 'planning') {
+    const msg = `BLOCKED_PLAN_NOT_READY: 任务 ${taskId} 仍处于规划阶段（planning），请先批准规划并运行 flow.mjs start --task ${taskId} 转入实施后再合并。`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', taskId }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
-    return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_NOT_EXPLORED' }
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_PLAN_NOT_READY' }
   }
 
   const currentHead = headRes.ok ? headRes.stdout.trim() : null
@@ -202,9 +202,10 @@ export async function assertPreMergeGates({
         process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 独立审查未通过（reviewPassed=${ledger.reviewPassed}）。\n`)
         return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_REVIEW_NOT_PASSED' }
       }
-      if (lastRound && (lastRound.verdict !== 'pass' || (lastRound.blockers ?? []).length > 0)) {
-        process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 最新一轮审查未通过（verdict=${lastRound.verdict}）。\n`)
-        return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_REVIEW_NOT_PASSED' }
+      const closureCheck = validateReviewRecordClosure({ ledger, lastRound, policy, hasDevReview, stopLossActive })
+      if (!closureCheck.ok) {
+        process.stderr.write(`${closureCheck.code}: ${closureCheck.reason}\n`)
+        return { ok: false, exitCode: closureCheck.exitCode ?? EXIT.FACT, code: closureCheck.code }
       }
     }
   }
@@ -270,6 +271,7 @@ export async function handleMerge(opts, roots) {
   let mergeRes = null
   // 本次合并发出的回告逐条记成败：两条合并路径共用一份，报告里统一列出未发出的那些。
   const mergeComments = []
+  const syncFailures = []
 
   if (canUseGhApi && ledger.prNumber) {
     if (currentHead) {
@@ -337,18 +339,37 @@ export async function handleMerge(opts, roots) {
     })
     // 回告写没写出去，要看返回值。后端在没有直连凭据时返回的是「未成功 + 已转交」，
     // 裸 await 把这件事吞掉，报告里一个字都不会出现。
-    mergeComments.push({ target: `PR #${ledger.prNumber}`, ...judgeCommentOutcome(await backend.postComment({
-      repo: originFull,
-      number: ledger.prNumber,
-      body: mergePrBody,
-      statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
-    })) })
+    try {
+      const prCmt = judgeCommentOutcome(await backend.postComment({
+        repo: originFull,
+        number: ledger.prNumber,
+        body: mergePrBody,
+        statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
+      }))
+      mergeComments.push({ target: `PR #${ledger.prNumber}`, ...prCmt })
+      if (!prCmt.ok) syncFailures.push({ target: `PR #${ledger.prNumber}`, phase: 'merge', error: prCmt.reason || prCmt.error || 'comment_failed' })
+    } catch (err) {
+      const msg = err?.message ?? String(err)
+      mergeComments.push({ target: `PR #${ledger.prNumber}`, ok: false, reason: msg })
+      syncFailures.push({ target: `PR #${ledger.prNumber}`, phase: 'merge', error: msg })
+    }
     for (const iss of ledger.linkedIssues ?? []) {
-      mergeComments.push({ target: `Issue #${iss}`, ...judgeCommentOutcome(await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null } })) })
-      await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
-      await backend.removeLabel({ repo: originFull, number: iss, label: 'in-review' })
-      await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
-      await backend.closeIssue({ repo: originFull, number: iss })
+      try {
+        const issCmt = judgeCommentOutcome(await backend.postComment({
+          repo: originFull, number: iss, body: mergeIssueBody,
+          statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
+        }))
+        mergeComments.push({ target: `Issue #${iss}`, ...issCmt })
+        if (!issCmt.ok) syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: issCmt.reason || issCmt.error || 'comment_failed' })
+        await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
+        await backend.removeLabel({ repo: originFull, number: iss, label: 'in-review' })
+        await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
+        await backend.closeIssue({ repo: originFull, number: iss })
+      } catch (err) {
+        const msg = err?.message ?? String(err)
+        mergeComments.push({ target: `Issue #${iss}`, ok: false, reason: msg })
+        syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: msg })
+      }
     }
     const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
     if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
@@ -402,17 +423,32 @@ export async function handleMerge(opts, roots) {
         humanApprovedReason: ledger.humanApprovedReason ?? null, bypassed: mergeBypassed,
       })
       for (const iss of ledger.linkedIssues ?? []) {
-        mergeComments.push({ target: `Issue #${iss}`, ...judgeCommentOutcome(await backend.postComment({ taskId, number: iss, body: localMergeBody, statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null } })) })
-        await backend.removeLabel({ taskId, number: iss, label: 'in-progress' })
-        await backend.removeLabel({ taskId, number: iss, label: 'in-review' })
-        await backend.removeLabel({ taskId, number: iss, label: 'changes-requested' })
-        await backend.closeIssue({ number: iss, reason: `merged into ${baseBranch}` })
+        try {
+          const issCmt = judgeCommentOutcome(await backend.postComment({
+            taskId, number: iss, body: localMergeBody,
+            statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null },
+          }))
+          mergeComments.push({ target: `Issue #${iss}`, ...issCmt })
+          if (!issCmt.ok) syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: issCmt.reason || issCmt.error || 'comment_failed' })
+          await backend.removeLabel({ taskId, number: iss, label: 'in-progress' })
+          await backend.removeLabel({ taskId, number: iss, label: 'in-review' })
+          await backend.removeLabel({ taskId, number: iss, label: 'changes-requested' })
+          await backend.closeIssue({ number: iss, reason: `merged into ${baseBranch}` })
+        } catch (err) {
+          const msg = err?.message ?? String(err)
+          mergeComments.push({ target: `Issue #${iss}`, ok: false, reason: msg })
+          syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: msg })
+        }
       }
     }
   }
 
   ledger.status = 'merged'
   ledger.mergedAt = new Date().toISOString()
+  ledger.mergeComments = mergeComments
+  if (syncFailures.length > 0) {
+    ledger.syncFailures = [...(Array.isArray(ledger.syncFailures) ? ledger.syncFailures : []), ...syncFailures]
+  }
   await runLifecycleGovernHook({ stage: 'merge', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   const checklist = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, originFull, pushRemote, {
@@ -424,7 +460,7 @@ export async function handleMerge(opts, roots) {
     knownCleanWorktrees: ledger.worktreePath ? [ledger.worktreePath] : [],
   })
   const unreported = mergeComments.filter((c) => !c.ok)
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist, ...(mergeComments.length > 0 ? { mergeComments } : {}), ...(unreported.length > 0 ? { unreportedComments: unreported } : {}) }, null, 2)}\n`)
+  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist, ...(mergeComments.length > 0 ? { mergeComments } : {}), ...(unreported.length > 0 ? { unreportedComments: unreported } : {}), ...(syncFailures.length > 0 ? { syncFailures } : {}) }, null, 2)}\n`)
   else {
     process.stdout.write(`合并状态已确认（task=${taskId}, status=${ledger.status}）。未自动删除任何分支或 Worktree。\n`)
     // 回告没发出去必须看得见：静默吞掉等于对外部提案人一声不吭地合了单。
@@ -634,9 +670,7 @@ export async function handleClaim(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover }, null, 2)}\n`)
     else {
       process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
-      const nextCmd = hasExploredEvidence(ledger)
-        ? `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-        : `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}`
+      const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
       printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
@@ -741,9 +775,7 @@ export async function handleClaim(opts, roots) {
     process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}) }, null, 2)}\n`)
   } else {
     process.stdout.write(`任务 ${taskId} 已${isTakeover ? '接管' : '认领'}（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
-    const nextCmd = hasExploredEvidence(ledger)
-      ? `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-      : `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}`
+    const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
     printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }

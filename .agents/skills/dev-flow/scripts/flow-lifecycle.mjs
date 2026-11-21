@@ -14,7 +14,7 @@ import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { deriveReworkState, hasExploredEvidence, nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { deriveReworkState, nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
@@ -589,12 +589,11 @@ export async function handleSubmit(opts, roots) {
     hasCiWorkflow: hasRepoCiWorkflow(implRoot),
     visualFilesChanged: changedForVisual.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
   })
-  const isCase1LowRiskDoc = Number(ledger.caseType) === 1 && policy.riskTier === 'low'
-  if (ledger.role !== 'inbound-external-pr' && !isCase1LowRiskDoc && !hasExploredEvidence(ledger)) {
-    const unlockCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}`
-    const msg = `BLOCKED_NOT_EXPLORED: 任务 ${taskId} 缺少只读探索证据（ledger.explored），请先运行 flow.mjs explore --task ${taskId} 记录后再提交。`
+  if (ledger.planning === true || ledger.status === 'planning') {
+    const unlockCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${taskId}`
+    const msg = `BLOCKED_PLAN_NOT_READY: 任务 ${taskId} 仍处于规划阶段（planning），请先批准规划并运行 flow.mjs start --task ${taskId} 转入实施后再提交。`
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_NOT_EXPLORED', taskId, reason: msg, nextStep: unlockCmd }, null, 2)}\n`)
+      process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', taskId, reason: msg, nextStep: unlockCmd }, null, 2)}\n`)
     }
     process.stderr.write(`${msg}\n`)
     if (!opts.json) printNextStep([{ skill: 'dev-flow', text: unlockCmd }], { repoRoot: roots.mainRoot })

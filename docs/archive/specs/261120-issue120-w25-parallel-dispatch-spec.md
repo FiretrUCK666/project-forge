@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: Phase 3A 治本重构 PR-A：工作流、规划隔离、交接瘦身与单一依赖图
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-21
 issue: 120
 pr: null
 branch: feat/w25-parallel-dispatch
-owner: plan-pra
+owner: impl-pra
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-pra-r2, round=2, sha=b7a4c79df622, summary=Round 2 independent Plan Critique PASS (0 blockers))"
 critique_rounds: "[{\"round\":1,\"verdict\":\"rejected\",\"reviewerId\":\"critic-pra\",\"sha\":\"9b36e1567242\",\"artifact_baseline\":{\"sha\":\"9b36e156724247b4001b8ec0c079daef1113250ac8e707ad2382907aa987cf62\",\"shortSha\":\"9b36e1567242\",\"criteriaCount\":7,\"anchorCount\":242},\"summary\":\"R1 发现 4 处阻塞：#118 归属界定、下游夹具与白名单/停损兼容、I350+ 注入号段与逐条列清、workflow-policy 800 行拆出 workflow-policy-next.mjs\",\"findings\":[\"R1 发现 4 处阻塞：#118 归属界定、下游夹具与白名单/停损兼容、I350+ 注入号段与逐条列清、workflow-policy 800 行拆出 workflow-policy-next.mjs\"],\"stopLossTriggered\":false,\"stopLossReasons\":[],\"recordedAt\":\"2026-11-21T14:30:23.366Z\"},{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-pra-r2\",\"sha\":\"b7a4c79df622\",\"artifact_baseline\":{\"sha\":\"b7a4c79df6223bf6eb118c1f5164372bd90655def467e112bba777f3b2c8759f\",\"shortSha\":\"b7a4c79df622\",\"criteriaCount\":7,\"anchorCount\":273},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-21T14:36:25.036Z\"}]"
-related_prd: ../prd/261120-w25-hardening-prd.md
+related_prd: ../../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue120-w25-parallel-dispatch-todo.md
 high_risk_paths: [kit/, scripts/dev/, AGENTS.md]
 task_id: w25-parallel-dispatch
@@ -172,13 +172,13 @@ flowchart TD
 ### 验收标准（正例 / 反例双向可判定）
 
 <!-- criteria:start -->
-- [ ] C1: 执行 `flow.mjs start --planning --task p1` 或 `doc-plan.mjs init --kind pair --slug p1 --title "p1" --worktree` 后，工作文档落于 `.worktrees/impl-p1` 独立分支且 `main` 干净；过审后执行 `flow.mjs start --task p1` 复用同一 worktree 转入实施。反例：未传 `--planning` 且 SPEC 仍为 `draft` 时，`flow.mjs start` 仍以退出码 3 阻断。
-- [ ] C2: `doc-plan` 的 `init` / `critique-reject` / `critique-pass` / `approve` 调用 `createTaskBackend()` + `capabilities` 与幂等键 `taskId + phase + round`：`github` 模拟后端写精简评论与 `planning`/`changes-requested`/`needs-human-decision`/`approved` 标签；`local-only` 与 `generic-git` 写本地事件日志并返回 `NOT_APPLICABLE`。反例：同键重复调用不重复发评论，离线或无远端时不得返回 `synced: true`。
-- [ ] C3: Critique 轮次与裁定写入单任务账本 `ledger.planCritique`，不向 SPEC Frontmatter 写 `critique_anchors`；`plan-exit-gate.mjs` 白名单对 `passed`（存在 `sha=hex` 时强校 `recordedSha === currentSha`，不含 `sha=` 的历史 `passed` 兼容放行并输出 `WARN_CRITIQUE_LEGACY_NO_SHA`）放行、对缺字段/`pending`/`rejected`/假 SHA 阻断，`formatPlanExitGate` 输出 `gate.warnings`；停损后仍可写入 `critique-reject` 意见，仅锁定 `approve`；`critique-continue` 与 `critique-override` 分离且缺 frontmatter 也能持久化；`VALID_STATUS_BY_TYPE.prd` 含 `superseded` 且 PRD `critique-pass` 不提示 `approve`。反例：修改 SPEC 正文一行后，带旧 `sha` 的 `passed` 必须被白名单门禁阻断。
-- [ ] C4: `doc-substantive.mjs` 删除 `DOC_REGRESSION_ANCHOR_LOST` 后，精简重写 SPEC 锚点减少但结构实质完备时 `doc-plan.mjs audit` 返回 `ok: true`；SPEC 正文超 380 行仅给 `warnings` 不阻断，PRD 无行上限；Case 3 无需多轮 Critique，`PLAN_STOP_LOSS_MAX_ROUNDS` 维持 3 轮以对齐 `scripts/dev/fixtures-escalation-stoploss.mjs`。反例：将核心节删空或改成占位词时，仍触发 `DOC_REGRESSION_CORE_EMPTIED` / `DOC_REGRESSION_CORE_DEGRADED` 阻断。
-- [ ] C5: `flow.mjs status --all --json` 返回活跃账本、未启动活跃 SPEC、`TaskBackend` 能力与波次计划；从 `workflow-policy.mjs` 拆出 `kit/skills/lib/workflow-policy-next.mjs` (new) 后两者均低于 800 行；`handoff-package.mjs` 为 `implementer` 与 `reviewer` 注入真实 `mustFix` / `shouldFix` / `blockers` 与 `scope_files`，修复非目标误吞第 1 节与设计节 0 命中，内嵌 5 行极简回执模板（状态/HEAD/PR 或 Issue/门禁与阻断数/下一步命令）及 15 行回报上限（详报默认落账本与 Issue/PR 评论）；`flow-inspect.mjs` 单次输出 `formatPlanExitGate`。反例：存在 `mustFix` 时交接包若缺失该条内容或误吞第 1 节，`fixtures-parallel-dispatch.mjs` (new) 断言必须变红。
-- [ ] C6: `doc-slice-graph.mjs` 作为唯一三态依赖图与波次引擎，归档前置自然满足、未就绪 `depends_on` 不被静默丢弃、写域重叠自动拆波并标 `serial-by-overlap` 而不报 `BLOCKED_SLICE_OVERLAP`，`needs-*` 阶段仍可见并行切片；`workflow-helpers.mjs` 不再保留分裂波次/正则逻辑。反例：前置切片为 `draft` 时下游切片不得进入 Wave 1，悬空 `task_id` 仍报错。
-- [ ] C7: 外部 PR 入站写受理评论与 `external-contribution` 标签；`flow start` 读取 SPEC `issue:`；`flow-merge.mjs` 与 `review-sync.mjs` 逐条 `try/catch` 把部分失败写入账本且禁用 `.some()` 吞错；未跑 `review-pack record` 禁过审查；`escalation.mjs` 默认对跨范围/连续 2 轮未关严重问题自动建单（仅 `--no-escalate --reason` 豁免）；折叠 `BLOCKED_NOT_EXPLORED` 并对齐 `review-gates.mjs`、`e2e-zip-harness.mjs`、`fixtures-doc-closure.mjs`、`fixtures-flow-explore-gate.mjs`、`I149` 与 `I240–I244`；`signals.jsonl` 按工作位隔离且 `govern-state.mjs` 只聚类 `severity >= medium` 失败信号；支持 `--jobs N` 与 `verify-injections.mjs --only` 逗号多 ID 及 `I350–I361`；全仓 `.mjs <= 800` 行，同步 `equip.mjs .` 与 `compose-agents.mjs .`（`AGENTS.md < 24576` 字节）。反例：多目标中 1 成功 1 失败时不得返回全成功，且 `info` `*.pass` 信号不得进入 `tier1-refactor`。
+- [x] C1: 执行 `flow.mjs start --planning --task p1` 或 `doc-plan.mjs init --kind pair --slug p1 --title "p1" --worktree` 后，工作文档落于 `.worktrees/impl-p1` 独立分支且 `main` 干净；过审后执行 `flow.mjs start --task p1` 复用同一 worktree 转入实施。反例：未传 `--planning` 且 SPEC 仍为 `draft` 时，`flow.mjs start` 仍以退出码 3 阻断。
+- [x] C2: `doc-plan` 的 `init` / `critique-reject` / `critique-pass` / `approve` 调用 `createTaskBackend()` + `capabilities` 与幂等键 `taskId + phase + round`：`github` 模拟后端写精简评论与 `planning`/`changes-requested`/`needs-human-decision`/`approved` 标签；`local-only` 与 `generic-git` 写本地事件日志并返回 `NOT_APPLICABLE`。反例：同键重复调用不重复发评论，离线或无远端时不得返回 `synced: true`。
+- [x] C3: Critique 轮次与裁定写入单任务账本 `ledger.planCritique`，不向 SPEC Frontmatter 写 `critique_anchors`；`plan-exit-gate.mjs` 白名单对 `passed`（存在 `sha=hex` 时强校 `recordedSha === currentSha`，不含 `sha=` 的历史 `passed` 兼容放行并输出 `WARN_CRITIQUE_LEGACY_NO_SHA`）放行、对缺字段/`pending`/`rejected`/假 SHA 阻断，`formatPlanExitGate` 输出 `gate.warnings`；停损后仍可写入 `critique-reject` 意见，仅锁定 `approve`；`critique-continue` 与 `critique-override` 分离且缺 frontmatter 也能持久化；`VALID_STATUS_BY_TYPE.prd` 含 `superseded` 且 PRD `critique-pass` 不提示 `approve`。反例：修改 SPEC 正文一行后，带旧 `sha` 的 `passed` 必须被白名单门禁阻断。
+- [x] C4: `doc-substantive.mjs` 删除 `DOC_REGRESSION_ANCHOR_LOST` 后，精简重写 SPEC 锚点减少但结构实质完备时 `doc-plan.mjs audit` 返回 `ok: true`；SPEC 正文超 380 行仅给 `warnings` 不阻断，PRD 无行上限；Case 3 无需多轮 Critique，`PLAN_STOP_LOSS_MAX_ROUNDS` 维持 3 轮以对齐 `scripts/dev/fixtures-escalation-stoploss.mjs`。反例：将核心节删空或改成占位词时，仍触发 `DOC_REGRESSION_CORE_EMPTIED` / `DOC_REGRESSION_CORE_DEGRADED` 阻断。
+- [x] C5: `flow.mjs status --all --json` 返回活跃账本、未启动活跃 SPEC、`TaskBackend` 能力与波次计划；从 `workflow-policy.mjs` 拆出 `kit/skills/lib/workflow-policy-next.mjs` (new) 后两者均低于 800 行；`handoff-package.mjs` 为 `implementer` 与 `reviewer` 注入真实 `mustFix` / `shouldFix` / `blockers` 与 `scope_files`，修复非目标误吞第 1 节与设计节 0 命中，内嵌 5 行极简回执模板（状态/HEAD/PR 或 Issue/门禁与阻断数/下一步命令）及 15 行回报上限（详报默认落账本与 Issue/PR 评论）；`flow-inspect.mjs` 单次输出 `formatPlanExitGate`。反例：存在 `mustFix` 时交接包若缺失该条内容或误吞第 1 节，`fixtures-parallel-dispatch.mjs` (new) 断言必须变红。
+- [x] C6: `doc-slice-graph.mjs` 作为唯一三态依赖图与波次引擎，归档前置自然满足、未就绪 `depends_on` 不被静默丢弃、写域重叠自动拆波并标 `serial-by-overlap` 而不报 `BLOCKED_SLICE_OVERLAP`，`needs-*` 阶段仍可见并行切片；`workflow-helpers.mjs` 不再保留分裂波次/正则逻辑。反例：前置切片为 `draft` 时下游切片不得进入 Wave 1，悬空 `task_id` 仍报错。
+- [x] C7: 外部 PR 入站写受理评论与 `external-contribution` 标签；`flow start` 读取 SPEC `issue:`；`flow-merge.mjs` 与 `review-sync.mjs` 逐条 `try/catch` 把部分失败写入账本且禁用 `.some()` 吞错；未跑 `review-pack record` 禁过审查；`escalation.mjs` 默认对跨范围/连续 2 轮未关严重问题自动建单（仅 `--no-escalate --reason` 豁免）；折叠 `BLOCKED_NOT_EXPLORED` 并对齐 `review-gates.mjs`、`e2e-zip-harness.mjs`、`fixtures-doc-closure.mjs`、`fixtures-flow-explore-gate.mjs`、`I149` 与 `I240–I244`；`signals.jsonl` 按工作位隔离且 `govern-state.mjs` 只聚类 `severity >= medium` 失败信号；支持 `--jobs N` 与 `verify-injections.mjs --only` 逗号多 ID 及 `I350–I361`；全仓 `.mjs <= 800` 行，同步 `equip.mjs .` 与 `compose-agents.mjs .`（`AGENTS.md < 24576` 字节）。反例：多目标中 1 成功 1 失败时不得返回全成功，且 `info` `*.pass` 信号不得进入 `tier1-refactor`。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -206,3 +206,9 @@ flowchart TD
 - 已定：维持 `PLAN_STOP_LOSS_MAX_ROUNDS = 3` 对齐停损夹具，触发停损后仍允许追加复核意见，仅锁定 `approve` 直至 `critique-continue` 或 `critique-override`。
 - 已定：从 `workflow-policy.mjs` 拆出 `kit/skills/lib/workflow-policy-next.mjs` (new)，`task-backend.mjs` 保持 0 行净增；新增故障注入使用无碰撞号段 `I350–I361` 落于 `scripts/dev/injections-data-parallel-dispatch.mjs` (new)。
 <!-- section: pending-end -->
+
+## 实现说明
+
+- 完成 `C1–C7` 全部改造：`flow start --planning` / `doc-plan init --worktree` 规划隔离、新增 `kit/skills/lib/plan-sync.mjs` 驱动 `TaskBackend` 幂等同步、Critique 迁入 `ledger.planCritique` 并改用 `plan-exit-gate.mjs` 严格白名单与 `critique-continue`、删除 `DOC_REGRESSION_ANCHOR_LOST`、拆分 `kit/skills/lib/workflow-policy-next.mjs`、上线 `flow status --all [--json]` 与 `handoff-package.mjs` 重建、收口 `doc-slice-graph.mjs` 单一三态依赖图，以及外部 PR 受理 / `issue:` 继承 / 多目标逐条容错 / `review-pack record` 闭合强校 / 默认自动升级 / 折叠 `BLOCKED_NOT_EXPLORED` / `signals.jsonl` 隔离聚类 / `--jobs N` 与 `I350–I361`。
+- 全仓 `.mjs <= 800` 行、`kit/skills/lib/task-backend.mjs` 零净增、`AGENTS.md` 22477 字节，已同步 `equip.mjs .` 与 `compose-agents.mjs .`。
+- 通过 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs --jobs 6`（394/394）与 `verify-injections.mjs --jobs 6`（306/306）。

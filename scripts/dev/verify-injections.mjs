@@ -224,10 +224,12 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   cloneTree(ROOT, STAGING)
   process.on('exit', () => removeTree(SANDBOX))
 
+  const onlyEq = process.argv.find((a) => a.startsWith('--only='))
   const onlyIndex = process.argv.indexOf('--only')
-  const argvOnly = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined
+  const argvOnly = onlyEq ? onlyEq.slice('--only='.length) : (onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined)
+  const jobsEq = process.argv.find((a) => a.startsWith('--jobs='))
   const jobsIndex = process.argv.indexOf('--jobs')
-  const requestedJobs = jobsIndex >= 0 ? Number(process.argv[jobsIndex + 1]) || 6 : 6
+  const requestedJobs = (jobsEq ? Number(jobsEq.slice('--jobs='.length)) : (jobsIndex >= 0 ? Number(process.argv[jobsIndex + 1]) : 6)) || 6
   const jobs = (process.platform === 'darwin' && process.env.CI)
     ? Math.min(requestedJobs, 2)
     : requestedJobs
@@ -242,7 +244,10 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     await flushAndExit(1)
   }
 
-  const selected = argvOnly ? INJECTIONS.filter((i) => i.id === argvOnly) : INJECTIONS
+  const onlyIds = argvOnly
+    ? new Set(String(argvOnly).split(',').map((s) => s.trim()).filter(Boolean))
+    : null
+  const selected = onlyIds ? INJECTIONS.filter((i) => onlyIds.has(i.id)) : INJECTIONS
   if (argvOnly && selected.length === 0) {
     process.stderr.write(`没有注入匹配 --only ${argvOnly}：编号写错时会一条都不跑，而「没跑」看着和「全过」一样。\n`)
     await flushAndExit(1)

@@ -313,7 +313,7 @@ export function isManagedPlanDoc(rel, text = '') {
   return false
 }
 
-/** 剥离易变生命周期元字段（保留方案正文、稳定标题/层级与验收标准），确保 link --issue/--pr 后不误触发陈旧锁定。 */
+/** 剥离易变生命周期元字段与实现期进展（勾选状态 / 实现说明），确保 link 与 finalize 后不误触发陈旧锁定。 */
 export function stripCritiqueMeta(text) {
   const norm = String(text ?? '').replace(/\r\n/g, '\n')
   const fm = parseDocFrontmatter(norm)
@@ -324,11 +324,16 @@ export function stripCritiqueMeta(text) {
     high_risk_paths: Array.isArray(fm.data?.high_risk_paths) ? fm.data.high_risk_paths : [],
   }
   const volatileLineRe = /^(?:-\s+)?(?:Plan Critique|Status|Issue|PR|Updated|Branch|Owner|Related\s+(?:SPEC|PRD|Todo)|plan_critique|critique_anchors|critique_rounds|critique_override|critique_findings|updated|issue|pr|status|related_prd|related_spec|related_todo|approved|implemented|done_at|branch|owner)\s*:/i
-  const cleanBody = String(fm.body ?? norm)
-    .split('\n')
-    .filter((l) => !volatileLineRe.test(l.trim()))
-    .join('\n')
-    .replace(/(\bdocs\/(?:prd|specs|todo)\/\d{6})-issue\d+-/gi, '$1-')
-    .trim()
+  const kept = []
+  let inFence = false
+  let inImplNote = false
+  for (const rawLine of String(fm.body ?? norm).split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(rawLine)) inFence = !inFence
+    if (!inFence && /^##\s+实现说明\s*$/.test(rawLine.trim())) { inImplNote = true; continue }
+    if (!inFence && inImplNote && /^##\s+/.test(rawLine.trim())) inImplNote = false
+    if (inImplNote || volatileLineRe.test(rawLine.trim())) continue
+    kept.push(inFence ? rawLine : rawLine.replace(/^(\s*-\s*)\[[xX]\](\s+C\d+\s*[:：])/, '$1[ ]$2'))
+  }
+  const cleanBody = kept.join('\n').replace(/(\bdocs\/(?:prd|specs|todo)\/\d{6})-issue\d+-/gi, '$1-').trim()
   return `${JSON.stringify(stableMeta)}\n${cleanBody}`
 }

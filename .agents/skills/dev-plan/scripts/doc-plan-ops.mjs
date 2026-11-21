@@ -9,14 +9,14 @@ import { existsSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
-import { evaluateCritiqueOverride, parseCritiqueRounds } from '../../lib/critique-rounds.mjs'
+import { evaluateCritiqueOverride, parseCritiqueRounds, readPlanCritiqueEntrySync } from '../../lib/critique-rounds.mjs'
 import { DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, updateDocFrontmatter } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { auditDoc, detectDocType } from './doc-audit.mjs'
 
 /** 校验 Critique/Audit/停损条件后批准 SPEC/PRD/Todo 并冻结 C1..Cn 验收指纹。 */
-export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
+export function approveSpec({ repoRoot, mainRoot = repoRoot, gitDir = null, file, skipCritiqueReason, taskId = null }) {
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw new Error(`找不到 SPEC/PRD 文件：${file}`)
   const text = readTextSafe(abs)
@@ -45,11 +45,11 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
   let skippedCritiqueValue = null
 
   if (docType === 'spec' || docType === 'prd') {
-    const priorRounds = parseCritiqueRounds(fm.data, workingText)
-    // override 生效与正文指纹比对走共用判据：`plan-exit-gate.mjs` 用的是同一份。
-    // 两处各写一遍，迟早算出不同的结论，然后「approve 说有效、门禁说过期」同时成立。
-    const critiqueState = evaluateCritiqueOverride(workingText, fm.data)
-    // 判据负责算「签字是否有效、是否已过期」；这里只读原始记录本身的签字与否。
+    const { entry: planCritiqueEntry } = readPlanCritiqueEntrySync({
+      repoRoot, mainRoot, gitDir, taskId, fmData: fm.data, relDoc: audit.file,
+    })
+    const priorRounds = parseCritiqueRounds(fm.data, workingText, planCritiqueEntry)
+    const critiqueState = evaluateCritiqueOverride(workingText, fm.data, planCritiqueEntry)
     const override = critiqueState.override
     const hasStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
     if (hasStopLoss && !override?.approved) {

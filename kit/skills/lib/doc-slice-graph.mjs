@@ -23,8 +23,9 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
-import { parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
+import { parseBodyRelations } from './github-client.mjs'
 
 /** 判定为「不参与当前规划」的文档状态。 */
 const INERT_STATUS = new Set(['superseded', 'dropped', 'archived'])
@@ -457,13 +458,14 @@ export function checkWaveScopeOverlap(repoRoot, graph = null) {
         const effective = hits.filter(([x, y]) => !DERIVED_MANIFEST_PATHS.some((d) => x === d || y === d))
         if (effective.length === 0) continue
         out.push({
-          code: SLICE_GRAPH_CODES.overlap,
+          code: 'SLICE_SERIAL_BY_OVERLAP',
+          serialReason: 'serial-by-overlap',
           file: `${a.rel} vs ${b.rel}`,
           wave: w,
           overlaps: effective,
-          message: `Wave ${w} 的 ${a.key} 与 ${b.key} 写域相交：`
-            + effective.map(([x, y]) => `${x} <-> ${y}`).join('；'),
-          fixHint: '并行切片必须零交叉。要么把它们排成先后波次（加 depends_on），要么把重叠的路径划给其中一片。',
+          message: `Wave ${w} 的 ${a.key} 与 ${b.key} 写域相交（按 serial-by-overlap 自动拆波串行）：`
+            + effective.map(([x, y]) => `${x} vs ${y}`).join('；'),
+          fixHint: '写域重叠的切片将自动拆分到先后子波次串行执行；若需并行请将重叠路径划给单一切片。',
         })
       }
     }
@@ -474,8 +476,8 @@ export function checkWaveScopeOverlap(repoRoot, graph = null) {
 /**
  * 四项检查一把跑完。
  *
- * 返回结构里 `errors` 与 `warnings` 分开：前三条是硬错（漏认领、缺元数据、有环），
- * 第四条同波次碰撞同样是硬错——两个并行分支撞在一起是真实事故，不是提醒。
+ * 前三条是硬错（漏认领、缺元数据、有环/悬空）；写域重叠可由调度器按 `serial-by-overlap`
+ * 自动拆波串行，记入 `warnings` 而不作为阻塞错误。
  */
 export function evaluateSliceGraph(repoRoot, { graph = null } = {}) {
   if (!repoRoot) return { ok: true, errors: [], warnings: [], checked: 0 }
@@ -484,7 +486,235 @@ export function evaluateSliceGraph(repoRoot, { graph = null } = {}) {
     ...checkMasterCriteriaCoverage(repoRoot, g),
     ...checkSliceMetadata(g),
     ...checkSliceGraphCycles(repoRoot, g),
-    ...checkWaveScopeOverlap(repoRoot, g),
   ]
-  return { ok: errors.length === 0, errors, warnings: [], checked: g.slices.length, masters: g.masters.map((m) => m.rel) }
+  const warnings = checkWaveScopeOverlap(repoRoot, g)
+  return { ok: errors.length === 0, errors, warnings, checked: g.slices.length, masters: g.masters.map((m) => m.rel) }
+}
+
+const WRITE_SCOPE_HEADING_RE = /(?:改动|涉及|修改|变更|受影响|写域|产物|目标).{0,8}(?:文件|路径|范围|清单)|^\s*(?:files|scope)\b/i
+const WRITE_SCOPE_SKIP_LINE_RE = /(?:不动|不改|不修改|不触碰|范围外|out of scope|禁止改|do-not-edit)/i
+const PATH_TOKEN_RE = /`([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,8})`/g
+
+function extractWriteScopeFallback(raw) {
+  const files = new Set()
+  let inFence = false
+  let inScopeSec = false
+  for (const line of String(raw ?? '').replace(/\r\n/g, '\n').split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
+    if (inFence) continue
+    if (/^##+\s+/.test(line)) inScopeSec = WRITE_SCOPE_HEADING_RE.test(line)
+    if (WRITE_SCOPE_SKIP_LINE_RE.test(line)) continue
+    if (!inScopeSec && !WRITE_SCOPE_HEADING_RE.test(line) && !/^\s*(?:[-*]|\d+\.)\s+.*`[A-Za-z0-9_.-]+\//.test(line)) continue
+    for (const m of line.matchAll(PATH_TOKEN_RE)) {
+      const p = posixPath(m[1]).replace(/^\.\//, '')
+      if (/^docs\/(?:prd|specs|todo|archive)\//.test(p)) continue
+      files.add(p)
+    }
+  }
+  return [...files].sort()
+}
+
+function filesOverlapMatchers(matchersA, matchersB) {
+  for (const ma of matchersA) {
+    if (DERIVED_MANIFEST_PATHS.includes(ma.raw)) continue
+    for (const mb of matchersB) {
+      if (DERIVED_MANIFEST_PATHS.includes(mb.raw)) continue
+      if (scopesOverlap(ma, mb)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * 单一三态扫描：扫描尚未建账本的就绪规划切片（`docs/specs/*.md` status=approved 与独立 `docs/todo/*.md` status=active）。
+ * - 已完成或 `docs/archive/` 前置自然满足 `depends_on`；
+ * - 存在但未就绪（`draft`/`pending`/`active` 等）的前置保留在 `unreadyDeps`，绝不静默丢弃；
+ * - 优先读 Frontmatter `scope_files`，缺写域保持 `conservativeSerial: true`（`serialReason: 'missing-scope'`）。
+ */
+export function scanUnstartedReadySlices(repoRoot, allLedgers = []) {
+  if (!repoRoot) return []
+  const graph = buildSliceGraph(repoRoot)
+  const trackedSpecs = new Set()
+  const trackedTodos = new Set()
+  const trackedTaskIds = new Set()
+  const trackedIssues = new Set()
+  const closedIssues = new Set()
+  const closedTaskIds = new Set()
+  const activeIssueToTask = new Map()
+  for (const l of Array.isArray(allLedgers) ? allLedgers : []) {
+    for (const f of [l?.specFile, l?.archivedSpecFile].filter(Boolean)) trackedSpecs.add(posixPath(f))
+    for (const f of [l?.todoFile, l?.archivedTodoFile].filter(Boolean)) trackedTodos.add(posixPath(f))
+    if (l?.taskId) trackedTaskIds.add(String(l.taskId))
+    const isClosed = ['merged', 'cleaned', 'aborted'].includes(String(l?.status ?? '').toLowerCase())
+    if (isClosed && l?.taskId) closedTaskIds.add(String(l.taskId))
+    for (const n of l?.linkedIssues ?? []) {
+      trackedIssues.add(Number(n))
+      if (isClosed) closedIssues.add(Number(n))
+      else if (l?.taskId && !activeIssueToTask.has(Number(n))) activeIssueToTask.set(Number(n), l.taskId)
+    }
+  }
+
+  const nodeStateByKey = new Map()
+  const issueToSliceKey = new Map()
+  for (const s of graph.slices) {
+    if (!s.key) continue
+    const prev = nodeStateByKey.get(s.key)
+    const done = Boolean(s.done || s.archived)
+    nodeStateByKey.set(s.key, prev
+      ? { ...prev, done: prev.done || done, archived: prev.archived || s.archived }
+      : { key: s.key, status: s.status, done, archived: s.archived })
+    const iss = Number(s.data?.issue) || parseDocFilename(s.rel)?.issue || null
+    if (iss && !issueToSliceKey.has(iss)) issueToSliceKey.set(iss, s.key)
+  }
+
+  const rawItems = []
+  for (const s of graph.slices) {
+    if (s.archived || !isManagedPlanDoc(s.rel, s.text)) continue
+    if (s.kind === 'spec') {
+      if (trackedSpecs.has(s.rel) || s.status !== 'approved') continue
+    } else if (s.kind === 'todo') {
+      if (trackedTodos.has(s.rel) || s.status !== 'active' || s.data?.related_spec) continue
+    } else continue
+
+    const fn = parseDocFilename(s.rel)
+    const iss = Number(s.data?.issue) || fn?.issue || null
+    if (iss && trackedIssues.has(iss)) continue
+    const taskId = String(s.data?.task_id ?? (iss ? `issue-${iss}` : (fn?.slug || basename(s.rel, '.md'))))
+    if (trackedTaskIds.has(taskId)) continue
+    const files = s.scopeFiles.length > 0 ? [...new Set(s.scopeFiles)].sort() : extractWriteScopeFallback(s.text)
+    const relDeps = parseBodyRelations(s.text).dependsOn.filter((n) => !closedIssues.has(n))
+    rawItems.push({
+      taskId, kind: s.kind,
+      ...(s.kind === 'spec' ? { specFile: s.rel } : { todoFile: s.rel }),
+      issue: iss, slug: fn?.slug ?? taskId,
+      files, hasWriteScope: files.length > 0, conservativeSerial: files.length === 0,
+      dependsOnIssues: relDeps, rawDependsOn: s.dependsOn, readyUnstarted: true,
+    })
+  }
+
+  const readyOrTrackedIds = new Set([...rawItems.map((it) => it.taskId), ...trackedTaskIds])
+  for (const it of rawItems) if (it.issue && !issueToSliceKey.has(it.issue)) issueToSliceKey.set(it.issue, it.taskId)
+
+  return rawItems.map((it) => {
+    const allDeps = [...new Set([
+      ...it.rawDependsOn,
+      ...it.dependsOnIssues.map((n) => activeIssueToTask.get(n) ?? issueToSliceKey.get(n)).filter(Boolean),
+    ])].filter((d) => d !== it.taskId)
+    const activeOrPendingDeps = []
+    const unreadyDeps = []
+    for (const d of allDeps) {
+      const node = nodeStateByKey.get(d)
+      if (closedTaskIds.has(d) || node?.done || node?.archived) continue
+      activeOrPendingDeps.push(d)
+      if (!readyOrTrackedIds.has(d)) unreadyDeps.push(d)
+    }
+    return { ...it, dependsOn: activeOrPendingDeps, unreadyDeps }
+  })
+}
+
+/**
+ * 多任务/就绪切片波次调度器：
+ * - 真逻辑依赖（`dependsOn` / `unreadyDeps`）严格阻断或后移，绝不静默丢弃未就绪前置；
+ * - 写域重叠（支持 glob 与路径前缀）按 `serial-by-overlap` 拆波并保留 `serialReason`；
+ * - 缺写域切片保持保守串行（`serialReason: 'missing-scope'`）。
+ */
+export function buildMultiTaskWavePlan(activeTasks = [], filesByTask = null) {
+  const activeIds = new Set(activeTasks.map((t) => t.taskId))
+  const items = activeTasks.map((t) => {
+    const rawFiles = filesByTask?.[t.taskId] ?? t.files ?? t.scopeFiles ?? []
+    const files = [...new Set(rawFiles.map((f) => posixPath(String(f ?? '')).replace(/^\.\//, '').trim()).filter(Boolean))].sort()
+    const matchers = files.map(makePathMatcher).filter(Boolean)
+    const rawDeps = [...new Set([
+      ...(Array.isArray(t.dependsOn) ? t.dependsOn.map(String) : []),
+      ...(t.parentTaskId ? [String(t.parentTaskId)] : []),
+    ])].filter((d) => d !== t.taskId)
+    const unreadyDeps = [...new Set([
+      ...(Array.isArray(t.unreadyDeps) ? t.unreadyDeps.map(String) : []),
+      ...rawDeps.filter((d) => !activeIds.has(d)),
+    ])]
+    const deps = rawDeps.filter((d) => activeIds.has(d))
+    const conservativeSerial = Boolean(t.conservativeSerial || (t.hasWriteScope === false && files.length === 0))
+    return {
+      taskId: t.taskId, files, matchers, deps, rawDeps, unreadyDeps, conservativeSerial,
+      readyUnstarted: Boolean(t.readyUnstarted), specFile: t.specFile ?? null, todoFile: t.todoFile ?? null,
+      status: t.status ?? (t.readyUnstarted ? 'ready' : 'active'), branch: t.branch ?? null,
+    }
+  })
+
+  const byId = new Map(items.map((it) => [it.taskId, it]))
+  const placedWave = new Map()
+  const waves = []
+  const remaining = new Set(items.map((it) => it.taskId))
+  let waveNum = 0
+
+  while (remaining.size > 0 && waveNum < items.length + 2) {
+    waveNum += 1
+    const curWave = []
+    const waveMatchers = []
+    let waveHasSerial = false
+    for (const id of [...remaining]) {
+      const it = byId.get(id)
+      if (it.unreadyDeps.length > 0) continue
+      if (!it.deps.every((d) => placedWave.has(d) && placedWave.get(d) < waveNum)) continue
+      if (waveHasSerial || (curWave.length > 0 && it.conservativeSerial)) continue
+      const overlapped = filesOverlapMatchers(it.matchers, waveMatchers)
+      if (overlapped) {
+        it.overlappedPriorWave = true
+        continue
+      }
+      const serialReason = it.conservativeSerial
+        ? 'missing-scope'
+        : (it.overlappedPriorWave ? 'serial-by-overlap' : null)
+      curWave.push({
+        taskId: id,
+        files: it.files,
+        deps: it.deps,
+        dependsOn: it.rawDeps,
+        slotIndex: curWave.length,
+        serialReason,
+        ...(it.conservativeSerial ? { conservativeSerial: true } : {}),
+        ...(it.readyUnstarted ? { readyUnstarted: true, specFile: it.specFile, todoFile: it.todoFile } : {}),
+        reason: it.conservativeSerial
+          ? '未声明写域，保守单列串行以防并行写冲突'
+          : (it.overlappedPriorWave
+              ? '写域与同波次前置相交，按 serial-by-overlap 自动拆至后续波次'
+              : (it.deps.length > 0 ? `等待前置 ${it.deps.join(',')} 合入后可并入本波` : '无未满足前置依赖且写域无重叠')),
+      })
+      if (it.conservativeSerial) waveHasSerial = true
+      waveMatchers.push(...it.matchers)
+    }
+    if (curWave.length === 0) {
+      const fallbackId = [...remaining][0]
+      const it = byId.get(fallbackId)
+      const isUnreadyDep = it.unreadyDeps.length > 0
+      curWave.push({
+        taskId: fallbackId, files: it.files, deps: it.deps, dependsOn: it.rawDeps, slotIndex: 0,
+        serialReason: isUnreadyDep ? 'unready-dependency' : 'cycle-or-forced',
+        ...(isUnreadyDep ? { blockedByUnreadyDeps: it.unreadyDeps } : { cycleOrForced: true }),
+        reason: isUnreadyDep
+          ? `前置依赖 ${it.unreadyDeps.join(',')} 尚未就绪，禁止提前进入可执行波次`
+          : '存在依赖环或未清依赖，强制单列串行',
+      })
+    }
+    for (const entry of curWave) {
+      placedWave.set(entry.taskId, waveNum)
+      remaining.delete(entry.taskId)
+    }
+    waves.push({
+      wave: waveNum,
+      canParallel: curWave.length > 1 && curWave.every((t) => !t.blockedByUnreadyDeps),
+      tasks: curWave,
+    })
+  }
+
+  const wave1Runnable = (waves[0]?.tasks ?? []).filter((t) => !t.blockedByUnreadyDeps)
+  const parallelDispatch = wave1Runnable.length >= 2
+  return {
+    totalTasks: items.length,
+    parallelDispatch,
+    waves,
+    order: waves.flatMap((w) => w.tasks.map((t) => t.taskId)),
+    parallelizable: wave1Runnable.map((t) => t.taskId),
+    hasDependencies: items.some((it) => it.rawDeps.length > 0),
+  }
 }

@@ -53,8 +53,8 @@ metadata:
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 
-- **不可自审、全历史换人与 3 轮停损锁**：`critique-pass` / `critique-reject` 硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用任意历史轮次审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`，退出码 `3`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`，退出码 `3`）；连轮相同阻塞项或第 3 轮仍退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），须人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后正文未改由维护者执行 `approve`（改正文触发 `BLOCKED_CRITIQUE_STALE`）。**批准只由 `approve` 一个入口写入**：它同时核对依据，合法依据只有三种（过审、带实质理由跳过、人类签字且正文未改），`link --approve` 会被 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY` 拒绝。支持 `--milestone` 对齐里程碑关联。
-- **`impl` 工作树协同**：若 `flow.mjs start --task <id>` 已先建好隔离工作树，`doc-plan.mjs init --task <id>` 会直接把规划单落盘到 `.worktrees/impl-<id>/` 避免撕裂；若先规划后建工作树，`flow.mjs start --spec ... --todo ...` 会自动将规划文档迁入实施工作树并同步 `-issue<N>-` 命名。
+- **不可自审、全历史换人与 3 轮停损锁**：`critique-pass` / `critique-reject` 将轮次与锚点写入任务账本 `ledger.planCritique`，硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用任意历史轮次审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`，退出码 `3`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`，退出码 `3`）；连轮相同阻塞项或第 3 轮仍退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），停损后仍允许改稿继续写新轮次 `critique-reject`/`critique-pass` 或记 `critique-continue`，仅锁定 `approve` 直至人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后正文未改由维护者执行 `approve`（改正文触发 `BLOCKED_CRITIQUE_STALE`）。**批准只由 `approve` 一个入口写入**：严格白名单只放行过审（SHA 一致）、带实质理由跳过、人类签字且正文未改三种依据，`link --approve` 会被 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY` 拒绝。支持 `--milestone` 与 `plan-sync.mjs` 同步规划状态。
+- **`impl` 工作树协同**：支持 `doc-plan.mjs init --worktree` 直接创建隔离规划工作树（`status: planning`）；若 `flow.mjs start --task <id> [--planning]` 已先建好隔离工作树，`doc-plan.mjs init --task <id>` 会直接把规划单落盘到 `.worktrees/impl-<id>/` 避免撕裂。
 - **波次移交 `dev-flow`**：单任务 `audit`/`approve` 通过后按 `[NEXT STEP]` 移交 `dev-flow`（`flow.mjs start`）；多切片协同可配合 `flow.mjs start --after <parent>` 起堆叠子分支或 `flow.mjs batch plan` 按文件互斥划分波次。未装配兄弟技能时退化为原生 Git 指引。
 
 ## 标准命令流
@@ -64,17 +64,18 @@ metadata:
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--plan-mode interactive | autonomous]
 
 # 2. 按统一模板生成文档（自动按工作区形态裁剪适用章节，--no-prune 强制全保留；--prd/--spec 建立互链并继承；支持 --milestone）
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--no-prune]
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--worktree] [--no-prune]
 
 # 3. 多轮互动澄清落盘与规划内审自净化（实质性校验零字数门槛、跨轮防退化比对、Mermaid 16/12、Frontmatter 互链）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" clarify --file "docs/specs/<file>" --question "<问题>" --decision "<结论>" [--by user] [--criterion "<追加 C 项>"]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "docs/specs/<YYMMDD-slug-spec>.md"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit .
 
-# 4. 关联、独立 Critique（通过/退回/人工解锁）、批准、成对归档（--include-master-prd 含总控 PRD）与取代
+# 4. 关联、独立 Critique（通过/退回/继续重写/人工解锁）、批准、成对归档（--include-master-prd 含总控 PRD）与取代
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "<slug-or-path>" [--issue <N>] [--pr <M>] [--milestone <N|标题>] [--branch <B>] [--status <S>]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --summary "<结论>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-reject --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --findings "<意见>" --summary "<退回原因>"
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-continue --file "docs/specs/<file>" --reason "<改进方向>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-override --file "docs/specs/<file>" --human-approved --reason "<裁决理由>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "docs/specs/<file>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" archive [<slug-or-path>] [--task <id>] [--include-master-prd]

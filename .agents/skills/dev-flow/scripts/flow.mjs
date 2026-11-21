@@ -40,7 +40,7 @@ function printHelp() {
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
     '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
     '  intake    [--pr <M> | --issue <N>] [--decision <accept|defer|reject-out-of-scope|reject-duplicate|needs-info>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
-    '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
+    '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
     '  milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--title "<标题>"] [--description "<描述>"] [--due <ISO>] [--issue <N>] [--pr <N>] [--task <id>] [--state open|closed|all] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
@@ -52,7 +52,7 @@ function printHelp() {
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
     '  merge     [--task <id>] [--method merge|squash|rebase] [--human-approved] [--reason <text>] [--skip-govern] [--json]',
     '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--allow-outbound <路径>] [--skip-govern] [--json]',
-    '  status    [--task <id>] [--json]',
+    '  status    [--task <id>] [--all] [--json]',
     '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
     '  batch     <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>] [--enqueue-only] [--trial-local] [--handoff] [--task <id>] [--json]',
   ].join('\n') + '\n')
@@ -72,7 +72,7 @@ async function main(argv) {
         'create-issue', 'takeover', 'reset-review-slot',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd',
         'ack-no-issue-context', 'apply', 'dry-run', 'skip-edit-gate', 'skip-govern', 'strict-lifecycle', 'run-govern-hook',
-        'allow-plan-bootstrap',
+        'allow-plan-bootstrap', 'planning', 'all',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',

@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from '../../lib/doc-slice-graph.mjs'
 import { destroyTaskScratchDir, findAffectedFeatures, readFeatureMap } from '../../lib/feature-map.mjs'
 import {
   canonicalPath, detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
@@ -339,6 +340,61 @@ export async function handleCleanup(opts, roots) {
 
 export async function handleStatus(opts, roots) {
   const active = listTaskLedgers(roots.mainRoot, { includeTerminal: false })
+  if (opts.all) {
+    const readySlices = scanUnstartedReadySlices(roots.mainRoot, active)
+    const wavePlan = buildMultiTaskWavePlan([...active, ...readySlices])
+    const fastCfg = roots.isGit ? readGitConfigFast(roots.gitDir, { systemMap: false }) : null
+    const remotes = parseRemoteUrls(fastCfg?.remoteText ?? '')
+    const first = active[0] ?? null
+    const inferredRole = first?.role ?? ((remotes.origin || remotes.upstream) ? 'maintainer' : 'local-only')
+    const inferredProvider = first?.providerId ?? ((remotes.origin || remotes.upstream) ? 'github' : 'none')
+    const backend = createTaskBackend({ role: inferredRole, providerId: inferredProvider, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
+    const tasks = active.map((t) => {
+      const ev = evaluateNextState({ activeTasks: active, selectedTask: t, repoRoot: roots.mainRoot })
+      return {
+        taskId: t.taskId,
+        slug: t.slug ?? null,
+        status: t.status,
+        phase: ev.phase,
+        ownerRole: ev.ownerRole,
+        planning: Boolean(t.planning || t.status === 'planning'),
+        role: t.role ?? inferredRole,
+        branch: t.branch ?? null,
+        worktreePath: t.worktreePath ?? null,
+        linkedIssues: t.linkedIssues ?? [],
+        prNumber: t.prNumber ?? null,
+        nextAction: ev.command || ev.nextAction,
+        syncFailures: t.syncFailures ?? [],
+      }
+    })
+    const summary = {
+      ok: true,
+      all: true,
+      activeCount: tasks.length,
+      activeTasks: tasks,
+      readySlices,
+      wavePlan,
+      parallelDispatch: wavePlan.parallelDispatch ?? null,
+      backendKind: backend.kind,
+      capabilities: backend.capabilities,
+    }
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
+    } else {
+      process.stdout.write(`全局看板（活跃任务 ${tasks.length}，未开干就绪切片 ${readySlices.length}，后端=${backend.kind}）：\n`)
+      for (const t of tasks) {
+        process.stdout.write(`- ${t.taskId}: status=${t.status}, phase=${t.phase}, branch=${t.branch ?? '-'}${t.planning ? ' [planning]' : ''}\n`)
+      }
+      if (readySlices.length > 0) {
+        process.stdout.write(`未启动就绪切片：${readySlices.map((s) => `${s.taskId ?? s.slug} (${s.file})`).join('、')}\n`)
+      }
+      if (wavePlan?.waves?.length > 0) {
+        process.stdout.write(`波次调度：共 ${wavePlan.waves.length} 波（Wave 1=${wavePlan.waves[0]?.tasks?.length ?? 0} 个任务）\n`)
+      }
+    }
+    return { exitCode: EXIT.OK, payload: summary }
+  }
+
   let ctx = null
   try {
     ctx = await resolveTaskContext(roots, opts)

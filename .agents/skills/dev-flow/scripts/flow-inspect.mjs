@@ -9,13 +9,14 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { autoPopulateExplored } from './flow-explore.mjs'
 import { checkAuthorIsNotImplementer } from '../../lib/doc-requirements.mjs'
-import { slugify } from '../../lib/docs.mjs'
+import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import { workTypePrefix } from '../../lib/escalation.mjs'
 import {
   canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
   gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
-  resolveRepoRoots, writeAtomic,
+  readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
 import {
   hasUnmergedIndexFast, parsePorcelainV2BranchZ, readGitConfigFast, readHeadFast,
@@ -23,15 +24,19 @@ import {
   resolveDefaultBranchFromRefs, resolveGitDirFast, resolveRefShaFast,
 } from '../../lib/git-fast.mjs'
 import { readWorktreeListFast } from '../../lib/git-status-fast.mjs'
-import { createDefaultLedger, listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
+import {
+  createDefaultLedger, createExploredEvidence, listTaskLedgers, readTaskLedger,
+  recordMountedDepsInLedger, sanitizeTaskId, updateTaskLedger,
+} from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
 import { evaluatePlanExitGate, formatPlanExitGate, PLAN_BOOTSTRAP_FLAG } from '../../lib/plan-exit-gate.mjs'
 import {
   cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parseMilestoneNumber, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeGitHubEnv, resolveIdentityLayers, resolveWorkspaceIdentity,
+  parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveIdentityLayers, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { createTaskBackend } from '../../lib/task-backend.mjs'
 import {
   assertNoDuplicatePrForTask, checkUnresolvedDependencies, resolveExternalCollaborationGraph,
 } from '../../lib/task-graph.mjs'
@@ -233,6 +238,56 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   }
 }
 
+function readSpecIssueInt(rootDir, specRel) {
+  if (!rootDir || !specRel) return null
+  const abs = join(rootDir, specRel)
+  const raw = existsSync(abs) ? readTextSafe(abs) : null
+  const n = raw ? Number(parseDocFrontmatter(raw)?.data?.issue) : NaN
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+function runStartPlanGate(gateRoot, { caseType, slug, taskId, issue, docs, opts, planCritique = null }) {
+  const planGate = evaluatePlanExitGate(gateRoot, {
+    caseType, slug, taskId, issue, docs,
+    allowBootstrap: Boolean(opts[PLAN_BOOTSTRAP_FLAG]),
+    reusePrRef: Boolean(opts['pr-ref']),
+    planCritique,
+  })
+  const lines = formatPlanExitGate(planGate)
+  if (planGate.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(planGate, null, 2)}\n`)
+    else for (const line of lines) process.stderr.write(`${line}\n`)
+    return { blocked: true, exitCode: planGate.exitCode ?? EXIT.FACT }
+  }
+  if (!opts.json) for (const line of lines) process.stderr.write(`${line}\n`)
+  return { blocked: false }
+}
+
+async function ackInboundExternalPr(roots, state, prNumber, opts = {}) {
+  const originFull = githubRepoFull(state.remoteUrls?.origin)
+  const upstreamFull = githubRepoFull(state.remoteUrls?.upstream)
+  const targetRepo = upstreamFull ?? state.declaredRepo ?? originFull ?? null
+  let client = opts._ghClient ?? opts._ghProbe?.client ?? null
+  if (!client && !opts._backend && targetRepo) {
+    const probe = await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} }).catch(() => null)
+    client = probe?.client ?? null
+  }
+  const backend = opts._backend ?? createTaskBackend({
+    role: 'maintainer', providerId: 'github', targetRepo, client, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+  })
+  if (!backend?.capabilities?.api || (!client && !opts._backend)) {
+    return { synced: false, labelSynced: false, skipped: true, reason: 'offline-or-no-client' }
+  }
+  const body = `<!-- pf:inbound-external-pr pr=${prNumber} -->\n已受理外部贡献 PR #${prNumber}，正在隔离审查工作树执行不可信安全扫描与规范评审。`
+  try {
+    const commentRes = await backend.postComment({ repo: targetRepo, number: prNumber, body, deduplicate: true })
+    const labelRes = await backend.addLabels({ repo: targetRepo, number: prNumber, labels: ['external-contribution'], isPr: true })
+    return { synced: commentRes?.ok !== false, labelSynced: labelRes?.ok !== false, error: null }
+  } catch (err) {
+    return { synced: false, labelSynced: false, error: err?.message ?? String(err) }
+  }
+}
+
 export async function handleStart(opts, roots) {
   if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
   const op = await detectInProgressGitOp(roots.mainRoot, { wtGitDir: resolveGitDirFast(roots.mainRoot), statusEntries: [] })
@@ -369,6 +424,7 @@ export async function handleStart(opts, roots) {
   const taskId = sanitizeTaskId(rawTaskId)
   const slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
 
+  const isPlanning = Boolean(opts.planning)
   const existing = readTaskLedger(roots.mainRoot, taskId)
   if (existing && existing.status !== 'cleaned' && existing.status !== 'aborted' && (
     (existing.worktreePath && existsSync(join(roots.mainRoot, existing.worktreePath)))
@@ -378,6 +434,10 @@ export async function handleStart(opts, roots) {
     if (opts.todo) existing.todoFile = opts.todo
     if (opts.spec) existing.specFile = opts.spec
     if (opts.prd) existing.prdFile = opts.prd
+    const existingWorkRootPre = existing.worktreePath ? resolve(roots.mainRoot, existing.worktreePath) : roots.mainRoot
+    const specIssuePre = readSpecIssueInt(existsSync(existingWorkRootPre) ? existingWorkRootPre : roots.mainRoot, existing.specFile)
+      ?? readSpecIssueInt(roots.mainRoot, existing.specFile)
+    if (specIssuePre && !linkedIssues.includes(specIssuePre)) linkedIssues.push(specIssuePre)
     if (linkedIssues.length > 0) existing.linkedIssues = [...new Set([...(existing.linkedIssues ?? []), ...linkedIssues])]
     const nextPrNo = effectiveExternalPr ?? prNumber ?? null
     if (nextPrNo && existing.prNumber !== nextPrNo) {
@@ -386,6 +446,32 @@ export async function handleStart(opts, roots) {
       existing.prContextUnavailable = null
       existing.prBaseSha = null
       existing.prHeadSha = null
+    }
+    if ((existing.status === 'planning' || existing.planning === true) && !isPlanning) {
+      const gateRoot = existsSync(existingWorkRootPre) ? existingWorkRootPre : roots.mainRoot
+      const gateRes = runStartPlanGate(gateRoot, {
+        caseType: opts.case !== undefined ? Number(opts.case) : existing.caseType,
+        slug: existing.slug ?? slug,
+        taskId,
+        issue: existing.linkedIssues?.[0] ?? null,
+        docs: { spec: existing.specFile, todo: existing.todoFile, prd: existing.prdFile },
+        opts,
+        planCritique: existing.planCritique ?? null,
+      })
+      if (gateRes.blocked) return { exitCode: gateRes.exitCode }
+      existing.status = 'started'
+      existing.planning = false
+      if (!existing.explored) {
+        existing.explored = await autoPopulateExplored(gateRoot, opts.agent ?? opts.implementer ?? existing.implementerId ?? 'local-agent')
+      }
+      if (existing.worktreePath && !existing.depsMode && existsSync(existingWorkRootPre)) {
+        const depMount = mountSharedDeps(roots.mainRoot, existingWorkRootPre)
+        existing.depsMode = depMount.mode
+        recordMountedDepsInLedger(existing, existing.worktreePath, depMount)
+      }
+    } else if (isPlanning && (existing.status === 'planning' || existing.status === 'planned')) {
+      existing.status = 'planning'
+      existing.planning = true
     }
     const existingFetchedCount = (existing.issueContext ?? []).filter((x) => x?.fetched).length
     const needIssueRefresh = (existing.linkedIssues ?? []).length > 0 && (
@@ -532,12 +618,14 @@ export async function handleStart(opts, roots) {
       const wtAdd = await gitRun(roots.mainRoot, ['worktree', 'add', '--detach', reviewAbs, targetSha])
       if (!wtAdd.ok) throw new Error(`创建外部 PR 审查位失败：${wtAdd.stderr}`)
     }
+    const inboundAck = await ackInboundExternalPr(roots, state, effectiveExternalPr, opts)
     const ledger = createDefaultLedger({
       taskId, slug, caseType, tier: 3, isolation: 'review-pr', role: 'inbound-external-pr', providerId: 'github',
       branch: null, baseBranch, baseSha: baseSha ?? targetSha, worktreePath: null, reviewWorktreePath: reviewRel,
       linkedIssues, prNumber: effectiveExternalPr, implementerId: `external-pr-${effectiveExternalPr}`,
       issueContext, issueContextUnavailable, prContext, prContextUnavailable, ...prPatch,
       status: 'review-ready', untrustedScanPassed: false, untrustedApproved: false, humanApprovedExec: false,
+      inboundAck,
     })
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`)
@@ -571,27 +659,18 @@ export async function handleStart(opts, roots) {
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId, linkedIssues)
   const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId, linkedIssues)
 
-  // 规划退场门禁：没有过审的规划就不许开工。
-  //
-  // 位置在这里是因为它两头都得对——往上，`inspectWorkspace` 已跑完、外部 PR 审查位已早退
-  // （那类任务不建规划文档）、账本里的既有任务已幂等复用；往下就是建分支与建工作位。
-  // 工作位一旦建好，"有没有规划" 就不再重要了，活儿反正在做了。
-  const planGate = evaluatePlanExitGate(roots.mainRoot, {
-    caseType, slug, taskId, issue: linkedIssues[0] ?? null,
-    docs: { spec: initialSpec, todo: initialTodo, prd: initialPrd },
-    allowBootstrap: Boolean(opts[PLAN_BOOTSTRAP_FLAG]),
-    // 只有 `--pr-ref` 才算「接管既有 PR 的某个提交」——那类任务的规划在那边已经走过一遍，
-    // 本仓看不到也无从判定。单纯带 `--pr` 不算豁免，否则谁都能用它绕开这道门。
-    reusePrRef: Boolean(opts['pr-ref']),
-  })
-  if (planGate.blocked) {
-    const lines = formatPlanExitGate(planGate)
-    if (opts.json) process.stdout.write(`${JSON.stringify(planGate, null, 2)}\n`)
-    for (const line of lines) process.stderr.write(`${line}\n`)
-    return { exitCode: planGate.exitCode ?? EXIT.FACT }
+  const specIssueNew = readSpecIssueInt(roots.mainRoot, initialSpec)
+  if (specIssueNew && !linkedIssues.includes(specIssueNew)) linkedIssues.push(specIssueNew)
+
+  if (!isPlanning) {
+    const gateRes = runStartPlanGate(roots.mainRoot, {
+      caseType, slug, taskId, issue: linkedIssues[0] ?? null,
+      docs: { spec: initialSpec, todo: initialTodo, prd: initialPrd },
+      opts,
+      planCritique: existing?.planCritique ?? null,
+    })
+    if (gateRes.blocked) return { exitCode: gateRes.exitCode }
   }
-  // 豁免放行时也说一句：被绕过的是哪一条，事后才有得核对。
-  for (const line of formatPlanExitGate(planGate)) process.stderr.write(`${line}\n`)
 
   for (const docRel of [initialSpec, initialTodo]) {
     const authored = checkAuthorIsNotImplementer(roots.mainRoot, docRel, implementerId)
@@ -609,6 +688,7 @@ export async function handleStart(opts, roots) {
     const hasBranch = await resolveLocalBranchRef()
     const sw = hasBranch.ok ? await gitRun(roots.mainRoot, ['switch', branch]) : await gitRun(roots.mainRoot, ['switch', '-c', branch])
     if (!sw.ok) throw new Error(`切换分支 ${branch} 失败：${sw.stderr}`)
+    const autoExplored = await autoPopulateExplored(roots.mainRoot, implementerId)
     const ledger = createDefaultLedger({
       taskId, slug, caseType, tier: 1, isolation: 'branch', role, providerId, branch, baseBranch, baseSha,
       worktreePath: null, reviewWorktreePath: `.worktrees/review-${taskId}`,
@@ -616,7 +696,10 @@ export async function handleStart(opts, roots) {
       linkedIssues, prNumber, implementerId,
       account: startIdentity.account, verifiedPlatformLogin: startIdentity.verifiedPlatformLogin, agent: startIdentity.agent,
       issueContext, issueContextUnavailable,
-      prContext, prContextUnavailable, ...prPatch, status: 'started',
+      prContext, prContextUnavailable, ...prPatch,
+      status: isPlanning ? 'planning' : 'started',
+      planning: isPlanning,
+      explored: autoExplored,
       ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
@@ -624,12 +707,17 @@ export async function handleStart(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
-      process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 初始无提交分支模式）：branch=${branch}, role=${role}\n`)
-      printNextStep([
-        { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
-        { skill: 'dev-flow', text: `2. 再执行 flow.mjs explore 记录探索证据：node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}` },
-        { skill: 'dev-flow', text: `3. 完成 claim 与 explore 后推进实施，提交后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
-      ], { repoRoot: roots.mainRoot })
+      process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 初始无提交分支模式${isPlanning ? '·规划阶段' : ''}）：branch=${branch}, role=${role}\n`)
+      const nextTier1 = isPlanning
+        ? [
+            { skill: 'dev-plan', text: `1. 在分支 ${branch} 起草规划文档并经 critique-pass 与 approve` },
+            { skill: 'dev-flow', text: `2. 过审后执行 flow.mjs start --task ${taskId} 转入实施` },
+          ]
+        : [
+            { skill: 'dev-flow', text: `1. 执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
+            { skill: 'dev-flow', text: `2. 完成实施并提交后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
+          ]
+      printNextStep(nextTier1, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -653,7 +741,8 @@ export async function handleStart(opts, roots) {
     if (!wtRes.ok) throw new Error(`创建实施 worktree 失败：${wtRes.stderr}`)
   }
 
-  const depMount = mountSharedDeps(roots.mainRoot, implAbs)
+  const depMount = isPlanning ? { mode: 'deferred-planning', mounted: [], mountedPaths: [] } : mountSharedDeps(roots.mainRoot, implAbs)
+  const autoExplored = await autoPopulateExplored(implAbs, implementerId)
   const ledger = createDefaultLedger({
     taskId, slug, caseType, tier: 2, isolation: 'worktree', role, providerId, branch, baseBranch, baseSha,
     worktreePath: implRel, reviewWorktreePath: reviewRel, depsMode: depMount.mode,
@@ -661,7 +750,10 @@ export async function handleStart(opts, roots) {
     linkedIssues, prNumber, implementerId,
     account: startIdentity.account, verifiedPlatformLogin: startIdentity.verifiedPlatformLogin, agent: startIdentity.agent,
     issueContext, issueContextUnavailable,
-    prContext, prContextUnavailable, ...prPatch, status: 'started',
+    prContext, prContextUnavailable, ...prPatch,
+    status: isPlanning ? 'planning' : 'started',
+    planning: isPlanning,
+    explored: autoExplored,
     ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
   })
   recordMountedDepsInLedger(ledger, implRel, depMount)
@@ -670,25 +762,34 @@ export async function handleStart(opts, roots) {
   if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId, linkedIssues)
   if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId, linkedIssues)
   if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId, linkedIssues)
-  if (linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger)
+  const specIssueWt = readSpecIssueInt(implAbs, ledger.specFile)
+  if (specIssueWt && !ledger.linkedIssues.includes(specIssueWt)) {
+    ledger.linkedIssues = [...ledger.linkedIssues, specIssueWt]
+  }
+  if (ledger.linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger)
   await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
   } else {
     if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
-    process.stdout.write(`任务 ${taskId} 已就绪（Tier 2 Worktree 模式）：\n`)
+    process.stdout.write(`任务 ${taskId} 已就绪（Tier 2 Worktree 模式${isPlanning ? '·规划隔离' : ''}）：\n`)
     process.stdout.write(`- 实施位: ${implRel}（分支: ${branch}，依赖模式: ${depMount.mode}）\n`)
     if (migratedDocs.length > 0) process.stdout.write(`- 已迁入规划文档: ${migratedDocs.join(', ')}\n`)
     process.stdout.write(`- 角色: ${role} | 基线: ${baseBranch}@${(baseSha ?? '').slice(0, 7)}\n`)
     if (Array.isArray(state.driftWarnings)) {
       for (const w of state.driftWarnings) process.stdout.write(`- [提醒] ${w.message}\n`)
     }
-    printNextStep([
-      { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
-      { skill: 'dev-flow', text: `2. 再执行 flow.mjs explore 记录探索证据：node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}` },
-      `3. 完成 claim 与 explore 后，在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,
-    ], { repoRoot: roots.mainRoot })
+    const nextTier2 = isPlanning
+      ? [
+          { skill: 'dev-plan', text: `1. 在 ${implRel} 内编写/完善 SPEC 与 Todo 并完成 critique-pass 与 approve` },
+          { skill: 'dev-flow', text: `2. 过审后在同工作区执行 flow.mjs start --task ${taskId} 转入实施阶段` },
+        ]
+      : [
+          { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
+          `2. 在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,
+        ]
+    printNextStep(nextTier2, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }

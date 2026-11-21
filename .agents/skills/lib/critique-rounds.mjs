@@ -6,11 +6,14 @@
 
 import { EXIT } from './exit-codes.mjs'
 import { existsSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
+import os from 'node:os'
+import path, { relative, resolve } from 'node:path'
 
 import { collectOwnerHistory, DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, stripCritiqueMeta, updateDocFrontmatter } from './docs.mjs'
 import { extractDocSnapshot } from './doc-substantive.mjs'
-import { posixPath, readTextSafe, sha256Text, writeAtomic } from './git.mjs'
+import { resolveGitDirFast } from './git-fast.mjs'
+import { posixPath, readJsonSafe, readTextSafe, sha256Text, writeAtomic, writeJsonAtomic } from './git.mjs'
+import { readTaskLedger, sanitizeTaskId, updateTaskLedger } from './ledger.mjs'
 import { appendGovernSignal } from './signals.mjs'
 
 export const CRITIQUE_FINDINGS_KEY = 'critique_findings'
@@ -138,7 +141,13 @@ export function parseCritiqueStamp(stamp) {
 }
 
 /** 安全反序列化 Frontmatter 中的 `critique_rounds` 历史数组（兼容旧单行 `plan_critique` 回退）。 */
-export function parseCritiqueRounds(fmData, rawText = '') {
+export function parseCritiqueRounds(fmData, rawText = '', ledgerEntry = null) {
+  if (Array.isArray(ledgerEntry?.rounds) && ledgerEntry.rounds.length > 0) {
+    return ledgerEntry.rounds
+      .filter((x) => x && typeof x === 'object')
+      .map((x) => ({ ...x }))
+      .sort((a, b) => (Number(a.round) || 0) - (Number(b.round) || 0))
+  }
   const rawVal = fmData?.[CRITIQUE_ROUNDS_KEY]
   let list = []
   if (Array.isArray(rawVal)) {
@@ -168,8 +177,11 @@ export function parseCritiqueRounds(fmData, rawText = '') {
   return []
 }
 
-/** 安全解析 Frontmatter 中的 `critique_override` 人类解锁记录。 */
-export function parseCritiqueOverride(fmData) {
+/** 安全解析账本或 Frontmatter 中的 `critique_override` 人类解锁记录。 */
+export function parseCritiqueOverride(fmData, ledgerEntry = null) {
+  if (ledgerEntry?.override && typeof ledgerEntry.override === 'object' && !Array.isArray(ledgerEntry.override)) {
+    return ledgerEntry.override
+  }
   const raw = fmData?.[CRITIQUE_OVERRIDE_KEY]
   if (!raw) return null
   if (typeof raw === 'object' && !Array.isArray(raw)) return raw
@@ -213,8 +225,8 @@ export function critiqueTextFingerprint(rawText) {
  * @returns {{present: boolean, approved: boolean, stale: boolean, sha: string|null,
  *   currentSha: string, override: object|null}}
  */
-export function evaluateCritiqueOverride(rawText, fmData) {
-  const override = parseCritiqueOverride(fmData)
+export function evaluateCritiqueOverride(rawText, fmData, ledgerEntry = null) {
+  const override = parseCritiqueOverride(fmData, ledgerEntry)
   const approved = override?.approved === true
   const recordedSha = typeof override?.sha === 'string' ? override.sha.trim().toLowerCase() : ''
   const currentSha = critiqueTextFingerprint(rawText)
@@ -325,29 +337,87 @@ function persistCritiqueFrontmatter(abs, text, fm, docType, patch) {
   }
 }
 
-function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round, digest, priorRounds, override, strictSameSha = false }) {
+function resolveEffectiveRoots(repoRoot, mainRoot, gitDir) {
+  const rawGitDir = gitDir && existsSync(resolve(gitDir))
+    ? resolve(gitDir)
+    : (resolveGitDirFast(repoRoot) ?? (mainRoot && mainRoot !== repoRoot ? resolveGitDirFast(mainRoot) : null))
+  const effGitDir = rawGitDir && existsSync(rawGitDir) ? rawGitDir : null
+  let effMainRoot = mainRoot && mainRoot !== repoRoot ? resolve(mainRoot) : resolve(repoRoot)
+  if ((!mainRoot || mainRoot === repoRoot) && effGitDir) {
+    const cdFile = path.join(effGitDir, 'commondir')
+    const common = existsSync(cdFile) ? resolve(effGitDir, (readTextSafe(cdFile) ?? '').trim()) : effGitDir
+    if (path.basename(common) === '.git') effMainRoot = path.dirname(common)
+  }
+  return { effMainRoot, effGitDir }
+}
+
+function sidecarCritiqueFile(repoRoot, effectiveGitDir) {
+  if (effectiveGitDir) return path.join(effectiveGitDir, 'project-forge-flow', 'plan-critique-state.json')
+  return path.join(os.tmpdir(), 'pf-plan-critique', `${sha256Text(resolve(repoRoot)).slice(0, 16)}.json`)
+}
+
+/** 同步读取规划内审条目（优先任务账本 `ledger.planCritique`，无账本时回退 sidecar）。 */
+export function readPlanCritiqueEntrySync({ repoRoot, mainRoot = repoRoot, gitDir = null, taskId = null, fmData = {}, relDoc }) {
+  const { effMainRoot, effGitDir } = resolveEffectiveRoots(repoRoot, mainRoot, gitDir)
+  const rawTaskId = taskId ?? fmData?.task_id ?? null
+  const effTaskId = rawTaskId ? sanitizeTaskId(rawTaskId) : null
+  if (effMainRoot && effTaskId) {
+    const ledger = readTaskLedger(effMainRoot, effTaskId)
+    if (ledger?.planCritique?.[relDoc]) {
+      return { entry: ledger.planCritique[relDoc], ledger, gitDir: effGitDir, mainRoot: effMainRoot, taskId: effTaskId }
+    }
+    if (ledger) return { entry: null, ledger, gitDir: effGitDir, mainRoot: effMainRoot, taskId: effTaskId }
+  }
+  const sidecar = sidecarCritiqueFile(repoRoot, effGitDir)
+  const data = readJsonSafe(sidecar, null)
+  return { entry: data?.[relDoc] ?? null, ledger: null, gitDir: effGitDir, mainRoot: effMainRoot, taskId: effTaskId }
+}
+
+/** 按 task_id 从任务账本读取规划内审条目；无账本时回退到隔离 sidecar。 */
+export async function readPlanCritiqueEntry(opts) {
+  return readPlanCritiqueEntrySync(opts)
+}
+
+async function persistPlanCritiqueEntry({ repoRoot, mainRoot = repoRoot, gitDir = null, taskId = null, fmData = {}, relDoc, entry }) {
+  const { effMainRoot, effGitDir } = resolveEffectiveRoots(repoRoot, mainRoot, gitDir)
+  const rawTaskId = taskId ?? fmData?.task_id ?? null
+  const effTaskId = rawTaskId ? sanitizeTaskId(rawTaskId) : null
+  if (effMainRoot && effTaskId) {
+    const existing = readTaskLedger(effMainRoot, effTaskId)
+    if (existing) {
+      await updateTaskLedger(effMainRoot, effTaskId, (cur) => ({
+        ...cur,
+        planCritique: { ...(cur.planCritique ?? {}), [relDoc]: entry },
+      }))
+      const readBack = readTaskLedger(effMainRoot, effTaskId)
+      const verified = readBack?.planCritique?.[relDoc]
+      if (!verified || verified.updatedAt !== entry.updatedAt) {
+        throw makePlanError('PLAN_CRITIQUE_PERSIST_FAILED', EXIT.ACTION, `账本 planCritique[${relDoc}] 回读校验失败`)
+      }
+      return { storedIn: 'ledger', entry: verified }
+    }
+  }
+  const sidecar = sidecarCritiqueFile(repoRoot, effGitDir)
+  const cur = (await readJsonSafe(sidecar, {})) ?? {}
+  await writeJsonAtomic(sidecar, { ...cur, [relDoc]: entry })
+  const readBack = await readJsonSafe(sidecar, null)
+  if (!readBack?.[relDoc] || readBack[relDoc].updatedAt !== entry.updatedAt) {
+    throw makePlanError('PLAN_CRITIQUE_PERSIST_FAILED', EXIT.ACTION, `规划内审 sidecar (${relDoc}) 回读校验失败`)
+  }
+  return { storedIn: 'sidecar', entry: readBack[relDoc] }
+}
+
+function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round, digest, priorRounds, strictSameSha = false }) {
   if (!reviewer || !String(reviewer).trim()) {
     throw makePlanError('MISSING_REVIEWER', EXIT.USAGE, 'critique 必须指定 --reviewer <reviewerId>')
   }
   // 自审要按**负责人历史**判，不只按当前 owner。
-  //
-  // 只比当前 owner 时，换个负责人就能让本人回来审自己的稿子：先把 owner 转给别人、
-  // 再以「新负责人不是审稿人」的状态自我复核。历史集合才是「谁曾是这份稿子的作者」，
-  // 这与负责人变更留痕是同一件事的两面。
   const ownerHistory = collectOwnerHistory(fmPre.data)
   const reviewerId = normActorId(reviewer)
   if (reviewerId && ownerHistory.some((o) => normActorId(o) === reviewerId)) {
     throw makePlanError(
       'SELF_CRITIQUE_REJECTED', EXIT.FACT,
       `SELF_CRITIQUE_REJECTED: 规划 Critique 独立复核人 (${reviewer}) 不得与文档负责人或其任前任负责人相同（历史：${ownerHistory.join('、')}）`,
-    )
-  }
-  const hasPriorStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
-  if (hasPriorStopLoss && !override?.approved) {
-    throw makePlanError(
-      'STOP_LOSS_ESCALATE', EXIT.HUMAN,
-      `STOP_LOSS_ESCALATE: ${file} 历史规划审查已触发停损且未获人类解锁；请运行 \`doc-plan.mjs critique-override --file "${file}" --human-approved --reason "..."\`。`,
-      { file, excludedReviewers: collectExcludedReviewers(priorRounds, fmPre.data?.owner) },
     )
   }
   const effectiveRound = round !== null && round !== undefined
@@ -379,21 +449,24 @@ function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round,
 /** 记录规划 Critique 通过（含自审拦截、全历史换人锁、A4 正文变动锁与历史停损校验）。 */
 export async function critiquePassDoc({
   repoRoot, mainRoot = repoRoot, gitDir = null, isGit = false,
-  file, reviewer, round = null, summary = '', findings = [], auditDoc = null, docType = null,
+  file, reviewer, round = null, summary = '', findings = [], auditDoc = null, docType = null, taskId = null,
 }) {
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', EXIT.ACTION, `找不到文档：${file}`)
   const rawPre = readTextSafe(abs)
   if (rawPre === undefined) throw makePlanError('FILE_UNREADABLE', EXIT.ACTION, `无法读取文本文件：${file}`)
 
+  const relDoc = posixPath(relative(repoRoot, abs))
   const fmPre = parseDocFrontmatter(rawPre)
-  const priorRounds = parseCritiqueRounds(fmPre.data, rawPre)
-  const override = parseCritiqueOverride(fmPre.data)
+  const { entry: priorEntry } = await readPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId, fmData: fmPre.data, relDoc,
+  })
+  const priorRounds = parseCritiqueRounds(fmPre.data, rawPre, priorEntry)
   const snapPre = extractDocSnapshot(rawPre)
   const baselinePre = computePlanArtifactBaseline(rawPre, snapPre)
 
-  const { effectiveRound, excludedReviewers } = validateCritiqueActorAndHistory({
-    fmPre, rawPre, file, reviewer, round, digest: baselinePre.shortSha, priorRounds, override,
+  const { effectiveRound } = validateCritiqueActorAndHistory({
+    fmPre, rawPre, file, reviewer, round, digest: baselinePre.shortSha, priorRounds,
   })
 
   if (typeof auditDoc === 'function') {
@@ -408,7 +481,6 @@ export async function critiquePassDoc({
 
   const text = readTextSafe(abs) ?? rawPre
   const fm = parseDocFrontmatter(text)
-  const relDoc = posixPath(relative(repoRoot, abs))
   const effType = docType ?? inferDocTypeLight(relDoc, fm.data)
   const snap = extractDocSnapshot(text)
   const baseline = computePlanArtifactBaseline(text, snap)
@@ -417,10 +489,10 @@ export async function critiquePassDoc({
   const stampValue = `passed (reviewer=${String(reviewer).trim()}, round=${effectiveRound}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
 
   const findingList = (Array.isArray(findings) ? findings : [findings]).map((f) => String(f ?? '').trim()).filter(Boolean)
-  const prevFindingsRaw = fm.data?.[CRITIQUE_FINDINGS_KEY]
-  const newFindingsRaw = findingList.length > 0
-    ? [String(prevFindingsRaw ?? '').trim(), serializeFindings(effectiveRound, findingList)].filter(Boolean).join(' ;; ')
-    : (prevFindingsRaw ?? null)
+  const priorFindings = Array.isArray(priorEntry?.findings) ? priorEntry.findings : []
+  const nextFindings = findingList.length > 0
+    ? [...priorFindings, { round: effectiveRound, verdict: 'passed', items: findingList }]
+    : priorFindings
 
   const nextRounds = [...priorRounds.filter((r) => Number(r.round) !== effectiveRound), {
     round: effectiveRound, verdict: 'passed', reviewerId: String(reviewer).trim(),
@@ -428,14 +500,22 @@ export async function critiquePassDoc({
     findings: findingList, stopLossTriggered: false, recordedAt: new Date().toISOString(),
   }].sort((a, b) => Number(a.round) - Number(b.round))
 
-  const patch = {
+  persistCritiqueFrontmatter(abs, text, fm, effType, {
     plan_critique: stampValue,
-    critique_anchors: JSON.stringify(snap),
-    [CRITIQUE_ROUNDS_KEY]: JSON.stringify(nextRounds),
     updated: docIsoDate(),
-  }
-  if (newFindingsRaw) patch[CRITIQUE_FINDINGS_KEY] = newFindingsRaw
-  persistCritiqueFrontmatter(abs, text, fm, effType, patch)
+  })
+
+  await persistPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId: taskId ?? fm.data?.task_id ?? null, fmData: fm.data, relDoc,
+    entry: {
+      ...(priorEntry ?? {}),
+      rounds: nextRounds,
+      anchors: snap,
+      findings: nextFindings,
+      override: priorEntry?.override ?? parseCritiqueOverride(fm.data),
+      updatedAt: new Date().toISOString(),
+    },
+  })
 
   if (isGit || existsSync(resolve(mainRoot, '.git'))) {
     await appendGovernSignal({
@@ -447,7 +527,7 @@ export async function critiquePassDoc({
   }
 
   return {
-    ok: true, file: relDoc, reviewer: String(reviewer).trim(), round: effectiveRound, sha: digest,
+    ok: true, file: relDoc, docType: effType, reviewer: String(reviewer).trim(), round: effectiveRound, sha: digest,
     summary: cleanSummary || null, status: 'passed',
     excludedReviewers: collectExcludedReviewers(nextRounds, fm.data?.owner),
   }
@@ -468,14 +548,17 @@ export async function critiqueRejectDoc({
   const fm = parseDocFrontmatter(text)
   const relDoc = posixPath(relative(repoRoot, abs))
   const effType = docType ?? inferDocTypeLight(relDoc, fm.data)
-  const priorRounds = parseCritiqueRounds(fm.data, text)
-  const override = parseCritiqueOverride(fm.data)
+  const { entry: priorEntry } = await readPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId, fmData: fm.data, relDoc,
+  })
+  const priorRounds = parseCritiqueRounds(fm.data, text, priorEntry)
+  const override = parseCritiqueOverride(fm.data, priorEntry)
   const snap = extractDocSnapshot(text)
   const baseline = computePlanArtifactBaseline(text, snap)
   const digest = baseline.shortSha
 
   const { effectiveRound, prevRound } = validateCritiqueActorAndHistory({
-    fmPre: fm, rawPre: text, file, reviewer, round, digest, priorRounds, override, strictSameSha: true,
+    fmPre: fm, rawPre: text, file, reviewer, round, digest, priorRounds, strictSameSha: true,
   })
 
   const findingList = (Array.isArray(findings) ? findings : [findings]).map((f) => String(f ?? '').trim()).filter(Boolean)
@@ -490,10 +573,10 @@ export async function critiqueRejectDoc({
   })
 
   const stampValue = `rejected (reviewer=${String(reviewer).trim()}, round=${effectiveRound}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
-  const prevFindingsRaw = fm.data?.[CRITIQUE_FINDINGS_KEY]
-  const newFindingsRaw = evalItems.length > 0
-    ? [String(prevFindingsRaw ?? '').trim(), serializeFindings(effectiveRound, evalItems)].filter(Boolean).join(' ;; ')
-    : (prevFindingsRaw ?? null)
+  const priorFindings = Array.isArray(priorEntry?.findings) ? priorEntry.findings : []
+  const nextFindings = evalItems.length > 0
+    ? [...priorFindings, { round: effectiveRound, verdict: 'rejected', items: evalItems }]
+    : priorFindings
 
   const nextRounds = [...priorRounds.filter((r) => Number(r.round) !== effectiveRound), {
     round: effectiveRound, verdict: 'rejected', reviewerId: String(reviewer).trim(),
@@ -502,14 +585,22 @@ export async function critiqueRejectDoc({
     recordedAt: new Date().toISOString(),
   }].sort((a, b) => Number(a.round) - Number(b.round))
 
-  const patch = {
+  persistCritiqueFrontmatter(abs, text, fm, effType, {
     plan_critique: stampValue,
-    critique_anchors: JSON.stringify(snap),
-    [CRITIQUE_ROUNDS_KEY]: JSON.stringify(nextRounds),
     updated: docIsoDate(),
-  }
-  if (newFindingsRaw) patch[CRITIQUE_FINDINGS_KEY] = newFindingsRaw
-  persistCritiqueFrontmatter(abs, text, fm, effType, patch)
+  })
+
+  await persistPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId: taskId ?? fm.data?.task_id ?? null, fmData: fm.data, relDoc,
+    entry: {
+      ...(priorEntry ?? {}),
+      rounds: nextRounds,
+      anchors: snap,
+      findings: nextFindings,
+      override: priorEntry?.override ?? override,
+      updatedAt: new Date().toISOString(),
+    },
+  })
 
   const hasGitDir = Boolean(isGit || existsSync(resolve(mainRoot, '.git')))
   if (hasGitDir) {
@@ -526,8 +617,10 @@ export async function critiqueRejectDoc({
   }
 
   const excludedReviewers = collectExcludedReviewers(nextRounds, fm.data?.owner)
+  const overrideCmd = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-override --file "${relDoc}" --human-approved --reason "<维护者裁决原因>"`
+  const continueCmd = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-continue --file "${relDoc}" --reason "<改进方向>"`
   const nextStep = sl.stopLoss
-    ? `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-override --file "${relDoc}" --human-approved --reason "<维护者裁决原因>"`
+    ? `${overrideCmd}（或先运行 ${continueCmd} 后重写并由新复核人继续复核）`
     : `修改 "${relDoc}" 后重跑 audit，再由新独立复核人（排除 ${excludedReviewers.join(', ')}）执行 Round ${effectiveRound + 1}`
   const stopLossPacket = sl.stopLoss
     ? {
@@ -538,7 +631,8 @@ export async function critiqueRejectDoc({
         repeatedFindings: sl.repeatedItems,
         excludedReviewers,
         rootCauseHypothesis: '连续驳回或达到 3 轮规划停损上限，说明需求边界/依赖拆分或架构前提尚有未决冲突。',
-        recoveryCommand: nextStep,
+        recoveryCommand: overrideCmd,
+        continueCommand: continueCmd,
       }
     : null
 
@@ -559,9 +653,63 @@ export async function critiqueRejectDoc({
   }
 }
 
+/** 人类准许在停损后继续重写并复核（`critique-continue --reason`），不等同于批准放行 `approve`。 */
+export async function critiqueContinueDoc({
+  repoRoot, mainRoot = repoRoot, gitDir = null,
+  file, reason = '', by = 'human-maintainer', docType = null, taskId = null,
+}) {
+  const cleanReason = String(reason ?? '').trim()
+  if (!cleanReason) throw makePlanError('MISSING_CONTINUE_REASON', EXIT.USAGE, 'critique-continue 必须传入非空 --reason "<改进方向>"')
+
+  const abs = resolve(repoRoot, file)
+  if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', EXIT.ACTION, `找不到文档：${file}`)
+  const text = readTextSafe(abs)
+  if (text === undefined) throw makePlanError('FILE_UNREADABLE', EXIT.ACTION, `无法读取文本文件：${file}`)
+
+  const fm = parseDocFrontmatter(text)
+  const relDoc = posixPath(relative(repoRoot, abs))
+  const effType = docType ?? inferDocTypeLight(relDoc, fm.data)
+  const digest = critiqueTextFingerprint(text)
+  const { entry: priorEntry } = await readPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId, fmData: fm.data, relDoc,
+  })
+  const priorRounds = parseCritiqueRounds(fm.data, text, priorEntry)
+  const continuedObj = {
+    active: true,
+    reason: cleanReason,
+    by: String(by ?? 'human-maintainer').trim() || 'human-maintainer',
+    at: new Date().toISOString(),
+    sha: digest,
+    roundsAtContinue: priorRounds.map((r) => r.round),
+  }
+
+  await persistPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId: taskId ?? fm.data?.task_id ?? null, fmData: fm.data, relDoc,
+    entry: {
+      ...(priorEntry ?? {}),
+      rounds: priorRounds,
+      continued: continuedObj,
+      updatedAt: continuedObj.at,
+    },
+  })
+
+  return {
+    ok: true,
+    status: 'CRITIQUE_CONTINUE_RECORDED',
+    file: relDoc,
+    docType: effType,
+    sha: digest,
+    continued: continuedObj,
+    unlockApprove: false,
+    excludedReviewers: collectExcludedReviewers(priorRounds, fm.data?.owner),
+    nextStep: `修改 "${relDoc}" 后重跑 audit 并由新复核人执行 critique-reject/critique-pass（注意：critique-continue 不解锁 approve）`,
+  }
+}
+
 /** C14: 人类维护者显式解锁规划停损（`critique-override --human-approved --reason`）。 */
-export function critiqueOverrideDoc({
-  repoRoot, file, humanApproved = false, reason = '', by = 'human-maintainer', docType = null,
+export async function critiqueOverrideDoc({
+  repoRoot, mainRoot = repoRoot, gitDir = null,
+  file, humanApproved = false, reason = '', by = 'human-maintainer', docType = null, taskId = null,
 }) {
   if (!humanApproved) throw makePlanError('MISSING_HUMAN_APPROVAL', EXIT.USAGE, 'critique-override 必须显式传入 --human-approved')
   const cleanReason = String(reason ?? '').trim()
@@ -576,7 +724,10 @@ export function critiqueOverrideDoc({
   const relDoc = posixPath(relative(repoRoot, abs))
   const effType = docType ?? inferDocTypeLight(relDoc, fm.data)
   const digest = critiqueTextFingerprint(text)
-  const priorRounds = parseCritiqueRounds(fm.data, text)
+  const { entry: priorEntry } = await readPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId, fmData: fm.data, relDoc,
+  })
+  const priorRounds = parseCritiqueRounds(fm.data, text, priorEntry)
   const overrideObj = {
     approved: true,
     reason: cleanReason,
@@ -590,7 +741,26 @@ export function critiqueOverrideDoc({
       [CRITIQUE_OVERRIDE_KEY]: JSON.stringify(overrideObj),
       updated: docIsoDate(),
     }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? effType] ?? [] })
+  } else {
+    const line = `- Critique Override: ${JSON.stringify(overrideObj)}`
+    let updated = text
+    if (/^(?:-\s+)?Critique Override:.*$/mi.test(text)) updated = text.replace(/^(?:-\s+)?Critique Override:.*$/mi, line)
+    else if (/^(?:-\s+)?Plan Critique:.*$/mi.test(text)) updated = text.replace(/^((?:-\s+)?Plan Critique:.*)$/mi, `$1\n${line}`)
+    else if (/^(?:-\s+)?Status:.*$/mi.test(text)) updated = text.replace(/^((?:-\s+)?Status:.*)$/mi, `$1\n${line}`)
+    else updated = /^(#[^\n]*\n)/.test(text) ? text.replace(/^(#[^\n]*\n)/, `$1\n${line}\n`) : `${line}\n\n${text}`
+    writeAtomic(abs, updated)
   }
+
+  await persistPlanCritiqueEntry({
+    repoRoot, mainRoot, gitDir, taskId: taskId ?? fm.data?.task_id ?? null, fmData: fm.data, relDoc,
+    entry: {
+      ...(priorEntry ?? {}),
+      rounds: priorRounds,
+      override: overrideObj,
+      updatedAt: overrideObj.at,
+    },
+  })
+
   return {
     ok: true,
     status: 'CRITIQUE_STOP_LOSS_OVERRIDDEN',

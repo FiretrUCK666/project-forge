@@ -339,30 +339,33 @@ export function registerIssue50Cases(cases) {
     try {
       const roots = await resolveRepoRoots(dir)
 
-      // 1) explored gate: needs-explore -> explore -> BLOCKED_NOT_EXPLORED -> pass
+      // 1) auto-explore on flow start + planning task blocked on merge + explicit flow explore refresh
+      const stPlanExp = await handleStart({ task: 't-exp-plan', slug: 'exp-plan', case: '2', planning: true, implementer: 'dev-a' }, roots)
+      if (stPlanExp.exitCode !== 0) return `t-exp-plan --planning start 失败：${stPlanExp.exitCode}`
+      const mBlockedPlan = await handleMerge({ task: 't-exp-plan' }, roots)
+      if (mBlockedPlan.exitCode !== 3 || mBlockedPlan.code !== 'BLOCKED_PLAN_NOT_READY') {
+        return `planning 态任务 merge 未按 exit 3 BLOCKED_PLAN_NOT_READY 阻断：${JSON.stringify(mBlockedPlan)}`
+      }
+
       const stExp = await handleStart({ task: 't-exp', slug: 'exp-gate', case: '2', implementer: 'dev-a' }, roots)
       if (stExp.exitCode !== 0) return `t-exp start 失败：${stExp.exitCode}`
       const clExp = await handleClaim({ task: 't-exp', agent: 'dev-a' }, roots)
       if (clExp.exitCode !== 0) return `t-exp claim 失败：${clExp.exitCode}`
-      const nxNeedExp = await handleNext({ task: 't-exp', json: true }, roots)
-      if (nxNeedExp.payload?.phase !== 'needs-explore') {
-        return `未探索任务应路由到 needs-explore，实际：${JSON.stringify(nxNeedExp.payload)}`
+      const expLedgerAuto = readTaskLedger(dir, 't-exp')
+      if (!hasExploredEvidence(expLedgerAuto)) {
+        return `flow start 未自动写入 explored 证据：${JSON.stringify(expLedgerAuto?.explored)}`
+      }
+      const nxAfterStart = await handleNext({ task: 't-exp', json: true }, roots)
+      if (nxAfterStart.payload?.phase === 'needs-explore') {
+        return `flow start 后不应再停留在 needs-explore：${JSON.stringify(nxAfterStart.payload)}`
       }
       const implExp = join(dir, '.worktrees', 'impl-t-exp')
       writeFileSync(join(implExp, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(2, 2)\n', 'utf8')
       gitSync(implExp, ['commit', '-qam', 'test: update'])
       const vExp = await handleVerify({ task: 't-exp', mode: 'gate' }, roots)
       if (vExp.exitCode !== 0) return `t-exp verify 失败：${vExp.exitCode}`
-      const mBlockedExp = await handleMerge({ task: 't-exp' }, roots)
-      if (mBlockedExp.exitCode !== 4 || mBlockedExp.code !== 'BLOCKED_NOT_EXPLORED') {
-        return `缺 explored 时 merge 未按 exit 4 BLOCKED_NOT_EXPLORED 阻断：${JSON.stringify(mBlockedExp)}`
-      }
       const runEx = await handleExplore({ task: 't-exp', by: 'dev-a' }, roots)
-      if (runEx.exitCode !== 0) return `handleExplore 失败：${runEx.exitCode}`
-      const expLedger = readTaskLedger(dir, 't-exp')
-      if (!hasExploredEvidence(expLedger)) return `explore 未写入有效 explored 证据：${JSON.stringify(expLedger?.explored)}`
-      const nxAfterExp = await handleNext({ task: 't-exp', json: true }, roots)
-      if (nxAfterExp.payload?.phase === 'needs-explore') return '记录 explored 后不应仍停留在 needs-explore'
+      if (runEx.exitCode !== 0) return `handleExplore 显式刷新失败：${runEx.exitCode}`
 
       // Empty diff structural gate
       const emptyGate = assessStructuralGate({ reviewRoot: implExp, diff: { files: [], untracked: [], text: '' }, devProfile: {}, parity: {} })

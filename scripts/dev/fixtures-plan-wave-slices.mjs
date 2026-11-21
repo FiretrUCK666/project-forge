@@ -101,9 +101,10 @@ export function registerPlanWaveSliceCases(cases) {
     })
     try {
       const r = evaluateSliceGraph(collide)
-      const hit = r.errors.find((e) => e.code === 'BLOCKED_SLICE_OVERLAP')
-      if (!hit) return `同波次写域碰撞没被报出来：${JSON.stringify(r.errors.map((e) => e.code))}`
-      if (!hit.message.includes('kit/shared')) return `碰撞报告没有指出具体路径：${hit.message}`
+      const hit = r.warnings.find((e) => e.code === 'SLICE_SERIAL_BY_OVERLAP' && e.serialReason === 'serial-by-overlap')
+      if (!hit) return `同波次写域重叠未标记为 serial-by-overlap：${JSON.stringify(r.warnings?.map((e) => e.code))}`
+      if (r.errors.some((e) => e.code === 'BLOCKED_SLICE_OVERLAP')) return '写域重叠不应再产生 BLOCKED_SLICE_OVERLAP 阻断'
+      if (!hit.message.includes('kit/shared')) return `串行提示没有指出具体路径：${hit.message}`
     } finally { rmTree(collide) }
 
     // 反向 7：派生清单不算碰撞——它由脚本重新生成，谁「改了它」没有意义
@@ -116,14 +117,12 @@ export function registerPlanWaveSliceCases(cases) {
     })
     try {
       const r = evaluateSliceGraph(manifest)
-      if (r.errors.some((e) => e.code === 'BLOCKED_SLICE_OVERLAP')) {
+      if (r.warnings.some((e) => e.code === 'SLICE_SERIAL_BY_OVERLAP') || r.errors.some((e) => e.code === 'BLOCKED_SLICE_OVERLAP')) {
         return '确定性派生清单被当成了写域碰撞'
       }
     } finally { rmTree(manifest) }
 
-    // 反向 8：两个都还没做完的活跃切片写同一份文件 -> 必须报碰撞。
-    // 这一条与下面的正向构成一对：只有「已完成」这一条线能把同样形状的碰撞判掉，
-    // 不能反过来把活跃切片的碰撞也一并放过。
+    // 反向 8：两个都还没做完的活跃切片写同一份文件 -> 标记 serial-by-overlap 串行化（不阻断）
     const activeCollide = makeWaveRepo({
       master: makeMaster({ criteria: ['C1', 'C2'] }),
       specs: [
@@ -133,21 +132,12 @@ export function registerPlanWaveSliceCases(cases) {
     })
     try {
       const r = evaluateSliceGraph(activeCollide)
-      const hit = r.errors.find((e) => e.code === 'BLOCKED_SLICE_OVERLAP')
-      if (!hit) return `两个活跃切片写同一份文件没被报碰撞：${JSON.stringify(r.errors.map((e) => e.code))}`
-      if (!hit.message.includes('AGENTS.md')) return `活跃切片碰撞没有指出具体路径：${hit.message}`
+      const hit = r.warnings.find((e) => e.code === 'SLICE_SERIAL_BY_OVERLAP' && e.serialReason === 'serial-by-overlap')
+      if (!hit) return `两个活跃切片写同一份文件未标记 serial-by-overlap：${JSON.stringify(r.warnings?.map((e) => e.code))}`
+      if (!hit.message.includes('AGENTS.md')) return `活跃切片重叠没有指出具体路径：${hit.message}`
     } finally { rmTree(activeCollide) }
 
     // 正向 4：两个都已完成（implemented）的切片写同一份文件 -> 不报。
-    //
-    // 已完成/已归档的切片不会再被并行派发，「它们都写过 AGENTS.md」是既成事实，
-    // 不是待处理的冲突。把它们算进同波次碰撞，会让每一次合并之后的仓库常驻一条
-    // 历史交叉告警——报出来的不是问题，是噪音。
-    //
-    // 两份都放 `docs/specs/`：只有这样它们才都归属同一份活跃总控、才都进候选集，
-    // 判决才真的由「已完成」这一条线作出。放进 `docs/archive/specs/` 时
-    // `related_prd` 会解析到归档目录、匹配不上活跃总控，用例会因为归属不符而静默通过——
-    // 那不是在测过滤条件，那是在测一个永远不会失败的摆设。
     const doneCollide = makeWaveRepo({
       master: makeMaster({ criteria: ['C1', 'C2'] }),
       specs: [
@@ -157,9 +147,8 @@ export function registerPlanWaveSliceCases(cases) {
     })
     try {
       const r = evaluateSliceGraph(doneCollide)
-      const hit = r.errors.find((e) => e.code === 'BLOCKED_SLICE_OVERLAP')
+      const hit = r.warnings.find((e) => e.code === 'SLICE_SERIAL_BY_OVERLAP')
       if (hit) return `已完成的切片之间被误报成同波次碰撞：${hit.message}`
-      // 前提自检：这两片确实都在候选视野里，否则上面的「没报错」毫无意义。
       const g = buildSliceGraph(doneCollide)
       const inMaster = g.slices.filter((s) => s.kind === 'spec' && s.masterRel === 'docs/prd/261120-master-prd.md')
       if (inMaster.length !== 2) return `正例前提不成立：归属同一总控的切片数为 ${inMaster.length}，应为 2`
@@ -167,9 +156,6 @@ export function registerPlanWaveSliceCases(cases) {
     } finally { rmTree(doneCollide) }
 
     // 正向 5：活跃切片依赖一个已完成的切片、两者写同一份文件 -> 也不报。
-    //
-    // 依赖已满足，活跃切片必然落在更晚的波次；硬把它和前一片拉到同一波次，
-    // 等于说「你的前置跟你并行」——那既不合拓扑，也把最常见的续做场景判成冲突。
     const mixedDep = makeWaveRepo({
       master: makeMaster({ criteria: ['C1', 'C2'] }),
       specs: [
@@ -179,7 +165,7 @@ export function registerPlanWaveSliceCases(cases) {
     })
     try {
       const r = evaluateSliceGraph(mixedDep)
-      const hit = r.errors.find((e) => e.code === 'BLOCKED_SLICE_OVERLAP')
+      const hit = r.warnings.find((e) => e.code === 'SLICE_SERIAL_BY_OVERLAP')
       if (hit) return `依赖已完成切片时被误报成同波次碰撞：${hit.message}`
       if (r.errors.some((e) => e.code === 'BLOCKED_SLICE_CYCLE')) {
         return `依赖已完成切片被误判成环或悬空：${JSON.stringify(r.errors.map((e) => e.code))}`

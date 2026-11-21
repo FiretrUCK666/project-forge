@@ -616,6 +616,19 @@ cases.push(['体检报告里的命令展示有字节上限', async () => {
 }])
 
 cases.push(['1:N 切片 SPEC 从 C4+ 起始允许 audit 与 approve，缺少 C<N> 验收条目仍拦截', async () => {
+  const s1Bare = [
+    '---', 'kind: spec', 'title: Slice1', 'status: approved', 'tier: L3',
+    'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 11', 'owner: planner',
+    'approved: true', 'plan_critique: passed (reviewer=critic-a, round=1)',
+    'related_prd: ../prd/261118-issue10-master-prd.md', '---', '',
+    '# SPEC: Slice1', '', '## 要解决的问题', '- 落地第 1 批（C1..C3）。', '',
+    '## 本期不做', '- 不含第 2 批。', '', '## 验收标准', '',
+    '- [ ] C1: `node src/app.mjs` slice 1a',
+    '- [ ] C2: `node src/app.mjs` slice 1b',
+    '- [ ] C3: `node src/app.mjs` slice 1c', '',
+  ].join('\n')
+  const { critiqueTextFingerprint: fpS1 } = await import('../../kit/skills/lib/critique-rounds.mjs')
+  const s1RealSha = fpS1(s1Bare)
   const dir = tmpProject({
     'src/app.mjs': 'export const ok = 1\n',
     'docs/prd/261118-issue10-master-prd.md': [
@@ -629,17 +642,10 @@ cases.push(['1:N 切片 SPEC 从 C4+ 起始允许 audit 与 approve，缺少 C<N
       '- [ ] C4: `node src/app.mjs` slice 2a',
       '- [ ] C5: `node src/app.mjs` slice 2b', '',
     ].join('\n'),
-    'docs/specs/261118-issue11-s1-spec.md': [
-      '---', 'kind: spec', 'title: Slice1', 'status: approved', 'tier: L3',
-      'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 11', 'owner: planner',
-      'approved: true', 'plan_critique: passed (reviewer=critic-a, round=1, sha=aaaaaaaa)',
-      'related_prd: ../prd/261118-issue10-master-prd.md', '---', '',
-      '# SPEC: Slice1', '', '## 要解决的问题', '- 落地第 1 批（C1..C3）。', '',
-      '## 本期不做', '- 不含第 2 批。', '', '## 验收标准', '',
-      '- [ ] C1: `node src/app.mjs` slice 1a',
-      '- [ ] C2: `node src/app.mjs` slice 1b',
-      '- [ ] C3: `node src/app.mjs` slice 1c', '',
-    ].join('\n'),
+    'docs/specs/261118-issue11-s1-spec.md': s1Bare.replace(
+      'plan_critique: passed (reviewer=critic-a, round=1)',
+      `plan_critique: passed (reviewer=critic-a, round=1, sha=${s1RealSha})`,
+    ),
     'docs/specs/261118-issue12-s2-spec.md': [
       '---', 'kind: spec', 'title: Slice2', 'status: draft', 'tier: L3',
       'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 12', 'owner: planner',

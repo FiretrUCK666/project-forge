@@ -613,7 +613,7 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
   if (pack.task) {
     lines.push(`Task     : ${pack.task.taskId} | role=${pack.task.role ?? 'unknown'} | finalized=${Boolean(pack.task.finalized)} | verifiedHead=${pack.task.verifiedHead ?? 'none'}`)
     const exp = pack.explored ?? pack.task.explored
-    lines.push(`Explored : ${exp ? `${exp.tier} (symbols=${exp.symbolCount}, at=${exp.at}${exp.by ? `, by=${exp.by}` : ''})` : 'MISSING (BLOCKED_NOT_EXPLORED)'}`)
+    lines.push(`Explored : ${exp ? `${exp.tier} (symbols=${exp.symbolCount}, at=${exp.at}${exp.by ? `, by=${exp.by}` : ''})` : 'not-recorded'}`)
     if (pack.headMismatchWarning) lines.push(`WARNING  : ${pack.headMismatchWarning}`)
   }
 

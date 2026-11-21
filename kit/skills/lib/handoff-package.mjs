@@ -68,26 +68,26 @@ function extractPaths(text) {
  */
 function extractDesignSection(text) {
   const body = String(text ?? "").replace(/\r\n/g, "\n")
-  const m = /^##[^\n]*(?:设计方案|方案与契约|设计说明|技术方案)[^\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/m.exec(body)
-  if (!m) return ""
+  const matches = [...body.matchAll(/^##[^\n]*(?:设计方案|方案与契约|设计说明|技术方案|技术设计|接口契约)[^\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/gm)]
+  if (matches.length === 0) return ""
   // 去掉 section 标记与 HTML 注释，交接包里不需要它们
-  return m[1]
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
+  return matches
+    .map((m) => m[1].replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim())
+    .filter(Boolean)
+    .join("\n\n")
 }
 
 /**
- * 从 `## 本期不做` / `## 非目标` 里抽出条目文本。
+ * 抽取非目标。
  *
- * 两种写法都要认：小节形态（`## 本期不做` 带几条列表）与行内条目形态
- * （`- **本期不做**：…`）。短文档常用后者——判据关心的是「说没说」，不是「用了哪种排版」。
+ * 严格匹配独立非目标小节（避免吞掉「目标与非目标」混合节里的目标条目），
+ * 并兼容行内条目形态（`- **本期不做**：…` / `- **非目标**：…`）。
  */
 function extractNonGoals(text) {
   const body = String(text ?? '').replace(/\r\n/g, '\n')
   const out = []
 
-  const section = /^##[^\n]*(?:本期不做|明确不做|非目标|Non-Goals)[^\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/m.exec(body)?.[1]
+  const section = /^#{2,3}\s+(?:[一二三四五六七八九十\d]+[、.]\s*)?(?:本期不做|明确不做|非目标|Non-Goals|明确边界与非目标)[^\n]*\n([\s\S]*?)(?=^#{2,3}\s|$(?![\s\S]))/mi.exec(body)?.[1]
   if (section) {
     for (const line of section.split('\n')) {
       const item = line.replace(/^\s*[-*]\s*/, '').trim()
@@ -95,7 +95,7 @@ function extractNonGoals(text) {
     }
   }
 
-  const inline = /^-\s*\*\*(?:本期不做|明确不做|非目标)\*\*\s*[:：]\s*(.+)$/gm
+  const inline = /^-\s*\*\*(?:本期不做|明确不做|非目标|Non-Goals)\*\*\s*[:：]\s*(.+)$/gim
   for (const m of body.matchAll(inline)) {
     const item = m[1].trim()
     if (item && !out.includes(item)) out.push(item)
@@ -103,6 +103,14 @@ function extractNonGoals(text) {
 
   return out
 }
+
+const RECEIPT_LINES = Object.freeze([
+  'conclusion: <pass | fail | blocked>',
+  'head_sha: <7~40 位提交哈希>',
+  'key_evidence: <核心验证命令与通过摘要>',
+  'remaining_risks: <无 | 遗留风险与影响范围>',
+  'next_action: <建议下一步动作>',
+])
 
 /**
  * 组装交接包。
@@ -210,9 +218,15 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   const todoText = readFromDocRoots(todoRel)
 
   // 验收标准以 SPEC 为准，没有 SPEC 时退到 Todo。两者都没有就明说没有。
+  const specFm = specText ? parseDocFrontmatter(specText) : null
+  const todoFm = todoText ? parseDocFrontmatter(todoText) : null
+  const fmScopeFiles = [
+    ...(Array.isArray(specFm?.data?.scope_files) ? specFm.data.scope_files : []),
+    ...(Array.isArray(todoFm?.data?.scope_files) ? todoFm.data.scope_files : []),
+  ].map((s) => String(s ?? '').trim()).filter(Boolean)
   const criteria = specText ? extractCriteria(specText) : extractCriteria(todoText)
   const sourceDoc = specText ? specRel : (todoText ? todoRel : null)
-  const paths = [...new Set([...extractPaths(specText), ...extractPaths(todoText)])]
+  const paths = [...new Set([...fmScopeFiles, ...extractPaths(specText), ...extractPaths(todoText)])]
   // 去重要按「说了同一件事」判，不是按字符串相等：
   // SPEC 写「不引入第三方解析器（零依赖是不变量）；不做 LSP 级语义分析」，
   // Todo 写「第三方解析器、LSP 级语义分析」——字面不同，内容重复。
@@ -436,11 +450,62 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   lines.push('')
   lines.push(boundary.report)
   lines.push('')
+  const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
+  const last = rounds.length > 0 ? rounds[rounds.length - 1] : null
+  const mustFix = Array.isArray(last?.mustFix) ? last.mustFix : []
+  const shouldFix = Array.isArray(last?.shouldFix) ? last.shouldFix : []
+  const blockers = Array.isArray(last?.blockers) ? last.blockers : []
+  const legacyFindings = Array.isArray(last?.findings) ? last.findings : []
+  const formatItem = (f) => {
+    if (typeof f === 'string') return f
+    const body = f?.summary ?? f?.text ?? f?.message ?? f?.title ?? ''
+    if (body) return f?.id ? `[${f.id}] ${body}` : String(body)
+    return f ? JSON.stringify(f) : ''
+  }
+  const reworkItems = [
+    ...mustFix.map((f) => ({ severity: 'must', text: formatItem(f) })),
+    ...blockers.map((f) => ({ severity: 'blocker', text: formatItem(f) })),
+    ...shouldFix.map((f) => ({ severity: 'should', text: formatItem(f) })),
+    ...legacyFindings.map((f) => ({ severity: f?.severity === 'must' ? 'must' : 'should', text: formatItem(f) })),
+  ].filter((it) => it.text)
+  const reworkFeedback = last ? {
+    round: last.round ?? null,
+    verdict: last.verdict ?? null,
+    summary: last.summary ?? null,
+    mustFix,
+    shouldFix,
+    blockers,
+    totalCount: reworkItems.length,
+  } : null
+
+  if (ledger?.explored?.symbolCount != null || Array.isArray(ledger?.explored?.topModules)) {
+    lines.push('## 已自动探明仓库基线')
+    lines.push('')
+    if (ledger.explored.symbolCount != null) lines.push(`- 索引符号数：${ledger.explored.symbolCount}`)
+    if (Array.isArray(ledger.explored.topModules) && ledger.explored.topModules.length > 0) {
+      lines.push(`- 核心模块：${ledger.explored.topModules.slice(0, 8).join('、')}`)
+    }
+    lines.push('')
+  }
+
+  if (role === 'implementer' && last && (reworkItems.length > 0 || last.verdict === 'fail' || last.verdict === 'changes_requested')) {
+    lines.push('## 上一轮返工意见（按此逐项修复后再交审）')
+    lines.push('')
+    lines.push(`上一轮（Round ${last.round ?? '?'}）结论：\`${last.verdict ?? '未记录'}\`${last.summary ? ` — ${last.summary}` : ''}`)
+    if (reworkItems.length > 0) {
+      lines.push('')
+      for (const item of reworkItems.slice(0, 20)) {
+        const tag = item.severity === 'must' ? '必修' : (item.severity === 'blocker' ? '阻断' : '建议')
+        lines.push(`- [${tag}] ${item.text}`)
+      }
+      if (reworkItems.length > 20) lines.push(`- （另有 ${reworkItems.length - 20} 条，见账本）`)
+    }
+    lines.push('')
+  }
+
   // 审核侧要的两样：这一轮该看什么、上一轮提了什么。
   // 实现侧不需要它们（那是审查者的事），所以按角色给，不给所有人。
   if (role === 'reviewer' || role === 'human') {
-    const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
-    const last = rounds.length > 0 ? rounds[rounds.length - 1] : null
     const nextRound = nextReviewRound(ledger)
 
     lines.push('## 这一轮该看什么')
@@ -456,14 +521,14 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
         lines.push('**当前 HEAD 与上一轮审查时相同**——什么都没改。同样的输入不会得出不同的结论，')
         lines.push('先让实现者按上一轮意见改，改完再复审。')
       }
-      const findings = Array.isArray(last.findings) ? last.findings : []
-      if (findings.length > 0) {
+      if (reworkItems.length > 0) {
         lines.push('')
-        lines.push(`上一轮提了 ${findings.length} 条：`)
-        for (const f of findings.slice(0, 20)) {
-          lines.push(`- [${f.severity === 'must' ? '必修' : '建议'}] ${f.text ?? f}`)
+        lines.push(`上一轮提了 ${reworkItems.length} 条（mustFix=${mustFix.length} / blockers=${blockers.length} / shouldFix=${shouldFix.length}）：`)
+        for (const item of reworkItems.slice(0, 20)) {
+          const tag = item.severity === 'must' ? '必修' : (item.severity === 'blocker' ? '阻断' : '建议')
+          lines.push(`- [${tag}] ${item.text}`)
         }
-        if (findings.length > 20) lines.push(`- （另有 ${findings.length - 20} 条，见账本）`)
+        if (reworkItems.length > 20) lines.push(`- （另有 ${reworkItems.length - 20} 条，见账本）`)
       }
     } else {
       lines.push('第一轮，按完整范围审。')
@@ -493,6 +558,15 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     lines.push('')
   }
 
+  lines.push('## 回执格式与篇幅纪律（上限 15 行，详报外置）')
+  lines.push('')
+  lines.push('- 回复给协调者总行数严格 **<= 15 行**；长日志、完整 diff 与全量测试明细须写入任务账本 / PR / 临时日志文件，禁止直接刷屏粘贴。')
+  lines.push('- 固定 5 行回执骨架：')
+  lines.push('```text')
+  for (const rl of RECEIPT_LINES) lines.push(rl)
+  lines.push('```')
+  lines.push('')
+
   const gates = policy?.requiredGates ?? []
   if (gates.length > 0) {
     // 层级名 → Dev Profile 里的真实命令。印一个 `gate` 出来等于什么都没说。
@@ -516,6 +590,7 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     lines.push('')
   }
 
+  const receiptTemplate = RECEIPT_LINES.join('\n')
   return {
     prompt: `${lines.join('\n').trimEnd()}\n`,
     fields: {
@@ -524,10 +599,14 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
       criteriaCount: criteria.length,
       criteria,
       paths,
+      scopeFiles: fmScopeFiles,
       nonGoals,
       design,
       relatedSlices,
       featureMapContext,
+      explored: ledger?.explored ?? null,
+      reworkFeedback,
+      receiptTemplate,
       commands: { quick, full, mergeGate },
       requiredGates: gates,
     },

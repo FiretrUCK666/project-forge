@@ -34,7 +34,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
-import { evaluateCritiqueOverride } from './critique-rounds.mjs'
+import { critiqueTextFingerprint, evaluateCritiqueOverride, parseCritiqueStamp, readPlanCritiqueEntrySync } from './critique-rounds.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { analyzePendingDecisions, planModeErrors } from './pending-decisions.mjs'
 
@@ -70,9 +70,6 @@ const READY_STATUS = Object.freeze({
 const APPROVAL_REQUIRED = Object.freeze({ 3: false, 4: true })
 /** 已作废的文档不参与判定：它们已经不代表当前规划。 */
 const INERT_STATUS = new Set(['superseded', 'dropped'])
-
-/** 内审状态里表示「还没过、过不了」的两档。 */
-const UNREADY_CRITIQUE = new Set(['pending', 'rejected'])
 
 function normalizeStatus(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -140,6 +137,7 @@ export const APPROVAL_BASIS = Object.freeze({
   PASSED: 'passed',
   SKIPPED: 'skipped',
   HUMAN_OVERRIDE: 'human-override',
+  CRITIQUE_STALE: 'critique-stale',
   CRITIQUE_UNREADY: 'critique-unready',
   OVERRIDE_STALE: 'override-stale',
   MISSING: 'missing',
@@ -223,35 +221,70 @@ export function resolveApprovalBasis(doc) {
       hasBasis: true,
       basis: APPROVAL_BASIS.NOT_APPLICABLE,
       evidence: `文档类型 ${docType || '(未识别)'} 的流程里没有批准动作，本判据不适用于它`,
+      warning: null,
     }
   }
 
   const data = doc?.data ?? {}
   const text = doc?.text ?? ''
   const stamp = typeof data.plan_critique === 'string' ? data.plan_critique.trim() : ''
-  const critique = normalizeStatus(stamp).split(/\s+/)[0]
+  const critique = normalizeStatus(stamp).split(/[\s(]+/)[0]
+  const ledgerEntry = doc?.ledgerEntry ?? doc?.planCritiqueEntry ?? null
 
-  // 依据一：正常过审。
+  // 严格白名单依据一：`passed`；带 sha= 必须与当前正文指纹完全一致，无 sha= 兼容放行并告警。
   if (critique === 'passed') {
-    return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.PASSED, evidence: stamp }
-  }
-
-  // 依据二：显式跳过，但理由必须实质——占位词不算跳过，算缺席。
-  if (critique === 'skipped') {
-    const reason = skippedReasonOf(stamp)
-    if (reason.length >= SKIPPED_REASON_MIN_CHARS) {
-      return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.SKIPPED, evidence: reason }
+    const rawSha = /\bsha=([^\s,)]+)/i.exec(stamp)?.[1]?.trim() ?? ''
+    const stampSha = parseCritiqueStamp(stamp)?.sha ?? ''
+    const ledgerRounds = Array.isArray(ledgerEntry?.rounds) ? ledgerEntry.rounds : []
+    const lastPassed = [...ledgerRounds].reverse().find((r) => r?.verdict === 'passed') ?? null
+    const ledgerSha = String(lastPassed?.artifact_baseline?.shortSha ?? lastPassed?.sha ?? '').trim()
+    const recordedSha = (rawSha || stampSha || ledgerSha).toLowerCase()
+    if (recordedSha) {
+      const currentSha = critiqueTextFingerprint(text).toLowerCase()
+      if (recordedSha !== currentSha) {
+        return {
+          applicable: true,
+          hasBasis: false,
+          basis: APPROVAL_BASIS.CRITIQUE_STALE,
+          evidence: `passed sha=${recordedSha} !== current=${currentSha}`,
+          warning: null,
+        }
+      }
+      return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.PASSED, evidence: stamp, warning: null }
+    }
+    return {
+      applicable: true,
+      hasBasis: true,
+      basis: APPROVAL_BASIS.PASSED,
+      evidence: stamp,
+      warning: {
+        code: 'WARN_CRITIQUE_LEGACY_NO_SHA',
+        file: doc?.rel ?? null,
+        message: `${doc?.rel ?? '计划文档'} 使用不含 sha= 的历史 passed 记录，建议补跑 critique-pass 绑定正文指纹`,
+      },
     }
   }
 
-  // 依据三：人类签字放行。过期与未过期是两件事，必须分开报。
-  const overrideState = evaluateCritiqueOverride(text, data)
-  if (overrideState.approved && !overrideState.stale) {
+  // 严格白名单依据二：显式跳过且实质理由达标。
+  if (critique === 'skipped') {
+    const reason = skippedReasonOf(stamp)
+    if (reason.length >= SKIPPED_REASON_MIN_CHARS) {
+      return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.SKIPPED, evidence: reason, warning: null }
+    }
+  }
+
+  // 严格白名单依据三：人类签字放行（approved === true、SHA 一致且带非空 reason）。
+  const overrideState = evaluateCritiqueOverride(text, data, ledgerEntry)
+  const overrideReason = typeof overrideState.override?.reason === 'string'
+    ? overrideState.override.reason.trim()
+    : ''
+  if (overrideState.approved && !overrideState.stale && overrideReason.length > 0) {
     return {
       applicable: true,
       hasBasis: true,
       basis: APPROVAL_BASIS.HUMAN_OVERRIDE,
       evidence: `human-override sha=${overrideState.sha ?? '(未记录)'}`,
+      warning: null,
     }
   }
   if (overrideState.approved && overrideState.stale) {
@@ -260,14 +293,17 @@ export function resolveApprovalBasis(doc) {
       hasBasis: false,
       basis: APPROVAL_BASIS.OVERRIDE_STALE,
       evidence: `override=${overrideState.sha} !== current=${overrideState.currentSha}`,
+      warning: null,
     }
   }
 
+  // 其余任何值（缺失、空值、pending、rejected、无效 skipped/override、未知状态）一律阻断。
   return {
     applicable: true,
     hasBasis: false,
-    basis: UNREADY_CRITIQUE.has(critique) ? APPROVAL_BASIS.CRITIQUE_UNREADY : APPROVAL_BASIS.MISSING,
+    basis: stamp ? APPROVAL_BASIS.CRITIQUE_UNREADY : APPROVAL_BASIS.MISSING,
     evidence: stamp || null,
+    warning: null,
   }
 }
 
@@ -282,7 +318,15 @@ export function resolveApprovalBasis(doc) {
  */
 export function resolveCritiqueReadiness(doc) {
   const verdict = resolveApprovalBasis(doc)
-  if (verdict.hasBasis) return { blocked: false, message: '', fixHint: '', basis: verdict.basis }
+  if (verdict.hasBasis) {
+    return {
+      blocked: false,
+      message: '',
+      fixHint: '',
+      basis: verdict.basis,
+      ...(verdict.warning ? { warning: verdict.warning } : {}),
+    }
+  }
 
   if (verdict.basis === APPROVAL_BASIS.OVERRIDE_STALE) {
     return {
@@ -293,25 +337,30 @@ export function resolveCritiqueReadiness(doc) {
       fixHint: '要么撤销那处改动，要么重新跑 critique-override 签字；改完再走 approve。',
     }
   }
+  if (verdict.basis === APPROVAL_BASIS.CRITIQUE_STALE) {
+    return {
+      blocked: true,
+      basis: verdict.basis,
+      message: `在 critique-pass 之后正文已改动或 SHA 不匹配（${verdict.evidence}），当前版本尚未复核`,
+      fixHint: '修改正文后必须由新独立复核人重跑 critique-pass（并重新 approve），不能沿用旧 SHA 过审印记。',
+    }
+  }
   const stamp = doc?.data?.plan_critique
   return {
     blocked: true,
     basis: verdict.basis,
     message: verdict.basis === APPROVAL_BASIS.CRITIQUE_UNREADY
-      ? `的规划内审仍是 ${normalizeStatus(stamp).split(/\s+/)[0]}（plan_critique: ${stamp}）`
+      ? `的规划内审状态未就绪（plan_critique: ${stamp}）`
       : '的规划内审没有任何记录（plan_critique 缺失或为空）',
-    fixHint: '内审非得是 passed 才能退场；退回的意见要改完再重审，不能带着未过审的稿子开工。'
-      + '若已由人裁决放行，须先跑 critique-override --human-approved --reason "<裁决说明>"。',
+    fixHint: '内审非得是有效 passed / 带实质理由的 skipped / 有效 human-override 才能退场。'
+      + '若已停损并由人裁决放行，须先跑 critique-override --human-approved --reason "<裁决说明>"。',
   }
 }
 
 /**
  * 单份文档的退场判据。返回 `reasons` 数组，空数组即合格。
- *
- * 每条理由都写成「哪里不对 + 怎么改」，因为这道门是要给人看的：
- * 只说「规划未就绪」，人还是不知道该补什么。
  */
-function evaluateDoc(doc, { requireApproval = true } = {}) {
+function evaluateDoc(doc, { requireApproval = true, warnings = null } = {}) {
   const reasons = []
   if (!doc.exists) {
     reasons.push({
@@ -374,6 +423,9 @@ function evaluateDoc(doc, { requireApproval = true } = {}) {
     // 内审是否「未过」由 `resolveCritiqueReadiness` 判：它会先看人类 override 有没有签字放行。
     // 「有过 rejected 记录」与「现在仍未过审」是两件事——把前者当后者，等于让人签的字不生效。
     const readiness = resolveCritiqueReadiness(doc)
+    if (readiness.warning && Array.isArray(warnings)) {
+      warnings.push(readiness.warning)
+    }
     if (readiness.blocked) {
       reasons.push({
         code: PLAN_EXIT_BLOCK_CODE,
@@ -389,11 +441,8 @@ function evaluateDoc(doc, { requireApproval = true } = {}) {
 
 /**
  * 关联总控 PRD 的退场判据。
- *
- * 只在切片 SPEC 指向的 PRD 声明了 `multi_spec: true` 时才看——单份 PRD 带单份 SPEC 时，
- * SPEC 过审就够；一旦是 1:N 拆分，总纲本身没定稿，切片就算各自过审也只是各说各话。
  */
-function evaluateMasterPrd(repoRoot, specDoc, { requireApproval = true } = {}) {
+function evaluateMasterPrd(repoRoot, specDoc, { requireApproval = true, warnings = null, planCritique = null } = {}) {
   const raw = specDoc?.data?.related_prd
   if (typeof raw !== 'string' || !raw.trim() || /^(?:无|none|null)$/i.test(raw.trim())) return []
   const prdAbs = resolve(dirname(specDoc.abs), raw.trim())
@@ -403,7 +452,8 @@ function evaluateMasterPrd(repoRoot, specDoc, { requireApproval = true } = {}) {
   const prd = readPlanDoc(repoRoot, prdRelFromRoot)
   if (!prd || !prd.exists) return []
   if (prd.data?.multi_spec !== true) return []
-  return evaluateDoc({ ...prd, kind: 'prd' }, { requireApproval }).map((r) => ({
+  const ledgerEntry = planCritique?.[prd.rel] ?? null
+  return evaluateDoc({ ...prd, kind: 'prd', ledgerEntry }, { requireApproval, warnings }).map((r) => ({
     ...r,
     message: `${r.message}（作为 ${specDoc.rel} 认领的总控 PRD）`,
   }))
@@ -411,17 +461,6 @@ function evaluateMasterPrd(repoRoot, specDoc, { requireApproval = true } = {}) {
 
 /**
  * 规划退场门禁。
- *
- * @param {string} repoRoot 判据读取根（主仓，因为规划文档在那里才算数）
- * @param {object} opts
- * @param {number|string} opts.caseType 五档分流结论
- * @param {string|null} opts.slug 切片短名
- * @param {string|null} opts.taskId 任务编号
- * @param {number|null} opts.issue 关联 Issue
- * @param {{spec?: string, todo?: string, prd?: string}} opts.docs 已绑定的规划文档（调用方负责解析）
- * @param {boolean} opts.allowBootstrap 规划 PR 自举豁免
- * @returns {{ok: boolean, blocked: boolean, applicable: boolean, code?: string, exitCode?: number,
- *   reasons: Array<object>, checked: Array<string>, bootstrap?: boolean, wouldBlock?: boolean}}
  */
 export function evaluatePlanExitGate(repoRoot, {
   caseType = null,
@@ -431,32 +470,23 @@ export function evaluatePlanExitGate(repoRoot, {
   docs = {},
   allowBootstrap = false,
   reusePrRef = false,
+  planCritique = null,
 } = {}) {
   const num = Number(caseType)
-  // 一、二档不建规划文档，第五档在更早处已被拦下——对它们判「规划是否过审」没有对象。
   if (!Number.isInteger(num) || num <= 2 || num === 5) {
     return { ok: true, blocked: false, applicable: false, reasons: [], checked: [] }
   }
-  // 接管既有 PR 的工作（`--pr-ref`）：这次的规划在那边已经走过一遍了，
-  // 本仓看不到也无从判定。对它拦「没绑定规划」只会逼人给一个无关的任务补一份假文档。
   if (reusePrRef) {
     return { ok: true, blocked: false, applicable: false, reasons: [], checked: [], reason: 'pr-continuation' }
   }
 
   const bound = collectBoundDocs(repoRoot, docs)
   const reasons = []
+  const warnings = []
   const checked = bound.map((d) => d.rel)
   const requireApproval = APPROVAL_REQUIRED[num] !== false
 
   if (bound.length === 0) {
-    // 一份规划都没绑：**不拦，但要留痕**。
-    //
-    // 判据只能判它拿得到的东西。这里它拿不到「这次该不该有规划」——本仓的 `dev-plan`
-    // 明确支持「先 `flow.mjs start` 建工作位、再 `doc-plan.mjs init --task` 把规划单
-    // 落进工作位」的顺序。按「没绑文档就拦」办，会把这条已经在用的合法顺序判死。
-    //
-    // 所以缺席只记一条警告，写进返回值让人看得见；「这一档到底该不该有规划」由 `triage`
-    // 与 `doc-plan.mjs audit` 在更早的位置回答，那里有需求原文可读，不是靠猜。
     const gap = repoUsesPlanDocs(repoRoot)
       ? `本仓 docs/ 下已有受管规划，但这次 Case ${num} 没有绑定任何一份（任务 ${taskId ?? slug ?? '(未命名)'}）`
       : null
@@ -470,20 +500,30 @@ export function evaluatePlanExitGate(repoRoot, {
     }
   }
   for (const doc of bound) {
-    reasons.push(...evaluateDoc(doc, { requireApproval }))
-    if (doc.kind === 'spec' && doc.exists) reasons.push(...evaluateMasterPrd(repoRoot, doc, { requireApproval }))
+    const ledgerEntry = planCritique?.[doc.rel]
+      ?? (doc.exists ? readPlanCritiqueEntrySync({ repoRoot, taskId, fmData: doc.data, relDoc: doc.rel }).entry : null)
+    reasons.push(...evaluateDoc({ ...doc, ledgerEntry }, { requireApproval, warnings }))
+    if (doc.kind === 'spec' && doc.exists) {
+      reasons.push(...evaluateMasterPrd(repoRoot, doc, { requireApproval, warnings, planCritique }))
+    }
   }
 
   if (reasons.length === 0) {
-    return { ok: true, blocked: false, applicable: true, reasons: [], checked }
+    return {
+      ok: true,
+      blocked: false,
+      applicable: true,
+      reasons: [],
+      checked,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    }
   }
 
-  // 自举豁免：规划 PR 本身要在「还没有规划」的状态下开工，否则谁也开不了头。
-  // 但它只放行，不隐瞒——把本该拦的理由原样带回去，方便事后核对豁免是否用得正当。
   if (allowBootstrap) {
     return {
       ok: true, blocked: false, applicable: true, reasons: [], checked,
       bootstrap: true, wouldBlock: reasons,
+      ...(warnings.length > 0 ? { warnings } : {}),
     }
   }
 
@@ -495,6 +535,7 @@ export function evaluatePlanExitGate(repoRoot, {
     exitCode: PLAN_EXIT_EXIT_CODE,
     reasons,
     checked,
+    ...(warnings.length > 0 ? { warnings } : {}),
     message: `${PLAN_EXIT_BLOCK_CODE}: 规划未就绪，不能开工（${reasons[0].message}）`,
   }
 }
@@ -502,16 +543,22 @@ export function evaluatePlanExitGate(repoRoot, {
 /** 把门禁结论排成人能读的几行，供文本模式输出。 */
 export function formatPlanExitGate(gate) {
   if (!gate) return []
+  const warningLines = Array.isArray(gate.warnings)
+    ? gate.warnings.map((w) => `[WARN] ${w.code ? `${w.code}: ` : ''}${w.message}`)
+    : []
   if (gate.blocked) {
     const lines = [`${PLAN_EXIT_BLOCK_CODE}: 规划未就绪，先补齐再开工（已检查：${gate.checked.join(', ') || '无绑定文档'}）`]
     for (const r of gate.reasons) {
       lines.push(`  - ${r.file ? `${r.file}：` : ''}${r.message}`)
       if (r.fixHint) lines.push(`    改法：${r.fixHint}`)
     }
-    return lines
+    return [...lines, ...warningLines]
   }
   if (gate.bootstrap && gate.wouldBlock?.length > 0) {
-    return [`规划退场门禁已被 --${PLAN_BOOTSTRAP_FLAG} 豁免（${gate.wouldBlock[0].message}）`]
+    return [
+      `规划退场门禁已被 --${PLAN_BOOTSTRAP_FLAG} 豁免（${gate.wouldBlock[0].message}）`,
+      ...warningLines,
+    ]
   }
-  return []
+  return warningLines
 }

@@ -303,7 +303,7 @@ export const INJECTIONS_WORKFLOW = [
   {
     id: 'I88',
     what: '主工作区直改不再提醒（绕过隔离位变成完全看不见）',
-    file: 'kit/skills/lib/workflow-policy.mjs',
+    file: 'kit/skills/lib/workflow-policy-next.mjs',
     from: '  if ((rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {',
     to: '  if (false && (rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {',
     expect: '主工作区有改动时给提醒',

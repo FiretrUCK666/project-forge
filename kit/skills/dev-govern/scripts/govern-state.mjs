@@ -17,6 +17,7 @@ import {
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { applyIssuesToBackend, buildIssues } from '../../lib/escalation.mjs'
+import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { appendGovernSignal, inferSignalModule, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, readTextStrictInfo } from './govern-checks.mjs'
 
@@ -664,8 +665,13 @@ export async function recordGovernRetroCheckpoint(mainRoot, gitDir, isGit, entry
 }
 
 export async function recordGovernSkip({ mainRoot, gitDir, isGit, taskId = null, stage = 'audit', reason = '', by = 'workflow' } = {}) {
+  // 跳过治理巡检是放行点：理由不仅要非空，还要说清绕过了什么。
+  // 两处入口（`flow verify --skip-govern` 与 `govern-audit --skip-govern`）用同一判据，
+  // 否则宽的那一侧会成为实际通道——绕过者只需要走那条不校验的路。
   const cleanReason = String(reason ?? '').trim()
   if (!cleanReason) return { ok: false, error: '--skip-govern requires non-empty --reason "<text>"' }
+  const reasonCheck = evaluateReleaseReason(cleanReason, { subject: '跳过治理巡检的理由' })
+  if (!reasonCheck.ok) return { ok: false, error: `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason}` }
   const state = loadGovernState(mainRoot)
   const record = { at: new Date().toISOString(), taskId, stage, reason: cleanReason, by }
   state.skips = [...state.skips, record].slice(-100)

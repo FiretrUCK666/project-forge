@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T02:39:46.934Z",
+  "installedAt": "2026-11-21T02:41:44.626Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -88,7 +88,7 @@
       "sha256": "9154b01b5c3098c0dad1aafbf62a5816f79bb92a41453e54bc7ede82172ed80a"
     },
     "dev-govern/scripts/govern-state.mjs": {
-      "sha256": "0041b0b979b298cfb0ed28fd2a3beb49759a1519edfc37093b2890ea4f1baac6"
+      "sha256": "ba84075be43b3064c806d60378da225aee19e6202ab14971e23cb36e7a346a14"
     },
     "dev-govern/scripts/govern-tests.mjs": {
       "sha256": "8411b3d352880d399d29437779d040f3ec02e65d6bb7349b66cb68ba56a64e5f"

@@ -97,11 +97,28 @@ async function batchSyntaxCheck(files) {
     "process.stdout.write(JSON.stringify(errors));",
   ].join('\n')
 
-  const res = spawnSync(
-    process.execPath,
-    ['--no-warnings', '--experimental-vm-modules', '--input-type=module', '-e', runnerScript],
-    { input: JSON.stringify(files), encoding: 'utf8', timeout: 15000, windowsHide: true },
-  )
+  const res = await new Promise((done) => {
+    const child = spawn(
+      process.execPath,
+      ['--no-warnings', '--experimental-vm-modules', '--input-type=module', '-e', runnerScript],
+      { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+    )
+    const out = []
+    const err = []
+    const timer = setTimeout(() => { try { child.kill() } catch { /* ignore */ } }, 15000)
+    timer.unref?.()
+    child.stdout?.on('data', (c) => out.push(c))
+    child.stderr?.on('data', (c) => err.push(c))
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      done({ status: code ?? 1, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') })
+    })
+    child.on('error', (e) => {
+      clearTimeout(timer)
+      done({ status: 1, stdout: '', stderr: e.message })
+    })
+    child.stdin.end(JSON.stringify(files))
+  })
   if (res.status === 0 && res.stdout) {
     try {
       const parsed = JSON.parse(res.stdout)
@@ -633,11 +650,11 @@ function checkCliParity({ ROOT, fail, note, walk }) {
  * 登记表说「事实档」，代码返「用法档」，两边都写得很整齐，没有任何东西会发现——
  * 直到有人照登记表去处理，做了一件本来不用做的事。所以按源码扫，不维护第二份清单。
  */
-function checkExitCodeParity({ ROOT, walk, fail, note }) {
+function checkExitCodeParity({ ROOT, readText, walk, fail, note }) {
   const sources = [
     ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
     ...walk(join(ROOT, 'kit', 'skills'), (f) => f.endsWith('.mjs')),
-  ].map((abs) => ({ file: abs.slice(ROOT.length + 1).replace(/\\/g, '/'), text: readFileSync(abs, 'utf8') }))
+  ].map((abs) => ({ file: abs.slice(ROOT.length + 1).replace(/\\/g, '/'), text: readText(abs) }))
   const result = evaluateExitCodeParity(sources, blockedExitOf)
   for (const message of result.failures) fail(`退出码档位：${message}`)
   // 覆盖率必须一起报：只说「核过的都一致」而不说「有多少没核」，

@@ -363,8 +363,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const root = resolve(targetDir)
   if (!existsSync(root)) throw new Error(`目标目录不存在：${root}`)
 
-  // 先启动工作区遍历与无阻塞异步读盘，再派生 git 子进程，使 libuv 线程池先跑起来并与 git 子进程并发
-  const staticPromise = scanProjectStaticFacts(root)
+  // 先派生 git 子进程，再启动工作区异步读盘与纯内存生态计算，使 git 子进程、libuv 线程池与主线程同步分析三路并行
   const gitPromise = detectGit(root, {
     probeAuth: opts.probeAuth === true,
     verifyToken: opts.verifyToken === true,
@@ -373,6 +372,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     offline: opts.offline,
     fastUnbornStatus: opts.fastUnbornStatus === true,
   })
+  const staticPromise = scanProjectStaticFacts(root)
   const [gitFacts, staticFacts] = await Promise.all([gitPromise, staticPromise])
   const {
     rawWs, relFiles, relSet, dirSet, ecosystem, taskEntryMeta, taskCommands, docs, workspace,

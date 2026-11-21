@@ -12,6 +12,7 @@ import { printNextStep } from '../../lib/cli.mjs'
 import { evaluateMasterPrdClosureState } from '../../lib/doc-substantive.mjs'
 import { evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
+import { mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { gitRun, posixPath, readTextSafe, syncDetachedWorktree, writeAtomic } from '../../lib/git.mjs'
 import { resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { recordMountedDepsInLedger, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
@@ -460,13 +461,14 @@ export function recordVerifyEvidenceForFlow({
   const finalOverallExit = shallowE2eEvidence ? 3 : overallExit
   // 预检算出的附件记录与界面核验结论，并进这一次写入。
   // 先前的做法是预检自己写一份、这里再整份覆盖，附件落账被后写的抹掉；
-  // 现在预检只算不写，由这里一次写全，没有覆盖窗口。
+  // 现在预检只算不写，由这里一次写全，没有覆盖窗口，且按 sameClean 过滤跨 HEAD 陈旧附件。
   const precheckRecords = Array.isArray(precheck?.records) ? precheck.records : []
-  const precheckVisual = precheck?.visual && precheck.visual.required ? precheck.visual : null
-  const carriedArtifacts = precheckRecords.length > 0
-    ? precheckRecords
-    : (Array.isArray(prev?.artifacts) ? prev.artifacts : [])
-  const carriedVisual = precheckVisual ?? (prev?.visual ?? null)
+  const precheckVisual = precheck?.visual && precheck.visual.required
+    ? { ...precheck.visual, headSha: precheck.visual.headSha ?? currentHead ?? null }
+    : null
+  const baseArtifacts = sameClean && Array.isArray(prev?.artifacts) ? prev.artifacts : []
+  const carriedArtifacts = mergeArtifactRecords(baseArtifacts, precheckRecords)
+  const carriedVisual = precheckVisual ?? (sameClean ? (prev?.visual ?? null) : null)
   writeVerificationEvidence(roots.gitDir, taskId, {
     taskId, baseSha: ledger.baseSha, headSha: currentHead, dirty,
     riskTier: policy.riskTier, mode: modeName, target: targetVal, exitCode: finalOverallExit,

@@ -132,6 +132,13 @@ async function main(argv) {
         if (data.inputs.issues.length > 1) process.stdout.write(`- 多 Issue 拓扑排序: ${data.inputs.issueGraph.orderedIssues.map((n) => `#${n}`).join(' -> ')}\n`)
         if ((data.inputs.milestones?.length ?? 0) > 0) process.stdout.write(`- 识别里程碑: ${data.inputs.milestones.map((m) => `#${m.number}`).join(', ')}\n`)
         for (const dw of data.driftWarnings ?? []) process.stdout.write(`- [提醒] ${dw.message}\n`)
+        // 认不出来的输入不许静默丢弃：JSON 里有 `inputs.unknown`，正文这边也得说，
+        // 否则不看 JSON 的人会以为「传了就用上了」。
+        const unknownInputs = data.inputs?.unknown ?? []
+        if (unknownInputs.length > 0) {
+          process.stdout.write(`- 以下输入没被使用（认不出来）：${unknownInputs.join('、')}\n`)
+          process.stdout.write('- 正确写法：https://<host>/<owner>/<repo>/issues/<N>（或 /pull/<M>）、#N、issue#N、pr#M\n')
+        }
         const extPrNum = data.identity.role === 'inbound-external-pr'
           ? (data.inputs.prs[0]?.number ?? parsePrNumber(opts['external-pr']))
           : null

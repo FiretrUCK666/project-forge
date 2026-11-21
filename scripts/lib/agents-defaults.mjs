@@ -360,7 +360,7 @@ export function buildDevProfileVars(facts, targetRoot) {
   const hasCommands = plan.block.trim().length > 0
     || COMMAND_ORDER.some((k) => typeof cmds[k] === 'string' && cmds[k].trim())
     || Boolean(cmds.check || cmds.smoke)
-  const hasCodeManifests = manifests.length > 0 || kinds.some((k) => k && k !== 'docs-only' && k !== 'empty')
+  const hasCodeManifests = manifests.length > 0 || (facts?.scale?.codeFiles ?? 0) > 0 || kinds.some((k) => k && k !== 'docs-only' && k !== 'empty' && k !== 'unknown')
 
   if (!hasCommands && !hasCodeManifests) {
     const hasGithub = Boolean(targetRoot && existsSync(join(targetRoot, '.github')))

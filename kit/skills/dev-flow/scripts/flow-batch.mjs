@@ -268,8 +268,11 @@ async function handleCheckDisjoint(opts, roots) {
 async function handleMergeQueue(opts, roots) {
   const { lockPath, statePath } = resolveQueuePaths(roots.mainRoot, roots.gitDir)
   return withFileLock(lockPath, async () => {
-    const state = readJsonSafe(statePath) ?? { queue: [], history: [] }
-    const queue = Array.isArray(state.queue) ? [...state.queue] : []
+    const state = readJsonSafe(statePath) ?? null
+    const hadStateFile = state !== null
+    const baseState = state ?? { queue: [], history: [] }
+    const queue = Array.isArray(baseState.queue) ? [...baseState.queue] : []
+    const queueBefore = [...queue]
     if (opts.enqueue) {
       const enqId = sanitizeTaskId(opts.enqueue)
       if (!queue.includes(enqId)) queue.push(enqId)
@@ -280,7 +283,14 @@ async function handleMergeQueue(opts, roots) {
         if (!queue.includes(id)) queue.push(id)
       }
     }
-    writeJsonAtomic(statePath, { queue, history: state.history ?? [] })
+
+    // 零工作量不落盘。
+    //
+    // 空跑一次顺手写一份 `{queue:[],history:[]}`，后续读取会把它当成真实状态——
+    // 而它只是「这次没事可做」。判据是「这次有没有真的改变队列或历史」，
+    // 不是「队列是不是空的」：后者会把「处理完清空队列」也一并跳过，历史随之丢失。
+    const queueChanged = JSON.stringify(queue) !== JSON.stringify(queueBefore)
+    if (queueChanged) writeJsonAtomic(statePath, { queue, history: baseState.history ?? [] })
 
     if (opts['enqueue-only']) {
       const out = { ok: true, action: 'enqueued', queue }
@@ -413,9 +423,20 @@ async function handleMergeQueue(opts, roots) {
       results.push({ taskId, ok: true, status: 'merged', baseDrifted, mergedSha: mergeRes.mergedSha ?? null })
     }
 
-    const nextHistory = [...(state.history ?? []), ...results].slice(-50)
-    writeJsonAtomic(statePath, { queue, history: nextHistory })
-    const out = { ok: !stoppedWithFailure, exitCode, processed: results, remainingQueue: queue }
+    // 这一路同理：只有真处理了东西（或队列发生了变化）才落盘。
+    // 队列里本来有条目、这次一个都没跑成，那也不叫空跑——照常写，历史要留下痕迹。
+    const historyChanged = results.length > 0
+    if (historyChanged || queueChanged || (hadStateFile && state !== null && queue.length !== queueBefore.length)) {
+      const nextHistory = [...(baseState.history ?? []), ...results].slice(-50)
+      writeJsonAtomic(statePath, { queue, history: nextHistory })
+    }
+    const out = {
+      ok: !stoppedWithFailure,
+      exitCode,
+      processed: results,
+      remainingQueue: queue,
+      ...(historyChanged || queueChanged ? {} : { skippedWrite: '本次零工作量：没有入队、没有可处理项、队列未变，未写队列状态文件' }),
+    }
     if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
     else {
       process.stdout.write(`FIFO 合并队列执行完成：处理 ${results.length} 项，剩余队列 ${queue.length} 项。\n`)

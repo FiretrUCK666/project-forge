@@ -336,11 +336,16 @@ export function bootstrapEmpty(targetDir, {
   }
 
   let gitInitialized = false
+  let firstCommit = null
   if (!dryRun && !existsSync(join(root, '.git'))) {
     const tplArg = `--template=${getEmptyBootstrapTplDir()}`
     let initRes = spawnSync('git', ['init', '-q', tplArg, '-b', 'main'], { cwd: root, windowsHide: true })
     if (initRes.status !== 0) initRes = spawnSync('git', ['init', '-q', tplArg], { cwd: root, windowsHide: true })
     gitInitialized = initRes.status === 0
+    // 只 init 不提交，交出去的就是一份没有历史的目录：文件全在 `??` 里，
+    // `git log` 报错，而报告那边只看「.git 在不在」就写「已就绪」。
+    // 起步流程自己建的仓必须留下首次提交，否则「版本管理已就绪」是句空话。
+    if (gitInitialized) firstCommit = createFirstCommit(root, created, names)
   }
 
   return {
@@ -350,8 +355,62 @@ export function bootstrapEmpty(targetDir, {
     name: names.kebab,
     dryRun,
     gitInitialized,
+    ...(firstCommit ? { firstCommit } : {}),
     created,
     ...(skipped.length > 0 ? { skipped } : {}),
+  }
+}
+
+/**
+ * 起步流程的首次提交。
+ *
+ * 失败不吞：返回 `{ ok: false, reason }` 让人看得见。缺 `user.name` / `user.email`
+ * 在干净环境与 CI 里很常见，那时提交会失败，而失败被吞掉的结果正是这一片要治的病——
+ * 报告说完成，磁盘上什么都没有。
+ *
+ * ## 身份缺失怎么办
+ *
+ * 重试一次，用一次性的本地身份提交，并在结果里明写 `identityFallback` 与本仓用的名字
+ * 与邮箱。理由是「首次提交必须有」是硬判据，而干净换机器上没配 git 身份是常态：
+ * 直接失败等于让每个新环境都开不了头，静默用假身份等于替人做主。
+ * 用一次性的 `-c` 传参，不写进仓库配置，也不写进全局配置——人后面配好自己的身份，
+ * 那条占位记录只在首次提交这一个提交里。
+ *
+ * 提交信息用仓库约定式前缀里最适合「初始骨架」的那一个（`chore:`），不另造一套措辞。
+ */
+function createFirstCommit(root, created = [], names = {}) {
+  if (created.length === 0) return { ok: false, reason: '没有创建任何文件，跳过首次提交' }
+  const addRes = spawnSync('git', ['add', '-A'], { cwd: root, windowsHide: true })
+  if (addRes.status !== 0) {
+    return { ok: false, reason: `git add 失败：${String(addRes.stderr ?? '').trim().slice(0, 300)}` }
+  }
+
+  const message = 'chore: 初始化项目治理基线'
+  const runCommit = (identityArgs) => spawnSync(
+    'git',
+    [...identityArgs, '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message],
+    { cwd: root, windowsHide: true, encoding: 'utf8' },
+  )
+
+  let commitRes = runCommit([])
+  let identityFallback = null
+  if (commitRes.status !== 0 && /Author identity unknown|empty ident name|unable to auto-detect email/i.test(String(commitRes.stderr ?? ''))) {
+    const name = names?.kebab ? names.kebab : 'project-bootstrap'
+    const email = `${name}@localhost`
+    commitRes = runCommit(['-c', `user.name=${name}`, '-c', `user.email=${email}`])
+    if (commitRes.status === 0) {
+      identityFallback = { name, email, note: '本机未配置 git 身份，首次提交用了一次性占位身份（未写入仓库或全局配置）' }
+    }
+  }
+  if (commitRes.status !== 0) {
+    return { ok: false, reason: `首次提交失败：${String(commitRes.stderr ?? '').trim().slice(0, 300)}` }
+  }
+  const headRes = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, windowsHide: true, encoding: 'utf8' })
+  return {
+    ok: true,
+    sha: String(headRes.stdout ?? '').trim() || null,
+    message,
+    ...(identityFallback ? { identityFallback } : {}),
   }
 }
 

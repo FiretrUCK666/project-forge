@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
 import { SKILL_ROOT, gitCommitFast, gitInit, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
 
@@ -202,8 +202,23 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
     for (const k of ['prd', 'spec', 'todo']) {
       if (!archJson.byKind?.[k]?.startsWith('docs/archive/')) return `${k} 未成对归档：${JSON.stringify(archJson.byKind)}`
     }
+    // 成对归档之后，三份文档都搬进了 docs/archive/，`related_*` 由 archive 重算。
+    // 这里直接解析重算后的 frontmatter 逐个验目标存在——「链接没断」只能这样验。
+    // 用 `audit .` 验不出来：归档后范围内的受管文档已经是 0 份，零目标的结论与链接无关。
+    const { parseDocFrontmatter: readFm } = await import('../../kit/skills/lib/shared.mjs')
+    for (const [kind, rel] of [['prd', archJson.byKind.prd], ['spec', archJson.byKind.spec], ['todo', archJson.byKind.todo]]) {
+      const fm = readFm(readFileSync(join(dir, rel), 'utf8')).data ?? {}
+      for (const rk of ['related_prd', 'related_spec', 'related_todo']) {
+        const v = fm[rk]
+        if (!v || /^(?:无|none|null)$/i.test(String(v).trim())) continue
+        const targetAbs = resolve(dirname(join(dir, rel)), String(v).trim())
+        if (!existsSync(targetAbs)) return `${kind} 归档后 ${rk} 指向不存在的 ${v}（断链）`
+      }
+    }
+    // 归档后范围内已无受管文档：审计必须报「未适用」，不得把零目标折成「全部通过」。
     const audAfter = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--json'], { cwd: dir })
-    if (audAfter.status !== 0) return `归档后 doc-plan audit 断链：${audAfter.stdout} ${audAfter.stderr}`
+    if (audAfter.status === 0) return '归档后零目标审计仍退 0（未适用被折成通过）'
+    if (JSON.parse(audAfter.stdout).applicable !== false) return `归档后审计结论应为未适用：${audAfter.stdout}`
 
     // syncDocsLifecycle 单遍替换防嵌套测试
     await syncDocsLifecycle(dir, { slugOrPath: archJson.byKind.spec })

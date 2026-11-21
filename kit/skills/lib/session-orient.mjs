@@ -31,6 +31,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { degradeSkillCommands, getSkillFallbacks, resolveAvailableSkills } from './cli.mjs'
 import { listDocs } from '../dev-plan/scripts/doc-audit.mjs'
 import { discoverContextDocs } from './doc-locator.mjs'
 import { listTaskLedgers } from './ledger.mjs'
@@ -263,7 +264,30 @@ export function buildSessionOrientation(mainRoot) {
     localIssues: openLocalIssues.map((i) => ({ number: i.number, title: i.title, state: i.state, labels: i.labels ?? [], assignees: i.assignees ?? [] })),
     pendingLocalMigration,
     stuck,
+    // 结构化字段保留原值：这是给程序用的，不经降级。
     nextSteps: nextSteps.slice(0, 3),
-    text: `${lines.join('\n').trimEnd()}\n`,
+    text: `${degradeOrientationLines(lines, mainRoot).join('\n').trimEnd()}\n`,
   }
+}
+
+/**
+ * 正文里指向未装配技能的命令，改成等价的通用做法。
+ *
+ * ## 为什么不能在每一处命令定义点做
+ *
+ * 正文里的套件命令有两个来源：本文件写死的几处，与 `doc-locator.mjs` 运行时拼出来的
+ * 「按需定位锚点」。后者根本不是字面量，只改前者会漏掉它。所以在**渲染出口**统一收口：
+ * 这里逐行走一遍 `cli.mjs` 的降级判定，两种来源一次覆盖。
+ *
+ * ## 为什么降级不是「把话说少」
+ *
+ * 替换结果必须仍指向一个可执行的动作类别（原生 git、项目本地测试……）。只把命令删掉、
+ * 或者只说一句「没装套件」，读的人拿到的是一句拒绝而不是一条路。
+ */
+function degradeOrientationLines(lines, mainRoot) {
+  const skillsInfo = resolveAvailableSkills(mainRoot)
+  // 技能目录都不存在时才谈得上「未装配」：已装配的仓里这些命令是能跑的，照打。
+  if (skillsInfo.hasSkillsDir) return lines
+  const fallbackMap = getSkillFallbacks(undefined)
+  return lines.map((line) => degradeSkillCommands(line, skillsInfo, fallbackMap))
 }

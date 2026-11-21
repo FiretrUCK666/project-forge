@@ -33,6 +33,21 @@ import { runTrialMerge } from './flow-trial-merge.mjs'
 export { handleAbort, handleCleanup, handleStatus }
 
 /**
+ * 一次写评论的成败，从后端返回值里读。
+ *
+ * 后端在没有直连凭据时返回的是「未成功 + 已转交宿主代理」——`ok: false` 加 `delegated: true`。
+ * 这种失败是**没发出去**，不是「发了但被别人接着做了」。所以判据只看 `ok`：
+ * 只要不是成功，就当作未发出，并把后端给的原因原样带出来。
+ */
+export function judgeCommentOutcome(result) {
+  if (result && result.ok === true) return { ok: true }
+  const reason = result?.skipped
+    ? `后端不支持写评论（${result.reason ?? 'client-unsupported'}）`
+    : (result?.delegated ? '后端没有直连凭据，评论已转交宿主代理但未由本工具发出' : (result?.reason ?? '后端返回未成功'))
+  return { ok: false, reason }
+}
+
+/**
  * 统一合并前置门禁校验（被 flow-merge 与 flow-batch FIFO 合并队列共同复用）。
  */
 export async function assertPreMergeGates({
@@ -253,6 +268,8 @@ export async function handleMerge(opts, roots) {
   ].filter(Boolean)
   const baseBranch = ledger.baseBranch || 'main'
   let mergeRes = null
+  // 本次合并发出的回告逐条记成败：两条合并路径共用一份，报告里统一列出未发出的那些。
+  const mergeComments = []
 
   if (canUseGhApi && ledger.prNumber) {
     if (currentHead) {
@@ -318,14 +335,16 @@ export async function handleMerge(opts, roots) {
       reviewerId: effectiveReviewer, reviewerDisplay, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
       humanApprovedReason: ledger.humanApprovedReason ?? null, bypassed: mergeBypassed,
     })
-    await backend.postComment({
+    // 回告写没写出去，要看返回值。后端在没有直连凭据时返回的是「未成功 + 已转交」，
+    // 裸 await 把这件事吞掉，报告里一个字都不会出现。
+    mergeComments.push({ target: `PR #${ledger.prNumber}`, ...judgeCommentOutcome(await backend.postComment({
       repo: originFull,
       number: ledger.prNumber,
       body: mergePrBody,
       statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
-    })
+    })) })
     for (const iss of ledger.linkedIssues ?? []) {
-      await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null } })
+      mergeComments.push({ target: `Issue #${iss}`, ...judgeCommentOutcome(await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null } })) })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'in-review' })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
@@ -383,7 +402,7 @@ export async function handleMerge(opts, roots) {
         humanApprovedReason: ledger.humanApprovedReason ?? null, bypassed: mergeBypassed,
       })
       for (const iss of ledger.linkedIssues ?? []) {
-        await backend.postComment({ taskId, number: iss, body: localMergeBody, statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null } })
+        mergeComments.push({ target: `Issue #${iss}`, ...judgeCommentOutcome(await backend.postComment({ taskId, number: iss, body: localMergeBody, statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null } })) })
         await backend.removeLabel({ taskId, number: iss, label: 'in-progress' })
         await backend.removeLabel({ taskId, number: iss, label: 'in-review' })
         await backend.removeLabel({ taskId, number: iss, label: 'changes-requested' })
@@ -404,9 +423,16 @@ export async function handleMerge(opts, roots) {
     mergeStateOverride: mergeRes?.trialMerged ? { state: 'merged', ownCommits: 0, isShallow: false, reason: `已合入 ${baseBranch}` } : null,
     knownCleanWorktrees: ledger.worktreePath ? [ledger.worktreePath] : [],
   })
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist }, null, 2)}\n`)
+  const unreported = mergeComments.filter((c) => !c.ok)
+  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist, ...(mergeComments.length > 0 ? { mergeComments } : {}), ...(unreported.length > 0 ? { unreportedComments: unreported } : {}) }, null, 2)}\n`)
   else {
     process.stdout.write(`合并状态已确认（task=${taskId}, status=${ledger.status}）。未自动删除任何分支或 Worktree。\n`)
+    // 回告没发出去必须看得见：静默吞掉等于对外部提案人一声不吭地合了单。
+    for (const u of unreported) {
+      process.stdout.write(`回告未发出：${u.target}（${u.reason}）\n`)
+      const num = String(u.target).replace(/^[^#]*#/, '')
+      process.stdout.write(`  补发命令：node .agents/skills/dev-flow/scripts/flow.mjs issue comment --issue ${num} --body "<回告正文>"\n`)
+    }
     printCleanupChecklistText(checklist)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
   }

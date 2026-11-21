@@ -216,7 +216,7 @@ export const INJECTIONS_GATES = [
     id: 'I131',
     what: 'evaluateIncludeDiffGate 直接返回 readyForDiff=true 放行（未经 check-empirical/check-fault 就允许 --include-diff）',
     file: 'kit/skills/dev-review/scripts/review-empirical.mjs',
-    from: '  const readyForDiff = !dirtyFaultResidue && missingSteps.length === 0',
+    from: '  const readyForDiff = !dirtyFaultResidue && !artifactBlock && missingSteps.length === 0',
     to: '  const readyForDiff = true',
     expect: '--include-diff 前置阻断',
   },

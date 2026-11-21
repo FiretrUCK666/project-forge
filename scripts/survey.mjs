@@ -91,9 +91,20 @@ export function computeArtifactPlan(facts) {
     if (!ignores.hasGitignore) missingIgnores.push('.gitignore')
     if ((ignores.unignoredOutputDirs?.length ?? 0) > 0) missingIgnores.push('未忽略产物目录')
     if ((ignores.ignoredButTracked?.length ?? 0) > 0) missingIgnores.push('已入库忽略文件')
-    items.push(missingIgnores.length > 0
-      ? { id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: `待补齐（${missingIgnores.join('、')}）`, action: 'calibrate', detail: '保留既有提交历史与规则，仅追加缺失的换行/忽略条目或清理误跟踪产物' }
-      : { id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '已就绪', action: 'preserve', detail: '版本库、.gitattributes 与 .gitignore 均已到位，保持现状' })
+    // 「版本库在」与「有历史」是两件事：只 init 没提交的目录，文件全在 `??` 里、
+    // `git log` 报错，而只看「.git 在不在」就会写「已就绪」——用户拿到的是一句空话。
+    const noCommits = Number(git.commits ?? 0) === 0
+    if (noCommits && missingIgnores.length === 0) {
+      items.push({
+        id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore',
+        status: '尚未首次提交（版本库存在但零提交）', action: 'create',
+        detail: '跑 git add -A && git commit -m "chore: 初始化项目基线" 落首次提交；起步流程自己创建的仓库会自动完成这一步',
+      })
+    } else {
+      items.push(missingIgnores.length > 0
+        ? { id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: `待补齐（${missingIgnores.join('、')}）`, action: 'calibrate', detail: '保留既有提交历史与规则，仅追加缺失的换行/忽略条目或清理误跟踪产物' }
+        : { id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '已就绪', action: 'preserve', detail: '版本库、.gitattributes 与 .gitignore 均已到位，保持现状' })
+    }
   }
 
   // 3. 受管 .agents/skills/ 与自有扩展技能（统一全量装配 + v2 墓碑/定制保护）
@@ -301,6 +312,24 @@ export function computeArtifactPlan(facts) {
 export { GAP_RULE_IDS, QUESTION_RULE_IDS, textsOf }
 
 /**
+ * 这个仓库算不算「纯文档项目」。
+ *
+ * 判据是「文档不止一份说明文件」，不是「有说明文件」。说明文件是每个仓库的标配：
+ * 只有 README 的目录，既可能是刚起步马上要写代码，也可能是长期只放说明，
+ * 两种处置正相反，而这一条判据在两者上给出同一个结论，等于没判。
+ *
+ * 多一份非说明文档（TDD、设计笔记、规范……）才算「这是个文档项目」的证据。
+ * 不用提交数阈值：那是会被时间推移改变结论的魔数，「几次算少」也没有事实依据。
+ */
+function isDocsOnlyByDocuments(ws, docs) {
+  if (!(ws.docFiles > 0) || !docs.readme) return false
+  // 说明文件的变体（README.zh-CN.md、README.rst……）与 README 本体算同一份，
+  // 拿它凑「不止一份」等于把双语主页当成文档项目。
+  const readmeVariants = new Set(docs.readmes ?? [docs.readme])
+  return ws.docFiles > readmeVariants.size
+}
+
+/**
  * 这个远端到底能做什么。
  *
  * 三态，不是两态：`true` 能做、`false` 不能做、`null` 认不出来。
@@ -361,7 +390,12 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
 
   let kinds = ecosystem.kinds
   if (kinds.length === 0) {
-    if (ws.codeFiles === 0 && ws.docFiles > 0 && docs.readme) kinds = ['docs-only']
+    // 纯文档项目的判据是「文档不止一份说明文件」，不是「有说明文件」。
+    // 说明文件是每个仓库的标配，它单独存在不构成「这是一个文档项目」的证据：
+    // 一个刚起步、马上就要写代码的目录，与一个长期只放说明文件的目录，
+    // 在「只有 README」这一条上完全没有区别，而两者的处置正相反。
+    // 不用提交数阈值——那是个会被时间推移改变结论的魔数，且「几次算少」没有事实依据。
+    if (ws.codeFiles === 0 && isDocsOnlyByDocuments(ws, docs)) kinds = ['docs-only']
     else if (ws.totalFiles === 0) kinds = ['empty']
     else kinds = ['unknown']
   }

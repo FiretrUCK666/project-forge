@@ -19,8 +19,9 @@ import {
   writeIntakeRecord,
 } from '../../lib/intake-triage.mjs'
 import { readTaskLedger, sanitizeTaskId } from '../../lib/ledger.mjs'
+import { judgeCrossRepoReference } from '../../lib/github-parse.mjs'
 import { getLocalIssue, getLocalPr, listLocalIssues } from '../../lib/local-issues.mjs'
-import { getHostingProvider, parseIssueNumbers, parsePrNumber, probeForWrite, resolveIdentityLayers } from '../../lib/platform.mjs'
+import { getHostingProvider, parseFlowInputs, parsePrNumber, probeForWrite, resolveIdentityLayers } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext, resolveReadClient } from './flow-context.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
@@ -43,9 +44,17 @@ function readRationaleText(mainRoot, opts = {}) {
   return String(opts.rationale ?? '').replace(/\r\n/g, '\n').trim()
 }
 
+/**
+ * 解析分诊目标。
+ *
+ * 引用可以来自三处：`--pr` / `--issue` 显式开关、位置参数、账本里已绑定的条目。
+ * 三条都走 `parseFlowInputs` 这一套解析——`inspect` 用的也是它，两条入口对同一输入
+ * 必须给出同一结论，各写一套只会让同一个链接在两边落到不同的目标上。
+ */
 function resolveTargetSelection(mainRoot, opts = {}) {
   const hasPr = opts.pr !== undefined && opts.pr !== null && opts.pr !== ''
   const hasIssue = opts.issue !== undefined && opts.issue !== null && opts.issue !== ''
+  const positional = (Array.isArray(opts._) ? opts._ : []).map((s) => String(s ?? '').trim()).filter(Boolean)
   if (hasPr && hasIssue) {
     throw new Error('--pr 与 --issue 不能同时指定，请一次分诊单个目标')
   }
@@ -55,15 +64,32 @@ function resolveTargetSelection(mainRoot, opts = {}) {
   }
   if (hasPr) {
     const prNum = parsePrNumber(opts.pr, { strict: true })
-    return { targetType: 'pr', targetNumber: prNum, ledger }
+    return { targetType: 'pr', targetNumber: prNum, targetRepo: null, ledger }
   }
   if (hasIssue) {
-    const nums = parseIssueNumbers(opts.issue, { strict: true })
-    if (nums.length !== 1) throw new Error(`--issue 需要单个有效编号，收到：${opts.issue}`)
-    return { targetType: 'issue', targetNumber: nums[0], ledger }
+    const parsed = parseFlowInputs([String(opts.issue)])
+    if (parsed.unknown.length > 0) {
+      throw new Error(`Issue 引用格式无效（支持正整数、#N、issue#N 或 HTTP(S) Issue URL）：${parsed.unknown.join(' ')}`)
+    }
+    if (parsed.issues.length !== 1) throw new Error(`--issue 需要单个有效编号，收到：${opts.issue}`)
+    return { targetType: 'issue', targetNumber: parsed.issues[0].number, targetRepo: parsed.issues[0].repo, ledger }
   }
-  if (ledger?.prNumber) return { targetType: 'pr', targetNumber: Number(ledger.prNumber), ledger }
-  if (ledger?.linkedIssues?.[0]) return { targetType: 'issue', targetNumber: Number(ledger.linkedIssues[0]), ledger }
+  if (positional.length > 0) {
+    const parsed = parseFlowInputs(positional)
+    const usable = [...parsed.issues, ...parsed.prs]
+    if (usable.length === 0) {
+      throw new Error(
+        `位置参数里没有可用的分诊目标，未识别的输入：${parsed.unknown.join(' ') || '(无)'}`
+        + '。正确写法：flow intake https://<host>/<owner>/<repo>/issues/<N>，或 --issue <N> / --pr <M>',
+      )
+    }
+    if (usable.length > 1) throw new Error(`一次只能分诊单个目标，收到 ${usable.length} 个：${positional.join(' ')}`)
+    const only = usable[0]
+    const isPr = parsed.prs.length === 1
+    return { targetType: isPr ? 'pr' : 'issue', targetNumber: only.number, targetRepo: isPr ? null : only.repo, ledger }
+  }
+  if (ledger?.prNumber) return { targetType: 'pr', targetNumber: Number(ledger.prNumber), targetRepo: null, ledger }
+  if (ledger?.linkedIssues?.[0]) return { targetType: 'issue', targetNumber: Number(ledger.linkedIssues[0]), targetRepo: null, ledger }
   throw new Error('缺少分诊目标：请传 --pr <M> 或 --issue <N>（或已绑定 Issue/PR 的 --task <id>）')
 }
 
@@ -210,7 +236,7 @@ function formatIntakeMarkdown(result) {
 export async function handleIntake(opts = {}, rootsArg = null) {
   const roots = rootsArg ?? (await resolveRepoRoots(opts.dir ?? process.cwd()))
   const { mainRoot, gitDir } = roots
-  const { targetType, targetNumber, ledger } = resolveTargetSelection(mainRoot, opts)
+  const { targetType, targetNumber, targetRepo: referenceRepo, ledger } = resolveTargetSelection(mainRoot, opts)
   const rationale = readRationaleText(mainRoot, opts)
   const duplicateOf = opts['duplicate-of'] ?? opts.duplicateOf ?? null
   const featureRef = opts['feature-ref'] ?? opts.featureRef ?? null
@@ -223,6 +249,12 @@ export async function handleIntake(opts = {}, rootsArg = null) {
   const role = state.identity?.role ?? 'local-only'
   const providerId = state.github?.providerId ?? 'none'
   const { targetRepo, pushRemote } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+
+  // 引用里带了别的仓就是跨仓引用：写操作会落到那张单上，不是本地这一条。
+  // 三态由 `judgeCrossRepoReference` 判，本仓不可判定时只报出不阻断。
+  const crossRepo = judgeCrossRepoReference({ repo: referenceRepo, targetRepo, raw: opts._?.join(' ') ?? '' })
+  if (crossRepo.blocked) throw new Error(crossRepo.message)
+  if (crossRepo.state === 'undecidable') process.stderr.write(`[提醒] ${crossRepo.message}\n`)
 
   const hydrated = await hydrateTargetMetadata({
     mainRoot, gitDir, targetType, targetNumber, opts, state, targetRepo, ledger,

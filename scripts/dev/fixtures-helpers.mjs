@@ -18,6 +18,15 @@ export const SKILL_ROOT = resolve(HERE, '..', '..')
 
 export { textsOf }
 
+/**
+ * 夹具断言退出码时引用单点档位，不写字面量。
+ *
+ * 断言里写死 `2` 看着更直接，但档位一改，全仓的断言就要跟着逐条改；
+ * 改漏一条的表现是「实现对了、断言红了」，而人会先去怀疑实现。
+ * 所以断言也走 `EXIT`：改档位只改一处，断言自动跟上。
+ */
+export { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
+
 export function initTestBackupDir() {
   if (!String(process.env.PF_NO_REAL_AUTH_PROBE ?? '').trim()) {
     process.env.PF_NO_REAL_AUTH_PROBE = '1'

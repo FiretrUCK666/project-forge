@@ -495,8 +495,11 @@ export function registerStageBLoopCases(cases) {
       const genBk = createTaskBackend({ role: 'generic-git', providerId: 'generic-git', mainRoot: ledgerDir })
       const gi = await genBk.createIssue({ title: '通用托管本地单', labels: ['bug'] })
       if (!gi.ok || gi.skipped || !gi.number) return `GenericRemoteBackend createIssue 仍静默 skipped：${JSON.stringify(gi)}`
-      const mrBlock = await genBk.mergePr({ remoteMerged: false, humanApproved: false })
-      if (mrBlock.ok || mrBlock.code !== 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED') return `GenericRemoteBackend.mergePr 护栏被破坏：${JSON.stringify(mrBlock)}`
+      // 护栏：取不到远端事实时不假装合并，如实报未核验（不是凭调用方自述放行）。
+      const mrBlock = await genBk.mergePr({ humanApproved: false })
+      if (mrBlock.ok || (mrBlock.code !== 'BLOCKED_MERGE_STATE_UNVERIFIED' && mrBlock.code !== 'BLOCKED_REMOTE_NOT_MERGED')) {
+        return `GenericRemoteBackend.mergePr 护栏被破坏：${JSON.stringify(mrBlock)}`
+      }
 
       // flow-merge checks=unknown 阻断 & timeout -> getPr(merged=true) 幂等续尾先评后关 Issue
       const lRoots = await resolveRepoRoots(ledgerDir)
@@ -555,7 +558,7 @@ export function registerStageBLoopCases(cases) {
     }
   }, 2000])
 
-  cases.push(['C8：generic-git bare remote 未传 --remote-merged 阻断与传入 --remote-merged 放行并先评后关', async () => {
+  cases.push(['C8：generic-git 远端未合并时阻断，远端合并后现场核验放行并先评后关', async () => {
     const bareDir = tmpProject({})
     const workDir = tmpProject({
       '.gitignore': '.worktrees/\n',
@@ -595,16 +598,20 @@ export function registerStageBLoopCases(cases) {
         }, await resolveRepoRoots(revWt))
         if (revCode !== 0) return `review record 失败：${revCode}`
 
+        // 远端还没合：现场取回并核验，four 态判定说没合就必须阻断。
         const blk = await handleMerge({ task: 'bare-merge', json: true }, roots)
-        if (blk.exitCode !== 3 || blk.code !== 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED') {
-          return `generic-git 未传 --remote-merged 未按 3 阻断：${JSON.stringify(blk)}`
+        if (blk.exitCode !== 3 || blk.code !== 'BLOCKED_REMOTE_NOT_MERGED') {
+          return `generic-git 远端未合并未按 3 阻断：${JSON.stringify(blk)}`
         }
-        const okMerge = await handleMerge({ task: 'bare-merge', 'remote-merged': true, json: true }, roots)
-        if (okMerge.exitCode !== 0) return `generic-git 传入 --remote-merged 仍死锁：${JSON.stringify(okMerge)}`
+        // 在远端真的合一次：把分支推成 main（快进合并），远端引用随即变化。
+        const mergeBranch = lg0.branch
+        gitSync(wtAbs, ['push', '-q', 'origin', `${mergeBranch}:main`])
+        const okMerge = await handleMerge({ task: 'bare-merge', json: true }, roots)
+        if (okMerge.exitCode !== 0) return `远端已合并后 merge 仍未放行：${JSON.stringify(okMerge)}`
         const lgAfter = readTaskLedger(workDir, 'bare-merge')
         const closedIss = getLocalIssue({ mainRoot: workDir, number: 1 })
         if (lgAfter.status !== 'merged' || closedIss.state !== 'CLOSED') {
-          return `generic-git --remote-merged 后账本或本地单未闭环：status=${lgAfter.status}, state=${closedIss.state}`
+          return `核验放行后账本或本地单未闭环：status=${lgAfter.status}, state=${closedIss.state}`
         }
         return true
       } finally {

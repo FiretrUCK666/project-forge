@@ -1,3 +1,4 @@
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 /**
  * injections-data-locate-intake.mjs —— 统一装配、按需定位、全局业务分诊、rebase 基线校准、可读 PR 正文与功能域命名门禁故障注入复验数据表（I179–I186）。
  */
@@ -25,8 +26,8 @@ export const INJECTIONS_LOCATE_INTAKE = [
     what: '绕过 review-pack.mjs 前置 intake 拒绝门禁（已 reject PR 仍进入后续审查或被 EMPIRICAL_FIRST 掩盖）',
     file: 'kit/skills/dev-review/scripts/review-pack.mjs',
     alsoDropIn: ['.agents/skills/dev-review/scripts/review-pack.mjs'],
-    from: '  if (intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }\n  }',
-    to: '  if (false && intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }\n  }',
+    from: '  if (intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.FACT, guard: intakeGuard }) }\n  }',
+    to: '  if (false && intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.FACT, guard: intakeGuard }) }\n  }',
     expect: 'review-pack 未前置拦截已 reject PR',
   },
   {
@@ -61,8 +62,8 @@ export const INJECTIONS_LOCATE_INTAKE = [
     what: '破坏 flow-lifecycle-hooks.mjs assertSubmitOwnership 对协调者/审查者代提交的拦截',
     file: 'kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs'],
-    from: "  if (nonImplRole) {\n    return {\n      ok: false,\n      code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',\n      exitCode: 3,\n      message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`,",
-    to: "  if (false && nonImplRole) {\n    return {\n      ok: false,\n      code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',\n      exitCode: 3,\n      message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`,",
+    from: "  if (nonImplRole) {\n    return {\n      ok: false,\n      code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',\n      exitCode: EXIT.FACT,\n      message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`,",
+    to: "  if (false && nonImplRole) {\n    return {\n      ok: false,\n      code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',\n      exitCode: EXIT.FACT,\n      message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`,",
     expect: '协调者代提交未被拦截',
   },
   {

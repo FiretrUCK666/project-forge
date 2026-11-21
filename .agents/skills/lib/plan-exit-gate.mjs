@@ -132,48 +132,174 @@ function readDirMarkdownSafe(dirAbs) {
 }
 
 /**
- * 内审是否「未过」——先看人类 override，再看 `plan_critique`。
+ * 「这条批准凭什么成立」的全部合法取值。
  *
- * ## 为什么不能只看 `plan_critique`
+ * 只列真有依据的三种，另加几个描述「为什么不成立」的档：判据要能说清缺什么。
+ */
+export const APPROVAL_BASIS = Object.freeze({
+  PASSED: 'passed',
+  SKIPPED: 'skipped',
+  HUMAN_OVERRIDE: 'human-override',
+  CRITIQUE_UNREADY: 'critique-unready',
+  OVERRIDE_STALE: 'override-stale',
+  MISSING: 'missing',
+  NOT_APPLICABLE: 'not-applicable',
+})
+
+/** 跳过评审的理由至少要有这么多字符，少于它就是占位词而不是理由。 */
+const SKIPPED_REASON_MIN_CHARS = 6
+
+/** 从 `skipped (reason=…)` 里取出理由原文；没有理由返回空串。 */
+function skippedReasonOf(stamp) {
+  const m = /reason=([^)]*)/i.exec(String(stamp ?? ''))
+  return m ? m[1].replace(/^\s*["'`]|["'`]\s*$/g, '').trim() : ''
+}
+
+/** 文档类型到「这里到底有没有批准这道关口」的映射，理由见本函数体。 */
+function approvalAppliesTo(docType) {
+  // `todo` 档不适用，理由必须写死在代码里而不是散在文档里：
+  //
+  // `Case 3` 的规矩是「建 Todo 冻结 `C1..Cn`、跑 `audit` 直通」——整条流程里
+  // 既没有独立 Critique，也没有 `approve` 动作。拿「批准依据」去卡它，等于要求
+  // 一件流程里根本不存在的事，会把整档卡死。卡死的门禁只有一个下场：人给它加
+  // 豁免，然后连该拦的一起放过。所以这里按**类型**判「不适用」，不是靠豁免。
+  //
+  // `spec` 与 `prd` 适用：`Case 4` 明写要求这两档经独立 Critique 后由人 `approve`。
+  return docType === 'spec' || docType === 'prd'
+}
+
+/**
+ * 从文档路径推断类型；推断不出来返回空串。
  *
- * 停损之后由人签字放行（`critique-override --human-approved`），随后 `approve` 通过。
- * 但 `approveSpec` 走 override 分支时只改 `status`/`approved`，**不会改写** `plan_critique`，
+ * 适用性按类型判，而调用方未必都带着类型：有的只给 `rel`。按约定目录推断
+ * 是同一份事实的另一种拿法，不另立判据。
+ */
+function inferDocTypeOf(doc) {
+  const explicit = normalizeStatus(doc?.docType ?? doc?.kind ?? '')
+  if (explicit) return explicit
+  const rel = posixPath(String(doc?.rel ?? '')).toLowerCase()
+  if (rel.startsWith('docs/specs/') || rel.startsWith('docs/archive/specs/')) return 'spec'
+  if (rel.startsWith('docs/prd/') || rel.startsWith('docs/archive/prd/')) return 'prd'
+  if (rel.startsWith('docs/todo/') || rel.startsWith('docs/archive/todo/')) return 'todo'
+  return ''
+}
+
+/**
+ * 「这条批准有没有依据」——**全仓唯一实现**。
+ *
+ * ## 为什么必须只有一处
+ *
+ * 退场门禁（本文件）与文档审计（`doc-audit.mjs` 的 `auditDoc`）判的是同一份事实。
+ * 两处各写一遍，迟早对同一份文档给出相反结论：一份正在生效的规划单「门禁说能开工、
+ * 审计说依据缺失」，而审计的失败又把那份文档自己的验收判红——**两边都没错，结果对不上**。
+ * 所以判法收敛在这里，两处都调它，谁也不许自己再判一遍。
+ *
+ * ## 三种合法依据，不是两种
+ *
+ * 1. `plan_critique` 以 `passed` 开头——正常过审；
+ * 2. `plan_critique` 以 `skipped` 开头**且带实质理由**——显式跳过评审，理由要够长；
+ * 3. `evaluateCritiqueOverride` 判为有效（`approved && !stale`）——人类签字放行。
+ *
+ * 第三种最容易漏。停损之后由人签字放行（`critique-override --human-approved`），
+ * 但 `approveSpec` 走 override 分支时只改 `status`/`approved`，**不改写** `plan_critique`，
  * 于是文档里仍留着 `rejected (reviewer=…, round=3, …)`。那是**当初被拒过**的历史，
- * 不是**现在仍未过审**。把两者等价，人签的字就白签了：门禁拦住已经获批的规划。
+ * 不是**现在仍未过审**。只认前两种，就会把已由人签字放行的文档判成「依据缺失」——
+ * 人签的字白签了。
  *
  * ## 但 override 只对签字时那份正文有效
  *
- * 签字后正文再被改动，人批的就不是当前这一版了。判据是正文指纹，
- * 与 `approve` 的 `BLOCKED_CRITIQUE_STALE` 用同一个函数（`evaluateCritiqueOverride`），
- * 两处若各算一次，「approve 说有效、门禁说过期」就会同时成立。
+ * 签字后正文再被改动，人批的就不是当前这一版了。判据是正文指纹，与 `approve` 的
+ * `BLOCKED_CRITIQUE_STALE` 用同一个函数（`evaluateCritiqueOverride`）；两处若各算一次，
+ * 「approve 说有效、门禁说过期」就会同时成立。
+ *
+ * @param {{rel?: string, kind?: string, docType?: string, text?: string, data?: object}} doc
+ * @returns {{applicable: boolean, hasBasis: boolean, basis: string, evidence: string|null}}
+ */
+export function resolveApprovalBasis(doc) {
+  const docType = inferDocTypeOf(doc)
+  if (!approvalAppliesTo(docType)) {
+    return {
+      applicable: false,
+      hasBasis: true,
+      basis: APPROVAL_BASIS.NOT_APPLICABLE,
+      evidence: `文档类型 ${docType || '(未识别)'} 的流程里没有批准动作，本判据不适用于它`,
+    }
+  }
+
+  const data = doc?.data ?? {}
+  const text = doc?.text ?? ''
+  const stamp = typeof data.plan_critique === 'string' ? data.plan_critique.trim() : ''
+  const critique = normalizeStatus(stamp).split(/\s+/)[0]
+
+  // 依据一：正常过审。
+  if (critique === 'passed') {
+    return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.PASSED, evidence: stamp }
+  }
+
+  // 依据二：显式跳过，但理由必须实质——占位词不算跳过，算缺席。
+  if (critique === 'skipped') {
+    const reason = skippedReasonOf(stamp)
+    if (reason.length >= SKIPPED_REASON_MIN_CHARS) {
+      return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.SKIPPED, evidence: reason }
+    }
+  }
+
+  // 依据三：人类签字放行。过期与未过期是两件事，必须分开报。
+  const overrideState = evaluateCritiqueOverride(text, data)
+  if (overrideState.approved && !overrideState.stale) {
+    return {
+      applicable: true,
+      hasBasis: true,
+      basis: APPROVAL_BASIS.HUMAN_OVERRIDE,
+      evidence: `human-override sha=${overrideState.sha ?? '(未记录)'}`,
+    }
+  }
+  if (overrideState.approved && overrideState.stale) {
+    return {
+      applicable: true,
+      hasBasis: false,
+      basis: APPROVAL_BASIS.OVERRIDE_STALE,
+      evidence: `override=${overrideState.sha} !== current=${overrideState.currentSha}`,
+    }
+  }
+
+  return {
+    applicable: true,
+    hasBasis: false,
+    basis: UNREADY_CRITIQUE.has(critique) ? APPROVAL_BASIS.CRITIQUE_UNREADY : APPROVAL_BASIS.MISSING,
+    evidence: stamp || null,
+  }
+}
+
+/**
+ * 内审是否「未过」——门禁给人看的那一侧措辞。
+ *
+ * 判法本身在 `resolveApprovalBasis` 里，这里只负责把结论翻译成「哪里不对 + 怎么改」。
+ * 两处各判一遍就等于两份真相，所以这里**只格式化，不判断**。
  *
  * @param {{rel: string, text: string, data: object}} doc
  * @returns {{blocked: boolean, message: string, fixHint: string, basis: string}}
  */
 export function resolveCritiqueReadiness(doc) {
-  const overrideState = evaluateCritiqueOverride(doc.text ?? '', doc.data ?? {})
+  const verdict = resolveApprovalBasis(doc)
+  if (verdict.hasBasis) return { blocked: false, message: '', fixHint: '', basis: verdict.basis }
 
-  if (overrideState.approved && !overrideState.stale) {
-    return { blocked: false, message: '', fixHint: '', basis: 'human-override' }
-  }
-  if (overrideState.approved && overrideState.stale) {
+  if (verdict.basis === APPROVAL_BASIS.OVERRIDE_STALE) {
     return {
       blocked: true,
-      basis: 'override-stale',
-      message: `在人类 critique-override 之后正文又改动了（override=${overrideState.sha} !== current=${overrideState.currentSha}），`
+      basis: verdict.basis,
+      message: `在人类 critique-override 之后正文又改动了（${verdict.evidence}），`
         + '人批的是当时那一版，不是现在这一版',
       fixHint: '要么撤销那处改动，要么重新跑 critique-override 签字；改完再走 approve。',
     }
   }
-
-  const critique = normalizeStatus(doc.data?.plan_critique).split(/\s+/)[0]
-  if (!critique || !UNREADY_CRITIQUE.has(critique)) {
-    return { blocked: false, message: '', fixHint: '', basis: 'passed' }
-  }
+  const stamp = doc?.data?.plan_critique
   return {
     blocked: true,
-    basis: 'critique-unready',
-    message: `的规划内审仍是 ${critique}（plan_critique: ${doc.data?.plan_critique}）`,
+    basis: verdict.basis,
+    message: verdict.basis === APPROVAL_BASIS.CRITIQUE_UNREADY
+      ? `的规划内审仍是 ${normalizeStatus(stamp).split(/\s+/)[0]}（plan_critique: ${stamp}）`
+      : '的规划内审没有任何记录（plan_critique 缺失或为空）',
     fixHint: '内审非得是 passed 才能退场；退回的意见要改完再重审，不能带着未过审的稿子开工。'
       + '若已由人裁决放行，须先跑 critique-override --human-approved --reason "<裁决说明>"。',
   }

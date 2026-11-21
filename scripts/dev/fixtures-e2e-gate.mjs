@@ -2,6 +2,7 @@
  * fixtures-e2e-gate.mjs —— 通用 E2E 硬门禁、合前三方 SHA 校验、三态计分与脱敏建单双向夹具。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -176,7 +177,7 @@ export function registerStageBLoopB5Cases(cases) {
         const passBlocked = await withQuietIo(async () => handleRecord({
           task: 'e-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-e', 'review-token': tokE, evidence: 'ok', json: true,
         }, await resolveRepoRoots(eRev)))
-        if (passBlocked.res !== 2 || !passBlocked.out.includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
+        if (passBlocked.res !== EXIT.FACT || !passBlocked.out.includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
           return `缺 E2E 观察时 pass 竟未被 BLOCKED_PASS_WITH_OPEN_BLOCKERS 拦截：exit=${passBlocked.res}, out=${passBlocked.out}`
         }
       } finally {
@@ -235,13 +236,13 @@ export function registerStageBLoopB5Cases(cases) {
 
   cases.push(['A6：合前三方 headSha/干净工作区校核、三态计分与确定性零 LLM CLI 故障注入 Stub', async () => {
     // 1. 三态计分：executed / succeeded / errorOnly
-    if (scoreExecutionResult({ executed: false, exitCode: 0, errorOnly: false }).ok !== false) {
+    if (scoreExecutionResult({ executed: false, exitCode: EXIT.OK, errorOnly: false }).ok !== false) {
       return 'scoreExecutionResult 未拦截 executed=false 的伪绿'
     }
-    if (scoreExecutionResult({ executed: true, exitCode: 0, errorOnly: true }).ok !== false) {
+    if (scoreExecutionResult({ executed: true, exitCode: EXIT.OK, errorOnly: true }).ok !== false) {
       return 'scoreExecutionResult 未拦截 errorOnly=true 的伪绿'
     }
-    if (scoreExecutionResult({ executed: true, exitCode: 0, errorOnly: false }).ok !== true) {
+    if (scoreExecutionResult({ executed: true, exitCode: EXIT.OK, errorOnly: false }).ok !== true) {
       return 'scoreExecutionResult 正向通过失败'
     }
 
@@ -312,7 +313,7 @@ export function registerStageBLoopB5Cases(cases) {
       const stubInvalidMode = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'a6-t', '--mode', 'bogus'], { cwd: dir })
       const stubBadFlag = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--nonexistent-flag'], { cwd: dir })
       const stubNoToken = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 'a6-t', '--verdict', 'pass', '--reviewer-id', 'rev-z', '--evidence', 'ok', '--json'], { cwd: dir })
-      if (stubInvalidMode.status === 0 || stubBadFlag.status === 0 || stubNoToken.status !== 2) {
+      if (stubInvalidMode.status === 0 || stubBadFlag.status === 0 || stubNoToken.status !== EXIT.FACT) {
         return `零 LLM CLI Stub 未按预期阻断异常参数/令牌：${JSON.stringify({ stubInvalidMode: stubInvalidMode.status, stubBadFlag: stubBadFlag.status, stubNoToken: stubNoToken.status })}`
       }
 

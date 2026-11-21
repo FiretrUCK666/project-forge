@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），不依赖 dev-govern，确保全模式稳定可用。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -13,7 +14,7 @@ import { evaluateStoredVisualEvidence, precheckVisualAndArtifacts } from './empi
 import { validateE2eEvidenceText } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { hasExploredEvidence, sanitizeTaskId, nextReviewRound } from './ledger.mjs'
-import { isProfileExplicitNone } from './profile.mjs'
+import { isProfileExplicitNone, resolveTierCommand } from './profile.mjs'
 import { GATE_WORKFLOW_FILE_RE, CODE_EXT_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
 import {
   analyzeIssueDependencies,
@@ -28,6 +29,7 @@ import {
   redactDiagnosticText,
   resolveEffectiveBaseSha,
   resolveReadablePrTitle,
+  resolveReadablePrTitleWithSource,
   scanUnstartedReadySlices,
   scoreExecutionResult,
   validatePreMergeShaAndWorktree,
@@ -46,6 +48,7 @@ export {
   redactDiagnosticText,
   resolveEffectiveBaseSha,
   resolveReadablePrTitle,
+  resolveReadablePrTitleWithSource,
   scanUnstartedReadySlices,
   scoreExecutionResult,
   validateE2eEvidenceText,
@@ -78,7 +81,7 @@ function normRel(p) {
   return posixPath(String(p ?? '')).trim().replace(/^\.\//, '').replace(/^\/+/, '')
 }
 
-/** 探测仓库是否配置了会在 PR/push 自动触发的 CI 检查工作流。 */
+/** 探测仓库是否配置了会在提案或推默认分支时自动触发的检查工作流（读触发键，不认文件名）。 */
 export function hasRepoCiWorkflow(repoRoot) {
   const wfDir = join(repoRoot, '.github', 'workflows')
   if (!existsSync(wfDir)) return false
@@ -90,7 +93,7 @@ export function hasRepoCiWorkflow(repoRoot) {
       if (/\bpull_request\b/i.test(txt)) return true
       if (/\bpush\b/i.test(txt) && !(/\btags\s*:/i.test(txt) && !/\bbranches\s*:/i.test(txt))) return true
     }
-  } catch { /* ignore */ }
+  } catch { /* 读不到就当没有 */ }
   return false
 }
 
@@ -327,11 +330,7 @@ export function validateVerifyPrecheck({ repoRoot = null, gitCommonDir = null, t
 }
 
 function configuredCmdForTier(profile, tierName) {
-  if (!profile) return undefined
-  const map = { quick: ['quickTest', 'quick-test'], smoke: ['smokeVerify', 'smoke-verify'], full: ['fullTest', 'full-test'], gate: ['mergeGate', 'merge-gate'] }
-  const pair = map[tierName]
-  if (!pair || isProfileExplicitNone(profile, pair[1])) return undefined
-  return profile[pair[0]]
+  return resolveTierCommand(profile, tierName)
 }
 
 /**
@@ -340,15 +339,15 @@ function configuredCmdForTier(profile, tierName) {
  */
 export function validateVerificationEvidence({ policy, evidence, headSha, profile = null, explicitCmdUsed = false } = {}) {
   if (!evidence || typeof evidence !== 'object' || !evidence.gates || Object.keys(evidence.gates).length === 0) {
-    return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: 3, reason: '缺少当前任务的 verify 实证记录（evidence.json），请先运行 flow.mjs verify。' }
+    return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT, reason: '缺少当前任务的 verify 实证记录（evidence.json），请先运行 flow.mjs verify。' }
   }
   const vis = evaluateStoredVisualEvidence({ evidence, policy, headSha })
-  if (!vis.ok) return { ok: false, code: vis.code, exitCode: 3, uiFiles: vis.uiFiles, reason: vis.reason }
+  if (!vis.ok) return { ok: false, code: vis.code, exitCode: EXIT.FACT, uiFiles: vis.uiFiles, reason: vis.reason }
   if (evidence.dirty === true || (headSha && evidence.headSha !== headSha)) {
     return {
       ok: false,
       code: 'BLOCKED_STALE_VERIFICATION',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       reason: `实证已过期（dirty=${Boolean(evidence.dirty)}, evidenceHead=${String(evidence.headSha ?? '').slice(0, 7)}, currentHead=${String(headSha ?? '').slice(0, 7)}），请提交并重跑 verify。`,
     }
   }
@@ -360,7 +359,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         reason: `无 CI 仓库的低风险文档静态必检未通过：${detail}`,
       }
     }
@@ -368,9 +367,9 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
 
   if (policy?.riskTier === 'low') {
     if (evidence.exitCode !== 0) {
-      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: 3, reason: '最新 verify 退出码非 0，请修复后重跑。' }
+      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT, reason: '最新 verify 退出码非 0，请修复后重跑。' }
     }
-    return { ok: true, code: null, exitCode: 0 }
+    return { ok: true, code: null, exitCode: EXIT.OK }
   }
 
   const requiredGates = Array.isArray(policy?.requiredGates)
@@ -396,7 +395,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier: 'smoke',
         reason: noCfg
           ? '运行时代码改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none：请在 AGENTS.md 补齐 smoke-verify，或运行 verify --mode smoke --cmd "<端到端命令>" --e2e-evidence "<运行观察>"。'
@@ -409,7 +408,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_SHALLOW_E2E_EVIDENCE',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier: 'smoke',
         reason: check.reason ?? 'E2E 观察回执仅为无实质水话，请写明执行入口与观察到的真实输出/状态。',
       }
@@ -420,7 +419,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_E2E_OBSERVATION_REQUIRED',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier: 'smoke',
         reason: '已完成 smoke 命令执行，但缺少当前 HEAD 的结构化 E2E 运行观察回执（e2eObservation），请核验真实输出/状态后传 --e2e-evidence "<观察实证>"。',
       }
@@ -435,14 +434,14 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier,
         reason: onlyPartial
           ? `仅有单文件快测（quick --target=${evidence.gates.quick.target}），不足以满足 ${policy?.riskTier} 风险所需的 ${requiredTier} 全量门禁。`
           : `${policy?.riskTier ?? 'medium'} 风险变更要求通过 ${requiredTier}（或更高级）门禁，当前仅通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]。`,
       }
     }
-    return { ok: true, code: null, exitCode: 0 }
+    return { ok: true, code: null, exitCode: EXIT.OK }
   }
 
   if (validGates.length === 0) {
@@ -451,21 +450,21 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         reason: `仅有单文件快测（quick --target=${evidence.gates.quick.target}），请运行不带 --target 的全量 verify。`,
       }
     }
     if (!explicitCmdUsed && evidence.exitCode !== 0) {
-      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: 3, reason: '当前 HEAD 未通过 verify 校验。' }
+      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT, reason: '当前 HEAD 未通过 verify 校验。' }
     }
     return {
       ok: false,
       code: 'BLOCKED_NOT_VERIFIED',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       reason: '当前 HEAD 缺少有效的全量 verify 通过记录。',
     }
   }
-  return { ok: true, code: null, exitCode: 0 }
+  return { ok: true, code: null, exitCode: EXIT.OK }
 }
 
 /** 评估唯一活跃任务或集合状态并给出单一入口下一步路由与精简上下文。 */
@@ -674,7 +673,7 @@ export function evaluateNextState({
     phase = 'needs-rework'
     ownerRole = 'implementer'
     blockingReasons.push('CHANGES_REQUESTED')
-    nextAction = `Round ${lastRound.round} 已退回修改，请在 ${t.worktreePath ?? '原分支'} 修复并提交新 commit 后执行 verify + submit --rework`
+    nextAction = `Round ${lastRound.round} 已退回修改，请在 ${t.worktreePath ?? '原分支'} 修复并提交新 commit 后执行 verify + submit`
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" rework --task ${t.taskId}`
   } else if (nothingImplementedYet) {
     // 还没提交过任何东西，下一步是实施，不是归档。
@@ -704,9 +703,8 @@ export function evaluateNextState({
   } else if (!['submitted', 'local-ready', 'awaiting-upstream-merge'].includes(t.status) || (t.lastSubmittedHead && currentHead && t.lastSubmittedHead !== currentHead)) {
     phase = 'needs-submit'
     ownerRole = 'implementer'
-    const reworkFlag = rounds.length > 0 ? ' --rework' : ''
     nextAction = '实证已锁定当前 HEAD，由实施者执行 submit 推送并提 PR/同步审查工作位'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId}${reworkFlag}`
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId}`
   } else if (t.role === 'contributor-fork') {
     phase = 'awaiting-upstream-merge'
     ownerRole = 'human'
@@ -722,9 +720,9 @@ export function evaluateNextState({
     ownerRole = 'human'
     const approveSuffix = policy?.humanApprovalRequired ? ' --human-approved --reason "<确认原因>"' : ''
     nextAction = policy?.humanApprovalRequired
-      ? '请先在远端托管完成 MR 合并，因触及高风险须人类确认后再带 --remote-merged --human-approved --reason 收尾'
-      : '请先在远端托管完成 MR 合并，再带 --remote-merged 确认收尾'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId} --remote-merged${approveSuffix}`
+      ? '请先在远端托管完成合并，再带 --human-approved --reason "<确认原因>" 收尾（合并结果由现场取回远端核验）'
+      : '请先在远端托管完成合并，再执行 merge 收尾（合并结果由现场取回远端核验）'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}${approveSuffix}`
   } else {
     phase = 'ready-to-merge'
     ownerRole = policy?.humanApprovalRequired ? 'human' : 'reviewer'
@@ -740,11 +738,9 @@ export function evaluateNextState({
 
   // 主工作区直接改文件：warning 不是 blocker。
   //
-  // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干。主 Agent 若在自己的工作区直接 write，
-  // 隔离位形同虚设，而「这次改动包含什么」也就说不清了——可这条此前没有任何东西看得见。
-  //
-  // 它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
-  // 真正的硬拦留在 merge。所以它进 `warnings` 而不进 `blockingReasons`——两件事不能混。
+  // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干，主 Agent 若在自己的工作区直接 write，
+  // 隔离位形同虚设，而「这次改动包含什么」也就说不清了。它是警告不是拦截：小改动（Case 1）
+  // 本来就该在主工作区做，拦死会把正常路径也堵住；真正的硬拦留在 merge。
   const warnings = []
   if ((rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {
     warnings.push({

@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块）。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
@@ -112,9 +113,9 @@ export async function handleRework(opts, roots) {
     process.stdout.write(`进入返工模式（task=${taskId}，原分支=${ledger.branch}，原 PR=${ledger.prNumber ?? '待创建'}）：\n`)
     if (forbiddenTouched.length > 0) process.stdout.write(`- 警告：以下变更命中 do-not-edit 列表：${forbiddenTouched.join(', ')}\n`)
     if (addedRebuts.length > 0) process.stdout.write(`- 已记录 ${addedRebuts.length} 条有据反驳。\n`)
-    printNextStep([{ skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }, { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --rework` }], { repoRoot: roots.mainRoot })
+    printNextStep([{ skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }, { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }
 
 export async function handleForkFinalize({ implRoot, roots, ledger, taskId, stZ, currentHead, opts }) {
@@ -128,7 +129,7 @@ export async function handleForkFinalize({ implRoot, roots, ledger, taskId, stZ,
   const committedDocs = (committedDiff.stdout || '').split('\n').filter((f) => /^docs\/(?:TDD\.md|specs\/|todo\/|prd\/|archive\/)/.test(f.trim()))
   if (committedDocs.length > 0) {
     process.stderr.write(`BLOCKED_FORK_PRIVATE_DOCS: 上游仓未接入 docs/ 体系，私有规划文件不应混入 Fork PR 提交：${committedDocs.join(', ')}\n`)
-    return { exitCode: 3 }
+    return { exitCode: EXIT.FACT }
   }
   const sharedForkPrd = Boolean(ledger.prdFile && isSharedMasterPrd(implRoot, ledger.prdFile, ledger.specFile))
   for (const relDoc of [ledger.todoFile, ledger.specFile, sharedForkPrd ? null : ledger.prdFile].filter(Boolean)) {
@@ -137,7 +138,7 @@ export async function handleForkFinalize({ implRoot, roots, ledger, taskId, stZ,
     const unchecked = findUncheckedLines(readTextSafe(docPath) ?? '')
     if (unchecked.length > 0) {
       process.stderr.write(`BLOCKED_UNCHECKED_DOC: ${relDoc} 仍有未勾选验收条目：\n${unchecked.map((u) => `  ${u}`).join('\n')}\n`)
-      return { exitCode: 1 }
+      return { exitCode: EXIT.ACTION }
     }
   }
   const privateKeepDir = join(roots.mainRoot, '.worktrees', '.state', 'private-docs', taskId)
@@ -171,9 +172,9 @@ export async function handleForkFinalize({ implRoot, roots, ledger, taskId, stZ,
   }
   if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
     process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则（共 ${coupledSyncWarnings.length} 组）。\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }
 
 export function evaluateFlowMasterPrdGate(implRoot, {
@@ -196,7 +197,7 @@ export function evaluateFlowMasterPrdGate(implRoot, {
     if (shouldBlockVerify) {
       return {
         blocked: true,
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         code: 'BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED',
         closure,
         sharedMasterPrd,

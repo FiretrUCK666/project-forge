@@ -13,7 +13,7 @@ import { artifactPathsOf, mergeArtifactRecords, normalizeArtifactRecords } from 
 import { buildEscalationIssuePayload, escalateToBackend } from '../../lib/escalation.mjs'
 import { posixPath } from '../../lib/git.mjs'
 import {
-  consumeReviewToken, createDefaultLedger, nextReviewRound,
+  collectImplementerHistory, consumeReviewToken, createDefaultLedger, nextReviewRound,
   readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger,
 } from '../../lib/ledger.mjs'
 import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
@@ -85,7 +85,7 @@ export async function handleRecord(opts, roots) {
     round = Number(opts.round)
     if (!Number.isInteger(round) || round < 1) {
       process.stderr.write('Error: record requires integer --round <1|2|3...>\n')
-      return EXIT.USAGE_OR_POLICY
+      return EXIT.USAGE
     }
   } else {
     // 与签发侧用同一个派生式——两处各算一次，轮次有空档时必然对不上。
@@ -95,12 +95,12 @@ export async function handleRecord(opts, roots) {
   const verdict = String(opts.verdict ?? '').toLowerCase()
   if (verdict !== 'pass' && verdict !== 'changes') {
     process.stderr.write('Error: record requires --verdict pass|changes\n')
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
   const reviewerId = String(opts['reviewer-id'] ?? '').trim()
   if (!reviewerId) {
     process.stderr.write('Error: record requires non-empty --reviewer-id <id>\n')
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
 
   // 实证佐证：没有它，'我跑过' 与 '我觉得' 在账本里分不出来。
@@ -111,7 +111,7 @@ export async function handleRecord(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_REVIEW_EVIDENCE', error: msg, taskId, round }, null, 2)}\n`)
     else process.stdout.write(`${msg}\n`)
     process.stderr.write(`${msg}\n`)
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
 
   const ledgerImplementer = String(baseLedger.implementerId ?? '').trim()
@@ -123,18 +123,21 @@ export async function handleRecord(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_IMPLEMENTER', error: msg, taskId, round }, null, 2)}\n`)
     else process.stdout.write(`${msg}\n`)
     process.stderr.write(`${msg}\n`)
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
-  if (normActorId(reviewerId) === normActorId(implementerId) || (optImplementer && normActorId(reviewerId) === normActorId(optImplementer))) {
-    const matchedImpl = normActorId(reviewerId) === normActorId(implementerId) ? implementerId : optImplementer
-    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) equals implementerId (${matchedImpl}). Independent review requires a distinct reviewer.`
+  // 按「历史 ∪ 当前」比对，不只看当前字段：一次接管就能让原实施者换个身份回来审自己的活。
+  const implementerHistory = [...new Set([...collectImplementerHistory(baseLedger), implementerId, optImplementer]
+    .filter((a) => String(a ?? '').trim()))]
+  const selfMatch = implementerHistory.find((a) => normActorId(a) === normActorId(reviewerId))
+  if (selfMatch) {
+    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) 与这个任务的历史实施者 (${selfMatch}) 相同。独立审查要求复核人不参与实施。`
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId: matchedImpl }, null, 2)}\n`)
+      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId: selfMatch, implementerHistory }, null, 2)}\n`)
     } else {
       process.stdout.write(`${msg}\n`)
     }
     process.stderr.write(`${msg}\n`)
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.FACT
   }
 
   const distinctLock = checkDistinctRoundReviewer(prevRounds, reviewerId, {
@@ -168,7 +171,7 @@ export async function handleRecord(opts, roots) {
         process.stdout.write(`${msg}\n`)
       }
       process.stderr.write(`${msg}\n`)
-      return EXIT.USAGE_OR_POLICY
+      return EXIT.FACT
     }
   }
 
@@ -201,14 +204,14 @@ export async function handleRecord(opts, roots) {
 
   if (verdict === 'pass' && mustFixList.length > 0) {
     process.stderr.write('Error: cannot record --verdict pass when --must-fix items are present.\n')
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
 
   const dispParsed = parseDispositions(opts.disposition ?? [])
   if (!dispParsed.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'INVALID_DISPOSITION', error: dispParsed.error, taskId, round }, null, 2)}\n`)
     process.stderr.write(`${dispParsed.error}\n`)
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
   const roundDispositionsMap = new Map()
   for (const d of dispParsed.items) roundDispositionsMap.set(d.idOrFp.toLowerCase(), d)
@@ -240,10 +243,10 @@ export async function handleRecord(opts, roots) {
   const curArtifactBaseline = await computeReviewArtifactBaseline({ targetRoot, baseSha: baseLedger.baseSha, headSha })
   if (round >= 2 && prevRound?.verdict === 'changes' && prevRound?.artifact_baseline?.diffSha && curArtifactBaseline.diffSha && curArtifactBaseline.diffSha === prevRound.artifact_baseline.diffSha) {
     const msg = `BLOCKED_NO_REWORK_CHANGES: Round ${round} 相对 baseSha 的代码差异指纹未变 (${curArtifactBaseline.diffSha})，禁止提交空返工直接复审。`
-    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_NO_REWORK_CHANGES', exitCode: EXIT.USAGE_OR_POLICY, taskId, round, headSha, artifact_baseline: curArtifactBaseline, error: msg }, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_NO_REWORK_CHANGES', exitCode: EXIT.FACT, taskId, round, headSha, artifact_baseline: curArtifactBaseline, error: msg }, null, 2)}\n`)
     else process.stdout.write(`${msg}\n`)
     process.stderr.write(`${msg}\n`)
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.FACT
   }
 
   const rebutsAll = [...(Array.isArray(baseLedger.rebuts) ? baseLedger.rebuts : []), ...(Array.isArray(prevRound?.rebuts) ? prevRound.rebuts : [])]
@@ -351,19 +354,19 @@ export async function handleRecord(opts, roots) {
   const obsInput = resolveReviewObservationInputs(opts)
   if (!obsInput.ok) {
     const msg = `${obsInput.code}: ${obsInput.reason}`
-    if (opts.json) process.stdout.write(`${JSON.stringify({ status: obsInput.code, exitCode: EXIT.UNTRUSTED_HAZARD, taskId, round, headSha, field: obsInput.field, error: msg }, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: obsInput.code, exitCode: EXIT.FACT, taskId, round, headSha, field: obsInput.field, error: msg }, null, 2)}\n`)
     else process.stdout.write(`${msg}\n`)
     process.stderr.write(`${msg}\n`)
-    return EXIT.UNTRUSTED_HAZARD
+    return EXIT.FACT
   }
   const { e2eText, blockedReasonText } = obsInput
   const artifactInput = normalizeArtifactRecords({ repoRoot: targetRoot, artifacts: artifactPathsOf(opts) })
   if (!artifactInput.ok) {
     const msg = `BLOCKED_ARTIFACT_INVALID: ${artifactInput.error}`
-    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_ARTIFACT_INVALID', exitCode: EXIT.UNTRUSTED_HAZARD, taskId, round, headSha, artifactErrors: artifactInput.errors, error: msg }, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_ARTIFACT_INVALID', exitCode: EXIT.FACT, taskId, round, headSha, artifactErrors: artifactInput.errors, error: msg }, null, 2)}\n`)
     else process.stdout.write(`${msg}\n`)
     process.stderr.write(`${msg}\n`)
-    return EXIT.UNTRUSTED_HAZARD
+    return EXIT.FACT
   }
   const artifactRecords = artifactInput.records
   const artifactText = artifactRecords.map((r) => `${r.relPath}(${r.bytes}B,${r.sha256Prefix})`).join('、')
@@ -454,9 +457,15 @@ export async function handleRecord(opts, roots) {
 
   if (visualChecked) {
     updated.visualVerifiedHead = headSha
-    updated.visualCheckEvidence = e2eText || artifactText
-      || (blockedReasonText ? `环境阻塞待人工或带界面节点核验——${blockedReasonText}` : '')
-      || updated.visualCheckEvidence
+    // 这个字段只接受入参原文、真实附件记录或既有真实记录；三者都没有就不写。
+    //
+    // 它不得由任何开关或阻塞说明派生。阻塞说明是「我这儿渲染不出来」的诚实报阻，
+    // 不是「我看到了什么」；把它拼成证据字段，等于把一次报阻洗成一次核验。
+    // 阻塞原因落到 `visualBlockedReason`，与证据字段并列而不是顶替它。
+    const inlineEvidence = e2eText || artifactText
+    const priorEvidence = typeof updated.visualCheckEvidence === 'string' ? updated.visualCheckEvidence.trim() : ''
+    updated.visualCheckEvidence = inlineEvidence || priorEvidence || null
+    updated.visualBlockedReason = blockedReasonText || (updated.visualBlockedReason ?? null)
   }
 
   const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)
@@ -507,7 +516,7 @@ export async function handleRecord(opts, roots) {
       ? await escalateToBackend({ repoRoot: mainRoot, item: escalationItem, _ghProbe: opts._ghProbe, _ghClient: opts._ghClient }).catch((e) => ({ ok: false, error: e?.message }))
       : null
     const payload = {
-      status: 'STOP_LOSS_ESCALATE', exitCode: EXIT.STOP_LOSS, taskId, round, headSha, reasons: stopReasons,
+      status: 'STOP_LOSS_ESCALATE', exitCode: EXIT.HUMAN, taskId, round, headSha, reasons: stopReasons,
       unresolvedMustFix: mustFixList, rebuttedItems, resolvedItems, excludedReviewers, stopLossPacket, escalationPayload,
       ...(escalatedIssue ? { escalatedIssue } : {}), ledgerPath: posixPath(tPath), githubSync,
       nextStep: stopLossPacket.recoveryCommand,
@@ -517,7 +526,7 @@ export async function handleRecord(opts, roots) {
       process.stdout.write([
         'STOP_LOSS_ESCALATE',
         `Task     : ${taskId} | Round ${round} | HEAD ${headSha}`,
-        `Exit Code: ${EXIT.STOP_LOSS} (escalate to human maintainer)`,
+        `Exit Code: ${EXIT.HUMAN} (escalate to human maintainer)`,
         `Reasons  : ${stopReasons.join('; ')}`,
         ...(stopLossPacket.hotspotFiles.length > 0 ? [`Hotspots : ${stopLossPacket.hotspotFiles.join(', ')}`] : []),
         ...(githubSync.synced ? [`GitHub   : synced to ${githubSync.targetRepo} (${githubSync.results.map((r) => `${r.kind}#${r.number}`).join(', ')})`] : []),
@@ -528,8 +537,8 @@ export async function handleRecord(opts, roots) {
       ].join('\n') + '\n')
       printNextStep([stopLossPacket.recoveryCommand], { repoRoot: mainRoot })
     }
-    process.stderr.write(`STOP_LOSS_ESCALATE: ${stopReasons.join('; ')} (exit ${EXIT.STOP_LOSS})\n`)
-    return EXIT.STOP_LOSS
+    process.stderr.write(`STOP_LOSS_ESCALATE: ${stopReasons.join('; ')} (exit ${EXIT.HUMAN})\n`)
+    return EXIT.HUMAN
   }
 
   const normalEscalations = collectNormalReviewEscalations({
@@ -584,12 +593,12 @@ export async function handleOverride(opts, roots) {
 
   if (!opts['human-approved']) {
     process.stderr.write('Error: `override` requires explicit `--human-approved --reason "<text>"`.\n')
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
   const reason = String(opts.reason ?? '').trim()
   if (!reason) {
     process.stderr.write('Error: `override` requires non-empty `--reason "<text>"` documenting human rationale.\n')
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
 
   const headSha = await resolveReviewTargetSha(mainRoot, workTreeRoot, ledger, opts.head ?? 'HEAD')

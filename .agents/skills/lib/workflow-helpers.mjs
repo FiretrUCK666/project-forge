@@ -12,9 +12,9 @@ import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-f
 import { gitRun, posixPath, readTextSafe } from './git.mjs'
 import { resolveRefShaFast } from './git-fast.mjs'
 import { parseBodyRelations } from './platform.mjs'
-import { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle } from './pr-template-hydrate.mjs'
+import { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle, resolveReadablePrTitleWithSource } from './pr-template-hydrate.mjs'
 
-export { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle }
+export { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle, resolveReadablePrTitleWithSource }
 
 const DIAGNOSTIC_SECRET_PATTERNS = [
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}\b/g,
@@ -263,9 +263,9 @@ export function buildSubmitNextSteps({ taskId, role, policy, nextRound = 1, hasD
   if (hasDevReview && policy?.independentReviewRequired !== false) {
     return [{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${taskId} --round ${nextRound}` }]
   }
-  const remoteFlag = role === 'generic-git' ? ' --remote-merged' : ''
+
   const approveFlag = policy?.humanApprovalRequired ? ' --human-approved --reason "<确认原因>"' : ''
-  return [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}${remoteFlag}${approveFlag}` }]
+  return [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}${approveFlag}` }]
 }
 
 /** 构造 `flow.mjs inspect` 结束时的下一步指引（未装配 dev-review 时阻断外部 PR 并提示补齐技能）。 */

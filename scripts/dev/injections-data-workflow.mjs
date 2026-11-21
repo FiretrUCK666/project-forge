@@ -70,16 +70,23 @@ export const INJECTIONS_WORKFLOW = [
   },
   {
     id: 'I59',
-    what: '关闭 flow-merge.mjs generic-git 未经远端 MR 确认的本地强合阻断',
+    what: '关闭 flow-merge.mjs generic-git 未经远端核验的本地强合阻断',
     file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
-    from: "  if (ledger.role === 'generic-git' && !opts['remote-merged'] && !opts['human-approved']) {",
-    to: "  if (false && ledger.role === 'generic-git' && !opts['remote-merged'] && !opts['human-approved']) {",
-    alsoPatches: [{
-      file: 'kit/skills/lib/task-backend.mjs',
-      from: '  async mergePr({ remoteMerged = false, humanApproved = false, ledger, branch, baseBranch } = {}) {\n    if (!remoteMerged && !humanApproved) {',
-      to: '  async mergePr({ remoteMerged = false, humanApproved = false, ledger, branch, baseBranch } = {}) {\n    if (false && !remoteMerged && !humanApproved) {',
-    }],
-    expect: 'generic-git 未阻断未确认本地 merge',
+    from: "  if (ledger.role === 'generic-git' && !opts['human-approved']) {",
+    to: "  if (false && ledger.role === 'generic-git' && !opts['human-approved']) {",
+    alsoPatches: [
+      {
+        file: 'kit/skills/lib/task-backend.mjs',
+        from: '    if (!fetched && !humanApproved) {',
+        to: '    if (false && !fetched && !humanApproved) {',
+      },
+      {
+        file: 'kit/skills/lib/task-backend.mjs',
+        from: '    if (!mergedStates.has(state.state)) {',
+        to: '    if (false && !mergedStates.has(state.state)) {',
+      },
+    ],
+    expect: 'generic-git 未阻断核不到远端的 merge',
   },
   {
     id: 'I60',
@@ -118,8 +125,8 @@ export const INJECTIONS_WORKFLOW = [
     id: 'I64',
     what: '关闭 critique-rounds.mjs critique 禁止自审拦截',
     file: 'kit/skills/lib/critique-rounds.mjs',
-    from: '  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
-    to: '  if (false && fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
+    from: '  if (reviewerId && ownerHistory.some((o) => normActorId(o) === reviewerId)) {',
+    to: '  if (false && reviewerId && ownerHistory.some((o) => normActorId(o) === reviewerId)) {',
     expect: 'SELF_CRITIQUE_REJECTED',
   },
   {
@@ -273,8 +280,8 @@ export const INJECTIONS_WORKFLOW = [
     id: 'I85',
     what: '干活的人给自己定验收标准不再被拦（作者与实施者同一人也放行）',
     file: 'kit/skills/lib/doc-requirements.mjs',
-    from: '  if (norm(owner) !== norm(implementerId)) return []',
-    to: '  if (true) return []',
+    from: '  const matched = owners.find((o) => norm(o) === norm(implementerId))',
+    to: '  const matched = owners.find(() => false)',
     expect: 'SPEC 作者不得就是实施者',
   },
   {

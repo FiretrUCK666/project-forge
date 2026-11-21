@@ -10,7 +10,7 @@
 
 | 身份状态 | 判定事实 | 推送目标与 PR 规则 | 禁止与降级行为 |
 | --- | --- | --- | --- |
-| `local-only` / `generic-git` | 无远端、`.git/pf-local-mode` 或未匹配注册表远端 | `local-only` 本地提交并经隔离试合合并；`generic-git` 推远端自建 MR，**合并须先在远端完成并带 `--remote-merged`**（禁止本地越权强合主干） | 跳过 GitHub PR 接口调用，账本记本地 |
+| `local-only` / `generic-git` | 无远端、`.git/pf-local-mode` 或未匹配注册表远端 | `local-only` 本地提交并经隔离试合合并；`generic-git` 推远端自建 MR，**合并在 merge 现场取回远端后按四态合流判定核验**，核不到就阻断、只在人类签字后放行（禁止本地越权强合主干） | 跳过 GitHub PR 接口调用，账本记本地 |
 | `maintainer` | `origin` 与声明源一致且拥有写权限（含单人所有者与同源团队/组织多位写权限协作者） | 公开/私有仓均直接同源独立特性分支 -> 门禁 -> 推自己分支 -> 开 PR（非 Fork） -> 独立审查 -> 合并 | **严禁直推受保护主干、严禁私自打标签或发版** |
 | `contributor-fork` | 存在不同 `upstream` 或 `origin` 为自身 Fork | **只推自己 `origin`**，向 `upstream` 开跨仓 PR；合并前不删 Fork 分支 | **严禁推 `upstream`、严禁自合/打标签/发版**；写标签遇 403 自动降级为评论/本地账本 |
 | `clone-readonly` | 克隆他人正本且无写权限（防误判维护者） | **未选定去向前先停下**：提示人三选一（建 Fork 贡献 / 独立新建项目 / 写 `.git/pf-local-mode` 转纯本地） | **严禁尝试推送或伪装成维护者** |

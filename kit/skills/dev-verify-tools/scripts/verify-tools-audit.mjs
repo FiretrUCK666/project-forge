@@ -15,8 +15,9 @@ import {
 import { listTaskLedgers, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { CODE_EXT_RE, isTestOrFixtureFile } from '../../lib/static-gates.mjs'
 import { generateRepoMap } from '../../dev-explore/scripts/repo-map.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 
-const EXIT = Object.freeze({ OK: 0, BLOCKED: 3 })
+
 
 function emitOut(opts, payload, lines) {
   if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
@@ -29,7 +30,7 @@ export function guardExistingFeatureMapForWrite(workRoot, opts) {
   const msg = `BLOCKED_CORRUPT_FEATURE_MAP: ${st.error}（写入操作 Fail-Closed，拒绝覆盖已损坏文件，请先修复或恢复备份）。`
   emitOut(opts, { ok: false, code: 'BLOCKED_CORRUPT_FEATURE_MAP', path: FEATURE_MAP_REL, error: msg }, [msg])
   process.stderr.write(`${msg}\n`)
-  return { ok: false, exitCode: EXIT.BLOCKED }
+  return { ok: false, exitCode: EXIT.FACT }
 }
 
 export async function handleAudit(opts, roots) {
@@ -117,7 +118,7 @@ export async function handleAudit(opts, roots) {
   for (const h of solidificationHints) lines.push(`  - [${h.code}] ${h.suggestion}`)
   for (const o of orphanScratchDirs) lines.push(`  - [ORPHAN_SCRATCH] task=${o.taskId} (${o.fileCount} files): ${o.posixDir}`)
   emitOut(opts, payload, lines)
-  return { exitCode: hasHardIssues ? EXIT.BLOCKED : EXIT.OK, ...payload }
+  return { exitCode: hasHardIssues ? EXIT.FACT : EXIT.OK, ...payload }
 }
 
 export async function handleClean(opts, roots) {

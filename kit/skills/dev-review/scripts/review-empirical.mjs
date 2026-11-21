@@ -167,7 +167,7 @@ export function evaluateIncludeDiffGate({
       opts,
       code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED',
       payload: {
-        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.UNTRUSTED_HAZARD,
+        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.FACT,
         mode, round, headSha, workspaceFingerprint: currentFingerprint,
         uiFiles: artifactVisual.visual.uiFiles,
         artifactErrors: artifactVisual.errors,
@@ -288,7 +288,7 @@ export async function handleCheckEmpirical(ctx) {
       payload: {
         status: 'BLOCKED_DIRTY_FAULT_RESIDUE',
         code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
+        exitCode: EXIT.FACT,
         mode,
         round,
         targetRoot: posixPath(reviewRoot),
@@ -312,7 +312,7 @@ export async function handleCheckEmpirical(ctx) {
       opts,
       code: evInput.code,
       payload: {
-        status: evInput.code, code: evInput.code, exitCode: EXIT.UNTRUSTED_HAZARD,
+        status: evInput.code, code: evInput.code, exitCode: EXIT.FACT,
         mode, round, headSha, workspaceFingerprint: currentFingerprint,
         rawEvidence: evInput.raw, error: evInput.reason,
         nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --e2e-evidence "<执行入口 + 真实输出/状态>"`],
@@ -331,7 +331,7 @@ export async function handleCheckEmpirical(ctx) {
       opts,
       code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED',
       payload: {
-        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.UNTRUSTED_HAZARD,
+        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.FACT,
         mode, round, headSha, workspaceFingerprint: currentFingerprint,
         uiFiles: artifactVisual.visual.uiFiles, artifactErrors: artifactVisual.errors,
         error: artifactVisual.reason,
@@ -350,7 +350,7 @@ export async function handleCheckEmpirical(ctx) {
       opts,
       code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED',
       payload: {
-        status: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', exitCode: EXIT.UNTRUSTED_HAZARD,
+        status: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', exitCode: EXIT.FACT,
         mode, round, headSha, workspaceFingerprint: currentFingerprint,
         nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --cmd "<验证命令>"`],
         error: msg,
@@ -384,7 +384,7 @@ export async function handleCheckEmpirical(ctx) {
         payload: {
           status: 'BLOCKED_EMPIRICAL_FAILED',
           code: 'BLOCKED_EMPIRICAL_FAILED',
-          exitCode: EXIT.UNTRUSTED_HAZARD,
+          exitCode: EXIT.FACT,
           mode,
           round,
           headSha,
@@ -506,7 +506,7 @@ export async function handleCheckFault(ctx) {
   const phase = String(opts.phase ?? '').trim().toLowerCase()
   if (phase !== 'fail' && phase !== 'restore') {
     process.stderr.write('Error: check-fault requires --phase fail|restore\n')
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
 
   const receiptPath = resolveEmpiricalReceiptPath({ gitDir, mode, task, prNo, reviewRoot, baseRef: opts.base })
@@ -550,7 +550,7 @@ export async function handleCheckFault(ctx) {
     return emitGateBlock({
       opts, code: 'BLOCKED_EMPIRICAL_FIRST',
       payload: {
-        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.UNTRUSTED_HAZARD,
+        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.FACT,
         mode, round, headSha, workspaceFingerprint: currentFingerprint, missingSteps: ['mechanical-pack', 'check-empirical'],
         nextSteps: [
           `node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags}`,
@@ -568,7 +568,7 @@ export async function handleCheckFault(ctx) {
 
   if (commandsToRun.length === 0) {
     process.stderr.write('Error: check-fault requires --cmd "<command>" when no verification command is configured.\n')
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
 
   const wtEnv = computeWorktreeEnv({ mainRoot, gitDir, taskId: task?.taskId ?? mode, slotIndex: task?.slotIndex })
@@ -579,7 +579,7 @@ export async function handleCheckFault(ctx) {
       const msg = 'BLOCKED_FAULT_NO_MUTATION: 工作区与基线指纹完全相同（未注入任何故障改动），禁止空跑故障注入。'
       return emitGateBlock({
         opts, code: 'BLOCKED_FAULT_NO_MUTATION',
-        payload: { status: 'BLOCKED_FAULT_NO_MUTATION', code: 'BLOCKED_FAULT_NO_MUTATION', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha, baselineFingerprint, workspaceFingerprint: currentFingerprint, error: msg },
+        payload: { status: 'BLOCKED_FAULT_NO_MUTATION', code: 'BLOCKED_FAULT_NO_MUTATION', exitCode: EXIT.FACT, mode, round, headSha, baselineFingerprint, workspaceFingerprint: currentFingerprint, error: msg },
         textLines: ['BLOCKED_FAULT_NO_MUTATION', msg],
       })
     }
@@ -590,7 +590,7 @@ export async function handleCheckFault(ctx) {
       const msg = 'BLOCKED_FAULT_NOT_CAUGHT: 工作区已注入故障，但全部验证命令依然退出 0（测试未抓住该故障）。'
       return emitGateBlock({
         opts, code: 'BLOCKED_FAULT_NOT_CAUGHT',
-        payload: { status: 'BLOCKED_FAULT_NOT_CAUGHT', code: 'BLOCKED_FAULT_NOT_CAUGHT', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha, baselineFingerprint, mutatedFingerprint: currentFingerprint, commands: results, error: msg },
+        payload: { status: 'BLOCKED_FAULT_NOT_CAUGHT', code: 'BLOCKED_FAULT_NOT_CAUGHT', exitCode: EXIT.FACT, mode, round, headSha, baselineFingerprint, mutatedFingerprint: currentFingerprint, commands: results, error: msg },
         textLines: ['BLOCKED_FAULT_NOT_CAUGHT', msg],
       })
     }
@@ -634,7 +634,7 @@ export async function handleCheckFault(ctx) {
       : 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作区指纹尚未还原回注入前基线（baselineFingerprint），请彻底还原后再运行 --phase restore。'
     return emitGateBlock({
       opts, code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-      payload: { status: 'BLOCKED_DIRTY_FAULT_RESIDUE', code: 'BLOCKED_DIRTY_FAULT_RESIDUE', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, targetRoot: posixPath(reviewRoot), baselineFingerprint, workspaceFingerprint: currentFingerprint, dirtyFiles: dirtyEntries.map((e) => e.file), error: msg },
+      payload: { status: 'BLOCKED_DIRTY_FAULT_RESIDUE', code: 'BLOCKED_DIRTY_FAULT_RESIDUE', exitCode: EXIT.FACT, mode, round, targetRoot: posixPath(reviewRoot), baselineFingerprint, workspaceFingerprint: currentFingerprint, dirtyFiles: dirtyEntries.map((e) => e.file), error: msg },
       textLines: ['BLOCKED_DIRTY_FAULT_RESIDUE', msg],
     })
   }
@@ -644,7 +644,7 @@ export async function handleCheckFault(ctx) {
     return emitGateBlock({
       opts, code: 'BLOCKED_EMPIRICAL_FIRST',
       payload: {
-        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.UNTRUSTED_HAZARD,
+        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.FACT,
         mode, round, headSha, workspaceFingerprint: currentFingerprint, missingSteps: ['check-fault:fail'],
         nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase fail ${targetFlags} --cmd "${commandsToRun[0]}"`],
         error: msg,
@@ -659,7 +659,7 @@ export async function handleCheckFault(ctx) {
     const msg = `BLOCKED_EMPIRICAL_FAILED: 还原后复绿命令仍然失败 (exit=${failed.exitCode}): ${failed.cmd}`
     return emitGateBlock({
       opts, code: 'BLOCKED_EMPIRICAL_FAILED',
-      payload: { status: 'BLOCKED_EMPIRICAL_FAILED', code: 'BLOCKED_EMPIRICAL_FAILED', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha, workspaceFingerprint: currentFingerprint, commands: results, error: msg },
+      payload: { status: 'BLOCKED_EMPIRICAL_FAILED', code: 'BLOCKED_EMPIRICAL_FAILED', exitCode: EXIT.FACT, mode, round, headSha, workspaceFingerprint: currentFingerprint, commands: results, error: msg },
       textLines: ['BLOCKED_EMPIRICAL_FAILED', msg],
     })
   }

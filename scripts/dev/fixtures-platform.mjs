@@ -93,11 +93,15 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
     const v = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-gen'], { cwd: wtGen })
     if (v.status !== 0) return `generic-git verify 失败：${v.stderr}`
     const mBlock = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--json'], { cwd: dirGeneric })
-    if (mBlock.status !== 3 || !mBlock.stderr.includes('BLOCKED_GENERIC_REMOTE_MR_REQUIRED')) {
-      return `generic-git 未阻断未确认本地 merge：exit=${mBlock.status} ${mBlock.stderr}`
+    // 远端不可达时核不到事实：如实阻断，且阻断理由必须是「核不到」，不是「你没声明」。
+    if (mBlock.status !== 3 || !/BLOCKED_(GENERIC_REMOTE_MR_REQUIRED|MERGE_STATE_UNVERIFIED|REMOTE_NOT_MERGED)/.test(mBlock.stderr)) {
+      return `generic-git 未阻断核不到远端的 merge：exit=${mBlock.status} ${mBlock.stderr}`
     }
-    const mOk = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--remote-merged', '--json'], { cwd: dirGeneric })
-    if (mOk.status !== 0) return `generic-git 带 --remote-merged 仍未放行：exit=${mOk.status} ${mOk.stderr}`
+    // 人类拍板可越过核不到：这是最后一道，且要求实质理由。
+    const mOk = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
+      'merge', '--task', 't-gen', '--human-approved', '--reason', '远端是不可达的内网仓，已在别处人工核对合并结果', '--json',
+    ], { cwd: dirGeneric })
+    if (mOk.status !== 0) return `generic-git 人类拍板后仍未放行：exit=${mOk.status} ${mOk.stderr}`
 
     const probeOffline = await probeGitHubEnv({
       cwd: dirNoRemote,

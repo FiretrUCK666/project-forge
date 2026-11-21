@@ -4,10 +4,11 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-plan 与 dev-review 共用。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 
-import { DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, stripCritiqueMeta, updateDocFrontmatter } from './docs.mjs'
+import { collectOwnerHistory, DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, stripCritiqueMeta, updateDocFrontmatter } from './docs.mjs'
 import { extractDocSnapshot } from './doc-substantive.mjs'
 import { posixPath, readTextSafe, sha256Text, writeAtomic } from './git.mjs'
 import { appendGovernSignal } from './signals.mjs'
@@ -68,7 +69,7 @@ export function checkDistinctRoundReviewer(rounds = [], currentReviewerId, {
     return {
       blocked: true,
       code,
-      exitCode: 2,
+      exitCode: EXIT.FACT,
       matchedRound: matched.round ?? null,
       matchedReviewer: matched.reviewerId ?? matched.reviewer,
       excludedReviewers,
@@ -115,7 +116,7 @@ export function evaluateThreeRoundStopLoss({
   const reasons = []
   if (maxRoundsExceeded) reasons.push(`round ${rNum} >= ${maxRounds} with unresolved verdict/blockers`)
   if (repeatedTrigger) reasons.push(`repeated blocker across consecutive rounds (${repeatedItems.length} item(s))`)
-  return { stopLoss, maxRoundsExceeded, repeatedTrigger, repeatedItems, reasons, exitCode: stopLoss ? 4 : 0 }
+  return { stopLoss, maxRoundsExceeded, repeatedTrigger, repeatedItems, reasons, exitCode: stopLoss ? EXIT.HUMAN : EXIT.OK }
 }
 
 /** 解析 `plan_critique` 单行印记（兼容旧格式）。 */
@@ -326,15 +327,25 @@ function persistCritiqueFrontmatter(abs, text, fm, docType, patch) {
 
 function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round, digest, priorRounds, override, strictSameSha = false }) {
   if (!reviewer || !String(reviewer).trim()) {
-    throw makePlanError('MISSING_REVIEWER', 2, 'critique 必须指定 --reviewer <reviewerId>')
+    throw makePlanError('MISSING_REVIEWER', EXIT.USAGE, 'critique 必须指定 --reviewer <reviewerId>')
   }
-  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {
-    throw makePlanError('SELF_CRITIQUE_REJECTED', 2, `SELF_CRITIQUE_REJECTED: 规划 Critique 独立复核人 (${reviewer}) 不得与文档负责人 (${fmPre.data.owner}) 相同`)
+  // 自审要按**负责人历史**判，不只按当前 owner。
+  //
+  // 只比当前 owner 时，换个负责人就能让本人回来审自己的稿子：先把 owner 转给别人、
+  // 再以「新负责人不是审稿人」的状态自我复核。历史集合才是「谁曾是这份稿子的作者」，
+  // 这与负责人变更留痕是同一件事的两面。
+  const ownerHistory = collectOwnerHistory(fmPre.data)
+  const reviewerId = normActorId(reviewer)
+  if (reviewerId && ownerHistory.some((o) => normActorId(o) === reviewerId)) {
+    throw makePlanError(
+      'SELF_CRITIQUE_REJECTED', EXIT.FACT,
+      `SELF_CRITIQUE_REJECTED: 规划 Critique 独立复核人 (${reviewer}) 不得与文档负责人或其任前任负责人相同（历史：${ownerHistory.join('、')}）`,
+    )
   }
   const hasPriorStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
   if (hasPriorStopLoss && !override?.approved) {
     throw makePlanError(
-      'STOP_LOSS_ESCALATE', 4,
+      'STOP_LOSS_ESCALATE', EXIT.HUMAN,
       `STOP_LOSS_ESCALATE: ${file} 历史规划审查已触发停损且未获人类解锁；请运行 \`doc-plan.mjs critique-override --file "${file}" --human-approved --reason "..."\`。`,
       { file, excludedReviewers: collectExcludedReviewers(priorRounds, fmPre.data?.owner) },
     )
@@ -349,7 +360,7 @@ function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round,
     subject: '规划 Critique',
   })
   if (reviewerLock.blocked) {
-    throw makePlanError('BLOCKED_CRITIQUE_SAME_REVIEWER', 2, reviewerLock.message, {
+    throw makePlanError('BLOCKED_CRITIQUE_SAME_REVIEWER', EXIT.FACT, reviewerLock.message, {
       file, round: effectiveRound, excludedReviewers: reviewerLock.excludedReviewers,
     })
   }
@@ -357,7 +368,7 @@ function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round,
   const prevBaselineSha = prevRound?.artifact_baseline?.shortSha ?? prevRound?.sha ?? parseCritiqueStamp(fmPre.data?.plan_critique)?.sha
   if (effectiveRound >= 2 && (strictSameSha || prevRound) && prevBaselineSha && prevBaselineSha === digest) {
     throw makePlanError(
-      'BLOCKED_CRITIQUE_SAME_SHA', 2,
+      'BLOCKED_CRITIQUE_SAME_SHA', EXIT.FACT,
       `BLOCKED_CRITIQUE_SAME_SHA (BLOCKED_NO_REWORK_CHANGES): ${file} Round ${effectiveRound} 正文与上一轮完全一致 (sha=${digest})，必须先修改文档再复核。`,
       { file, round: effectiveRound, sha: digest, excludedReviewers: reviewerLock.excludedReviewers },
     )
@@ -371,9 +382,9 @@ export async function critiquePassDoc({
   file, reviewer, round = null, summary = '', findings = [], auditDoc = null, docType = null,
 }) {
   const abs = resolve(repoRoot, file)
-  if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', 1, `找不到文档：${file}`)
+  if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', EXIT.ACTION, `找不到文档：${file}`)
   const rawPre = readTextSafe(abs)
-  if (rawPre === undefined) throw makePlanError('FILE_UNREADABLE', 1, `无法读取文本文件：${file}`)
+  if (rawPre === undefined) throw makePlanError('FILE_UNREADABLE', EXIT.ACTION, `无法读取文本文件：${file}`)
 
   const fmPre = parseDocFrontmatter(rawPre)
   const priorRounds = parseCritiqueRounds(fmPre.data, rawPre)
@@ -390,7 +401,7 @@ export async function critiquePassDoc({
     if (!audit.ok) {
       const err = new Error(`文档尚有 ${audit.errors.length} 处审计问题未自净化，禁止记录 critique-pass`)
       err.audit = audit
-      err.exitCode = 1
+      err.exitCode = EXIT.ACTION
       throw err
     }
   }
@@ -450,9 +461,9 @@ export async function critiqueRejectDoc({
   file, reviewer, round = null, summary = '', findings = [], docType = null, taskId = null,
 }) {
   const abs = resolve(repoRoot, file)
-  if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', 1, `找不到文档：${file}`)
+  if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', EXIT.ACTION, `找不到文档：${file}`)
   const text = readTextSafe(abs)
-  if (text === undefined) throw makePlanError('FILE_UNREADABLE', 1, `无法读取文本文件：${file}`)
+  if (text === undefined) throw makePlanError('FILE_UNREADABLE', EXIT.ACTION, `无法读取文本文件：${file}`)
 
   const fm = parseDocFrontmatter(text)
   const relDoc = posixPath(relative(repoRoot, abs))
@@ -534,7 +545,7 @@ export async function critiqueRejectDoc({
   return {
     ok: !sl.stopLoss,
     status: sl.stopLoss ? 'STOP_LOSS_ESCALATE' : 'CRITIQUE_REJECTED',
-    exitCode: sl.stopLoss ? 4 : 0,
+    exitCode: sl.stopLoss ? EXIT.HUMAN : EXIT.FACT,
     file: relDoc,
     reviewer: String(reviewer).trim(),
     round: effectiveRound,
@@ -552,14 +563,14 @@ export async function critiqueRejectDoc({
 export function critiqueOverrideDoc({
   repoRoot, file, humanApproved = false, reason = '', by = 'human-maintainer', docType = null,
 }) {
-  if (!humanApproved) throw makePlanError('MISSING_HUMAN_APPROVAL', 2, 'critique-override 必须显式传入 --human-approved')
+  if (!humanApproved) throw makePlanError('MISSING_HUMAN_APPROVAL', EXIT.USAGE, 'critique-override 必须显式传入 --human-approved')
   const cleanReason = String(reason ?? '').trim()
-  if (!cleanReason) throw makePlanError('MISSING_OVERRIDE_REASON', 2, 'critique-override 必须传入非空 --reason "<裁决说明>"')
+  if (!cleanReason) throw makePlanError('MISSING_OVERRIDE_REASON', EXIT.USAGE, 'critique-override 必须传入非空 --reason "<裁决说明>"')
 
   const abs = resolve(repoRoot, file)
-  if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', 1, `找不到文档：${file}`)
+  if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', EXIT.ACTION, `找不到文档：${file}`)
   const text = readTextSafe(abs)
-  if (text === undefined) throw makePlanError('FILE_UNREADABLE', 1, `无法读取文本文件：${file}`)
+  if (text === undefined) throw makePlanError('FILE_UNREADABLE', EXIT.ACTION, `无法读取文本文件：${file}`)
 
   const fm = parseDocFrontmatter(text)
   const relDoc = posixPath(relative(repoRoot, abs))

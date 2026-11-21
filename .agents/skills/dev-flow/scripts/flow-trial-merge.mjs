@@ -3,24 +3,22 @@
  * 成功后再推进干净 `mainRoot` 的基线分支，严禁直接在 `mainRoot` 运行 `git switch` / `git merge --no-ff`。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { execShellCommand, gitRun, gitStatusPorcelainZ, readTextSafe } from '../../lib/git.mjs'
 import { isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
-import { isProfileExplicitNone } from '../../lib/profile.mjs'
+import { isProfileExplicitNone, resolveTierCommand } from '../../lib/profile.mjs'
 import { runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 function pickTrialVerifyCommand({ policy, profile, evidence, ledger }) {
   if (policy?.riskTier === 'low') return null
   const tier = policy?.requiredGates?.[0] ?? null
-  let cmd = null
-  if (tier === 'gate' && profile?.mergeGate && !isProfileExplicitNone(profile, 'merge-gate')) cmd = profile.mergeGate
-  else if (tier === 'full' && profile?.fullTest && !isProfileExplicitNone(profile, 'full-test')) cmd = profile.fullTest
-  else if (tier === 'smoke' && profile?.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify')) cmd = profile.smokeVerify
-  else if (tier === 'quick' && profile?.quickTest && !isProfileExplicitNone(profile, 'quick-test')) cmd = profile.quickTest
+  // 层级到 Dev Profile 键的对应只在 profile.mjs 一处；这里不再自己拼一份。
+  let cmd = tier ? (resolveTierCommand(profile, tier) ?? null) : null
 
   if (!cmd && evidence?.gates && evidence.mode) {
     const g = evidence.gates[evidence.mode]
@@ -86,7 +84,7 @@ export async function runTrialMerge({
       ok: false,
       blocked: true,
       code: 'BLOCKED_DIRTY_MAIN',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。',
     }
   }
@@ -204,7 +202,7 @@ export async function runTrialMerge({
         ok: false,
         blocked: true,
         code: 'BLOCKED_TRIAL_MERGE_CONFLICT',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         conflictFiles: extracted.conflictFiles,
         conflictHunks: extracted.conflictHunks,
         conflictSummary: {
@@ -239,7 +237,7 @@ export async function runTrialMerge({
             ok: false,
             blocked: true,
             code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
-            exitCode: 3,
+            exitCode: EXIT.FACT,
             message: `BLOCKED_STATIC_DOC_CHECK_FAILED: 试合后文档静态校验失败：${docCheck.errors.map((e) => e.message).slice(0, 3).join('；')}`,
           }
         }
@@ -252,7 +250,7 @@ export async function runTrialMerge({
             ok: false,
             blocked: true,
             code: 'BLOCKED_TRIAL_MERGE_VERIFY_FAILED',
-            exitCode: 3,
+            exitCode: EXIT.FACT,
             message: `BLOCKED_TRIAL_MERGE_VERIFY_FAILED: 临时试合后复测失败（cmd="${trialCmd}", exit=${execRes.code}）：${(execRes.stderr || execRes.stdout).trim().slice(0, 300)}`,
           }
         }

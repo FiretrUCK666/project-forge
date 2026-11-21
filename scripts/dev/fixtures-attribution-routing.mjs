@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { renderAgentsTemplate } from '../compose-agents.mjs'
 import { discoverKitSkillsDetailed } from '../lib/protocol.mjs'
 import { survey } from '../survey.mjs'
-import { gitInit, gitCommitFast, rmTree, SKILL_ROOT, tmpProject } from './fixtures-helpers.mjs'
+import { EXIT, gitInit, gitCommitFast, rmTree, SKILL_ROOT, tmpProject } from './fixtures-helpers.mjs'
 import { startMockRemoteServer } from './mock-remote-server.mjs'
 
 async function withQuietIo(fn) {
@@ -468,7 +468,7 @@ export function registerAttributionRoutingCases(cases) {
         task: 't-case2', round: '1', verdict: 'pass', 'reviewer-id': 'impl-108', 'review-token': tok1,
         evidence: 'run test ok', json: true,
       }, roots))
-      if (selfExit.res !== 2 || !selfExit.stdout.includes('SELF_REVIEW_REJECTED')) {
+      if (selfExit.res !== EXIT.FACT || !selfExit.stdout.includes('SELF_REVIEW_REJECTED')) {
         return `未拦截自审: exit=${selfExit.res} out=${selfExit.stdout}`
       }
 

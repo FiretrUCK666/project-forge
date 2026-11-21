@@ -201,9 +201,9 @@ export function registerEditPyramidCases(cases) {
       // 4. --skip-edit-gate 审计与 final 阻断
       const skipNoReason = await runEditGate({ mode: 'verify', dir, skipEditGate: true })
       if (skipNoReason.exitCode !== 2) return `无 reason 的 --skip-edit-gate 未返回 exit 2：${JSON.stringify(skipNoReason)}`
-      const skipFinal = await runEditGate({ mode: 'verify', dir, skipEditGate: true, final: true, reason: 'rush' })
+      const skipFinal = await runEditGate({ mode: 'verify', dir, skipEditGate: true, final: true, reason: '赶时间' })
       if (skipFinal.exitCode !== 3) return `--final 下未禁止 --skip-edit-gate：${JSON.stringify(skipFinal)}`
-      const skipOk = await runEditGate({ mode: 'verify', dir, skipEditGate: true, reason: 'wip-checkpoint' })
+      const skipOk = await runEditGate({ mode: 'verify', dir, skipEditGate: true, reason: '本次只改注释，改码门禁查的是代码结构，跳过它不会漏掉代码问题' })
       if (!skipOk.ok || !skipOk.recorded) return `带 reason 的 --skip-edit-gate 未正常记账：${JSON.stringify(skipOk)}`
       const roots = await resolveRepoRoots(dir)
       const sigs = readSignalsJsonl(roots)
@@ -451,13 +451,19 @@ export function registerEditPyramidCases(cases) {
         return `--changed --quiet 增量过滤不准：${JSON.stringify(bj.findings)}`
       }
 
-      // 3. --skip-govern 必传 reason 且同时写入 govern-state.json 与 signals.jsonl
+      // 3. --skip-govern 必传实质 reason 且同时写入 govern-state.json 与 signals.jsonl
       const skipFail = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--skip-govern'])
       if (skipFail.status !== 2) return `无 reason 的 --skip-govern 未报错退出 2：${skipFail.status}`
-      const skipOk = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--skip-govern', '--task', 'c7-task', '--reason', 'emergency-doc-fix', '--json'])
+      // 反例：理由非空但只是占位词，同样要拦——只查非空等于给水话留门。
+      const skipShallow = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--skip-govern', '--reason', '赶时间'])
+      if (skipShallow.status === 0) return '占位词的 --skip-govern 理由被放行了——理由就该是理由'
+      if (!/BLOCKED_SHALLOW_OVERRIDE_REASON/.test(skipShallow.stdout + skipShallow.stderr)) {
+        return `占位词理由被拒但没说明原因：${skipShallow.stdout}${skipShallow.stderr}`
+      }
+      const skipOk = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--skip-govern', '--task', 'c7-task', '--reason', '紧急文档修复：只改了一处错别字，治理巡检的检查项不涉及它', '--json'])
       if (skipOk.status !== 0) return `带 reason 的 --skip-govern 失败：${skipOk.stderr}`
       const govState = loadGovernState(dir)
-      if (!govState.skips.some((s) => s.taskId === 'c7-task' && s.reason === 'emergency-doc-fix')) {
+      if (!govState.skips.some((s) => s.taskId === 'c7-task' && String(s.reason ?? '').includes('只改了一处错别字'))) {
         return `--skip-govern 未写入 govern-state.json：${JSON.stringify(govState)}`
       }
       const roots = await resolveRepoRoots(dir)

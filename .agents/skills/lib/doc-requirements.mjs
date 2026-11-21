@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { CUSTOM_DECL_REL, parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { collectOwnerHistory, normOwnerId } from './doc-approval.mjs'
 import { isStubValue } from './doc-substantive.mjs'
 import { readTextSafe } from './git.mjs'
 
@@ -628,16 +629,18 @@ export function checkAuthorIsNotImplementer(repoRoot, specRel, implementerId) {
   const abs = join(repoRoot, specRel)
   if (!existsSync(abs)) return []
   const fm = parseDocFrontmatter(readTextSafe(abs) ?? '')
-  const owner = fm.data?.owner
-  if (!owner) return []
-  const norm = (s) => String(s ?? '').trim().replace(/^@/, '').toLowerCase()
-  if (norm(owner) !== norm(implementerId)) return []
+  // 按「历史负责人 ∪ 当前负责人」比对：换个身份写验收标准，仍是同一个人写的。
+  const owners = collectOwnerHistory(fm.data)
+  if (owners.length === 0) return []
+  const norm = normOwnerId
+  const matched = owners.find((o) => norm(o) === norm(implementerId))
+  if (!matched) return []
   return [{
     code: 'SELF_AUTHORED_ACCEPTANCE',
     file: specRel,
-    owner: String(owner),
+    owner: String(matched),
     implementerId: String(implementerId),
-    message: `${specRel} 的作者（${owner}）就是这个任务的实施者（${implementerId}）`
+    message: `${specRel} 的作者（${matched}）就是这个任务的实施者（${implementerId}）`
       + '——干活的人给自己定验收标准，一定会写一份自己能轻松通过的，'
       + '「动手前冻结标准」这件事就失去了意义。请换一个不参与实施的人来写或复核这份规划。',
   }]

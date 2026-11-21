@@ -16,6 +16,9 @@ import { githubRepoPath as engineGithubRepoPath } from '../lib/text.mjs'
 import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
 import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
+import { auditEntry, auditGlobalWhitelist, auditHandRolled, evaluateParity, ENTRY_SPECS, HAND_ROLLED_SPECS } from './cli-parity.mjs'
+import { evaluateExitCodeParity } from './exit-code-parity.mjs'
+import { blockedExitOf } from '../../kit/skills/lib/exit-codes.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
@@ -604,6 +607,46 @@ function checkKitWriteProbes({ ROOT, fail, note }) {
   if (violations.length === 0) note(`写路径联网探测：${targets.length} 个脚本均已通过 probeForWrite 与显式 probeNetwork 门禁（0 违规）`)
 }
 
+/**
+ * 参数三重对拍：注册表、帮助声明、读取点。
+ *
+ * 一个参数只活在三分之二处，比完全没有更坏——它看起来像能用。所以这里不查文档写得好不好，
+ * 只查这三件事对不对得上：帮助里有的必须注册得上，注册了的必须有人读，暗参数只许少不许多。
+ */
+function checkCliParity({ ROOT, fail, note, walk }) {
+  const audits = [
+    ...ENTRY_SPECS.map((spec) => auditEntry(spec, { ROOT, walk })),
+    ...HAND_ROLLED_SPECS.map((spec) => auditHandRolled(spec, { ROOT })),
+  ]
+  const { failures, notes } = evaluateParity(audits)
+  for (const message of failures) fail(`参数对拍：${message}`)
+  const globalCheck = auditGlobalWhitelist({ ROOT })
+  if (!globalCheck.ok) fail(`参数对拍：${globalCheck.error}`)
+  if (failures.length === 0) note(`参数对拍：${notes.join('；')}`)
+}
+
+/**
+ * 退出码档位对拍：登记表 vs 实际返回。
+ *
+ * 登记表说「事实档」，代码返「用法档」，两边都写得很整齐，没有任何东西会发现——
+ * 直到有人照登记表去处理，做了一件本来不用做的事。所以按源码扫，不维护第二份清单。
+ */
+function checkExitCodeParity({ ROOT, walk, fail, note }) {
+  const sources = [
+    ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
+    ...walk(join(ROOT, 'kit', 'skills'), (f) => f.endsWith('.mjs')),
+  ].map((abs) => ({ file: abs.slice(ROOT.length + 1).replace(/\\/g, '/'), text: readFileSync(abs, 'utf8') }))
+  const result = evaluateExitCodeParity(sources, blockedExitOf)
+  for (const message of result.failures) fail(`退出码档位：${message}`)
+  // 覆盖率必须一起报：只说「核过的都一致」而不说「有多少没核」，
+  // 读的人会把前者当成全部——那正是本片要治的那种「看着很干净」。
+  if (result.ok) {
+    const { literals, paired, unpaired, byKind: kind } = result.coverage
+    note(`退出码档位：${result.codes} 个在册阻断码的 ${paired} 处返回与登记一致；`
+      + `另有 ${unpaired}/${literals} 处不在覆盖内：标签类 ${kind.label.length}（退出码由调用方给）、提示类 ${kind.advisory.length}（本就不阻断）、委派类 ${kind.delegated.length}`)
+  }
+}
+
 export async function runSuiteChecks(ctx) {
   const allMjs = [
     ...ctx.walk(join(ctx.ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
@@ -623,6 +666,8 @@ export async function runSuiteChecks(ctx) {
   checkPlatformLock(ctx)
   checkStructureRules(ctx)
   checkKitSuite(ctx, syntaxErrors)
+  checkCliParity(ctx)
+  checkExitCodeParity(ctx)
   checkKitWriteProbes(ctx)
   checkHygiene(ctx)
 }

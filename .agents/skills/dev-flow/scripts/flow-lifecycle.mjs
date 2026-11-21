@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -13,11 +14,11 @@ import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { hasExploredEvidence, nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { deriveReworkState, hasExploredEvidence, nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
-import { isProfileExplicitNone, parseAgentsProfile, readDecisions } from '../../lib/profile.mjs'
+import { isProfileExplicitNone, parseAgentsProfile, readDecisions, resolveTierCommand, TIER_PROFILE_KEYS } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
@@ -25,13 +26,11 @@ import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
   buildSubmitNextSteps, determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
-  readVerificationEvidence, redactDiagnosticText, resolveEffectiveBaseSha, resolveReadablePrTitle,
+  readVerificationEvidence, redactDiagnosticText, resolveEffectiveBaseSha, resolveReadablePrTitleWithSource,
   runLowRiskDocStaticCheck, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
-import {
-  assertSubmitOwnership, checkLifecyclePreconditions, runLifecycleGovernHook, runPreVerifyEditGateHook,
-} from './flow-lifecycle-hooks.mjs'
+import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
+import { assertSubmitOwnership, checkLifecyclePreconditions, runLifecycleGovernHook, runPreVerifyEditGateHook } from './flow-lifecycle-hooks.mjs'
 import {
   applySubmitPostActions,
   cmdContainsSubcommand,
@@ -71,7 +70,7 @@ export async function handleFinalize(opts, roots) {
   if (!preCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: preCheck.code, reason: preCheck.message }, null, 2)}\n`)
     process.stderr.write(`${preCheck.message}\n`)
-    return { exitCode: preCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: preCheck.exitCode ?? EXIT.FACT }
   }
 
   const fastFinHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
@@ -112,14 +111,14 @@ export async function handleFinalize(opts, roots) {
     const unchecked = findUncheckedLines(readTextSafe(absDoc) ?? '')
     if (unchecked.length > 0) {
       process.stderr.write(`BLOCKED_UNCHECKED_${label}: ${relDoc} 仍有未勾选验收条目：\n${unchecked.map((u) => `  ${u}`).join('\n')}\n`)
-      return { exitCode: 1 }
+      return { exitCode: EXIT.ACTION }
     }
   }
 
   const criteriaDrift = checkFrozenCriteria(ledger, implRoot)
-  if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: 1 } }
+  if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: EXIT.ACTION } }
   const specNoteCheck = ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note: opts.note })
-  if (!specNoteCheck.ok) { process.stderr.write(specNoteCheck.message); return { exitCode: 1 } }
+  if (!specNoteCheck.ok) { process.stderr.write(specNoteCheck.message); return { exitCode: EXIT.ACTION } }
 
   const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir })
   const finDiff = effectiveBase
@@ -144,7 +143,7 @@ export async function handleFinalize(opts, roots) {
     }
     if (opts.json) process.stdout.write(`${JSON.stringify(blockedOut, null, 2)}\n`)
     process.stderr.write(`BLOCKED_TDD_SYNC: ${parity.tddSyncWarning}\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
 
   let archivedGroup = { moved: [], byKind: { prd: prdRel, spec: specRel, todo: todoRel }, archivedMasterPrd: null }
@@ -168,7 +167,7 @@ export async function handleFinalize(opts, roots) {
   if (!governHook.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify(governHook, null, 2)}\n`)
     process.stderr.write(`${governHook.message}\n`)
-    return { exitCode: governHook.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: governHook.exitCode ?? EXIT.FACT }
   }
 
   ledger.finalized = true
@@ -196,9 +195,9 @@ export async function handleFinalize(opts, roots) {
   }
   if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
     process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则且未更新伴随文件（共 ${coupledSyncWarnings.length} 组）。\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }
 
 export async function handleVerify(opts, roots) {
@@ -212,7 +211,7 @@ export async function handleVerify(opts, roots) {
   if (!verifyPreCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: verifyPreCheck.code, reason: verifyPreCheck.message }, null, 2)}\n`)
     process.stderr.write(`${verifyPreCheck.message}\n`)
-    return { exitCode: verifyPreCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: verifyPreCheck.exitCode ?? EXIT.FACT }
   }
 
   const editGateRes = await runPreVerifyEditGateHook({ mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
@@ -220,7 +219,7 @@ export async function handleVerify(opts, roots) {
     await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'verify.edit-gate.fail', severity: 'high', source: 'flow-verify', message: editGateRes.message, taskId })
     if (opts.json) process.stdout.write(`${JSON.stringify(editGateRes, null, 2)}\n`)
     process.stderr.write(`${editGateRes.message}\n`)
-    return { exitCode: editGateRes.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: editGateRes.exitCode ?? EXIT.FACT }
   }
 
   const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
@@ -229,7 +228,7 @@ export async function handleVerify(opts, roots) {
     await emitFlowSignal(roots, { category: 'security', module: 'workflow', pattern: 'verify.untrusted-blocked', severity: 'high', source: 'flow-verify', message: untrustedGate.message, taskId })
     if (opts.json) process.stdout.write(`${JSON.stringify(untrustedGate, null, 2)}\n`)
     process.stderr.write(`${untrustedGate.message}\n`)
-    return { exitCode: untrustedGate.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: untrustedGate.exitCode ?? EXIT.FACT }
   }
 
   const vPrdRel = ledger.prdFile ?? ledger.archivedPrdFile ?? findStrictDocBySlug(implRoot, 'docs/prd', ledger)
@@ -252,14 +251,14 @@ export async function handleVerify(opts, roots) {
   if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-mode', severity: 'low', source: 'flow-verify', message: `invalid verify mode: ${mode}`, taskId })
     process.stderr.write(`INVALID_VERIFY_MODE: --mode / --tier 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
   let rawTarget = opts.target !== undefined ? String(opts.target).trim() : null
   if (rawTarget !== null) {
     if (!rawTarget || /[;&|`$><\r\n]/.test(rawTarget)) {
       await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-target', severity: 'low', source: 'flow-verify', message: `invalid target: ${opts.target}`, taskId })
       process.stderr.write(`INVALID_TARGET_ARG: --target 值非法或含不允许的元字符：${opts.target}\n`)
-      return { exitCode: 1 }
+      return { exitCode: EXIT.ACTION }
     }
     rawTarget = posixPath(rawTarget)
   }
@@ -272,12 +271,8 @@ export async function handleVerify(opts, roots) {
   const isExplicitNone = !opts.cmd && isProfileExplicitNone(profile, profileKey)
 
   let cmd = opts.cmd
-  if (!cmd && !isExplicitNone) {
-    if (mode === 'gate') cmd = profile.mergeGate ?? profile.fullTest ?? profile.quickTest
-    else if (mode === 'full') cmd = profile.fullTest ?? profile.quickTest
-    else if (mode === 'smoke') cmd = profile.smokeVerify
-    else cmd = profile.quickTest
-  }
+  // 层级到 Dev Profile 键的对应与降级链只在 profile.mjs 一处，这里不再自己拼一遍。
+  if (!cmd && !isExplicitNone) cmd = resolveTierCommand(profile, mode, { fallback: true })
 
   const computeVerifyPolicy = async (stZReuse = null) => {
     const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
@@ -316,7 +311,7 @@ export async function handleVerify(opts, roots) {
     const docOk = !docStaticRes || docStaticRes.ok
     recordVerifyEvidenceForFlow({
       roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
-      cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: 0,
+      cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: EXIT.OK,
       explicitNoneSkipped: true, docStaticRes,
     })
     ledger.verifiedHead = docOk ? currentHead : null
@@ -324,7 +319,7 @@ export async function handleVerify(opts, roots) {
     ledger.verifiedMode = mode
     ledger.verifiedTarget = rawTarget
     ledger.verifiedDirtyHash = sha256Text(stStdout)
-    ledger.lastVerifyExitCode = docOk ? 0 : EXIT_POLICY_BLOCK
+    ledger.lastVerifyExitCode = docOk ? 0 : EXIT.FACT
     ledger.visualFilesChanged = policy.visualFilesChanged
     ledger.empiricalVisualCheckRequired = policy.visualFilesChanged.length > 0
     ledger.status = docOk ? 'verified' : 'verify-failed'
@@ -334,15 +329,15 @@ export async function handleVerify(opts, roots) {
       const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', errors: docStaticRes.errors }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: 0, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, null, 2)}\n`)
+      process.stdout.write(`${JSON.stringify({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: EXIT.OK, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, null, 2)}\n`)
     } else {
       process.stdout.write(`verify (${mode}): AGENTS.md Dev Profile 显式配置 \`${profileKey}: none\`，已放行并绑定 HEAD=${currentHead ?? 'unborn'}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (!cmd) {
@@ -351,20 +346,17 @@ export async function handleVerify(opts, roots) {
       if (policy.smokeRequired) {
         await emitFlowSignal(roots, { category: 'e2e', module: 'workflow', pattern: 'verify.smoke.unconfigured', severity: 'medium', source: 'flow-verify', message: 'unconfigured smoke-verify for runtime changes', taskId })
         process.stderr.write('BLOCKED_SMOKE_VERIFY_UNCONFIGURED: 运行时改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none（Q3）；请在 AGENTS.md 补齐 smoke-verify，或通过 --cmd "<命令>" --e2e-evidence "<运行观察>" 传入。\n')
-        return { exitCode: EXIT_POLICY_BLOCK }
+        return { exitCode: EXIT.FACT }
       }
     }
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.no-cmd`, severity: 'medium', source: 'flow-verify', message: `no verify command for ${mode}`, taskId })
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入（纯文档仓请配 \`${profileKey}: none\`）。\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
 
-  // 证据只取人说过的：`--e2e-evidence` / `--visual-evidence` 的原文。
-  //
-  // 裸 `--visual-checked` 是「我核验过了」的口头声明，它自身**不带观察内容**。
-  // 这里不替它编一句「observed and verified」——编出来的句子会被当成观察证据写进
-  // evidence.json，然后一路通过后面的门禁，而实际上谁也没说看到了什么。
-  // 缺什么就让它缺着，交给校验入口去要求补齐。
+  // 证据只取人说过的原文（`--e2e-evidence` / `--visual-evidence`）。裸 `--visual-checked` 只是口头声明、
+  // 不带观察内容；这里不替它编一句「observed and verified」——编出来的句子会被当成观察写进
+  // evidence.json 并一路通过后面的门禁，而谁也没说看到了什么。缺什么就让它缺着，交给校验入口要求补齐。
   const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
     || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
     || ''
@@ -375,7 +367,7 @@ export async function handleVerify(opts, roots) {
     if (pre.policy.smokeRequired && !alreadySmokeOk) {
       await emitFlowSignal(roots, { category: 'e2e', module: 'workflow', pattern: 'verify.smoke.unconfigured', severity: 'medium', source: 'flow-verify', message: `blocked ${mode}: unconfigured smoke-verify`, taskId })
       process.stderr.write(`BLOCKED_SMOKE_VERIFY_UNCONFIGURED: 运行时改动禁止在既无 smoke-verify 命令又未声明 smoke-verify: none 且无 --cmd/--e2e-evidence 时以 ${mode} 放行（Q3）；请在 AGENTS.md 补齐 smoke-verify，或传 --cmd "<命令>" --e2e-evidence "<运行观察>"。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
   }
 
@@ -390,7 +382,7 @@ export async function handleVerify(opts, roots) {
     } else {
       await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.missing-target`, severity: 'low', source: 'flow-verify', message: `missing --target for ${mode}`, taskId })
       process.stderr.write(`MISSING_TARGET_ARG: 验证命令 "${cmd}" 含 {target} 占位符，请追加 --target <file> 指定单测文件或用例。\n`)
-      return { exitCode: 1 }
+      return { exitCode: EXIT.ACTION }
     }
   }
 
@@ -399,7 +391,7 @@ export async function handleVerify(opts, roots) {
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1000) {
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.invalid-timeout`, severity: 'low', source: 'flow-verify', message: `invalid timeout: ${opts.timeout}`, taskId })
     process.stderr.write(`INVALID_TIMEOUT_ARG: --timeout 须为 >= 1000 的毫秒数，收到：${opts.timeout}\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
   const wtEnv = computeWorktreeEnv({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId, slotIndex: ledger.slotIndex })
   const tRunStart = Date.now()
@@ -451,7 +443,7 @@ export async function handleVerify(opts, roots) {
     ledger.status = 'verify-failed'
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.precheck.code ?? 'BLOCKED_VERIFY_PRECHECK', exitCode: finalExit, reasons: evRec.precheck.reasons ?? null }, null, 2)}\n`)
-    return { exitCode: finalExit || EXIT_POLICY_BLOCK }
+    return { exitCode: finalExit || EXIT.FACT }
   }
   let e2eFailureReport = null
   if ((mode === 'smoke' || smokeExecuted) && smokeRunRes && !smokeRunRes.ok) {
@@ -474,11 +466,11 @@ export async function handleVerify(opts, roots) {
   ledger.empiricalVisualCheckRequired = empiricalVisualCheckRequired
   if (allOk && hasVisualCheckFlag) {
     ledger.visualVerifiedHead = currentHead
-    // 有原文就存原文；只有裸 --visual-checked 时记「声明」本身，不编造观察内容。
-    // 两者必须分得开——后面判定「有没有真观察」靠的是 evidence.json 里的 e2eObservation，
-    // 而那条只有真传了 --e2e-evidence / --visual-evidence 才会有。
-    ledger.visualCheckEvidence = e2eEvidenceInput
-      || (opts['visual-checked'] ? '已声明核验（--visual-checked，未附观察原文）' : (ledger.visualCheckEvidence ?? null))
+    // 这个字段只接受入参原文或既有真实记录；两者都没有就不写。它不得由任何开关派生：
+    // 给裸 `--visual-checked` 拼一句「已声明核验」，会让「核验过」在账本里有了文字，而文字
+    // 不是观察。开关的语义由 `visualVerifiedHead` / `empiricalVisualCheckRequired` 表达。
+    const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
+    ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
   await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
@@ -504,7 +496,7 @@ export async function handleSubmit(opts, roots) {
   if (!ownRes.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: ownRes.code, reason: ownRes.message }, null, 2)}\n`)
     process.stderr.write(`${ownRes.message}\n`)
-    return { exitCode: ownRes.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: ownRes.exitCode ?? EXIT.FACT }
   }
 
   const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
@@ -516,21 +508,21 @@ export async function handleSubmit(opts, roots) {
   const currentHead = headRes.ok ? headRes.stdout.trim() : null
   if (stZ.entries.length > 0) {
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 存在未提交改动，请先提交后再运行 verify 与 submit。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const needsFinalize = ledger.caseType === 3 || ledger.caseType === 4 || Boolean(ledger.todoFile) || Boolean(ledger.specFile)
   if (needsFinalize) {
     if (!ledger.finalized) {
       process.stderr.write(`BLOCKED_NOT_FINALIZED: Case ${ledger.caseType} 任务必须先执行 flow.mjs finalize --task ${taskId} 完成文档同步锁。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
     if (ledger.finalizedHead && currentHead && ledger.finalizedHead !== currentHead) {
       const postFin = await gitDiffNameStatusZ(implRoot, [`${ledger.finalizedHead}..${currentHead}`])
       const nonDocChanges = postFin.entries.map((e) => e.file).filter((f) => f && !/^docs\//.test(f))
       if (nonDocChanges.length > 0) {
         process.stderr.write(`BLOCKED_STALE_FINALIZE: finalize 之后又改了非文档文件（${nonDocChanges.join(', ')}），请重新运行 finalize。\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
+        return { exitCode: EXIT.FACT }
       }
     }
   }
@@ -541,7 +533,7 @@ export async function handleSubmit(opts, roots) {
     } else {
       process.stderr.write(`BLOCKED_STALE_VERIFICATION: 代码已变更（verifiedHead=${String(ledger.verifiedHead).slice(0, 7)} !== HEAD=${currentHead?.slice(0, 7)}），必须重跑 verify。\n`)
     }
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const profile = parseAgentsProfile(implRoot)
@@ -572,14 +564,14 @@ export async function handleSubmit(opts, roots) {
     }
     process.stderr.write(`${msg}\n`)
     if (!opts.json) printNextStep([{ skill: 'dev-flow', text: unlockCmd }], { repoRoot: roots.mainRoot })
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
   const evidence = readVerificationEvidence(roots.gitDir, taskId)
   const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
   if (!evCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: evCheck.code, reason: evCheck.reason, policy }, null, 2)}\n`)
     process.stderr.write(`${evCheck.code}: ${evCheck.reason}\n`)
-    return { exitCode: evCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: evCheck.exitCode ?? EXIT.FACT }
   }
 
   const visualFilesChanged = policy.visualFilesChanged
@@ -589,7 +581,7 @@ export async function handleSubmit(opts, roots) {
 
   if (ledger.role === 'clone-readonly') {
     process.stderr.write('BLOCKED_CLONE_READONLY: 当前身份为只读克隆，禁止推送；请先走 Fork 或本地模式。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const reviewSlotSync = await syncReviewSlotForSubmit(roots, ledger, taskId, currentHead, { resetDirty: Boolean(opts['reset-review-slot']) })
@@ -605,7 +597,7 @@ export async function handleSubmit(opts, roots) {
     })
     const submitDisplay = formatAttribution({ ...submitLayers, capabilities: localBackend.capabilities })
     const submitActorId = submitLayers.agent || submitLayers.account || undefined
-    const isReworkLocal = Boolean(opts.rework) || (ledger.rounds ?? []).length > 0
+    const isReworkLocal = deriveReworkState(ledger).isRework
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
     const { issueCommentBodyFor } = buildSubmitComments({
       isRework: isReworkLocal, round: nextRound, shortHead: currentHead?.slice(0, 7) ?? 'unknown', actorDisplay: submitDisplay,
@@ -640,7 +632,7 @@ export async function handleSubmit(opts, roots) {
       process.stdout.write(`本地模式提交校验已通过（HEAD=${shortHead}，未配置远端不执行 push）。\n`)
       printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   const fastRemoteCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
@@ -652,7 +644,7 @@ export async function handleSubmit(opts, roots) {
 
   if (ledger.role === 'contributor-fork' && originLower && upstreamLower && originLower === upstreamLower) {
     process.stderr.write('BLOCKED_FORK_REMOTE_LOCK: origin 与 upstream 指向相同仓，禁止直接向正本推送。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const pushRes = await gitRun(implRoot, ['push', '-u', pushRemote, ledger.branch])
@@ -667,11 +659,10 @@ export async function handleSubmit(opts, roots) {
       process.stdout.write(`submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
       printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
-  // 提审要开 PR——那是平台写操作。用「不联网」的探测结果判断「能不能写」，
-  // 必然得到「不能」，然后安静地只记账本，看起来像成功。
+  // 提审要开 PR，那是平台写操作。用「不联网」的探测结果判断「能不能写」，必然得到「不能」，然后安静地只记账本、看起来像成功。
   const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const backend = createTaskBackend({
     role: ledger.role, providerId: ledger.providerId, targetRepo,
@@ -699,10 +690,10 @@ export async function handleSubmit(opts, roots) {
     if (dup.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify(dup, null, 2)}\n`)
       process.stderr.write(`${dup.message}\n`)
-      return { exitCode: dup.exitCode ?? EXIT_POLICY_BLOCK }
+      return { exitCode: dup.exitCode ?? EXIT.FACT }
     }
   }
-  if (!ledger.prNumber && !opts.rework) {
+  if (!ledger.prNumber) {
     const openPrRes = await backend.findOpenPrForBranch({ repo: targetRepo, branch: ledger.branch, headOwner: ledger.role === 'contributor-fork' ? originOwner : undefined, base: ledger.baseBranch })
     if (openPrRes?.ok && Array.isArray(openPrRes.prs) && openPrRes.prs.length > 0) {
       const found = openPrRes.prs[0]
@@ -711,22 +702,29 @@ export async function handleSubmit(opts, roots) {
       ledger.prState = found.state ?? 'OPEN'
     }
   }
-  const isRework = Boolean(opts.rework) || Boolean(ledger.prNumber)
+  // 返工与否由账本推导：末轮退回且令牌已消费。不收开关，也不靠「有没有 PR 号」猜。
+  const reworkState = deriveReworkState(ledger)
+  // 「是不是返工」与「PR 在不在」是两件事：前者决定措辞，后者决定复用还是新建。混用一个变量就会出现「PR 明明在，却又建了一个」。
+  const hasExistingPr = Boolean(ledger.prNumber)
 
   let prResult = null
   const commentResults = []
-  if (isRework && ledger.prNumber) {
+  const isRework = reworkState.isRework
+  if (hasExistingPr) {
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
-    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: true, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
+    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
-    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: 'rework-submitted', round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
+    const reuseAction = isRework ? 'rework-submitted' : 'submitted-existing-pr'
+    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
     for (const iss of ledger.linkedIssues ?? []) {
-      commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'rework-submitted', round: nextRound, ...submitStateIdentity, prNumber: ledger.prNumber, headSha: currentHead } }) })
+      commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, prNumber: ledger.prNumber, headSha: currentHead } }) })
     }
-    await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: true })
+    await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework })
   } else {
-    const title = resolveReadablePrTitle(implRoot, ledger, opts.title)
-    const body = opts.body ?? hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
+    const { title, titleSource } = resolveReadablePrTitleWithSource(implRoot, ledger, opts.title)
+    ledger.prTitleSource = titleSource
+    // 提案正文由账本与模板确定性生成：正文里排着的实证上下文都能从账本读出来，一旦允许传 `--body`，实证栏就成了「他说的」，不是「记录里的」。
+    const body = hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
     prResult = await backend.createPr({ targetRepo, head: headSpec, base: ledger.baseBranch, title, body, draft: Boolean(opts.draft) })
     if (prResult.ok && prResult.number) {
       ledger.prNumber = prResult.number
@@ -751,5 +749,5 @@ export async function handleSubmit(opts, roots) {
     if (prResult?.delegated) process.stdout.write(`- 待宿主 MCP 代理执行 PR 载荷：${JSON.stringify(prResult.jsonPayload)}\n`)
     printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }

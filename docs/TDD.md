@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用基线 | 以仓库当前源码与 [SKILL.md](../SKILL.md) 当前 `metadata.version` 为准 |
-| 最近更新日期 | `2026-11-19` |
+| 最近更新日期 | `2026-11-21` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |
 | 托管平台适配范围 | 产品层注册表当前仅注册 `github`；未匹配托管远端降级为 `generic-git`，由 `TaskBackend` 统一对外操作 |
@@ -155,7 +155,10 @@ flowchart LR
 | `kit/skills/lib/doc-substantive.mjs` | 核心实质性校验与跨轮防退化 | `isStubValue`、`extractTechAnchors`、`checkCoreSubstantiveness`、`extractDocSnapshot`、`parseCritiqueAnchors`、`checkDocRegression`、`readGitHeadFileSync`、`resolveBaselineSnapshotSync`、`collectMasterPrdSpecTexts` |
 | `kit/skills/lib/doc-frontmatter.mjs` | Frontmatter 零依赖解析、受管判定与原子更新 | `parseDocFrontmatter`、`serializeDocFrontmatter`、`updateDocFrontmatter`、`isManagedPlanDoc`（由 `docs.mjs` 统一重导出） |
 | `kit/skills/lib/doc-comments.mjs` / `kit/skills/lib/review-comment-render.mjs` | PR / Issue 协同结构化评论渲染与双层归属格式化 | `formatAttribution`、`buildClaimComments`、`buildReviewComments`、`buildSubmitComments`、`buildMergeComments`、`buildIntakeDecisionComments`（由 `doc-templates.mjs` 与 `docs.mjs` 统一重导出） |
-| `kit/skills/lib/pr-template-hydrate.mjs` | PR 可读标题与实证正文回填 | `resolveReadablePrTitle`、`hydratePrTemplateBody`（由 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 统一重导出） |
+| `kit/skills/lib/exit-codes.mjs` | 退出码四档语义与阻断码登记 | `EXIT`（0 通过 / 1 有事待办 / 2 用法 / 3 前提事实不成立 / 4 人类拍板）、`VERIFY_EXIT` 交棒四态、`BLOCK_CODE_TIERS` 与 `REGISTERED_BLOCK_CODES` |
+| `kit/skills/lib/gate-truth.mjs` | 合入门禁的结构判定与派生 | `GATE_VERDICT` 四档互斥、`extractExecutionBlocks`（一条执行块一步）、`evaluateStructuralPredicates`（触发形态/写作用域/平台上下文逐条判）、`deriveMergeGate`、`evaluateRemoteChecks` 远端检查五档 |
+| `kit/skills/lib/evidence-substance.mjs` | 「这段文字算不算实证」的共用判据 | `evaluateTextSubstance`（提审与观察摘要共用）、`evaluateReleaseReason`（放行理由更严一档，不设措辞白名单） |
+| `kit/skills/lib/doc-approval.mjs` | 批准状态、负责人历史与属性归一 | `APPROVING_STATUS`、`isApprovingStatus`、`normOwnerId`、`collectOwnerHistory`、`PREVIOUS_OWNERS_KEY` || `kit/skills/lib/pr-template-hydrate.mjs` | PR 可读标题与实证正文回填 | `resolveReadablePrTitle`、`hydratePrTemplateBody`（由 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 统一重导出） |
 | `kit/skills/lib/command-lex.mjs` | 命令词法：切段、命令位置与动作词 | `splitCommandSegments`、`commandHeadOf`、`commandVerbOf`、`classifyByCommandPosition`、`classifyCommandText`、`COMMAND_DISPLAY_MAX_BYTES`；动作词只在**命令位置**匹配，路径只留最后一段，`--opt=` 取值与 `.属性名` 不是动作 |
 | `kit/skills/lib/tool-owned.mjs` | 工具产物归属声明 | `TOOL_OWNED_PREFIXES`、`isToolOwnedPath`、`TOOL_SKELETON_FILES`、`hasRealContent`；规模、可复用模块与契约失效路径三类判据一律先过它 |
 | `kit/skills/lib/symbol-index.mjs` | 定义符号抽取与语言覆盖三态 | `extractSymbols`（先剥注释再匹配定义形状）、`isSymbolRuleSupported`、`languageOf`、`summarizeSymbolCoverage`；没有规则的语言返回 `unsupported` 而非空数组 |
@@ -279,7 +282,7 @@ flowchart TD
 - `maintainer`（`owner` / `team-collaborator`）：同源独立分支开 PR，禁直推主干；零历史成员先 `--probe-auth`，`claim` + `--takeover` 双写，遵守 `CODEOWNERS` 与 Merge Queue；若 `AGENTS.md`「## 取舍」写 `merge-authority: human` 则全部 PR 合并收回人工。
 - `contributor-fork`：只推个人 `origin` Fork 分支向 `upstream` 开 PR；硬禁止 `merge` 与上游 PR 仍 `OPEN` 时删 Fork 分支；写标签遇 403 自动降级。
 - `clone-readonly` / `undetermined`：停下由人选 `--clone-choice fork|standalone|local`；`inbound-external-pr` 必先过 `--untrusted-scan` 再经人类确认运行测试。
-- `local-only` / `generic-git`：`local-only` 走本地分支、独立审查与 `.worktrees/.tmp-merge-*` 临时 `--detach` 试合推进主干；`generic-git` 有远端时不越权本地强合并，须在远端完成 MR 后带 `--remote-merged`（或 `--human-approved`）收尾。
+- `local-only` / `generic-git`：`local-only` 走本地分支、独立审查与 `.worktrees/.tmp-merge-*` 临时 `--detach` 试合推进主干；`generic-git` 有远端时不越权本地强合并：merge 现场先 `fetch` 再按四态合流判定（`inspectBranchMergeState`）核验远端是否已合，核不到就阻断，只有人类签字（`--human-approved --reason`）可在核不到时放行。
 
 ### 双轨四级传输与 API 通道
 
@@ -411,6 +414,11 @@ flowchart TD
 | `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、`Dev Profile` 单源、传递可达性、Mermaid 宽度、套件行数与端到端冒烟 | 每次提交前；退出码 `0` |
 | `scripts/dev/gap-coverage.mjs` | `survey` 全部 `GAP_RULE_IDS` 在 `review.mjs` 与文档指引中的配对覆盖率 | 每次改动勘察/体检规则后；`0` 项遗漏 |
 | `scripts/dev/fixtures.mjs` | 身份判定、统一装配、v2 墓碑/定制、`HostingProvider` 降级、工作流状态机、按需定位、业务分诊与增量审计正反断言 | 每次改动判定或工作流后；`0` 项失败 |
+| `scripts/dev/merge-gate.mjs` | 合入门禁编排：从流水线结构派生清单，一条执行块一步、整块经 shell 实跑，输出 `passed`/`failed`/`unverified`/`not-applicable` 四档；`not-applicable` 不阻断 | 合流前实跑；四档结论互斥 |
+| `scripts/dev/fixtures-flow-truth.mjs` | `C1..C10` 的正反双向定点用例（批准依据三种合法来源、门禁四档互斥、结构谓词单谓词隔离、参数三重对拍、分诊留源） | 判据变更后；全部通过 |
+| `scripts/dev/injections-data-flow-truth.mjs` | 上述判据的故障注入复验表：拆掉任一判据都必须让对应用例变红 | 判据变更后；每条注入都变红 |
+| `scripts/dev/cli-parity.mjs` | 参数注册表、帮助声明、读取点三重对拍；声明只认行首与方括号分组两种形态，暗参数按名字锁基线 | 参数注册变更后；三重对拍一致 |
+| `scripts/dev/exit-code-parity.mjs` | 阻断码登记档位与返回处对拍：按源码扫出「码 → 返回档位」配对，未登记、档位不符、一码两档都判失败；夹具里故意写错的反例串按文件名排除 | 退出码登记变更后；零不一致 |
 | `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及字节预算校验（`--check`） | 修改契约或模板后；退出码 `0` |
 | `scripts/equip.mjs` | `.agents/skills/` 与 `kit/skills/` 及 `.pf-manifest.json` 字节级一致（`--check`） | 修改 `kit/skills/` 后；退出码 `0` |
 | `scripts/review.mjs` | 交付成熟度体检、`claims.mjs` 真实路径/脚本回查与 `staleTddPaths` 检测 | 交付验收与合流前；`0` 个「缺」 |
@@ -424,5 +432,27 @@ flowchart TD
 ### 交棒退出码契约（`VERIFY_EXIT`）与跨文件对拍约定
 
 - `handoff.mjs --verify` 返回四档退出码：`0`（`clean`）、`1`（`dirty`）、`3`（`truncated`）、`4`（`notApplicable` 本仓源码不适用）。
+
+### 退出码单点分层（`kit/skills/lib/exit-codes.mjs`）
+
+全部脚本共用一张表，四档语义固定：`0` 通过；`1` 有事要处理但可继续；`2` 用法问题（改命令即可）；`3` 前提事实不成立（命令没错，得去把事做出来）；`4` 只能由人类拍板。阻断码按类别登记在同一文件里，脚本只引用常量，不再各自定义数值。
+
+### 合入门禁四档（`kit/skills/lib/gate-truth.mjs`）
+
+merge 门禁由流水线**结构谓词**圈定后单源派生，结论严格互斥四档：
+
+| 结论 | 何时 | 是否阻断 |
+| --- | --- | --- |
+| `passed` | 派生出步骤且全部跑通 | 否 |
+| `failed` | 找到流水线文件却读不懂，或读得懂但一步也派生不出来 | 是 |
+| `unverified` | 派生出步骤但还没跑过 | 否 |
+| `not-applicable` | 仓库里没有任何可识别的流水线文件 | 否，但必须显式入报告 |
+
+`not-applicable` 不折成通过：`kit/` 随用户包分发，要求非该类 CI 的项目也长成某种形状，装完即不可用。判定前先取回远端引用，避免用上次取回时的旧快照回答新问题。
+
+### 参数三重对拍（`scripts/dev/cli-parity.mjs`）
+
+注册表、帮助声明、读取点必须互相对得上：帮助里声明的必须注册得上，注册了的必须有人读，暗参数只许少不许多（逐条按名字锁在登记册里）。声明位置只认行首与方括号分组两种形态，句中提及（`--body-file`、`--ignore-scripts`）不算。
+
 - `scripts/dev/preflight-contracts.mjs` 与 `scripts/dev/verify-injections.mjs` 持续对拍推送分档判据、收尾七步命令链、四字段审查记录与发版包产物分离。
 - 触碰 `AGENTS.md` `Dev Profile` 中标记为 `high-risk` 的目录或文件时，必须经独立上下文审查并补齐正反夹具与故障注入用例后再行合入。

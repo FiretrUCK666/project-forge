@@ -32,8 +32,8 @@ export const INJECTIONS_VERIFY_TOOLS = [
     what: 'C9 isSafeTaskScratchPath 放松仓外前缀校验导致主仓/父目录越界放行',
     file: 'kit/skills/lib/verify-state.mjs',
     alsoDropIn: ['.agents/skills/lib/verify-state.mjs'],
-    from: '  if (samePath(cand, scratchRoot)) return false\n  if (samePath(cand, expected)) return true',
-    to: '  if (samePath(cand, scratchRoot)) return true\n  if (samePath(cand, expected)) return true',
+    from: '  if (samePath(cand, scratchRoot)) return false',
+    to: '  if (samePath(cand, scratchRoot)) return true',
     expect: 'StageC C9',
   },
   {
@@ -74,9 +74,9 @@ export const INJECTIONS_VERIFY_TOOLS = [
   },
   {
     id: 'I203',
-    what: 'C11 validateE2eEvidenceText 放行无实质水话（ok/pass/lgtm/done/已验证）',
-    file: 'kit/skills/lib/verify-state.mjs',
-    alsoDropIn: ['.agents/skills/lib/verify-state.mjs'],
+    what: 'C11 evaluateTextSubstance 放行无实质水话（ok/pass/lgtm/done/已验证）',
+    file: 'kit/skills/lib/evidence-substance.mjs',
+    alsoDropIn: ['.agents/skills/lib/evidence-substance.mjs'],
     from: '  if (!lowered || SHALLOW_EXACT_SET.has(lowered)) {',
     to: '  if (false && (!lowered || SHALLOW_EXACT_SET.has(lowered))) {',
     expect: 'StageC C11',

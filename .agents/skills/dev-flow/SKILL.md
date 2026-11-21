@@ -46,7 +46,7 @@ metadata:
    - `verify --mode quick|smoke|full|gate`：写入 `<gitCommonDir>/project-forge-flow/tasks/<id>/evidence.json`（并向 `signals.jsonl` 写事件）绑定 `verifiedHead === HEAD`；`submit`/`merge` 现场按 `low`/`medium`/`high` 三正交策略核验，`quick --target` 绝不顶替全量门禁，无 CI 低风险纯文档变更须过 `runLowRiskDocStaticCheck`。证据只取人说过的：`--e2e-evidence` / `--visual-evidence` 的原文才写成观察记录，裸 `--visual-checked` 只记「已声明核验」，不代为生成观察串。`--artifact <path>`（可重复）与 `--visual-blocked-reason "<原因>"` 一并透传给实证校验入口：前置未实现时 Fail-Soft 放行，实现后按其返回码阻断。
    - `submit` 推后**零跟踪文件写回**，先查 OPEN PR 防重、套用 `.github/pull_request_template.md` 并继承 Milestone 后移交 `dev-review`。
 5. **审查者合入、临时 `--detach` 试合、`generic-git` 防越权与 7 步确认清理**：
-   - 独立审查 PASS（`low` 风险可免审查直接合或可选 `review-pack record` 写状态单）后由审查者执行 `flow.mjs merge`（校验 `verifiedHead === HEAD`、`reviewPassedHead === HEAD`、远端 CI 绿灯与堆叠父 PR 已合）；`generic-git` 禁本地强合（退出码 `3`，需 `--remote-merged` 或 `--human-approved`）；本地合入须先建 `.worktrees/.tmp-merge-*` `--detach` 试合复测再推进主干；弱化门禁或停损解锁（退出码 `4`）必传 `--human-approved --reason`。
+   - 独立审查 PASS（`low` 风险可免审查直接合或可选 `review-pack record` 写状态单）后由审查者执行 `flow.mjs merge`（校验 `verifiedHead === HEAD`、`reviewPassedHead === HEAD`、远端 CI 绿灯与堆叠父 PR 已合）；`generic-git` 禁本地强合（退出码 `3`，merge 现场取回远端按四态合流判定核验，核不到则阻断，仅 `--human-approved --reason` 可放行）；本地合入须先建 `.worktrees/.tmp-merge-*` `--detach` 试合复测再推进主干；弱化门禁或停损解锁（退出码 `4`）必传 `--human-approved --reason`。
    - `cleanup` 先列清单请人确认后带 `--confirm` 执行（兼容 Squash/远端 `MERGED`；放行账本 `mountedDeps`，阻断未登记外链/悬空链接，确需切断须逐条传 `--allow-outbound`，先 `unlinkSync` 再删 worktree 与分支）。
 
 ## 标准命令流
@@ -74,8 +74,8 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" verify --tier quick [--target <f
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke|full|gate [--artifact <path>]... [--visual-checked] [--visual-blocked-reason "<原因>"]
 
 # 4. 实施者提交待审 -> 移交 dev-review -> 返工 -> 审查者合入 -> 确认清理
-node ".agents/skills/dev-flow/scripts/flow.mjs" submit [--rework] [--reset-review-slot]
+node ".agents/skills/dev-flow/scripts/flow.mjs" submit [--reset-review-slot]
 node ".agents/skills/dev-flow/scripts/flow.mjs" rework [--rebut "<findingId>: <reason>"]
-node ".agents/skills/dev-flow/scripts/flow.mjs" merge [--method merge|squash|rebase] [--remote-merged] [--human-approved] [--reason "<原因>"]
+node ".agents/skills/dev-flow/scripts/flow.mjs" merge [--method merge|squash|rebase] [--human-approved] [--reason "<原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --confirm [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--allow-outbound <路径>]
 ```

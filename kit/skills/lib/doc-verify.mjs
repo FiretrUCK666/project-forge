@@ -29,6 +29,7 @@
  * 它不证明「用法正确」，只证明「不是编的」——而后者正是审核人手工核的那件事。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -119,7 +120,7 @@ async function checkCommandClaim(root, cmd) {
     const { stdout } = await run(parts[0], args, {
       cwd: root, timeout: 180000, windowsHide: true, maxBuffer: 8 * 1024 * 1024,
     })
-    return { ok: true, ran: true, exitCode: 0, tail: String(stdout).slice(-300) }
+    return { ok: true, ran: true, exitCode: EXIT.OK, tail: String(stdout).slice(-300) }
   } catch (error) {
     return {
       ok: false,

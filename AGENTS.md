@@ -53,7 +53,7 @@
 quick-test: node scripts/dev/preflight.mjs
 full-test: node scripts/dev/fixtures.mjs
 smoke-verify: node scripts/dev/preflight.mjs
-merge-gate: node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs
+merge-gate: node scripts/dev/merge-gate.mjs
 arch-rules: kit/** -> scripts/dev/**, kit/** -> scripts/lib/**, scripts/*.mjs -> scripts/dev/**, scripts/lib/** -> scripts/dev/**
 high-risk: scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md, .github/workflows/, .gitattributes
 do-not-edit: docs/archive/, docs/release-notes/
@@ -169,7 +169,7 @@ node scripts/dev/verify-injections.mjs
 ## 日常协作：改动怎么落地
 
 - **第一步：双轴五态身份判定与入站分诊**——
-  先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁自合与提前删分支，标签 403 降级）；只读为 **clone-readonly**（三选一）；未注册主机退化 `generic-git`（远端合 MR 后带 `--remote-merged`）；外部/新增 Issue 与 PR 先经 `flow.mjs intake` 业务分诊（已 `approve` 自研豁免）。
+  先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁自合与提前删分支，标签 403 降级）；只读为 **clone-readonly**（三选一）；未注册主机退化 `generic-git`（merge 现场取回远端并按四态合流判定核验，核不到就阻断，只在人类签字后放行）；外部/新增 Issue 与 PR 先经 `flow.mjs intake` 业务分诊（已 `approve` 自研豁免）。
 
 - **第二步：纯调度分波、五档分流与三正交策略**——主会话保持薄上下文纯调度底线：无论是否配置远端或大仓接入，主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查一律派发独立隔离代理。跑 `flow.mjs next`（就绪 `docs/specs/*.md` 在 `Wave 1 >= 2` 时并行派发）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项：
 
@@ -187,7 +187,7 @@ node scripts/dev/verify-injections.mjs
 
 - **第四步：认领与 PR 前文档同步**——**谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（协调者不代提 PR；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危）；统一前缀（`docs:`/`fix:`/`feat:`）、四态标签与 Milestone 继承；变基/试合附 `GIT_EDITOR=true`/`--no-edit`。PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对 `git mv` 归档至 `docs/archive/`，`1:N` 总控 PRD 走四态闭环），`submit` 推后零跟踪文件写回、自动抽取 SPEC/Todo/`evidence.json` 生成干净 PR 正文并双写评论。
 
-- **第五步：独立审查与合并**——**独立审查通过（`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮硬停损约束；触碰高风险路径须加故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 须带 `--remote-merged`）。合前强校三方 `headSha`、干净工作区与 E2E 观察；详见各技能 `SKILL.md` 与协作判据。
+- **第五步：独立审查与合并**——**独立审查通过（`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮硬停损约束；触碰高风险路径须加故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 的 merge 现场取回远端并按四态合流判定核验，核不到就阻断、只在人类签字后放行）。合前强校三方 `headSha`、干净工作区与 E2E 观察；详见各技能 `SKILL.md` 与协作判据。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo 完成记录与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、随同分支提交；

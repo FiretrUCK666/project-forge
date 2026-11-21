@@ -185,6 +185,7 @@ export function createDefaultLedger(partial = {}) {
     prNumber: partial.prNumber ?? null,
     prState: partial.prState ?? null,
     prUrl: partial.prUrl ?? null,
+    prTitleSource: partial.prTitleSource ?? null,
     prContext: partial.prContext && typeof partial.prContext === 'object' && !Array.isArray(partial.prContext)
       ? partial.prContext
       : null,
@@ -205,6 +206,14 @@ export function createDefaultLedger(partial = {}) {
     empiricalVisualCheckRequired: Boolean(partial.empiricalVisualCheckRequired),
     visualVerifiedHead: partial.visualVerifiedHead ?? null,
     visualCheckEvidence: partial.visualCheckEvidence ?? null,
+    /**
+     * 环境确实无法渲染时的诚实报阻说明。
+     *
+     * 它与 `visualCheckEvidence` 是两件事，不能共用一个字段：前者是「我没看到」，
+     * 后者是「我看到了什么」。混在一起，读的人分不出「真核验过」和「报了个阻」，
+     * 而这两件事的后果完全相反——一个可以合，一个必须等人工或有界面节点复核。
+     */
+    visualBlockedReason: partial.visualBlockedReason ?? null,
     implementerId: partial.implementerId ?? null,
     claimedBy: partial.claimedBy ?? null,
     reviewerId: partial.reviewerId ?? null,
@@ -241,8 +250,57 @@ export function createDefaultLedger(partial = {}) {
     status: partial.status ?? 'started',
     ...partial,
     explored: normalizeExploredEvidence(partial.explored),
+    /** 历史实施者集合（含接管前的原认领人），供三处自审判定按「历史 ∪ 当前」比对。 */
+    previousImplementers: Array.isArray(partial.previousImplementers) ? partial.previousImplementers.map(String) : [],
     taskId,
   }
+}
+
+/** 归一化参与人标识（去前导 `@`、小写）。 */
+function normActor(value) {
+  return String(value ?? '').trim().replace(/^@/, '').toLowerCase()
+}
+
+/**
+ * 历史实施者集合 ∪ 当前实施者（去重保序）。
+ *
+ * 三处自审判定（代码审查、规划 Critique、作者即实施者）都按这份集合比对，
+ * 不只看当前字段：一次接管就能让原实施者换个身份回来审自己的活。
+ */
+export function collectImplementerHistory(ledger) {
+  const out = []
+  const seen = new Set()
+  const push = (v) => {
+    const s = String(v ?? '').trim()
+    if (!s) return
+    const key = normActor(s)
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    out.push(s)
+  }
+  push(ledger?.implementerId)
+  push(ledger?.claimedBy)
+  for (const p of Array.isArray(ledger?.previousImplementers) ? ledger.previousImplementers : []) push(p)
+  return out
+}
+
+/** 把即将被替换的实施者记进历史（接管与重新认领时调用）。 */
+export function rememberPreviousImplementer(ledger, nextActor) {
+  const out = []
+  const seen = new Set()
+  const nextKey = normActor(nextActor)
+  const push = (v) => {
+    const s = String(v ?? '').trim()
+    if (!s) return
+    const key = normActor(s)
+    if (!key || key === nextKey || seen.has(key)) return
+    seen.add(key)
+    out.push(s)
+  }
+  for (const p of Array.isArray(ledger?.previousImplementers) ? ledger.previousImplementers : []) push(p)
+  push(ledger?.implementerId)
+  push(ledger?.claimedBy)
+  return out
 }
 
 export function readTaskLedger(mainRoot, taskId) {
@@ -479,4 +537,32 @@ export function nextReviewRound(ledger) {
   const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
   const nums = rounds.map((r) => Number(r?.round ?? r) || 0).filter((n) => n > 0)
   return nums.length > 0 ? Math.max(...nums) + 1 : 1
+}
+
+/**
+ * 这个任务当前是不是返工态——**从账本读出，不是从开关读入**。
+ *
+ * 判据是两件已经发生过的事：末轮结论是退回，且那一轮的审查令牌已被消费。
+ * 两个条件都成立，说明有人真的审过、真的退回过；缺任何一个都还没到返工。
+ *
+ * 为什么不收一个 `--rework` 开关：真实返工本来就能从账本读出来。留着开关，
+ * 模型会先传参数、再换路试——参数成了「我要走返工分支」的自我声明，
+ * 而账本里的历史才是事实。
+ */
+export function deriveReworkState(ledger) {
+  const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
+  const sorted = [...rounds].sort((a, b) => (Number(a?.round) || 0) - (Number(b?.round) || 0))
+  const last = sorted.length > 0 ? sorted[sorted.length - 1] : null
+  const verdict = String(last?.verdict ?? '').toLowerCase()
+  const tokens = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
+  const lastRoundNum = Number(last?.round) || 0
+  const consumed = tokens.some((t) => Number(t?.round) === lastRoundNum && (t?.consumed === true || Boolean(t?.consumedAt)))
+  const isRework = Boolean(last) && (verdict === 'changes' || verdict === 'changes-requested' || verdict === 'rejected') && consumed
+  return {
+    isRework,
+    round: lastRoundNum,
+    verdict: verdict || null,
+    tokenConsumed: consumed,
+    reason: isRework ? `账本 Round ${lastRoundNum} 结论为 ${verdict} 且该轮审查令牌已消费` : '账本里没有已消费令牌的退回轮次',
+  }
 }

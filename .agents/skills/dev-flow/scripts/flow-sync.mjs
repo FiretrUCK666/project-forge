@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -16,7 +17,7 @@ import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrit
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
 import { resolveEffectiveBaseSha } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, EXIT_POLICY_BLOCK } from './flow-inspect.mjs'
+import { buildTargetRepoContext } from './flow-inspect.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 export async function handleSync(opts = {}, roots) {
@@ -30,7 +31,7 @@ export async function handleSync(opts = {}, roots) {
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突再 sync`)
   if (stZ.entries.length > 0) {
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 实施工作区存在未提交改动，请先提交后再执行 sync。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const fastPrevHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
@@ -116,7 +117,7 @@ export async function handleSync(opts = {}, roots) {
         ok: false,
         blocked: true,
         code: 'BLOCKED_SYNC_REBASE_CONFLICT',
-        exitCode: EXIT_POLICY_BLOCK,
+        exitCode: EXIT.FACT,
         taskId,
         onto: targetBaseBranch,
         newBaseSha,
@@ -126,7 +127,7 @@ export async function handleSync(opts = {}, roots) {
       }
       if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
       process.stderr.write(`BLOCKED_SYNC_REBASE_CONFLICT: sync 变基到 ${targetBaseBranch} 产生冲突（${conflicts.join(', ') || rbRes.stderr}），已中止变基保护现场。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK, ...payload }
+      return { exitCode: EXIT.FACT, ...payload }
     }
 
     depMount = ledger.tier === 2 ? mountSharedDeps(roots.mainRoot, implRoot) : { mode: 'none' }
@@ -202,5 +203,5 @@ export async function handleSync(opts = {}, roots) {
     process.stdout.write(`sync 完成（task=${taskId}, syncCount=${ledger.syncCount}, onto=${targetBaseBranch}@${newBaseSha.slice(0, 7)}, HEAD=${newHeadSha?.slice(0, 7)}）。\n`)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }

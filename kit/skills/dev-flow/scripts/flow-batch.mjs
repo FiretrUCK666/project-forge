@@ -5,6 +5,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），零特定宿主名称耦合。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -20,8 +21,9 @@ import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } fro
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { buildMultiTaskWavePlan, evaluateNextState, hasRepoCiWorkflow, scanUnstartedReadySlices } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
+import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { assertPreMergeGates } from './flow-merge.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
 
@@ -219,7 +221,7 @@ async function handleBatchPlan(opts, roots) {
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${wave1[0].taskId}` }], { repoRoot: roots.mainRoot })
     }
   }
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }
 
 async function handleCheckDisjoint(opts, roots) {
@@ -248,19 +250,19 @@ async function handleCheckDisjoint(opts, roots) {
       blocked: true,
       disjoint: false,
       code: 'BLOCKED_OVERLAPPING_SLICE_FILES',
-      exitCode: EXIT_POLICY_BLOCK,
+      exitCode: EXIT.FACT,
       overlaps,
       message: `BLOCKED_OVERLAPPING_SLICE_FILES: 并行切片存在文件重叠（${overlaps.map((o) => `${o.file}: [${o.tasks.join(', ')}]`).join('; ')}），必须拆波串行执行。`,
     }
     if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
     process.stderr.write(`${out.message}\n`)
-    return { exitCode: EXIT_POLICY_BLOCK, ...out }
+    return { exitCode: EXIT.FACT, ...out }
   }
 
   const out = { ok: true, disjoint: true, tasks: perTask, overlaps: [] }
   if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   else process.stdout.write(`并行切片互斥校验通过：${taskIds.length} 个任务零文件重叠。\n`)
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }
 
 async function handleMergeQueue(opts, roots) {
@@ -284,7 +286,7 @@ async function handleMergeQueue(opts, roots) {
       const out = { ok: true, action: 'enqueued', queue }
       if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
       else process.stdout.write(`已入队 FIFO 合并队列：${queue.join(', ')}\n`)
-      return { exitCode: 0, ...out }
+      return { exitCode: EXIT.OK, ...out }
     }
 
     const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
@@ -333,33 +335,20 @@ async function handleMergeQueue(opts, roots) {
         queue.unshift(taskId)
         results.push({ taskId, ok: false, blocked: true, code: gate.code, exitCode: gate.exitCode })
         stoppedWithFailure = true
-        exitCode = gate.exitCode ?? EXIT_POLICY_BLOCK
+        exitCode = gate.exitCode ?? EXIT.FACT
         break
       }
 
       if (needsOnlineRemoteMerge && gate.currentHead) {
         const checks = await backend.getCommitChecks({ repo: originFull, ref: gate.currentHead })
         const ciRequired = hasRepoCiWorkflow(gate.implRoot)
-        let ciBlock = null
-        if (checks?.ok) {
-          if (checks.bucket === 'fail' && !opts['human-approved']) {
-            const list = (checks.failed ?? []).map((c) => `${c.name}[${c.state}]`).join(', ')
-            ciBlock = { code: 'BLOCKED_CI_FAILED', msg: `BLOCKED_CI_FAILED: 当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 检查未通过（${list}），禁止带病合并。` }
-          } else if (checks.bucket === 'pending' && !opts['human-approved']) {
-            const list = (checks.pending ?? []).map((c) => `${c.name}[${c.state}]`).join(', ')
-            ciBlock = { code: 'BLOCKED_CI_PENDING', msg: `BLOCKED_CI_PENDING: 当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 仍在运行或排队（${list}），请等待全部变绿后再执行 merge。` }
-          } else if (checks.bucket === 'none' && ciRequired && !opts['human-approved']) {
-            ciBlock = { code: 'BLOCKED_CI_PENDING', msg: `BLOCKED_CI_PENDING: 仓库存在检查工作流，但当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端尚未注册 check-run，请等待检查变绿后再执行 merge。` }
-          }
-        } else if (checks && !checks.skipped && ciRequired && !opts['human-approved']) {
-          ciBlock = { code: 'BLOCKED_CI_UNVERIFIED', msg: `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。` }
-        }
-        if (ciBlock) {
+        const verdict = evaluateRemoteChecks(checks, { ciRequired, headSha: gate.currentHead })
+        if (verdict.blocking && !opts['human-approved']) {
           queue.unshift(taskId)
-          process.stderr.write(`${ciBlock.msg}\n`)
-          results.push({ taskId, ok: false, blocked: true, code: ciBlock.code, exitCode: EXIT_POLICY_BLOCK, checks })
+          process.stderr.write(`${verdict.message}\n`)
+          results.push({ taskId, ok: false, blocked: true, code: verdict.code, exitCode: EXIT.FACT, checks })
           stoppedWithFailure = true
-          exitCode = EXIT_POLICY_BLOCK
+          exitCode = EXIT.FACT
           break
         }
       }
@@ -375,7 +364,6 @@ async function handleMergeQueue(opts, roots) {
         mergeRes = await backend.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
       } else if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git') {
         mergeRes = await backend.mergePr({
-          remoteMerged: Boolean(opts['remote-merged']),
           humanApproved: Boolean(opts['human-approved']),
           ledger,
           branch: ledger.branch,
@@ -411,7 +399,7 @@ async function handleMergeQueue(opts, roots) {
         }))
         results.push({ taskId, ok: false, status: 'rework', baseDrifted, queueConflict: conflictInfo })
         stoppedWithFailure = true
-        exitCode = mergeRes?.exitCode ?? EXIT_POLICY_BLOCK
+        exitCode = mergeRes?.exitCode ?? EXIT.FACT
         break
       }
 
@@ -475,7 +463,7 @@ async function handleResumeSession(opts, roots) {
     process.stdout.write(`会话句柄已轮换（task=${taskId}, epoch=${sessionHandle.epoch}, token=${sessionHandle.handoffToken}）。\n`)
     printNextStep([{ skill: 'dev-flow', text: nextState.command }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }
 
 export async function handleBatch(opts, roots) {

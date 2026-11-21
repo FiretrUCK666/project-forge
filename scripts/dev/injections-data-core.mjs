@@ -274,8 +274,8 @@ export const INJECTIONS_CORE = [
     id: 'I23',
     what: '放行外部 PR --untrusted-scan 高危 workflow/postinstall 拦截',
     file: 'kit/skills/dev-review/scripts/review-pack.mjs',
-    from: '    if (hazards.length > 0 && !opts.humanApprovedExec) {',
-    to: '    if (false && hazards.length > 0 && !opts.humanApprovedExec) {',
+    from: '  if (hazards.length > 0 && !opts.humanApprovedExec) {',
+    to: '  if (false && hazards.length > 0 && !opts.humanApprovedExec) {',
     expect: '高危 workflow/postinstall 未拦截',
   },
   {
@@ -492,10 +492,11 @@ export const INJECTIONS_CORE = [
   },
   {
     id: 'I50',
-    what: '禁用 flow-merge.mjs 对远端 CI fail 状态的合并阻断',
-    file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
-    from: "        if (checks.bucket === 'fail' && !opts['human-approved']) {",
-    to: "        if (false && checks.bucket === 'fail' && !opts['human-approved']) {",
+    what: '禁用远端 CI fail 状态的合并阻断（判定单点失效，两条合入路径同时失守）',
+    file: 'kit/skills/lib/gate-truth.mjs',
+    alsoDropIn: ['.agents/skills/lib/gate-truth.mjs'],
+    from: "        verdict: REMOTE_CHECK_VERDICT.FAILED,\n        blocking: true,",
+    to: "        verdict: REMOTE_CHECK_VERDICT.FAILED,\n        blocking: false,",
     expect: '远端 CI 失败未阻断合并：',
   },
 ]

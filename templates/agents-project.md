@@ -170,7 +170,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
 - **第一步：双轴五态身份判定与入站分诊**——
 <!-- project-forge: if has-remote -->
-  先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁自合与提前删分支，标签 403 降级）；只读为 **clone-readonly**（三选一）；未注册主机退化 `generic-git`（远端合 MR 后带 `--remote-merged`）；外部/新增 Issue 与 PR 先经 `flow.mjs intake` 业务分诊（已 `approve` 自研豁免）。
+  先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁自合与提前删分支，标签 403 降级）；只读为 **clone-readonly**（三选一）；未注册主机退化 `generic-git`（merge 现场取回远端并按四态合流判定核验，核不到就阻断，只在人类签字后放行）；外部/新增 Issue 与 PR 先经 `flow.mjs intake` 业务分诊（已 `approve` 自研豁免）。
 <!-- project-forge: endif -->
 <!-- project-forge: if no-remote -->
   还没有远端时按 `local-only` 运作，通过本地特性分支与临时 `--detach` 试合推进主干；高风险或 `one-way` 变更仍须独立审查，新增提案可走 `flow.mjs intake` 离线分诊。
@@ -193,7 +193,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 <!-- project-forge: if has-remote -->
 - **第四步：认领与 PR 前文档同步**——**谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（协调者不代提 PR；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危）；统一前缀（`docs:`/`fix:`/`feat:`）、四态标签与 Milestone 继承；变基/试合附 `GIT_EDITOR=true`/`--no-edit`。PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对 `git mv` 归档至 `docs/archive/`，`1:N` 总控 PRD 走四态闭环），`submit` 推后零跟踪文件写回、自动抽取 SPEC/Todo/`evidence.json` 生成干净 PR 正文并双写评论。
 
-- **第五步：独立审查与合并**——**独立审查通过（`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮硬停损约束；触碰高风险路径须加故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 须带 `--remote-merged`）。合前强校三方 `headSha`、干净工作区与 E2E 观察；详见各技能 `SKILL.md` 与协作判据。
+- **第五步：独立审查与合并**——**独立审查通过（`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮硬停损约束；触碰高风险路径须加故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 的 merge 现场取回远端并按四态合流判定核验，核不到就阻断、只在人类签字后放行）。合前强校三方 `headSha`、干净工作区与 E2E 观察；详见各技能 `SKILL.md` 与协作判据。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo 完成记录与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、随同分支提交；

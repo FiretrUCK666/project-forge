@@ -5,6 +5,7 @@
  * 自动被 `scripts/dev/fixtures.mjs` 发现（域 `empirical-cycle`）。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -150,7 +151,7 @@ export function registerEmpiricalCycleCases(cases) {
       taskId: 'render-probe',
       ledger: { taskId: 'render-probe', caseType: 3, branch: 'feat/render', lastVerifyExitCode: 0, verifiedHead: head, ...(extra.ledger ?? {}) },
       policy: { riskTier: 'medium', highRiskHits: [], oneWayBoundaryHits: [] },
-      evidence: { gates: { full: { cmd: 'node test.mjs', exitCode: 0, durationMs: 10 } }, ...evidence },
+      evidence: { gates: { full: { cmd: 'node test.mjs', exitCode: EXIT.OK, durationMs: 10 } }, ...evidence },
       currentHead: head,
       changedFiles: [...ui],
       visualFilesChanged: [...ui],
@@ -293,8 +294,8 @@ export function registerEmpiricalCycleCases(cases) {
     const gate = validateVerificationEvidence({
       policy: { riskTier: 'medium', requiredGates: ['full'], visualFilesChanged: ['src/App.tsx'] },
       evidence: {
-        headSha: head, dirty: false, exitCode: 0,
-        gates: { full: { headSha: head, exitCode: 0, executed: true, succeeded: true, dirty: false } },
+        headSha: head, dirty: false, exitCode: EXIT.OK,
+        gates: { full: { headSha: head, exitCode: EXIT.OK, executed: true, succeeded: true, dirty: false } },
         visualVerifiedHead: head,
         visualCheckEvidence: SYNTHETIC_OBSERVATION_TEXTS[1],
       },
@@ -398,8 +399,12 @@ export function registerEmpiricalCycleCases(cases) {
       }, roots))
       if (accepted.res !== 0) return `真实阻塞理由未经 CLI 放行：exit=${accepted.res} out=${accepted.stdout} err=${accepted.stderr}`
       const ledgerAfter = readTaskLedger(dir, 'obs-t')
-      if (!String(ledgerAfter.visualCheckEvidence ?? '').includes('当前环境无图形会话')) {
-        return `--visual-blocked-reason 未被写入账本（注册了却不消费）：${ledgerAfter.visualCheckEvidence}`
+      if (!String(ledgerAfter.visualBlockedReason ?? '').includes('当前环境无图形会话')) {
+        return `--visual-blocked-reason 未被写入账本（注册了却不消费）：${ledgerAfter.visualBlockedReason}`
+      }
+      // 阻塞说明落自己的字段；证据字段只写真实观察，两者不共用。
+      if (ledgerAfter.visualCheckEvidence) {
+        return `阻塞说明被当成了观察证据：${ledgerAfter.visualCheckEvidence}`
       }
       return true
     } finally { rmTree(dir) }

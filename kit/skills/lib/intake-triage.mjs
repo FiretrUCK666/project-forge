@@ -10,6 +10,7 @@ import { join } from 'node:path'
 
 import { buildIntakeDecisionComments } from './doc-comments.mjs'
 import { parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { resolveApprovalBasis } from './plan-exit-gate.mjs'
 import { posixPath, readJsonSafe, readTextSafe, withFileLock, writeJsonAtomic } from './git.mjs'
 import { parseBodyRelations, parsePfStateTags } from './github-parse.mjs'
 import { listTaskLedgers, sanitizeTaskId } from './ledger.mjs'
@@ -149,9 +150,20 @@ export function hasIntakeBlockingSignal({ record = null, localPr = null, labels 
   }
 }
 
-function isApprovedFrontmatter(fmData) {
-  if (!fmData || typeof fmData !== 'object') return false
-  return fmData.approved === true || String(fmData.approved ?? '').trim().toLowerCase() === 'true'
+/**
+ * 文档里的 `approved: true` 是否站得住——调 `resolveApprovalBasis` 这一个判据，不另写一份。
+ *
+ * 只读 `approved` 这一位，会把三种情况都放进来： Critique 直接过了的、带实质理由跳过的、
+ * 人类签字放行的（这三种成立），以及**签字过期**、毫无依据的（这两种不成立）。
+ * 分诊要豁免的是「这份规划已经被人认过」，那就要问同一个问题、得同一个答案——
+ * 两处各算一次，必然出现「退场门禁说没依据、分诊说已核准」。
+ */
+function approvalOfDoc(raw, rel) {
+  const parsed = parseDocFrontmatter(raw)
+  const data = parsed.data ?? {}
+  const basis = resolveApprovalBasis({ rel, text: raw, data })
+  const approvedFlag = data.approved === true || String(data.approved ?? '').trim().toLowerCase() === 'true'
+  return { approved: approvedFlag && basis.applicable && basis.hasBasis, basis, data }
 }
 
 /** 检查目标 Issue/PR/分支/任务是否命中本仓已通过 `dev-plan` 审批流核准（`approved: true`）的自研规划文档。 */
@@ -195,8 +207,9 @@ export function isApprovedInternalPlan(repoRoot, input = {}) {
   for (const rel of candidateDocs) {
     const raw = readTextSafe(join(repoRoot, rel))
     if (!raw) continue
-    const fm = parseDocFrontmatter(raw)
-    if (!isApprovedFrontmatter(fm.data)) continue
+    const verdict = approvalOfDoc(raw, rel)
+    if (!verdict.approved) continue
+    const fm = { data: verdict.data }
     const fn = parseDocFilename(rel)
     const docIssue = Number(fm.data?.issue ?? fn?.issue)
     const docPr = Number(fm.data?.pr)
@@ -641,16 +654,26 @@ export function evaluateIntakeTriage(repoRoot, input = {}) {
   const decisionSource = explicitDecisionRaw ? 'explicit' : (exemption.exempt ? 'internal-plan-exempt' : 'rule-engine')
   const labels = [...(INTAKE_DECISION_TO_LABELS[decision] ?? [])]
   const shouldClose = decision === 'reject' || decision === 'merge-duplicate'
+  // 补充字段逐条带源：哪些字段不是平台上的、平台当时为什么读不到。
+  //
+  // 结论是「这个提案该不该收」，读的却是调用方转述的内容时，必须让人看得出来——
+  // 否则同一份提案换个标题就能绕过非目标判定，而报告上一切正常。
   const reason = buildDefaultReason(decision, dimensions, exemption)
+  const supplemented = Array.isArray(input.supplemented) ? input.supplemented.filter(Boolean) : []
+  const basisNote = supplemented.length === 0
+    ? null
+    : `判定依据里有 ${supplemented.length} 个字段来自调用方补充（${supplemented.map((s) => s.field).join(', ')}），`
+      + `平台侧未提供：${supplemented[0].reason ?? '未记录原因'}`
+  const reasonWithNote = basisNote ? `${reason}（${basisNote}）` : reason
   const rollbackHint = buildRollbackHint({ targetType, targetNumber, decision, labels })
   const rendered = buildIntakeDecisionComments({
     targetType,
     targetNumber,
     decision,
-    reason,
-    summary: reason,
+    reason: reasonWithNote,
+    summary: reasonWithNote,
     rationale,
-    humanExplanation: rationale || reason,
+    humanExplanation: rationale || reasonWithNote,
     duplicateOf,
     dimensions,
     labels,
@@ -683,7 +706,8 @@ export function evaluateIntakeTriage(repoRoot, input = {}) {
     matchedTaskId: exemption.matchedTaskId,
     shouldClose,
     labels,
-    reason,
+    reason: reasonWithNote,
+    supplemented,
     rationale: rationale || null,
     duplicateOf: duplicateOf || null,
     featureRef,

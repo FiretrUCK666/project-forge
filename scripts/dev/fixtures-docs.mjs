@@ -122,7 +122,7 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       return `复核后 approve 失败：${okApprove.stderr}`
     }
 
-    const exApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--skip-critique-reason', 'emergency-fix', '--json'], { cwd: dir })
+    const exApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--skip-critique-reason', '紧急修复：停线事故，先放行评审把补丁推上去', '--json'], { cwd: dir })
     if (exApprove.status !== 0 || !JSON.parse(exApprove.stdout).critiqueSkipped) {
       return `--skip-critique-reason 豁免失败：${exApprove.stderr}`
     }

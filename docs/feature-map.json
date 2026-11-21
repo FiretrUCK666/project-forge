@@ -36,7 +36,9 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-survey.mjs",
-        "scripts/dev/fixtures-heterogeneous-survey.mjs"
+        "scripts/dev/fixtures-heterogeneous-survey.mjs",
+        "docs/archive/specs/261117-issue49-survey-honesty-spec.md",
+        "docs/archive/specs/261118-issue74-b4a-heterogeneous-survey-spec.md"
       ]
     },
     {
@@ -158,7 +160,10 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-handoff-review.mjs",
-        "scripts/dev/fixtures-claims.mjs"
+        "scripts/dev/fixtures-claims.mjs",
+        "docs/archive/specs/261117-issue52-review-independence-spec.md",
+        "docs/archive/specs/261118-issue57-review-empirical-gate-spec.md",
+        "docs/archive/specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md"
       ]
     },
     {
@@ -323,7 +328,9 @@
         "scripts/dev/fixtures-flow-cleanup.mjs",
         "scripts/dev/fixtures-e2e-gate.mjs",
         "scripts/dev/fixtures-attribution-routing.mjs",
-        "scripts/dev/fixtures-plan-wave.mjs"
+        "scripts/dev/fixtures-plan-wave.mjs",
+        "docs/archive/specs/261120-issue113-flow-truth-spec.md",
+        "docs/specs/261120-issue116-w25-flow-defects-spec.md"
       ]
     },
     {
@@ -476,7 +483,8 @@
         }
       ],
       "testRefs": [
-        "scripts/dev/fixtures-iterate-evolution.mjs"
+        "scripts/dev/fixtures-iterate-evolution.mjs",
+        "docs/archive/specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md"
       ]
     },
     {
@@ -514,6 +522,260 @@
         "scripts/dev/fixtures.mjs",
         "scripts/dev/verify-injections.mjs"
       ]
+    },
+    {
+      "id": "flow-truth-gate",
+      "name": "合入门禁单源派生与四档互斥结论",
+      "entrypoints": [
+        "scripts/dev/merge-gate.mjs",
+        "kit/skills/lib/gate-truth.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/gate-truth.mjs",
+        "scripts/dev/merge-gate.mjs"
+      ],
+      "businessFlows": [
+        "从流水线结构谓词圈定清单并逐块实跑",
+        "输出 passed/failed/unverified/not-applicable 四档且不互相折叠"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-merge-gate",
+          "kind": "command",
+          "command": "node scripts/dev/merge-gate.mjs --dry-run",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "合入门禁",
+            "merge-gate",
+            "四档"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs"
+      ]
+    },
+    {
+      "id": "flow-truth-exit",
+      "name": "退出码四档单点分层与阻断码登记",
+      "entrypoints": [
+        "kit/skills/lib/exit-codes.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/exit-codes.mjs"
+      ],
+      "businessFlows": [
+        "统一 0/1/2/3/4 四档语义与阻断码到档位映射",
+        "全脚本引用常量而非手写字面量"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-exit-codes",
+          "kind": "command",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "退出码",
+            "exit code",
+            "阻断码"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs"
+      ]
+    },
+    {
+      "id": "flow-truth-evidence",
+      "name": "实证文本实质判据与放行理由契约",
+      "entrypoints": [
+        "kit/skills/lib/evidence-substance.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/evidence-substance.mjs",
+        "kit/skills/lib/doc-approval.mjs"
+      ],
+      "businessFlows": [
+        "判断一段文字算不算实证（提审与观察共用）",
+        "放行理由更严一档：必须说清绕过什么，不设措辞白名单"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-evidence-substance",
+          "kind": "command",
+          "command": "node scripts/dev/fixtures.mjs --domain flow-truth",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "实证",
+            "放行理由",
+            "占位词"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs",
+        "scripts/dev/injections-data-flow-truth.mjs"
+      ]
+    },
+    {
+      "id": "flow-truth-cli-parity",
+      "name": "参数注册表、帮助声明与读取点三重对拍",
+      "entrypoints": [
+        "scripts/dev/cli-parity.mjs"
+      ],
+      "modules": [
+        "scripts/dev/cli-parity.mjs"
+      ],
+      "businessFlows": [
+        "帮助里声明的必须注册得上、注册了的必须有人读",
+        "暗参数按名字锁基线，只许变短"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-cli-parity",
+          "kind": "command",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "参数对拍",
+            "cli-parity",
+            "暗参数",
+            "死参数"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs"
+      ]
+    },
+    {
+      "id": "backup",
+      "name": "写前增量快照与回滚",
+      "entrypoints": [
+        "scripts/backup.mjs"
+      ],
+      "modules": [
+        "scripts/backup.mjs"
+      ],
+      "businessFlows": [
+        "写前增量快照与回滚 主入口 (scripts/backup.mjs)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-backup",
+          "kind": "command",
+          "command": "node scripts/backup.mjs list .",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "backup",
+            "写前增量快照与回滚"
+          ]
+        }
+      ],
+      "testRefs": []
+    },
+    {
+      "id": "skill",
+      "name": "SKILL",
+      "entrypoints": [
+        "SKILL.md"
+      ],
+      "modules": [
+        "SKILL.md"
+      ],
+      "businessFlows": [
+        "[cli] CLI:SKILL.md (SKILL.md)"
+      ],
+      "verificationTools": [],
+      "testRefs": [
+        "docs/archive/specs/261116-issue43-v7-m5-align-skills-docs-bootstrap-spec.md",
+        "docs/archive/specs/261118-issue71-b1-skill-discovery-spec.md"
+      ]
+    },
+    {
+      "id": "cli",
+      "name": "cli",
+      "entrypoints": [
+        "kit/skills/lib/cli.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/cli.mjs"
+      ],
+      "businessFlows": [
+        "cli 主入口 (kit/skills/lib/cli.mjs)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-cli",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "cli"
+          ]
+        }
+      ],
+      "testRefs": []
+    },
+    {
+      "id": "check",
+      "name": "check.yml",
+      "entrypoints": [
+        ".github/workflows/check.yml"
+      ],
+      "modules": [
+        ".github/workflows/check.yml"
+      ],
+      "businessFlows": [
+        "[job] check.yml (.github/workflows/check.yml)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-check",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "check",
+            "check.yml"
+          ]
+        }
+      ],
+      "testRefs": []
+    },
+    {
+      "id": "release",
+      "name": "release.yml",
+      "entrypoints": [
+        ".github/workflows/release.yml"
+      ],
+      "modules": [
+        ".github/workflows/release.yml"
+      ],
+      "businessFlows": [
+        "[job] release.yml (.github/workflows/release.yml)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-release",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "release",
+            "release.yml"
+          ]
+        }
+      ],
+      "testRefs": []
     }
   ]
 }

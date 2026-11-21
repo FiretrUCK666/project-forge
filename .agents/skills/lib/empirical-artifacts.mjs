@@ -8,11 +8,12 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块）。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { statSync } from 'node:fs'
 import { basename, isAbsolute, relative, resolve } from 'node:path'
 
 import { posixPath, readJsonSafe, sha256File, writeJsonAtomic } from './git.mjs'
-import { validateE2eEvidenceText } from './feature-map.mjs'
+import { evaluateTextSubstance } from './evidence-substance.mjs'
 
 /** 单个附件体积上限：超过它就不再是「实证产物」，而是留下来的临时大二进制。 */
 export const ARTIFACT_MAX_BYTES = 50 * 1024 * 1024
@@ -134,7 +135,7 @@ export function normalizeArtifactRecords({ repoRoot = null, artifacts = [], capt
 
 /**
  * 判断一段观察文本是否「有实质」：拒绝占位符、无信息水话与旧式合成串。
- * 复用 `validateE2eEvidenceText` 的同一套判据，不再另立第二份口径。
+ * 判据只有一处实现（`evidence-substance.mjs`），提审、审查回执、放行理由三处都调它。
  */
 export function evaluateObservationSubstance(raw) {
   const text = String(raw ?? '').trim()
@@ -147,7 +148,7 @@ export function evaluateObservationSubstance(raw) {
       reason: `观察摘要「${text}」是旧式硬编码确认串，没有记录任何真实渲染结果；请写清看了哪个界面、看到了什么。`,
     }
   }
-  const check = validateE2eEvidenceText(text)
+  const check = evaluateTextSubstance(text, { subject: '观察摘要' })
   if (!check.ok) return { ok: false, code: check.code, reason: check.reason }
   return { ok: true, code: null, reason: null, text: check.cleaned }
 }
@@ -177,7 +178,7 @@ export function validateArtifactsAndVisual({
     return {
       ok: false,
       code: normalized.code ?? 'BLOCKED_ARTIFACT_INVALID',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       reason: normalized.error,
       records: normalized.records,
       errors: normalized.errors,
@@ -203,7 +204,7 @@ export function validateArtifactsAndVisual({
   }
 
   if (!required || visual.satisfiedBy) {
-    return { ok: true, code: null, exitCode: 0, reason: null, records: normalized.records, errors: [], visual }
+    return { ok: true, code: null, exitCode: EXIT.OK, reason: null, records: normalized.records, errors: [], visual }
   }
 
   const placeholder = observation.code === 'BLOCKED_VISUAL_OBSERVATION_PLACEHOLDER' ? observation.reason : null
@@ -212,7 +213,7 @@ export function validateArtifactsAndVisual({
     placeholder,
     '请至少满足一项：① 附真实非空实证附件 --artifact "<产物路径>"（可多个）；② 写下实际渲染/交互观察摘要（看了哪一屏、看到了什么）；③ 环境确实无法渲染时显式声明 --visual-blocked-reason "<阻塞原因>" 诚实报阻。',
   ].filter(Boolean).join(' ')
-  return { ok: false, code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED', exitCode: 3, reason, records: normalized.records, errors: [], visual }
+  return { ok: false, code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED', exitCode: EXIT.FACT, reason, records: normalized.records, errors: [], visual }
 }
 
 /**

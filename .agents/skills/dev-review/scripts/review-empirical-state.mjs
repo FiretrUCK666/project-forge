@@ -11,6 +11,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { escalateToBackend } from '../../lib/escalation.mjs'
+import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { artifactPathsOf, evaluateObservationSubstance, validateArtifactsAndVisual } from '../../lib/empirical-artifacts.mjs'
 import {
   canonicalPath, execShellCommand, gitStatusPorcelainZ,
@@ -387,7 +388,7 @@ export async function checkDirtyFaultResidueBeforeSync({ mainRoot, gitDir, opts,
   return {
     blocked: true,
     code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-    exitCode: EXIT.UNTRUSTED_HAZARD,
+    exitCode: EXIT.FACT,
     mode,
     round: expectedRound,
     targetRoot: posixPath(slotRoot),
@@ -448,7 +449,7 @@ export function emitGateBlock({ opts, code, payload, textLines }) {
     process.stdout.write(`${textLines.join('\n')}\n`)
   }
   process.stderr.write(`${payload.error ?? code}\n`)
-  return payload.exitCode ?? EXIT.UNTRUSTED_HAZARD
+  return payload.exitCode ?? EXIT.FACT
 }
 
 export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, receipt, diff, reviewRoot, scanUntrustedDiff }) {
@@ -458,9 +459,36 @@ export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, rece
 
   const scanRes = scanUntrustedDiff(diff, reviewRoot)
   const hazards = scanRes.hazards ?? []
+  // 本次调用带着放行开关，就先验理由：只查开关不查理由，等于这道闸门只认喊话。
+  // 账本里已经有批准记录（task / receipt）的情形不在这里验——那是上一次已经验过的结果，
+  // 现在再要一次理由，会让「已经批过」变成每次执行都得重新批。
+  const wantsBypassNow = Boolean(opts.humanApprovedExec || opts['human-approved'])
+  if (wantsBypassNow) {
+    const reasonCheck = evaluateReleaseReason(opts.reason, {
+      subject: opts.humanApprovedExec ? '在不可信代码上执行的理由' : '把不可信扫描记为已批准的理由',
+    })
+    if (!reasonCheck.ok) {
+      const flags = opts.humanApprovedExec ? '--human-approved-exec' : '--human-approved'
+      const msg = `${reasonCheck.code}: ${reasonCheck.reason} ${flags} 必须写清：看过哪些高危项、为什么判定可接受、怎么隔离或复核。`
+      return {
+        blocked: true,
+        payload: {
+          status: reasonCheck.code,
+          code: reasonCheck.code,
+          exitCode: EXIT.USAGE,
+          mode,
+          pr: prNo ?? task?.prNumber ?? null,
+          headSha,
+          hazards,
+          error: msg,
+        },
+        textLines: [reasonCheck.code, msg],
+      }
+    }
+    opts.releaseReason = reasonCheck.cleaned
+  }
   const isApproved = Boolean(
-    opts.humanApprovedExec
-    || opts['human-approved']
+    wantsBypassNow
     || task?.untrustedApproved === true
     || task?.humanApprovedExec === true
     || (receipt?.headSha === headSha && receipt?.humanApprovedExec === true),
@@ -479,7 +507,7 @@ export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, rece
       payload: {
         status: 'BLOCKED_UNTRUSTED_HAZARD',
         code: 'BLOCKED_UNTRUSTED_HAZARD',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
+        exitCode: EXIT.FACT,
         mode,
         pr: prNo ?? task?.prNumber ?? null,
         headSha,
@@ -510,7 +538,7 @@ export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, rece
       payload: {
         status: 'BLOCKED_UNTRUSTED_HAZARD',
         code: 'BLOCKED_UNTRUSTED_HAZARD',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
+        exitCode: EXIT.FACT,
         mode,
         pr: prDisplay,
         headSha,

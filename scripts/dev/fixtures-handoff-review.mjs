@@ -118,7 +118,7 @@ cases.push(["交接包必须带设计方案，且不许把同一件事说两遍"
   const { buildHandoff } = await import("../../kit/skills/lib/handoff-package.mjs")
 
   const spec = [
-    "---", "kind: spec", "title: h", "status: approved", "owner: me", "---", "",
+    "---", "kind: spec", "title: h", "status: approved", "owner: me", "approved: true", "plan_critique: passed", "---", "",
     "# SPEC: h", "",
     "## 要解决的问题", "", "某功能要改。", "",
     "## 设计方案与契约变更", "", "### 接口变更", "",
@@ -257,7 +257,7 @@ cases.push(["交接包给角色边界与状态机指针，不抄流程清单", a
     "README.md": "# w\n\n角色边界测试。\n",
     "AGENTS.md": "```yaml\nquick-test: node --test\n```\n",
     "docs/specs/261117-issue7-w-spec.md": [
-      "---", "kind: spec", "title: w", "status: approved", "owner: me", "---", "",
+      "---", "kind: spec", "title: w", "status: approved", "owner: me", "approved: true", "plan_critique: passed", "---", "",
       "# SPEC: w", "", "## 要解决的问题", "", "某功能要改。", "",
       "## 冻结的验收标准", "", "- [ ] C1: 退出码 0", "",
     ].join("\n"),
@@ -681,7 +681,7 @@ cases.push(["归档之后审核交接包仍拿得到验收标准", async () => {
     const fs = await import("node:fs")
     fs.mkdirSync(join(wt, "docs", "archive", "specs"), { recursive: true })
     fs.writeFileSync(join(wt, "docs", "archive", "specs", "x-spec.md"), [
-      "---", "kind: spec", "title: x", "status: implemented", "owner: me", "---", "",
+      "---", "kind: spec", "title: x", "status: implemented", "owner: me", "approved: true", "plan_critique: passed", "---", "",
       "# SPEC: x", "", "## 冻结的验收标准", "", "- [x] C1: 退出码 0", "- [x] C2: 不误报", "",
     ].join("\n"))
 

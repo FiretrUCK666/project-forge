@@ -348,7 +348,7 @@ export function registerReviewEmpiricalCases(cases) {
       writeFileSync(join(implWt, 'src/app.mjs'), '// R2 commit\nexport const computeVal = () => 2\n')
       gitCommitFast(implWt, 'fix: r2', { updateOnly: true })
       await handleVerify({ task: 'r-t', mode: 'full' }, roots)
-      await handleSubmit({ task: 'r-t', agent: 'alice', rework: true }, roots)
+      await handleSubmit({ task: 'r-t', agent: 'alice' }, roots)
 
       const r2Blocked = await runRp(['--task', 'r-t', '--round', '2', '--include-diff', '--json'], dir)
       if (r2Blocked.status !== 3 || !`${r2Blocked.stdout}\n${r2Blocked.stderr}`.includes('BLOCKED_EMPIRICAL_FIRST')) {
@@ -476,7 +476,21 @@ export function registerReviewEmpiricalCases(cases) {
           return `未批准高危外部 PR 竟执行了 check-empirical：exit=${hazEmp.status} out=${hazEmp.stdout}`
         }
         // 人类明确批准后放行
-        const aprEmp = await runRp(['check-empirical', '--pr', '72', '--human-approved-exec', '--cmd', 'node test.mjs', '--json'], extDir, fakeGhExt.env)
+        // 放行必须带实质理由：只给开关不给理由，闸门等于没关。
+        // 这两条断言针对的是「旁路本身的契约」，不是某一次调用能不能过。
+        const noReasonExec = await runRp(['check-empirical', '--pr', '72', '--human-approved-exec', '--cmd', 'node test.mjs', '--json'], extDir, fakeGhExt.env)
+        if (noReasonExec.status === 0) {
+          return '--human-approved-exec 不给理由就放行了——旁路闸门形同虚设'
+        }
+        if (!`${noReasonExec.stdout}\n${noReasonExec.stderr}`.includes('BLOCKED_SHALLOW_OVERRIDE_REASON')) {
+          return `--human-approved-exec 缺理由被拒但没说明原因：${noReasonExec.stdout}${noReasonExec.stderr}`
+        }
+        const fluffExec = await runRp(['check-empirical', '--pr', '72', '--human-approved-exec', '--reason', 'ok', '--cmd', 'node test.mjs', '--json'], extDir, fakeGhExt.env)
+        if (fluffExec.status === 0) {
+          return '--human-approved-exec 用占位词当理由就放行了——只查非空等于给水话留门'
+        }
+        // 人类明确批准后放行（理由要写清看过什么、为什么可接受、怎么隔离）
+        const aprEmp = await runRp(['check-empirical', '--pr', '72', '--human-approved-exec', '--reason', '已核对 workflow 与依赖脚本：仅固定版本官方 action，无 postinstall，且以 --ignore-scripts 安装', '--cmd', 'node test.mjs', '--json'], extDir, fakeGhExt.env)
         if (aprEmp.status !== 0) {
           return `人类批准高危外部 PR 后 check-empirical 失败：exit=${aprEmp.status} out=${aprEmp.stdout} err=${aprEmp.stderr}`
         }

@@ -478,10 +478,10 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
   const revI = join(repoI, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
 
   // Critique 双侧锁 + 3 轮硬停损 + override
-  assertOk(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-1', '--findings', 'C1: need clearer boundary'], repoI, env), 'Scenario I critique R1')
+  assertBlocked(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-1', '--findings', 'C1: need clearer boundary'], repoI, env), 'CRITIQUE_REJECTED', 'Scenario I critique R1')
   assertBlocked(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-1', '--findings', 'same'], repoI, env), 'BLOCKED_CRITIQUE_SAME_REVIEWER', 'Scenario I critique same reviewer')
   writeFiles(repoI, { 'docs/specs/261118-issue1-s1-spec.md': `${readFileSync(join(repoI, 'docs/specs/261118-issue1-s1-spec.md'), 'utf8')}\n- rev2\n` })
-  assertOk(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-2', '--findings', 'C1: need boundary 2'], repoI, env), 'Scenario I critique R2')
+  assertBlocked(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-2', '--findings', 'C1: need boundary 2'], repoI, env), 'CRITIQUE_REJECTED', 'Scenario I critique R2')
   writeFiles(repoI, { 'docs/specs/261118-issue1-s1-spec.md': `${readFileSync(join(repoI, 'docs/specs/261118-issue1-s1-spec.md'), 'utf8')}\n- rev3\n` })
   const critStop = runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-3', '--findings', 'C1: stop loss'], repoI, env)
   if (critStop.status !== 4) throw new Error(`Scenario I critique stop-loss expected 4 got ${critStop.status}: ${critStop.stderr}`)
@@ -528,7 +528,7 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
   runGit(wtS1, ['commit', '-qm', 'fix: s1 r2'])
   assertOk(runNodeScript(flowI, ['finalize', '--task', 's1', '--no-tdd'], wtS1, env), 'Scenario I s1 r2 finalize')
   assertOk(runNodeScript(flowI, ['verify', '--task', 's1', '--mode', 'gate', '--e2e-evidence', 'I_SMOKE_OK r2'], wtS1, env), 'Scenario I s1 r2 verify')
-  assertOk(runNodeScript(flowI, ['submit', '--task', 's1', '--agent', 'alice', '--rework'], wtS1, env), 'Scenario I s1 r2 submit')
+  assertOk(runNodeScript(flowI, ['submit', '--task', 's1', '--agent', 'alice'], wtS1, env), 'Scenario I s1 r2 submit')
   const tR2 = await issueTokenFor(repoI, 's1', 2)
   assertBlocked(runNodeScript(revI, ['record', '--task', 's1', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-1', '--review-token', tR2, '--evidence', 'ok', '--must-fix', 'C1: src/a.mjs:1 same'], repoI, env), 'BLOCKED_SAME_REVIEWER_REREVIEW', 'Scenario I same reviewer R2')
   assertOk(runNodeScript(revI, ['record', '--task', 's1', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-2', '--review-token', tR2, '--evidence', 'ok', '--must-fix', 'C2: src/a.mjs:1 fix2'], repoI, env), 'Scenario I s1 R2 changes')
@@ -539,7 +539,7 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
   runGit(wtS1, ['commit', '-qm', 'fix: s1 r3'])
   assertOk(runNodeScript(flowI, ['finalize', '--task', 's1', '--no-tdd'], wtS1, env), 'Scenario I s1 r3 finalize')
   assertOk(runNodeScript(flowI, ['verify', '--task', 's1', '--mode', 'gate', '--e2e-evidence', 'I_SMOKE_OK r3'], wtS1, env), 'Scenario I s1 r3 verify')
-  assertOk(runNodeScript(flowI, ['submit', '--task', 's1', '--agent', 'alice', '--rework'], wtS1, env), 'Scenario I s1 r3 submit')
+  assertOk(runNodeScript(flowI, ['submit', '--task', 's1', '--agent', 'alice'], wtS1, env), 'Scenario I s1 r3 submit')
   const tR3 = await issueTokenFor(repoI, 's1', 3)
   const stopR3 = runNodeScript(revI, ['record', '--task', 's1', '--round', '3', '--verdict', 'changes', '--reviewer-id', 'rev-3', '--review-token', tR3, '--evidence', 'ok', '--must-fix', 'C3: src/a.mjs:1 fix3'], repoI, env)
   if (stopR3.status !== 4) throw new Error(`Scenario I R3 stop-loss expected 4 got ${stopR3.status}`)
@@ -626,7 +626,7 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
     runGit(repoJ, ['push', 'origin', '--delete', 'feat/hook-del'])
   } finally { void pushMainFail }
 
-  // 真实非零 E2E 失败 -> 脱敏诊断包 + 建单 -> 修复后复绿并解锁 --include-diff -> generic-git --remote-merged merge
+  // 真实非零 E2E 失败 -> 脱敏诊断包 + 建单 -> 修复后复绿并解锁 --include-diff -> generic-git 人类签字放行 merge
   const flowJ = join(repoJ, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revJ = join(repoJ, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
   assertOk(runNodeScript(flowJ, ['start', '--task', 'j1', '--case', '2', '--slug', 'j1', '--implementer', 'alice'], repoJ, env), 'Scenario J start')
@@ -648,7 +648,16 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
   assertOk(runNodeScript(flowJ, ['verify', '--task', 'j1', '--mode', 'gate', '--e2e-evidence', 'J_SMOKE_OK exit=0'], wtJ, env), 'Scenario J verify fixed')
   assertOk(runNodeScript(flowJ, ['submit', '--task', 'j1', '--agent', 'alice'], wtJ, env), 'Scenario J submit')
   assertOk(await recordWithToken(flowJ, revJ, 'j1', repoJ, env, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-j']), 'Scenario J pass')
-  assertOk(runNodeScript(flowJ, ['merge', '--task', 'j1', '--remote-merged'], repoJ, env), 'Scenario J generic-git merge')
+  // generic-git 的收尾要现场取回远端、按四态合流判定核验。这个场景里的远端是本地裸仓，
+  // 所以要真的让远端的 main 前进到分支尖端——那就是一次快进合并的等价结果。
+  // 不能直接 push 到 main：钩子禁止直推默认分支，那条禁令本身是对的，测试不该绕过它。
+  const ledgerPath = join(repoJ, '.worktrees', '.state', 'tasks', 'j1.json')
+  const jBranch = String(JSON.parse(readFileSync(ledgerPath, 'utf8')).branch ?? '')
+  if (!jBranch) throw new Error('Scenario J ledger has no branch')
+  runGit(wtJ, ['push', '-q', 'origin', `${jBranch}:${jBranch}`])
+  const jTip = String(runGit(wtJ, ['rev-parse', 'HEAD']).stdout).trim()
+  runGit(bareJ, ['update-ref', 'refs/heads/main', jTip])
+  assertOk(runNodeScript(flowJ, ['merge', '--task', 'j1'], repoJ, env), 'Scenario J generic-git merge')
 }
 
 export async function runStageBScenarios(pkgRoot, sandbox, env, helpers) {

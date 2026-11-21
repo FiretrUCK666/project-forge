@@ -2,6 +2,7 @@
  * fixtures-escalation-stoploss.mjs —— 分级升级、停损闭环与总控四态收口双向断言。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -217,7 +218,7 @@ export function registerStageBLoopB4bCases(cases) {
         task: 'c13-t', round: '1', verdict: 'changes', evidence: 'ok', 'reviewer-id': '@Rev-A',
         'must-fix': ['C1: src/app.mjs:1 第一轮问题'], 'review-token': tok1,
       }, roots))
-      if (r1.res !== 2 || r1Ok.res !== 0) return `token/R1 异常：${r1.res}/${r1Ok.res}`
+      if (r1.res !== EXIT.FACT || r1Ok.res !== 0) return `token/R1 异常：${r1.res}/${r1Ok.res}`
 
       writeFileSync(join(wt, 'src/app.mjs'), 'export const x = 3\n')
       gitCommitFast(wt, 'fix: v3', { updateOnly: true })
@@ -227,7 +228,7 @@ export function registerStageBLoopB4bCases(cases) {
         task: 'c13-t', round: '2', verdict: 'changes', evidence: 'ok', 'reviewer-id': 'rev-a',
         'must-fix': ['C2: src/app.mjs:1 新问题'], 'review-token': undefined,
       }, roots))
-      if (sameR2.res !== 2 || !sameR2.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
+      if (sameR2.res !== EXIT.FACT || !sameR2.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
         return `R2 复用 @Rev-A 未被拦截：exit=${sameR2.res}, err=${sameR2.err}`
       }
 
@@ -260,7 +261,7 @@ export function registerStageBLoopB4bCases(cases) {
         task: 'c13-t', round: '3', verdict: 'changes', evidence: 'ok', 'reviewer-id': 'rev-a',
         'must-fix': ['C3: src/app.mjs:1 三轮问题'], 'review-token': tok3,
       }, roots))
-      if (reuseR1.res !== 2 || !reuseR1.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
+      if (reuseR1.res !== EXIT.FACT || !reuseR1.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
         return `R3 复用历史 R1 rev-a 未被全历史锁拦截：exit=${reuseR1.res}, err=${reuseR1.err}`
       }
 
@@ -340,30 +341,45 @@ export function registerStageBLoopB4bCases(cases) {
     })
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     try {
-      const selfRej = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'author-a', '--findings', 'C1: bad', '--dir', dir]))
-      if (selfRej.res !== 2 || !selfRej.err.includes('SELF_CRITIQUE_REJECTED')) {
+      // 自审要按负责人历史判，不只按当前 owner：换过人之后，原负责人回来审自己的稿子同样要拒。
+    // 只比当前 owner 时，这里会静默放行——那是最典型的一类「看起来在拦、实际没拦」。
+    const rotatedSpec = 'docs/specs/261118-issue14-c14-rotated-spec.md'
+    mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+    writeFileSync(join(dir, rotatedSpec), [
+      '---', 'kind: spec', 'title: "C14 Rotated"', 'status: draft', 'tier: L3', 'created: 2026-11-18',
+      'updated: 2026-11-18', 'issue: 14', 'owner: author-b', 'previous_owners: [author-a]', 'approved: false', 'implemented: false',
+      'plan_critique: pending', 'critique_rounds: []', 'related_prd: null', '---', '',
+      '# Spec: C14 Rotated', '', '## 目标', '- 换人后旧作者不得回来自审', '', '## 方案', '- 历史负责人集合比对', '',
+    ].join('\n'))
+    const rotatedSelf = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', join(dir, rotatedSpec), '--reviewer', 'author-a', '--findings', 'C1: bad']))
+    if (rotatedSelf.res !== EXIT.FACT || !String(rotatedSelf.err).includes('SELF_CRITIQUE_REJECTED')) {
+      return `换人后原负责人回来自审未被拦截：exit=${rotatedSelf.res}, err=${rotatedSelf.err}`
+    }
+
+    const selfRej = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'author-a', '--findings', 'C1: bad', '--dir', dir]))
+      if (selfRej.res !== EXIT.FACT || !selfRej.err.includes('SELF_CRITIQUE_REJECTED')) {
         return `critique-reject 未拦同人自审：exit=${selfRej.res}, err=${selfRej.err}`
       }
 
       const r1Rej = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-1', '--round', '1', '--findings', 'C1: 缺异常分支', '--summary', '需补异常路径', '--dir', dir, '--json']))
-      if (r1Rej.res !== 0) return `R1 critique-reject 失败：${r1Rej.err}`
+      if (r1Rej.res !== EXIT.FACT) return `R1 critique-reject 失败：${r1Rej.err}`
 
       // 未改稿直接 critique-pass -> BLOCKED_CRITIQUE_SAME_SHA (2)
       const sameSha = await withQuietIo(() => runDocPlanCli(['critique-pass', '--file', specFile, '--reviewer', 'critic-2', '--round', '2', '--summary', 'ok', '--dir', dir]))
-      if (sameSha.res !== 2 || !sameSha.err.includes('BLOCKED_CRITIQUE_SAME_SHA')) {
+      if (sameSha.res !== EXIT.FACT || !sameSha.err.includes('BLOCKED_CRITIQUE_SAME_SHA')) {
         return `未改稿直接复审未被拦截：exit=${sameSha.res}, err=${sameSha.err}`
       }
 
       // 改稿后用 critic-1 重审 -> BLOCKED_CRITIQUE_SAME_REVIEWER (2)
       writeFileSync(join(dir, specFile), readFileSync(join(dir, specFile), 'utf8').replace('第一版草案', '第二版补异常'))
       const sameRev = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-1', '--round', '2', '--findings', 'C2: 补门型', '--dir', dir]))
-      if (sameRev.res !== 2 || !sameRev.err.includes('BLOCKED_CRITIQUE_SAME_REVIEWER')) {
+      if (sameRev.res !== EXIT.FACT || !sameRev.err.includes('BLOCKED_CRITIQUE_SAME_REVIEWER')) {
         return `R2 复用 critic-1 未被拦截：exit=${sameRev.res}, err=${sameRev.err}`
       }
 
       // R2 critic-2 与 R1 不同意见正常放行 (0)
       const r2Diff = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-2', '--round', '2', '--findings', 'C2: 补充回滚点', '--dir', dir]))
-      if (r2Diff.res !== 0) return `R2 critic-2 不同意见不应停损：exit=${r2Diff.res}, err=${r2Diff.err}`
+      if (r2Diff.res !== EXIT.FACT) return `R2 critic-2 不同意见不应停损：exit=${r2Diff.res}, err=${r2Diff.err}`
 
       // R3 再改稿后即使换 critic-3 仍 reject -> 第 3 轮硬停损 (4) + 信号写入
       writeFileSync(join(dir, specFile), readFileSync(join(dir, specFile), 'utf8').replace('第二版补异常', '第三版补回滚'))
@@ -548,7 +564,7 @@ export function registerStageBLoopB4bCases(cases) {
       const tmRes = await runTrialMerge({
         mainRoot: dir, ledger: readTaskLedger(dir, 'docs-task'), baseBranch: 'main',
         profile: { fullTest: 'exit 0', quickTest: 'exit 0' },
-        evidence: { headSha: (await gitRun(wtDocs, ['rev-parse', 'HEAD'])).stdout.trim(), dirty: false, gates: { full: { exitCode: 0 } }, skipped: [] },
+        evidence: { headSha: (await gitRun(wtDocs, ['rev-parse', 'HEAD'])).stdout.trim(), dirty: false, gates: { full: { exitCode: EXIT.OK } }, skipped: [] },
         policy: { riskTier: 'medium', requiredGates: ['full'] }, changedFiles: ['src/app.mjs'],
       })
       if (tmRes.code !== 'BLOCKED_TRIAL_MERGE_CONFLICT' || !tmRes.conflictHunks?.length || !tmRes.recoveryPacket?.commands?.some((c) => c.includes('GIT_EDITOR=true'))) {

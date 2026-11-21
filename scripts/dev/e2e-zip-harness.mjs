@@ -276,7 +276,7 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   assertOk(runNodeScript(flowD1, ['merge', '--task', 'd1'], repoD1, env), 'Scenario D1 merge')
   assertOk(runNodeScript(flowD1, ['cleanup', '--task', 'd1', '--confirm'], repoD1, env), 'Scenario D1 cleanup')
 
-  // D2: generic-git blocks merge without --remote-merged
+  // D2: generic-git 在核不到远端事实时阻断，人类签字才放行
   const repoD2 = join(sandbox, 'repo-d2')
   mkdirSync(repoD2, { recursive: true })
   initGitRepo(repoD2, {
@@ -301,8 +301,8 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   assertOk(runNodeScript(flowD2, ['verify', '--task', 'd2', '--mode', 'full'], wtD2, env), 'Scenario D2 verify')
   assertOk(runNodeScript(flowD2, ['submit', '--task', 'd2'], wtD2, env), 'Scenario D2 submit')
   assertOk(await recordWithToken(flowD2, revD2, 'd2', repoD2, env, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d2']), 'Scenario D2 review pass')
-  assertBlocked(runNodeScript(flowD2, ['merge', '--task', 'd2'], repoD2, env), 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', 'Scenario D2 generic-git unconfirmed merge')
-  assertOk(runNodeScript(flowD2, ['merge', '--task', 'd2', '--remote-merged'], repoD2, env), 'Scenario D2 generic-git --remote-merged')
+  assertBlocked(runNodeScript(flowD2, ['merge', '--task', 'd2'], repoD2, env), 'BLOCKED_', 'Scenario D2 generic-git unconfirmed merge')
+  assertOk(runNodeScript(flowD2, ['merge', '--task', 'd2', '--human-approved', '--reason', '远端是不可达的内网仓，已在别处人工核对合并结果'], repoD2, env), 'Scenario D2 generic-git human-approved')
 }
 
 async function runScenarioE(pkgRoot, sandbox, env) {
@@ -375,8 +375,8 @@ async function runScenarioE(pkgRoot, sandbox, env) {
   runGit(wtE, ['commit', '-qm', 'fix: app=3'])
   assertOk(runNodeScript(flowE, ['finalize', '--task', 't-e', '--json'], wtE, env), 'Scenario E re-finalize')
   assertOk(runNodeScript(flowE, ['verify', '--task', 't-e', '--mode', 'gate'], wtE, env), 'Scenario E verify r2')
-  assertBlocked(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'alice', '--rework'], wtE, env), 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', 'Scenario E ownership mismatch')
-  assertOk(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'bob', '--takeover', '--reason', 'cross-session handoff', '--rework'], wtE, env), 'Scenario E takeover submit')
+  assertBlocked(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'alice'], wtE, env), 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', 'Scenario E ownership mismatch')
+  assertOk(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'bob', '--takeover', '--reason', 'cross-session handoff'], wtE, env), 'Scenario E takeover submit')
 
   assertBlocked(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-2', '--must-fix', 'C1: src/untouched.mjs:1 out of scope']), 'BLOCKED_OUT_OF_SCOPE_MUST_FIX', 'Scenario E out-of-scope must-fix')
   assertOk(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-2']), 'Scenario E record r2 pass')

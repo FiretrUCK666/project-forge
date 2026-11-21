@@ -13,26 +13,12 @@ import {
   canonicalPath, gitRun, posixPath, readJsonSafe, readTextSafe, samePath,
   sha256Text, writeJsonAtomic,
 } from './git.mjs'
+import { evaluateTextSubstance } from './evidence-substance.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
 import { appendGovernSignal, readSignalsJsonl } from './signals.mjs'
 import { extractSymbols } from './symbol-index.mjs'
 
 export const VALID_RISK_LEVELS = Object.freeze(['low', 'medium', 'high'])
-
-const SHALLOW_EXACT_SET = new Set([
-  'ok', 'okay', 'k', 'pass', 'passed', 'passing', 'lgtm', 'done', 'good', 'fine',
-  'yes', 'y', 'true', 'checked', 'verified', 'tested', 'works', 'worked', 'working',
-  'green', 'clean', 'ready', 'approved', 'confirm', 'confirmed', 'success', 'succeeded',
-  'all good', 'all pass', 'all passed', 'looks good', 'looks good to me',
-  'tests pass', 'tests passed', 'test pass', 'test passed', 'it works',
-  'no issues', 'no issue', 'no problem', 'no errors', 'ship it', 'smoke ok',
-  'tbd', 'todo', 'n/a', 'na', 'none', 'null', 'nil', 'skip', 'skipped',
-  '已验证', '通过', '已通过', '测试通过', '没问题', '无问题', '正常', '运行正常',
-  '可以', '好的', '完成', '已完成', '已测试', '已检查', '已确认', '验证通过',
-  '实测通过', '一切正常', '全部通过', '过了', '行', 'ok了', '通过了', '验证ok',
-])
-
-const PLACEHOLDER_E2E_RE = /^(?:<[^>]{1,40}>|\{[^}]{1,40}\}|\[[^\]]{1,40}\]|[.…\-_=*!！?？\s]+)$/
 
 function normRelPath(p) {
   return posixPath(String(p ?? '').trim()).replace(/^\.\//, '').replace(/^\/+/, '')
@@ -53,36 +39,12 @@ function uniqPaths(arr) {
 
 /** 校验 `--e2e-evidence` 是否写清执行入口与观察到的真实输出/状态，拦截水话与占位符。 */
 export function validateE2eEvidenceText(raw) {
-  const trimmed = String(raw ?? '').trim()
-  if (!trimmed) {
-    return { ok: false, code: 'BLOCKED_SHALLOW_E2E_EVIDENCE', reason: '--e2e-evidence 不能为空，请写清执行入口与观察到的真实输出/状态。' }
-  }
-  if (PLACEHOLDER_E2E_RE.test(trimmed)) {
-    return { ok: false, code: 'BLOCKED_SHALLOW_E2E_EVIDENCE', reason: `--e2e-evidence="${trimmed}" 为占位符，请填写实际执行入口与真实输出/状态。` }
-  }
-  const stripped = trimmed
-    .replace(/^[\s"'`“”‘’()（）\[\]【】]+|[\s"'`“”‘’()（）\[\]【】.!！?？。，,;；]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const lowered = stripped.toLowerCase()
-  if (!lowered || SHALLOW_EXACT_SET.has(lowered)) {
-    return {
-      ok: false,
-      code: 'BLOCKED_SHALLOW_E2E_EVIDENCE',
-      reason: `--e2e-evidence="${trimmed}" 仅为无实质水话，请写清执行的命令/入口与观察到的真实输出/状态（如 "node scripts/survey.mjs . --json exit=0"）。`,
-    }
-  }
-  const compactLen = stripped.replace(/\s+/g, '').length
-  if (compactLen < 6) {
-    return { ok: false, code: 'BLOCKED_SHALLOW_E2E_EVIDENCE', reason: `--e2e-evidence="${trimmed}" 过短且缺少实证细节，请写清执行入口与观察到的真实输出/状态。` }
-  }
-  const tokens = stripped.split(/[\s,，;；|]+/).filter(Boolean)
-  const hasConcreteAnchor = /(?:[=:/\\.]|\d|exit|stdout|stderr|status|http|cli|smoke|e2e|json|html|svg|ok_|_ok|pass_|_pass)/i.test(stripped)
-  const meaningfulTokens = tokens.filter((tok) => !SHALLOW_EXACT_SET.has(tok.toLowerCase().replace(/[.!！?？]+$/, '')))
-  if (meaningfulTokens.length === 0 || (!hasConcreteAnchor && compactLen < 8 && meaningfulTokens.length < 2)) {
-    return { ok: false, code: 'BLOCKED_SHALLOW_E2E_EVIDENCE', reason: `--e2e-evidence="${trimmed}" 缺少具体执行入口或观察结果，请写明运行对象及真实输出/退出码/状态。` }
-  }
-  return { ok: true, code: null, cleaned: trimmed }
+  // 判据只有一处实现：措辞千变万化，词表每加一条就逼出下一个措辞。
+  // 所以这里只把结果映射成原有的码位，判法本身在 evidence-substance.mjs。
+  const base = evaluateTextSubstance(raw, { subject: '--e2e-evidence' })
+  return base.ok
+    ? { ok: true, code: null, cleaned: base.cleaned }
+    : { ok: false, code: 'BLOCKED_SHALLOW_E2E_EVIDENCE', reason: base.reason }
 }
 
 /** 仓外验证命名空间根路径：`{gitCommonDir}/project-forge-verify/`（非 Git 回退 tmpdir 哈希目录）。 */

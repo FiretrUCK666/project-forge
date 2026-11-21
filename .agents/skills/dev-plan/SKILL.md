@@ -53,7 +53,7 @@ metadata:
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 
-- **不可自审、全历史换人与 3 轮停损锁**：`critique-pass` / `critique-reject` 硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用任意历史轮次审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`，退出码 `2`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`，退出码 `2`）；连轮相同阻塞项或第 3 轮仍退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），须人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后正文未改由维护者执行 `approve`（改正文触发 `BLOCKED_CRITIQUE_STALE`）。支持 `--milestone` 对齐里程碑关联。
+- **不可自审、全历史换人与 3 轮停损锁**：`critique-pass` / `critique-reject` 硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用任意历史轮次审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`，退出码 `3`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`，退出码 `3`）；连轮相同阻塞项或第 3 轮仍退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），须人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后正文未改由维护者执行 `approve`（改正文触发 `BLOCKED_CRITIQUE_STALE`）。**批准只由 `approve` 一个入口写入**：它同时核对依据，合法依据只有三种（过审、带实质理由跳过、人类签字且正文未改），`link --approve` 会被 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY` 拒绝。支持 `--milestone` 对齐里程碑关联。
 - **`impl` 工作树协同**：若 `flow.mjs start --task <id>` 已先建好隔离工作树，`doc-plan.mjs init --task <id>` 会直接把规划单落盘到 `.worktrees/impl-<id>/` 避免撕裂；若先规划后建工作树，`flow.mjs start --spec ... --todo ...` 会自动将规划文档迁入实施工作树并同步 `-issue<N>-` 命名。
 - **波次移交 `dev-flow`**：单任务 `audit`/`approve` 通过后按 `[NEXT STEP]` 移交 `dev-flow`（`flow.mjs start`）；多切片协同可配合 `flow.mjs start --after <parent>` 起堆叠子分支或 `flow.mjs batch plan` 按文件互斥划分波次。未装配兄弟技能时退化为原生 Git 指引。
 

@@ -9,6 +9,7 @@
 import { basename } from 'node:path'
 
 import { flushAndExit, hasSkillSupport, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import { detectGateWeakening } from '../../lib/static-gates.mjs'
@@ -18,6 +19,17 @@ import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
 const SUBCOMMANDS = ['inspect', 'next', 'explore', 'intake', 'start', 'issue', 'milestone', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
+
+/**
+ * 由脚本确定性生成、不接受调用方整段替换的参数归属。
+ *
+ * 病根不在「传了个参数」，而在**同一个字段有两个生产者**：脚本按账本与模板生成一份，
+ * 调用方又能塞一份进来，于是最终写进平台的到底是哪一份说不清——它显示的是「他说的」，
+ * 不是「记录里的」。所以这里按子命令收窄注册，传了就按用法错误拒绝。
+ */
+const GENERATED_BODY_SUBCOMMANDS = new Set(['submit', 'rework'])
+/** 只允许建单与评论写正文的子命令（那里的正文是内容本身）。 */
+const CONTENT_BODY_SUBCOMMANDS = new Set(['issue', 'milestone', 'intake', 'next', 'claim', 'release'])
 
 function printHelp() {
   process.stdout.write([
@@ -35,10 +47,10 @@ function printHelp() {
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--skip-govern] [--json]',
     '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--artifact <path>] [--visual-checked] [--visual-blocked-reason <text>] [--human-approved] [--skip-edit-gate] [--skip-govern] [--json]',
-    '  submit    [--task <id>] [--draft] [--rework] [--new-pr] [--reset-review-slot] [--json]',
+    '  submit    [--task <id>] [--draft] [--new-pr] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
-    '  merge     [--task <id>] [--method merge|squash|rebase] [--remote-merged] [--human-approved] [--reason <text>] [--skip-govern] [--json]',
+    '  merge     [--task <id>] [--method merge|squash|rebase] [--human-approved] [--reason <text>] [--skip-govern] [--json]',
     '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--allow-outbound <路径>] [--skip-govern] [--json]',
     '  status    [--task <id>] [--json]',
     '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
@@ -54,10 +66,10 @@ async function main(argv) {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
       booleanFlags: [
-        'probe-auth', 'parallel', 'draft', 'rework', 'confirm', 'force',
+        'probe-auth', 'parallel', 'draft', 'confirm', 'force',
         'keep-branch', 'keep-worktree', 'only-review-worktree', 'keep-local-branch', 'keep-remote-branch',
         'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync', 'include-master-prd',
-        'create-issue', 'takeover', 'reset-review-slot', 'remote-merged',
+        'create-issue', 'takeover', 'reset-review-slot',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd',
         'ack-no-issue-context', 'apply', 'dry-run', 'skip-edit-gate', 'skip-govern', 'strict-lifecycle', 'run-govern-hook',
         'allow-plan-bootstrap',
@@ -66,7 +78,7 @@ async function main(argv) {
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
         'agent', 'actor', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'comment', 'state',
-        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot', 'focus', 'by',
+        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus', 'by',
         'milestone', 'due', 'due-on', 'description',
         'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
         'visual-blocked-reason',
@@ -80,6 +92,18 @@ async function main(argv) {
   }
   const { sub, opts } = cli
   if (cli.help) { printHelp(); return 0 }
+
+  // 按子命令收窄：提审与返工分支的正文由脚本生成，不接受调用方传入。
+  if (GENERATED_BODY_SUBCOMMANDS.has(sub) && (opts.body !== undefined || opts.comment !== undefined || opts.note !== undefined)) {
+    process.stderr.write('BLOCKED_GENERATED_BODY_HAS_SINGLE_PRODUCER: submit/rework 的提案正文由账本、模板与实证记录确定性生成，'
+      + '不接受 --body / --comment / --note。想改正文里的事实，就去改账本与实证记录本身；'
+      + '想改标题，用 --title。\n')
+    return EXIT.USAGE
+  }
+  if (!CONTENT_BODY_SUBCOMMANDS.has(sub) && !GENERATED_BODY_SUBCOMMANDS.has(sub) && opts.body !== undefined) {
+    process.stderr.write(`BLOCKED_BODY_PARAM_ON_${String(sub ?? 'unknown').toUpperCase()}: 子命令 ${sub} 不写正文，不接受 --body。\n`)
+    return EXIT.USAGE
+  }
 
   const roots = await resolveRepoRoots(cli.targetDir)
 

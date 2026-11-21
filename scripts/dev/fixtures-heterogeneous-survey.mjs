@@ -2,6 +2,7 @@
  * fixtures-heterogeneous-survey.mjs —— 异构勘察、business-flows 与多生态盲点双向行为断言。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -231,8 +232,8 @@ export function registerStageBOnboardingB4aCases(cases) {
           ranAt: '2026-11-18',
           headSha: 'abc1234',
           summary: '接入前只读实跑全绿',
-          commands: [{ command: 'npm test', exitCode: 0, detail: '2 passed' }],
-          entrypoints: [{ entry: 'node bin/cli.mjs', exitCode: 0, detail: 'stdout=ok' }],
+          commands: [{ command: 'npm test', exitCode: EXIT.OK, detail: '2 passed' }],
+          entrypoints: [{ entry: 'node bin/cli.mjs', exitCode: EXIT.OK, detail: 'stdout=ok' }],
         },
       })
       if (!renderedTdd.includes('src/routes/orders.mjs') || !renderedTdd.includes('abc1234') || !renderedTdd.includes('npm test')) {

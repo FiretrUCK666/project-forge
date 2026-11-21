@@ -4,12 +4,14 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），拆分自 doc-plan.mjs 以控制入口文件行数。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { evaluateCritiqueOverride, parseCritiqueRounds } from '../../lib/critique-rounds.mjs'
 import { DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, updateDocFrontmatter } from '../../lib/docs.mjs'
+import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { auditDoc, detectDocType } from './doc-audit.mjs'
 
@@ -51,18 +53,27 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
     const override = critiqueState.override
     const hasStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
     if (hasStopLoss && !override?.approved) {
-      throw Object.assign(new Error(`STOP_LOSS_ESCALATE: ${audit.file} 已触发规划 Critique 停损且尚未解锁；请先运行 doc-plan.mjs critique-override --file "${audit.file}" --human-approved --reason "..."`), { code: 'STOP_LOSS_ESCALATE', exitCode: 4 })
+      throw Object.assign(new Error(`STOP_LOSS_ESCALATE: ${audit.file} 已触发规划 Critique 停损且尚未解锁；请先运行 doc-plan.mjs critique-override --file "${audit.file}" --human-approved --reason "..."`), { code: 'STOP_LOSS_ESCALATE', exitCode: EXIT.HUMAN })
     }
     if (critiqueState.approved) {
       if (critiqueState.stale) {
-        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${critiqueState.sha} !== current=${critiqueState.currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: 2 })
+        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${critiqueState.sha} !== current=${critiqueState.currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: EXIT.FACT })
       }
     } else {
       const currentSha = critiqueState.currentSha
       const critiqueVal = String(fm.data?.plan_critique ?? (/^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1] ?? '')).trim()
       if (!/^passed\b/i.test(critiqueVal)) {
         if (skipCritiqueReason && String(skipCritiqueReason).trim()) {
-          skippedCritiqueValue = `skipped (reason=${String(skipCritiqueReason).trim()})`
+          // 跳过规划内审是本切片里最直接的一条后门：只校验非空，传一个占位词就能产出
+          // 「已批准 + 跳过评审」。所以它和别的放行点用同一个判据，不再单独放宽。
+          const reasonCheck = evaluateReleaseReason(skipCritiqueReason, { subject: '跳过规划内审的理由' })
+          if (!reasonCheck.ok) {
+            throw Object.assign(
+              new Error(`BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason} 跳过规划内审必须写清：这次为什么不用它、漏掉它可能放过什么。`),
+              { code: 'BLOCKED_SHALLOW_OVERRIDE_REASON', exitCode: EXIT.USAGE },
+            )
+          }
+          skippedCritiqueValue = `skipped (reason=${reasonCheck.cleaned})`
           if (!fm.hasFrontmatter) {
             const skipLine = `- Plan Critique: ${skippedCritiqueValue}`
             workingText = /^(?:-\s+)?Plan Critique:.*$/mi.test(workingText)
@@ -71,12 +82,12 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
           }
           critiqueSkipped = true
         } else {
-          throw Object.assign(new Error(`BLOCKED_CRITIQUE_REQUIRED: ${audit.file} 为 ${docType.toUpperCase()} 文档，必须先通过独立 Critique 并运行 critique-pass，或传入 --skip-critique-reason "<原因>"`), { code: 'BLOCKED_CRITIQUE_REQUIRED', exitCode: 2 })
+          throw Object.assign(new Error(`BLOCKED_CRITIQUE_REQUIRED: ${audit.file} 为 ${docType.toUpperCase()} 文档，必须先通过独立 Critique 并运行 critique-pass，或传入 --skip-critique-reason "<原因>"`), { code: 'BLOCKED_CRITIQUE_REQUIRED', exitCode: EXIT.FACT })
         }
       } else {
         const shaMatch = /\bsha=([a-f0-9]{8,64})\b/i.exec(critiqueVal)
         if (shaMatch && currentSha.slice(0, shaMatch[1].length) !== shaMatch[1].toLowerCase() && !skipCritiqueReason) {
-          throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在 critique-pass 之后正文已被修改（recorded=${shaMatch[1]} !== current=${currentSha.slice(0, shaMatch[1].length)}），请重新复核并执行 critique-pass`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: 2 })
+          throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在 critique-pass 之后正文已被修改（recorded=${shaMatch[1]} !== current=${currentSha.slice(0, shaMatch[1].length)}），请重新复核并执行 critique-pass`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: EXIT.FACT })
         }
       }
     }

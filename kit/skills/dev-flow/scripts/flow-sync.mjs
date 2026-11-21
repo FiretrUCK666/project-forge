@@ -17,7 +17,7 @@ import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrit
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
 import { resolveEffectiveBaseSha } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, EXIT_POLICY_BLOCK } from './flow-inspect.mjs'
+import { buildTargetRepoContext } from './flow-inspect.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 export async function handleSync(opts = {}, roots) {
@@ -31,7 +31,7 @@ export async function handleSync(opts = {}, roots) {
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突再 sync`)
   if (stZ.entries.length > 0) {
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 实施工作区存在未提交改动，请先提交后再执行 sync。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const fastPrevHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
@@ -117,7 +117,7 @@ export async function handleSync(opts = {}, roots) {
         ok: false,
         blocked: true,
         code: 'BLOCKED_SYNC_REBASE_CONFLICT',
-        exitCode: EXIT_POLICY_BLOCK,
+        exitCode: EXIT.FACT,
         taskId,
         onto: targetBaseBranch,
         newBaseSha,
@@ -127,7 +127,7 @@ export async function handleSync(opts = {}, roots) {
       }
       if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
       process.stderr.write(`BLOCKED_SYNC_REBASE_CONFLICT: sync 变基到 ${targetBaseBranch} 产生冲突（${conflicts.join(', ') || rbRes.stderr}），已中止变基保护现场。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK, ...payload }
+      return { exitCode: EXIT.FACT, ...payload }
     }
 
     depMount = ledger.tier === 2 ? mountSharedDeps(roots.mainRoot, implRoot) : { mode: 'none' }

@@ -13,10 +13,12 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'n
 import { dirname, join, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from '../../kit/skills/lib/doc-frontmatter.mjs'
-import { deriveMergeGate, evaluateRemoteChecks, extractExecutionBlocks, GATE_VERDICT } from '../../kit/skills/lib/gate-truth.mjs'
+import { deriveMergeGate, detectParserGap, evaluateRemoteChecks, extractExecutionBlocks, GATE_VERDICT } from '../../kit/skills/lib/gate-truth.mjs'
 import { evaluateIntakeTriage } from '../../kit/skills/lib/intake-triage.mjs'
 import { resolveApprovalBasis } from '../../kit/skills/lib/plan-exit-gate.mjs'
 import { auditEntry, auditHandRolled, ENTRY_SPECS, evaluateParity, extractDeclared, HAND_ROLLED_SPECS } from './cli-parity.mjs'
+import { evaluateExitCodeParity } from './exit-code-parity.mjs'
+import { blockedExitOf, REGISTERED_BLOCK_CODES } from '../../kit/skills/lib/exit-codes.mjs'
 import { rmTree, tmpProject } from './fixtures-helpers.mjs'
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..')
@@ -240,16 +242,55 @@ export function registerFlowTruthCases(cases) {
       }
     } finally { rmTree(broken) }
 
-    // 四、有文件、能解析，但一条都派生不出来：同样阻断，不许当成「没有检查」。
-    const emptyJob = repoWith({
-      '.github/workflows/ci.yml': 'on:\n  pull_request:\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n',
+    // 三之二、解析漏读与「本来就没有可跑步骤」必须分开判。前者说明解析坏了、门禁会静默变空；
+    // 后者只是这份流水线不适用于本仓。混在一起，要么把正常项目判死，要么把坏掉的解析放过去。
+    if (!detectParserGap('on:\n  pull_request:\njobs:\n  a:\n    steps:\n      - run: node a.mjs\n', [])) {
+      return '文件里写着 run 步骤却切不出执行块时没被标成解析漏读——门禁会静默变空'
+    }
+    if (detectParserGap('on:\n  pull_request:\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n', [])) {
+      return '本来就没有 run 步骤的文件被误标成解析漏读——那会把正常项目判死'
+    }
+    if (detectParserGap('on:\n  pull_request:\njobs:\n  a:\n    steps:\n      - run: node a.mjs\n', [{ cmd: 'node a.mjs' }])) {
+      return '切得出执行块时仍被判成解析漏读——判据把「读到了」和「没读到」搞反了'
+    }
+
+    // 四、流水线文件在、解析得了，但按结构谓词整份被排除（只有发版步骤，没有本地可跑的检查）：
+    // 记不适用、不阻断。判据不能隐含「必须有某种形状的流水线」——那样只有发版流水线的仓
+    // 装完工具就不可用，而它本来没有任何可本地复现的检查。
+    const releaseOnly = repoWith({
+      '.github/workflows/release.yml': 'on:\n  push:\n    tags: [\'v*\']\npermissions:\n  contents: write\njobs:\n  rel:\n    runs-on: ubuntu-latest\n    steps:\n      - run: gh release create v1 --repo x/y\n',
     })
     try {
-      const gate = deriveMergeGate(emptyJob)
-      if (gate.verdict !== GATE_VERDICT.FAILED || !gate.blocking) {
-        return `派生为空没有阻断（verdict=${gate.verdict}）——文件在却一步都没派生出来，说明谓词或解析坏了`
+      const gate = deriveMergeGate(releaseOnly)
+      if (gate.verdict !== GATE_VERDICT.NOT_APPLICABLE || gate.blocking) {
+        return `只有发版流水线却判成 ${gate.verdict}（blocking=${gate.blocking}）——非该类 CI 的仓会被无理由卡死`
       }
-    } finally { rmTree(emptyJob) }
+      if (!gate.reasons.some((r) => r.includes('release.yml'))) {
+        return `不适用没说清是哪份文件被排除：${JSON.stringify(gate.reasons)}`
+      }
+    } finally { rmTree(releaseOnly) }
+
+    // 五、文件里明明写着 run 步骤，一条执行块都切不出来：这是解析漏读，必须阻断。
+    // 与第四条的区别是「本来没有」和「该有却没读到」——后者会把门禁静默变空。
+    const parserGap = repoWith({
+      '.github/workflows/ci.yml': 'on:\n  pull_request:\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node x.mjs\n',
+    })
+    try {
+      const gate = deriveMergeGate(parserGap)
+      if (gate.steps.length === 0 && gate.verdict !== GATE_VERDICT.FAILED) {
+        return `写着 run 步骤却读不出执行块时判成了 ${gate.verdict}——解析漏读必须阻断`
+      }
+    } finally { rmTree(parserGap) }
+
+    // 六、正反双向：正常校验流水线必须派生得出步骤，且结论不是「不适用」。
+    const healthy = repoWith({
+      '.github/workflows/check.yml': 'on:\n  pull_request:\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node a.mjs\n',
+    })
+    try {
+      const gate = deriveMergeGate(healthy)
+      if (gate.verdict === GATE_VERDICT.NOT_APPLICABLE) return '合规流水线被判成不适用'
+      if (gate.steps.length !== 1) return `合规流水线派生了 ${gate.steps.length} 步，应为 1 步`
+    } finally { rmTree(healthy) }
     return true
   }])
 
@@ -489,6 +530,74 @@ export function registerFlowTruthCases(cases) {
       // 反例三：平台读取失败不得让分诊直接失败。
       if (!clean.ok) return '分诊因为平台读不到直接失败了——离线仓必须还能用'
     } finally { rmTree(dir) }
+    return true
+  }])
+
+  cases.push(['C9：阻断码登记档位与返回处一致——未登记即失败，档位不符即失败，一码两档也失败', async () => {
+    const tierName = { 1: 'EXIT.ACTION', 2: 'EXIT.USAGE', 3: 'EXIT.FACT', 4: 'EXIT.HUMAN' }
+
+    // 正例：登记表与返回处逐条一致。
+    const clean = [
+      { file: 'a.mjs', text: "return { code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT }" },
+      { file: 'b.mjs', text: "throw Object.assign(new Error('x'), { code: 'MISSING_REVIEWER', exitCode: EXIT.USAGE })" },
+    ]
+    const okRes = evaluateExitCodeParity(clean, blockedExitOf)
+    if (!okRes.ok) return `合规写法被判失败：${okRes.failures.join('；')}`
+    if (okRes.checked !== 2) return `只认出 ${okRes.checked} 处配对，应为 2 处`
+
+    // 反例一：未登记的码必须报失败——没登记的码拿不到确定档位，调用方只能猜。
+    const unregistered = [{ file: 'c.mjs', text: "return { code: 'BLOCKED_BRAND_NEW_CODE', exitCode: EXIT.FACT }" }]
+    const unregRes = evaluateExitCodeParity(unregistered, blockedExitOf)
+    if (unregRes.ok) return '未登记的阻断码被放过了——新增码不登记就永远不会被要求定档'
+    if (!unregRes.failures.some((m) => m.includes('未在 exit-codes 里登记档位'))) {
+      return `未登记被报成了别的问题：${unregRes.failures.join('；')}`
+    }
+
+    // 反例二：登记与返回不一致必须报失败——照登记表处理的人会做错事。
+    const drifted = [{ file: 'd.mjs', text: "return { code: 'STOP_LOSS_ESCALATE', exitCode: EXIT.FACT }" }]
+    const driftRes = evaluateExitCodeParity(drifted, blockedExitOf)
+    if (driftRes.ok) return '停损升级返回事实档却被放过了——登记写 4、实际返 3 正是要抓的那类脱节'
+    if (!driftRes.failures.some((m) => m.includes('实际返回 3 档'))) {
+      return `档位不符没被指名：${driftRes.failures.join('；')}`
+    }
+
+    // 反例三：同一个码在两个地方返不同档位，也必须报——一个码只能表达一种情形。
+    const mixed = [
+      { file: 'e.mjs', text: "return { code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT }" },
+      { file: 'f.mjs', text: "return { code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.HUMAN }" },
+    ]
+    const mixedRes = evaluateExitCodeParity(mixed, blockedExitOf)
+    if (mixedRes.ok) return '同一个码用两个档位却被放过了——读的人分不清该改命令还是该找人'
+
+    // 反例四：exitCode 来自变量时不参与判断，不能因为认不出就报失败。
+    const viaVar = [{ file: 'g.mjs', text: "return { code: 'BLOCKED_NOT_VERIFIED', exitCode: pre.finalExit || EXIT.FACT }" }]
+    const varRes = evaluateExitCodeParity(viaVar, blockedExitOf)
+    if (!varRes.ok) return `退出码来自变量时被误判成档位不符：${varRes.failures.join('；')}——这种写法本来就判不了，不该假装判了`
+
+    // 登记表自身的完整性：四档之内、非空。全仓真实源码的对拍由 preflight 那一侧做——
+    // 夹具里再扫一遍全仓，会扫到本夹具故意写错的反例串，只能靠在夹具里开口子才过。
+    if (REGISTERED_BLOCK_CODES.length === 0) return '登记表是空的'
+    for (const code of REGISTERED_BLOCK_CODES) {
+      const tier = blockedExitOf(code)
+      if (!tier || !tierName[tier]) return `${code} 的档位 ${tier} 不在四档之内`
+    }
+    return true
+  }])
+
+  cases.push(['M1：规划内审独立性按负责人历史判——换人后原负责人不能回来审自己的稿子', async () => {
+    const { collectOwnerHistory } = await import('../../kit/skills/lib/doc-approval.mjs')
+    // 正例：只有当前 owner，历史集合就是它自己。
+    const one = collectOwnerHistory({ owner: 'alice' })
+    if (one.length !== 1 || one[0] !== 'alice') return `单负责人历史算错：${JSON.stringify(one)}`
+    // 正例：换过人之后，历史里要能同时读到新旧两任——只比当前 owner 时，旧负责人可以回来自审。
+    const two = collectOwnerHistory({ owner: 'bob', previous_owners: ['alice'] })
+    if (!two.includes('alice') || !two.includes('bob')) return `换人后历史不完整：${JSON.stringify(two)}`
+    // 反例：同一个人写两遍不该被算成两任。
+    const dup = collectOwnerHistory({ owner: 'alice', previous_owners: ['alice', 'ALICE '] })
+    if (dup.length !== 1) return `同一负责人被重复计入：${JSON.stringify(dup)}`
+    // 反例：空值不该进历史（否则「没写 owner」会被当成某人）。
+    const none = collectOwnerHistory({ owner: '', previous_owners: ['null', '  '] })
+    if (none.length !== 0) return `空负责人进了历史：${JSON.stringify(none)}`
     return true
   }])
 

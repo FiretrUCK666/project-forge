@@ -249,6 +249,18 @@ export function discoverPipelineFiles(repoRoot) {
 }
 
 /**
+ * 解析漏读的判定：文本里写着 `run:`，却一个执行块都没切出来。
+ *
+ * 抽成独立判据是因为它必须与「本来就没有可跑步骤」分开：
+ * 前者说明解析坏了、门禁会静默变空；后者只是这份流水线不适用于本仓。
+ * 混在一起，要么把正常项目判死，要么把坏掉的解析当成「没有检查」放过去。
+ */
+export function detectParserGap(text, blocks) {
+  if ((blocks ?? []).length > 0) return false
+  return /(^|\n)\s*(?:-\s+)?run\s*:/.test(String(text ?? ''))
+}
+
+/**
  * 判定一份流水线文件。
  *
  * @returns {{ file: string, parsed: boolean, reason: string|null, adopted: boolean,
@@ -266,7 +278,8 @@ export function evaluatePipeline(repoRoot, rel) {
   }
   const predicates = evaluateStructuralPredicates(shape, blocks)
   const adopted = predicates.triggerOk && predicates.permissionOk && predicates.runnable.length > 0
-  return { file: rel, parsed: true, reason: null, adopted, predicates, blocks: predicates.runnable, skippedBlocks: predicates.platformOnly, triggers: shape.triggers, env: shape.env }
+  const parserGap = detectParserGap(text, blocks)
+  return { file: rel, parsed: true, reason: null, adopted, parserGap, predicates, blocks: predicates.runnable, skippedBlocks: predicates.platformOnly, triggers: shape.triggers, env: shape.env }
 }
 
 /**
@@ -325,14 +338,36 @@ export function deriveMergeGate(repoRoot) {
     file: b.file, startLine: b.startLine, endLine: b.endLine, cmd: b.cmd, lineCount: b.lineCount,
   })))
 
-  if (steps.length === 0) {
+  // 解析漏读与「本来就没有可跑步骤」是两件事，判据必须分开。
+  // 前者会让门禁静默变空，后者只是这份流水线不适用于本仓——混在一起，
+  // 要么把正常项目判死，要么把坏掉的解析当成「没有检查」放过去。
+  const parserGaps = evaluated.filter((e) => e.parserGap)
+  if (parserGaps.length > 0) {
     return {
       verdict: GATE_VERDICT.FAILED,
       blocking: true,
       steps: [],
+      adoptedFiles: adopted.map((e) => e.file),
+      skippedFiles: skipped,
+      skippedSteps,
+      reasons: parserGaps.map((e) => `${e.file}：文件里写着 run 步骤，却一条执行块都没切出来——解析漏读了，不能当成「没有检查」`),
+    }
+  }
+
+  // 文件都在、都解析得了、每份也都有下落，但一条本地可跑的检查都派不出来：
+  // 这不是故障，是「本仓的流水线都不属于这一类」。记不适用而不阻断——判据不能隐含
+  // 「必须有某种形状的流水线」，那会让非该类 CI 的项目装完即不可用。
+  if (steps.length === 0) {
+    return {
+      verdict: GATE_VERDICT.NOT_APPLICABLE,
+      blocking: false,
+      steps: [],
       adoptedFiles: [],
       skippedFiles: skipped,
-      reasons: ['流水线文件都在，但按三条结构谓词一步也派生不出来——说明谓词或解析坏了，不能当成「没有检查」'],
+      skippedSteps,
+      reasons: [
+        `${pipelineFiles.length} 份流水线文件都按结构谓词排除了（${skipped.map((s) => s.file).join('、')}），没有本地可跑的门禁步骤`,
+      ],
     }
   }
 

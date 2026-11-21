@@ -690,11 +690,11 @@ export function registerOnboardingCases(cases) {
       }
       return true
     } finally { cleanups.forEach(rmTree) }
-  }, 15000])
+  }, 45000])
 
-  cases.push(['C5/C6b：无 dev-review × 5 角色兼容性矩阵', () => runRoleMatrixForMode('no-dev-review'), 15000])
+  cases.push(['C5/C6b：无 dev-review × 5 角色兼容性矩阵', () => runRoleMatrixForMode('no-dev-review'), 45000])
 
-  cases.push(['C5/C6c：有无 dev-review 合并门禁（完整套件 × 5 角色兼容性矩阵）', () => runRoleMatrixForMode('full-kit'), 15000])
+  cases.push(['C5/C6c：有无 dev-review 合并门禁（完整套件 × 5 角色兼容性矩阵）', () => runRoleMatrixForMode('full-kit'), 45000])
 
   cases.push(['C9：5 类典型项目形态端到端接管、backup 还原、handoff 与内置 dev-flow 实测', async () => {
     const makePkgShape = (name, readme, extraFiles, scripts, testCmd) => ({

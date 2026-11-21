@@ -26,7 +26,7 @@ import {
   determineWorkflowPolicy, evaluateNextState, hasRepoCiWorkflow,
   readVerificationEvidence, resolveEffectiveBaseSha, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
+import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
 import { unmountSharedDeps } from './worktree-deps.mjs'
 
@@ -89,7 +89,7 @@ async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isA
       const msg = `BLOCKED_MAIN_WORKTREE_REMOVAL: 拒绝将主工作区 (${wt.path}) 作为清理目标删除。`
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_MAIN_WORKTREE_REMOVAL', worktree: wt.path }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+      return { ok: false, exitCode: EXIT.FACT }
     }
     if (isCwdInside(wt.abs)) {
       throw new Error(`当前进程工作目录位于待删除 worktree (${wt.path}) 内，请先切回主仓根目录再清理`)
@@ -99,7 +99,7 @@ async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isA
       const msg = `BLOCKED_UNREGISTERED_WORKTREE: 路径 ${wt.path} 未在 git worktree list 中注册（可能已被并发清理或非工作树目录），拒绝执行删除。`
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_UNREGISTERED_WORKTREE', worktree: wt.path }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+      return { ok: false, exitCode: EXIT.FACT }
     }
     // 预检全部待删 worktree：任一条命中未获准外链就整批停下，不先删第一个再在第二个失败。
     const preCheck = unmountSharedDeps(roots.mainRoot, wt.abs, {
@@ -110,7 +110,7 @@ async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isA
     })
     if (preCheck.ok === false) {
       emitOutboundBlock(wt.path, preCheck.blocked, opts, prefixNote)
-      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+      return { ok: false, exitCode: EXIT.FACT }
     }
   }
 
@@ -127,7 +127,7 @@ async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isA
     })
     if (unmount.ok === false) {
       emitOutboundBlock(wt.path, unmount.blocked, opts, prefixNote)
-      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+      return { ok: false, exitCode: EXIT.FACT }
     }
     // 原本干净的工作树在删除档解绑了被 Git 跟踪的链接后，工作树会出现 `D <link>`；
     // 此时由工具自动附带 `--force` 完成移除，避免在合法放行场景卡在 git 的脏工作树拒删上。
@@ -277,20 +277,20 @@ export async function handleCleanup(opts, roots) {
       printCleanupChecklistText(cl)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
   if (ledger.role === 'contributor-fork' && cl.prState === 'OPEN' && (!keepRemoteBr || !keepLocalBr)) {
     process.stderr.write(`BLOCKED_OPEN_FORK_PR: contributor-fork 关联上游 PR #${ledger.prNumber ?? '?'} 仍为 OPEN，硬锁拒绝删除 Fork 分支。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
   if (cl.downstreamStackedPrs.length > 0 && (!keepRemoteBr || !keepLocalBr)) {
     process.stderr.write(`BLOCKED_STACKED_PR: 存在以 ${ledger.branch} 为 base 的下游开放 PR，拒绝删除分支。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
   const dirtyWt = worktreesToRemove.find((w) => w.dirty)
   if (dirtyWt && !opts.force) {
     process.stderr.write(`BLOCKED_DIRTY_WORKTREE: 工作树 ${dirtyWt.path} 存在未提交改动，拒绝自动移除。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   if (cl.localBranch && !keepLocalBr) {
@@ -441,7 +441,7 @@ export async function handleAbort(opts, roots) {
       process.stdout.write(`BLOCKED_CONFIRMATION_REQUIRED: 放弃任务 ${taskId} 将移除 worktree (${worktrees.map((w) => w.path).join(', ') || '无'}) 并标记账本为 aborted。\n`)
       printNextStep([{ skill: 'dev-flow', text: `确认放弃后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
   const rmOut = await safeRemoveWorktrees(roots, ledger, worktrees, opts, { isAbort: true })
   if (!rmOut.ok) return { exitCode: rmOut.exitCode }

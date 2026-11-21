@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T04:41:10.979Z",
+  "installedAt": "2026-11-21T07:28:21.647Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -22,10 +22,10 @@
       "sha256": "a83c8da68082c1c3feae17d1784bf50ff4a5cc98d8facf39bf213aa7568744bf"
     },
     "dev-flow/scripts/flow-batch.mjs": {
-      "sha256": "721f703bdbf2f1c80bde4db4ea90e4312fa71a3126900fc7af7b8275de01c4e0"
+      "sha256": "e400cac6c5ddc31a182c5d2c626324661524cac54b0528543a9ee02b2b7d5aae"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
-      "sha256": "aba68eaf49691f3af492e9dde40a0e19129940581187b8a1480d79ebc56c2d4b"
+      "sha256": "f14f6fb55fe2ad2ffff75f3d017821dbb5e470fcd241858dc30e9424ab3d2bdb"
     },
     "dev-flow/scripts/flow-context.mjs": {
       "sha256": "26d6a1b5e34549151c06c700d369bb3c5712952b9e6e3b5753b0242785ecd9df"
@@ -34,13 +34,13 @@
       "sha256": "e42d21a500b74605e40cc01a5b80a6c2a1992cfff45f70f2ca0cdaacfb8ab6d5"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
-      "sha256": "e97561f199ad954f48f982b4eea370094e23cec88bb9ae1368ff6bc48c891c44"
+      "sha256": "d93ba8047895aeea454a59630ad5957a8da95f78666a379a3a858bf07f9ba26c"
     },
     "dev-flow/scripts/flow-intake.mjs": {
-      "sha256": "e7e7596c93b8a6cff2eb950f57f0e054230a2913206af406f9a8fc32e234feed"
+      "sha256": "92151a3a5da402aa5ccb68f69aa3fd7880bf9e8173d92dcc1dd989a97b3d7adf"
     },
     "dev-flow/scripts/flow-issues.mjs": {
-      "sha256": "8368dc2ecd75070fad76734e288bf6691500367aa2b995222f0e89a6159ec30e"
+      "sha256": "086edfb8ae09681f3194fecabf008ce45a67e1e6e5473a9918474aeaa150d50f"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
       "sha256": "dcbe1fe9449d7d957d0d8dc75259b1e44e4fc09b5f41538988e248de82b5e7c5"
@@ -49,16 +49,16 @@
       "sha256": "9bdc3d70eeea273653cc74daa4038be6656bc4d3ad210b64b8d1050584d4714a"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "1e45732f7c6a545e5ab12f10f4c7242a16da0e42a7ebf434b18f19e9fa2c7535"
+      "sha256": "1eab9cfa4b7478e1aa85d7d024128825e99b15124d4d4db15daf27f98d9324d2"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "3d67b2671d81c81cefea7eb2565e82b65921bf90ccbf9aaa10752fda986a7aa3"
+      "sha256": "505996a9ff7be550873e3c1b68c19f25ecc4510364ce4c04c3ef95f1c3d6fed8"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "df41f455b1a4c3f86e7cbf2beae8cfeea04c1dac676d0fa2ab67894aaaaec1e4"
     },
     "dev-flow/scripts/flow-sync.mjs": {
-      "sha256": "60c01f5dd1e2a4c2e6321af41fd6810d05115cc83b0d1d6731838ea7dd58a2ca"
+      "sha256": "dafdde0f8c26f2678f982298a4a9f9b5e40769bdbb99bffbeb283b01be3c3e62"
     },
     "dev-flow/scripts/flow-trial-merge.mjs": {
       "sha256": "0faa0b7c80d1eb76062d30cb9a60777896d13cf1949df1e0c83841c6b8b646e4"
@@ -121,7 +121,7 @@
       "sha256": "395e2d35c30cc975cdc2ea06890396e8f8130d866ee52b2fc0561d50ba4f13e6"
     },
     "dev-plan/scripts/doc-plan-ops.mjs": {
-      "sha256": "acb02fa469713a9497568450566acc7a30a1307b9a376fe162e2ff84b6b13050"
+      "sha256": "482e3195513908b6dfd5ffdf205d98ca1c12c3040467eb329482a3cd658a14c1"
     },
     "dev-plan/scripts/doc-plan.mjs": {
       "sha256": "88cf6cae43d77b0687feedc23cb3fe0401db8f6c5789bd7581a319cad7e71869"
@@ -154,7 +154,7 @@
       "sha256": "da2927ea56e473c33ac22a56015ad9ce44ec240ac162de51567e5cb0472ba549"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "b12bb4fc0354b1dbfae61da1014b2c10caca16444c6a140caf2f66211608547c"
+      "sha256": "53e7090449142bec31f10d111f7416752c408fcc25aff00e25c0528c3a1cc6df"
     },
     "dev-review/scripts/review-pr.mjs": {
       "sha256": "6d8c8069ad956e708bdc15aad57cc8785a288b8f90dbeda2047b1278549a2b1c"
@@ -181,7 +181,7 @@
       "sha256": "8ccfedeba1932a419d58ff83fb5ef8f86e338b02039d10f0f8f946fb0f46c1c9"
     },
     "lib/critique-rounds.mjs": {
-      "sha256": "f9327fbcaf53a57f5f5843ae938e0219e798cb0fbd7bb118fe1316e5335a64df"
+      "sha256": "eba1326d84e9ec6ed589a433ae30ded94ff827cbec514fff8ecd98db092cff67"
     },
     "lib/doc-approval.mjs": {
       "sha256": "cc43152df1fa5d0588ead9d0f853254dd4cd2e4bca89a01f38df449502485e74"
@@ -241,13 +241,13 @@
       "sha256": "67ad14f3f08c7d9c8928a60c0ac8c62f411d9ea3bcefb9fb2bffc84e7a1d57ed"
     },
     "lib/exit-codes.mjs": {
-      "sha256": "7e51ced6715217b48271ba89168ef6b245e8313e3334c08b1ae8f715d6f8306b"
+      "sha256": "cf28abebb3f0f2d2727a7667e219b0b3cc8835951105b53600a6c308bb2cf325"
     },
     "lib/feature-map.mjs": {
       "sha256": "94acec09609cd5fd14e2f52d643fc55d8d7f4803454136c232f2bb65b64a90e0"
     },
     "lib/gate-truth.mjs": {
-      "sha256": "f7519691d777bebaab3d53ffd6ad294a23e31956d1bd2402c7d6c3a9e8a51d8b"
+      "sha256": "5007cda6989ca84cd1681d8e9aba95574d539ff17a40b5ffa954a3aa0e588d94"
     },
     "lib/git-core.mjs": {
       "sha256": "1802ee6931ceca7cac7a335c1b4b698ad5ae0b5332962d055e0794dee394ab27"
@@ -379,10 +379,10 @@
       "sha256": "c5db8f8c7594ead9730ecae41e9def732f9a09bb8e7ccf70a637cfaf678d17fb"
     },
     "lib/workflow-helpers.mjs": {
-      "sha256": "32870e03844423a317675402490da59e58604632d044ec89a7d0e89cb42e4010"
+      "sha256": "328d24caeb61c1ba9931db486d2d62771cd9a94ec72586061fab3b41b0472fa6"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "2e02e5f48162717b9c0f874e91a745fa51bf8069cf00b82b83e8c0d275707f25"
+      "sha256": "ed3c2e4736a80effb18fd6c9b22d9d681fb682fc529f4d9473c946e5b50d23a9"
     },
     "templates/docs-prd.md": {
       "sha256": "7e8b29b9a129f29d1777e7b6885ddfa06e9c2f533ba59435cd416ed60598869e"

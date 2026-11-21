@@ -131,7 +131,7 @@ function buildDispatchOrder(allCases) {
 const WORKER_TASK_TIMEOUT_MS = 90000
 const WORKER_MSG_PREFIX = '__PF_W__:'
 
-function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, caseNames = []) {
+function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, caseNames = [], caseCosts = []) {
   return new Promise((done) => {
     let cursor = 0
     let passed = 0
@@ -227,13 +227,17 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, ca
       const armTaskWatchdog = (idx) => {
         clearTaskTimer()
         taskStartedAt = Date.now()
+        // 声明了成本就按它放宽（留一倍余量应对并行抢占），没声明就用默认值。
+        // 两处共用同一个数字：调度拿它排先后，看门狗拿它定时限。
+        const declared = Number(caseCosts[idx]) > 0 ? Number(caseCosts[idx]) : 0
+        const budget = Math.max(WORKER_TASK_TIMEOUT_MS, declared * 2)
         taskTimer = setTimeout(() => {
           const name = caseNames[idx] ?? 'unknown'
-          timedOutMsg = `工作进程 ${tag} 在用例 #${idx}（${name}）执行超时 (>${WORKER_TASK_TIMEOUT_MS}ms${readTraceSummary()})`
+          timedOutMsg = `工作进程 ${tag} 在用例 #${idx}（${name}）执行超时 (>${budget}ms${readTraceSummary()})`
           killProcessTree(child, false)
           closeFallback = setTimeout(() => finishWorker(124), 3000)
           closeFallback.unref?.()
-        }, WORKER_TASK_TIMEOUT_MS)
+        }, budget)
         taskTimer.unref?.()
       }
 
@@ -432,6 +436,7 @@ async function main() {
         Math.min(lanes, allCases.length),
         workerBkRoot,
         allCases.map(([name]) => name),
+        allCases.map(([, , costMs]) => (Number(costMs) > 0 ? Number(costMs) : 0)),
       )
       if (profile) {
         const sorted = [...timings].sort((a, b) => b.ms - a.ms)

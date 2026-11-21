@@ -329,8 +329,18 @@ function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round,
   if (!reviewer || !String(reviewer).trim()) {
     throw makePlanError('MISSING_REVIEWER', EXIT.USAGE, 'critique 必须指定 --reviewer <reviewerId>')
   }
-  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {
-    throw makePlanError('SELF_CRITIQUE_REJECTED', EXIT.FACT, `SELF_CRITIQUE_REJECTED: 规划 Critique 独立复核人 (${reviewer}) 不得与文档负责人 (${fmPre.data.owner}) 相同`)
+  // 自审要按**负责人历史**判，不只按当前 owner。
+  //
+  // 只比当前 owner 时，换个负责人就能让本人回来审自己的稿子：先把 owner 转给别人、
+  // 再以「新负责人不是审稿人」的状态自我复核。历史集合才是「谁曾是这份稿子的作者」，
+  // 这与负责人变更留痕是同一件事的两面。
+  const ownerHistory = collectOwnerHistory(fmPre.data)
+  const reviewerId = normActorId(reviewer)
+  if (reviewerId && ownerHistory.some((o) => normActorId(o) === reviewerId)) {
+    throw makePlanError(
+      'SELF_CRITIQUE_REJECTED', EXIT.FACT,
+      `SELF_CRITIQUE_REJECTED: 规划 Critique 独立复核人 (${reviewer}) 不得与文档负责人或其任前任负责人相同（历史：${ownerHistory.join('、')}）`,
+    )
   }
   const hasPriorStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
   if (hasPriorStopLoss && !override?.approved) {

@@ -125,8 +125,8 @@ export const INJECTIONS_WORKFLOW = [
     id: 'I64',
     what: '关闭 critique-rounds.mjs critique 禁止自审拦截',
     file: 'kit/skills/lib/critique-rounds.mjs',
-    from: '  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
-    to: '  if (false && fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
+    from: '  if (reviewerId && ownerHistory.some((o) => normActorId(o) === reviewerId)) {',
+    to: '  if (false && reviewerId && ownerHistory.some((o) => normActorId(o) === reviewerId)) {',
     expect: 'SELF_CRITIQUE_REJECTED',
   },
   {

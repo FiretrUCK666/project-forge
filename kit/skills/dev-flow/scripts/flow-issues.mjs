@@ -13,7 +13,7 @@ import { closeLocalIssue, getLocalIssue, listLocalIssues } from '../../lib/local
 import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv, resolveIdentityLayers } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext } from './flow-context.mjs'
-import { EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, inspectWorkspace } from './flow-inspect.mjs'
+import { inspectWorkspace } from './flow-inspect.mjs'
 
 async function resolveMilestoneId(backend, targetRepo, rawMilestone) {
   if (rawMilestone === null || rawMilestone === undefined || String(rawMilestone).trim() === '') return null
@@ -69,7 +69,7 @@ export async function createIssueForStart({
 }) {
   if (!['maintainer', 'local-only', 'generic-git'].includes(role)) {
     process.stderr.write(`BLOCKED_CREATE_ISSUE_ROLE: --create-issue 仅支持 maintainer、local-only 或 generic-git 创建新工单（当前 role=${role}）。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK, blocked: true }
+    return { exitCode: EXIT.FACT, blocked: true }
   }
   const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
   const useRemoteGh = role === 'maintainer' && providerId === 'github'
@@ -123,7 +123,7 @@ export async function createIssueForStart({
   if (createRes.delegated) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CREATE_ISSUE_DELEGATED', ...createRes }, null, 2)}\n`)
     else process.stdout.write(`无直连 GitHub 凭据，已生成创建 Issue 代理载荷：${JSON.stringify(createRes.jsonPayload)}\n`)
-    return { exitCode: EXIT_ACTION_REQUIRED, delegated: true }
+    return { exitCode: EXIT.HUMAN, delegated: true }
   }
   if (!createRes.ok || !createRes.number) {
     throw new Error(`创建工单失败：${createRes.error ?? '未返回有效 Issue 编号'}`)
@@ -172,7 +172,7 @@ export async function handleIssue(opts, roots) {
     if (res.delegated) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CREATE_ISSUE_DELEGATED', ...res }, null, 2)}\n`)
       else process.stdout.write(`已生成创建 Issue 代理载荷：${JSON.stringify(res.jsonPayload)}\n`)
-      return { exitCode: EXIT_ACTION_REQUIRED }
+      return { exitCode: EXIT.HUMAN }
     }
     if (!res.ok) throw new Error(`创建工单失败：${res.error ?? 'unknown'}`)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, issue: res }, null, 2)}\n`)
@@ -275,13 +275,13 @@ export async function handleIssue(opts, roots) {
       const msg = 'BLOCKED_MIGRATE_NO_REMOTE: 当前仍为 local-only 模式，请先绑定远端后再运行 issue migrate。'
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_MIGRATE_NO_REMOTE' }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
     if (!useRemoteGh && !opts._ghClient) {
       const msg = `BLOCKED_MIGRATE_UNSUPPORTED_BACKEND: 当前远端（role=${role}, provider=${providerId}）不支持自动远端建单迁移，可本地继续追踪。`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_MIGRATE_UNSUPPORTED_BACKEND' }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
     const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} }))
     const remoteRepo = targetRepo ?? 'local/migrated'
@@ -315,7 +315,7 @@ export async function handleIssue(opts, roots) {
           process.stdout.write(`${JSON.stringify(created.jsonPayload)}\n`)
           printNextStep(['请在宿主 MCP 完成远端建单，并在确认后执行 issue close 关闭原本地工单。'], { repoRoot: roots.mainRoot })
         }
-        return { exitCode: EXIT_ACTION_REQUIRED }
+        return { exitCode: EXIT.HUMAN }
       }
       if (!created.ok || !created.number) {
         throw new Error(`迁移本地工单 #${item.number} 至远端失败：${created.error ?? 'unknown'}`)
@@ -397,7 +397,7 @@ export async function handleMilestone(opts, roots) {
     if (res.delegated) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MILESTONE_DELEGATED', ...res }, null, 2)}\n`)
       else process.stdout.write(`已生成创建里程碑代理载荷：${JSON.stringify(res.jsonPayload)}\n`)
-      return { exitCode: EXIT_ACTION_REQUIRED }
+      return { exitCode: EXIT.HUMAN }
     }
     if (!res.ok) throw new Error(`创建里程碑失败：${res.error ?? 'unknown'}`)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, capabilities: backend.capabilities, milestone: res }, null, 2)}\n`)
@@ -430,7 +430,7 @@ export async function handleMilestone(opts, roots) {
       if (r.delegated) {
         if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MILESTONE_DELEGATED', ...r }, null, 2)}\n`)
         else process.stdout.write(`已生成指派里程碑代理载荷：${JSON.stringify(r.jsonPayload)}\n`)
-        return { exitCode: EXIT_ACTION_REQUIRED }
+        return { exitCode: EXIT.HUMAN }
       }
       if (!r.ok) throw new Error(`指派里程碑至 #${num} 失败：${r.error ?? 'unknown'}`)
       results.push(r)
@@ -454,7 +454,7 @@ export async function handleMilestone(opts, roots) {
     if (res.delegated) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MILESTONE_DELEGATED', ...res }, null, 2)}\n`)
       else process.stdout.write(`已生成关闭里程碑代理载荷：${JSON.stringify(res.jsonPayload)}\n`)
-      return { exitCode: EXIT_ACTION_REQUIRED }
+      return { exitCode: EXIT.HUMAN }
     }
     if (!res.ok) throw new Error(`关闭里程碑 #${msNum} 失败：${res.error ?? 'unknown'}`)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, milestone: res }, null, 2)}\n`)

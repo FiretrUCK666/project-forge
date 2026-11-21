@@ -29,10 +29,8 @@ import {
   readVerificationEvidence, redactDiagnosticText, resolveEffectiveBaseSha, resolveReadablePrTitleWithSource,
   runLowRiskDocStaticCheck, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
-import {
-  assertSubmitOwnership, checkLifecyclePreconditions, runLifecycleGovernHook, runPreVerifyEditGateHook,
-} from './flow-lifecycle-hooks.mjs'
+import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
+import { assertSubmitOwnership, checkLifecyclePreconditions, runLifecycleGovernHook, runPreVerifyEditGateHook } from './flow-lifecycle-hooks.mjs'
 import {
   applySubmitPostActions,
   cmdContainsSubcommand,
@@ -72,7 +70,7 @@ export async function handleFinalize(opts, roots) {
   if (!preCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: preCheck.code, reason: preCheck.message }, null, 2)}\n`)
     process.stderr.write(`${preCheck.message}\n`)
-    return { exitCode: preCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: preCheck.exitCode ?? EXIT.FACT }
   }
 
   const fastFinHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
@@ -169,7 +167,7 @@ export async function handleFinalize(opts, roots) {
   if (!governHook.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify(governHook, null, 2)}\n`)
     process.stderr.write(`${governHook.message}\n`)
-    return { exitCode: governHook.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: governHook.exitCode ?? EXIT.FACT }
   }
 
   ledger.finalized = true
@@ -213,7 +211,7 @@ export async function handleVerify(opts, roots) {
   if (!verifyPreCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: verifyPreCheck.code, reason: verifyPreCheck.message }, null, 2)}\n`)
     process.stderr.write(`${verifyPreCheck.message}\n`)
-    return { exitCode: verifyPreCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: verifyPreCheck.exitCode ?? EXIT.FACT }
   }
 
   const editGateRes = await runPreVerifyEditGateHook({ mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
@@ -221,7 +219,7 @@ export async function handleVerify(opts, roots) {
     await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'verify.edit-gate.fail', severity: 'high', source: 'flow-verify', message: editGateRes.message, taskId })
     if (opts.json) process.stdout.write(`${JSON.stringify(editGateRes, null, 2)}\n`)
     process.stderr.write(`${editGateRes.message}\n`)
-    return { exitCode: editGateRes.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: editGateRes.exitCode ?? EXIT.FACT }
   }
 
   const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
@@ -230,7 +228,7 @@ export async function handleVerify(opts, roots) {
     await emitFlowSignal(roots, { category: 'security', module: 'workflow', pattern: 'verify.untrusted-blocked', severity: 'high', source: 'flow-verify', message: untrustedGate.message, taskId })
     if (opts.json) process.stdout.write(`${JSON.stringify(untrustedGate, null, 2)}\n`)
     process.stderr.write(`${untrustedGate.message}\n`)
-    return { exitCode: untrustedGate.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: untrustedGate.exitCode ?? EXIT.FACT }
   }
 
   const vPrdRel = ledger.prdFile ?? ledger.archivedPrdFile ?? findStrictDocBySlug(implRoot, 'docs/prd', ledger)
@@ -321,7 +319,7 @@ export async function handleVerify(opts, roots) {
     ledger.verifiedMode = mode
     ledger.verifiedTarget = rawTarget
     ledger.verifiedDirtyHash = sha256Text(stStdout)
-    ledger.lastVerifyExitCode = docOk ? 0 : EXIT_POLICY_BLOCK
+    ledger.lastVerifyExitCode = docOk ? 0 : EXIT.FACT
     ledger.visualFilesChanged = policy.visualFilesChanged
     ledger.empiricalVisualCheckRequired = policy.visualFilesChanged.length > 0
     ledger.status = docOk ? 'verified' : 'verify-failed'
@@ -331,7 +329,7 @@ export async function handleVerify(opts, roots) {
       const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', errors: docStaticRes.errors }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
     if (opts.json) {
       process.stdout.write(`${JSON.stringify({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: EXIT.OK, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, null, 2)}\n`)
@@ -348,7 +346,7 @@ export async function handleVerify(opts, roots) {
       if (policy.smokeRequired) {
         await emitFlowSignal(roots, { category: 'e2e', module: 'workflow', pattern: 'verify.smoke.unconfigured', severity: 'medium', source: 'flow-verify', message: 'unconfigured smoke-verify for runtime changes', taskId })
         process.stderr.write('BLOCKED_SMOKE_VERIFY_UNCONFIGURED: 运行时改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none（Q3）；请在 AGENTS.md 补齐 smoke-verify，或通过 --cmd "<命令>" --e2e-evidence "<运行观察>" 传入。\n')
-        return { exitCode: EXIT_POLICY_BLOCK }
+        return { exitCode: EXIT.FACT }
       }
     }
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.no-cmd`, severity: 'medium', source: 'flow-verify', message: `no verify command for ${mode}`, taskId })
@@ -369,7 +367,7 @@ export async function handleVerify(opts, roots) {
     if (pre.policy.smokeRequired && !alreadySmokeOk) {
       await emitFlowSignal(roots, { category: 'e2e', module: 'workflow', pattern: 'verify.smoke.unconfigured', severity: 'medium', source: 'flow-verify', message: `blocked ${mode}: unconfigured smoke-verify`, taskId })
       process.stderr.write(`BLOCKED_SMOKE_VERIFY_UNCONFIGURED: 运行时改动禁止在既无 smoke-verify 命令又未声明 smoke-verify: none 且无 --cmd/--e2e-evidence 时以 ${mode} 放行（Q3）；请在 AGENTS.md 补齐 smoke-verify，或传 --cmd "<命令>" --e2e-evidence "<运行观察>"。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
   }
 
@@ -445,7 +443,7 @@ export async function handleVerify(opts, roots) {
     ledger.status = 'verify-failed'
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.precheck.code ?? 'BLOCKED_VERIFY_PRECHECK', exitCode: finalExit, reasons: evRec.precheck.reasons ?? null }, null, 2)}\n`)
-    return { exitCode: finalExit || EXIT_POLICY_BLOCK }
+    return { exitCode: finalExit || EXIT.FACT }
   }
   let e2eFailureReport = null
   if ((mode === 'smoke' || smokeExecuted) && smokeRunRes && !smokeRunRes.ok) {
@@ -498,7 +496,7 @@ export async function handleSubmit(opts, roots) {
   if (!ownRes.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: ownRes.code, reason: ownRes.message }, null, 2)}\n`)
     process.stderr.write(`${ownRes.message}\n`)
-    return { exitCode: ownRes.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: ownRes.exitCode ?? EXIT.FACT }
   }
 
   const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
@@ -510,21 +508,21 @@ export async function handleSubmit(opts, roots) {
   const currentHead = headRes.ok ? headRes.stdout.trim() : null
   if (stZ.entries.length > 0) {
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 存在未提交改动，请先提交后再运行 verify 与 submit。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const needsFinalize = ledger.caseType === 3 || ledger.caseType === 4 || Boolean(ledger.todoFile) || Boolean(ledger.specFile)
   if (needsFinalize) {
     if (!ledger.finalized) {
       process.stderr.write(`BLOCKED_NOT_FINALIZED: Case ${ledger.caseType} 任务必须先执行 flow.mjs finalize --task ${taskId} 完成文档同步锁。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
     if (ledger.finalizedHead && currentHead && ledger.finalizedHead !== currentHead) {
       const postFin = await gitDiffNameStatusZ(implRoot, [`${ledger.finalizedHead}..${currentHead}`])
       const nonDocChanges = postFin.entries.map((e) => e.file).filter((f) => f && !/^docs\//.test(f))
       if (nonDocChanges.length > 0) {
         process.stderr.write(`BLOCKED_STALE_FINALIZE: finalize 之后又改了非文档文件（${nonDocChanges.join(', ')}），请重新运行 finalize。\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
+        return { exitCode: EXIT.FACT }
       }
     }
   }
@@ -535,7 +533,7 @@ export async function handleSubmit(opts, roots) {
     } else {
       process.stderr.write(`BLOCKED_STALE_VERIFICATION: 代码已变更（verifiedHead=${String(ledger.verifiedHead).slice(0, 7)} !== HEAD=${currentHead?.slice(0, 7)}），必须重跑 verify。\n`)
     }
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const profile = parseAgentsProfile(implRoot)
@@ -566,14 +564,14 @@ export async function handleSubmit(opts, roots) {
     }
     process.stderr.write(`${msg}\n`)
     if (!opts.json) printNextStep([{ skill: 'dev-flow', text: unlockCmd }], { repoRoot: roots.mainRoot })
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
   const evidence = readVerificationEvidence(roots.gitDir, taskId)
   const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
   if (!evCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: evCheck.code, reason: evCheck.reason, policy }, null, 2)}\n`)
     process.stderr.write(`${evCheck.code}: ${evCheck.reason}\n`)
-    return { exitCode: evCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: evCheck.exitCode ?? EXIT.FACT }
   }
 
   const visualFilesChanged = policy.visualFilesChanged
@@ -583,7 +581,7 @@ export async function handleSubmit(opts, roots) {
 
   if (ledger.role === 'clone-readonly') {
     process.stderr.write('BLOCKED_CLONE_READONLY: 当前身份为只读克隆，禁止推送；请先走 Fork 或本地模式。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const reviewSlotSync = await syncReviewSlotForSubmit(roots, ledger, taskId, currentHead, { resetDirty: Boolean(opts['reset-review-slot']) })
@@ -646,7 +644,7 @@ export async function handleSubmit(opts, roots) {
 
   if (ledger.role === 'contributor-fork' && originLower && upstreamLower && originLower === upstreamLower) {
     process.stderr.write('BLOCKED_FORK_REMOTE_LOCK: origin 与 upstream 指向相同仓，禁止直接向正本推送。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const pushRes = await gitRun(implRoot, ['push', '-u', pushRemote, ledger.branch])
@@ -692,7 +690,7 @@ export async function handleSubmit(opts, roots) {
     if (dup.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify(dup, null, 2)}\n`)
       process.stderr.write(`${dup.message}\n`)
-      return { exitCode: dup.exitCode ?? EXIT_POLICY_BLOCK }
+      return { exitCode: dup.exitCode ?? EXIT.FACT }
     }
   }
   if (!ledger.prNumber) {

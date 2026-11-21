@@ -23,7 +23,8 @@ import { getLocalIssue, getLocalPr, listLocalIssues } from '../../lib/local-issu
 import { getHostingProvider, parseIssueNumbers, parsePrNumber, probeForWrite, resolveIdentityLayers } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext, resolveReadClient } from './flow-context.mjs'
-import { EXIT_ACTION_REQUIRED, inspectWorkspace } from './flow-inspect.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
+import { inspectWorkspace } from './flow-inspect.mjs'
 
 export { evaluateIntakeTriage, isApprovedInternalPlan, readIntakeRecord, writeIntakeRecord }
 
@@ -395,7 +396,7 @@ export async function handleIntake(opts = {}, rootsArg = null) {
     printNextStep(nextSteps, { repoRoot: mainRoot })
   }
 
-  return { exitCode: delegated ? EXIT_ACTION_REQUIRED : 0, result }
+  return { exitCode: delegated ? EXIT.HUMAN : 0, result }
 }
 
 /** 供 `flow.mjs` 或独立调用方直接以 `(repoRoot, argv)` 形式运行 `flow intake`。 */

@@ -17,6 +17,8 @@ import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
 import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
 import { auditEntry, auditGlobalWhitelist, auditHandRolled, evaluateParity, ENTRY_SPECS, HAND_ROLLED_SPECS } from './cli-parity.mjs'
+import { evaluateExitCodeParity } from './exit-code-parity.mjs'
+import { blockedExitOf } from '../../kit/skills/lib/exit-codes.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
@@ -623,6 +625,22 @@ function checkCliParity({ ROOT, fail, note, walk }) {
   if (failures.length === 0) note(`参数对拍：${notes.join('；')}`)
 }
 
+/**
+ * 退出码档位对拍：登记表 vs 实际返回。
+ *
+ * 登记表说「事实档」，代码返「用法档」，两边都写得很整齐，没有任何东西会发现——
+ * 直到有人照登记表去处理，做了一件本来不用做的事。所以按源码扫，不维护第二份清单。
+ */
+function checkExitCodeParity({ ROOT, walk, fail, note }) {
+  const sources = [
+    ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
+    ...walk(join(ROOT, 'kit', 'skills'), (f) => f.endsWith('.mjs')),
+  ].map((abs) => ({ file: abs.slice(ROOT.length + 1).replace(/\\/g, '/'), text: readFileSync(abs, 'utf8') }))
+  const result = evaluateExitCodeParity(sources, blockedExitOf)
+  for (const message of result.failures) fail(`退出码档位：${message}`)
+  if (result.ok) note(`退出码档位：${result.codes} 个阻断码的登记档位与 ${result.checked} 处返回全部一致`)
+}
+
 export async function runSuiteChecks(ctx) {
   const allMjs = [
     ...ctx.walk(join(ctx.ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
@@ -643,6 +661,7 @@ export async function runSuiteChecks(ctx) {
   checkStructureRules(ctx)
   checkKitSuite(ctx, syntaxErrors)
   checkCliParity(ctx)
+  checkExitCodeParity(ctx)
   checkKitWriteProbes(ctx)
   checkHygiene(ctx)
 }

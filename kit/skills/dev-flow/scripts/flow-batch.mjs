@@ -23,7 +23,7 @@ import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { buildMultiTaskWavePlan, evaluateNextState, hasRepoCiWorkflow, scanUnstartedReadySlices } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
+import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { assertPreMergeGates } from './flow-merge.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
 
@@ -250,13 +250,13 @@ async function handleCheckDisjoint(opts, roots) {
       blocked: true,
       disjoint: false,
       code: 'BLOCKED_OVERLAPPING_SLICE_FILES',
-      exitCode: EXIT_POLICY_BLOCK,
+      exitCode: EXIT.FACT,
       overlaps,
       message: `BLOCKED_OVERLAPPING_SLICE_FILES: 并行切片存在文件重叠（${overlaps.map((o) => `${o.file}: [${o.tasks.join(', ')}]`).join('; ')}），必须拆波串行执行。`,
     }
     if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
     process.stderr.write(`${out.message}\n`)
-    return { exitCode: EXIT_POLICY_BLOCK, ...out }
+    return { exitCode: EXIT.FACT, ...out }
   }
 
   const out = { ok: true, disjoint: true, tasks: perTask, overlaps: [] }
@@ -335,7 +335,7 @@ async function handleMergeQueue(opts, roots) {
         queue.unshift(taskId)
         results.push({ taskId, ok: false, blocked: true, code: gate.code, exitCode: gate.exitCode })
         stoppedWithFailure = true
-        exitCode = gate.exitCode ?? EXIT_POLICY_BLOCK
+        exitCode = gate.exitCode ?? EXIT.FACT
         break
       }
 
@@ -346,9 +346,9 @@ async function handleMergeQueue(opts, roots) {
         if (verdict.blocking && !opts['human-approved']) {
           queue.unshift(taskId)
           process.stderr.write(`${verdict.message}\n`)
-          results.push({ taskId, ok: false, blocked: true, code: verdict.code, exitCode: EXIT_POLICY_BLOCK, checks })
+          results.push({ taskId, ok: false, blocked: true, code: verdict.code, exitCode: EXIT.FACT, checks })
           stoppedWithFailure = true
-          exitCode = EXIT_POLICY_BLOCK
+          exitCode = EXIT.FACT
           break
         }
       }
@@ -399,7 +399,7 @@ async function handleMergeQueue(opts, roots) {
         }))
         results.push({ taskId, ok: false, status: 'rework', baseDrifted, queueConflict: conflictInfo })
         stoppedWithFailure = true
-        exitCode = mergeRes?.exitCode ?? EXIT_POLICY_BLOCK
+        exitCode = mergeRes?.exitCode ?? EXIT.FACT
         break
       }
 

@@ -720,9 +720,9 @@ export function evaluateNextState({
     ownerRole = 'human'
     const approveSuffix = policy?.humanApprovalRequired ? ' --human-approved --reason "<确认原因>"' : ''
     nextAction = policy?.humanApprovalRequired
-      ? '请先在远端托管完成 MR 合并，因触及高风险须人类确认后再带 --remote-merged --human-approved --reason 收尾'
-      : '请先在远端托管完成 MR 合并，再带 --remote-merged 确认收尾'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId} --remote-merged${approveSuffix}`
+      ? '请先在远端托管完成合并，再带 --human-approved --reason "<确认原因>" 收尾（合并结果由现场取回远端核验）'
+      : '请先在远端托管完成合并，再执行 merge 收尾（合并结果由现场取回远端核验）'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}${approveSuffix}`
   } else {
     phase = 'ready-to-merge'
     ownerRole = policy?.humanApprovalRequired ? 'human' : 'reviewer'

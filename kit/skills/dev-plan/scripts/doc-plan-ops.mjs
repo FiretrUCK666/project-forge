@@ -57,7 +57,7 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
     }
     if (critiqueState.approved) {
       if (critiqueState.stale) {
-        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${critiqueState.sha} !== current=${critiqueState.currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: EXIT.USAGE })
+        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${critiqueState.sha} !== current=${critiqueState.currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: EXIT.FACT })
       }
     } else {
       const currentSha = critiqueState.currentSha
@@ -82,12 +82,12 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
           }
           critiqueSkipped = true
         } else {
-          throw Object.assign(new Error(`BLOCKED_CRITIQUE_REQUIRED: ${audit.file} 为 ${docType.toUpperCase()} 文档，必须先通过独立 Critique 并运行 critique-pass，或传入 --skip-critique-reason "<原因>"`), { code: 'BLOCKED_CRITIQUE_REQUIRED', exitCode: EXIT.USAGE })
+          throw Object.assign(new Error(`BLOCKED_CRITIQUE_REQUIRED: ${audit.file} 为 ${docType.toUpperCase()} 文档，必须先通过独立 Critique 并运行 critique-pass，或传入 --skip-critique-reason "<原因>"`), { code: 'BLOCKED_CRITIQUE_REQUIRED', exitCode: EXIT.FACT })
         }
       } else {
         const shaMatch = /\bsha=([a-f0-9]{8,64})\b/i.exec(critiqueVal)
         if (shaMatch && currentSha.slice(0, shaMatch[1].length) !== shaMatch[1].toLowerCase() && !skipCritiqueReason) {
-          throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在 critique-pass 之后正文已被修改（recorded=${shaMatch[1]} !== current=${currentSha.slice(0, shaMatch[1].length)}），请重新复核并执行 critique-pass`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: EXIT.USAGE })
+          throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在 critique-pass 之后正文已被修改（recorded=${shaMatch[1]} !== current=${currentSha.slice(0, shaMatch[1].length)}），请重新复核并执行 critique-pass`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: EXIT.FACT })
         }
       }
     }

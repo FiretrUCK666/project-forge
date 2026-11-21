@@ -341,7 +341,22 @@ export function registerStageBLoopB4bCases(cases) {
     })
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     try {
-      const selfRej = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'author-a', '--findings', 'C1: bad', '--dir', dir]))
+      // 自审要按负责人历史判，不只按当前 owner：换过人之后，原负责人回来审自己的稿子同样要拒。
+    // 只比当前 owner 时，这里会静默放行——那是最典型的一类「看起来在拦、实际没拦」。
+    const rotatedSpec = 'docs/specs/261118-issue14-c14-rotated-spec.md'
+    mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+    writeFileSync(join(dir, rotatedSpec), [
+      '---', 'kind: spec', 'title: "C14 Rotated"', 'status: draft', 'tier: L3', 'created: 2026-11-18',
+      'updated: 2026-11-18', 'issue: 14', 'owner: author-b', 'previous_owners: [author-a]', 'approved: false', 'implemented: false',
+      'plan_critique: pending', 'critique_rounds: []', 'related_prd: null', '---', '',
+      '# Spec: C14 Rotated', '', '## 目标', '- 换人后旧作者不得回来自审', '', '## 方案', '- 历史负责人集合比对', '',
+    ].join('\n'))
+    const rotatedSelf = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', join(dir, rotatedSpec), '--reviewer', 'author-a', '--findings', 'C1: bad']))
+    if (rotatedSelf.res !== EXIT.FACT || !String(rotatedSelf.err).includes('SELF_CRITIQUE_REJECTED')) {
+      return `换人后原负责人回来自审未被拦截：exit=${rotatedSelf.res}, err=${rotatedSelf.err}`
+    }
+
+    const selfRej = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'author-a', '--findings', 'C1: bad', '--dir', dir]))
       if (selfRej.res !== EXIT.FACT || !selfRej.err.includes('SELF_CRITIQUE_REJECTED')) {
         return `critique-reject 未拦同人自审：exit=${selfRej.res}, err=${selfRej.err}`
       }

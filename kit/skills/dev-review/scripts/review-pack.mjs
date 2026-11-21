@@ -11,6 +11,7 @@ import { basename, join, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
+import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { gitRun, isMainModule, posixPath, readTextSafe, resolveRepoRoots } from '../../lib/git.mjs'
 import {
   getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast, resolveGitDirFast, setCachedRangeDiffCommits,
@@ -400,7 +401,20 @@ async function main(argv = process.argv.slice(2)) {
       const scanRes = scanUntrustedDiff(diff, reviewRoot)
       const hazards = scanRes.hazards
       untrustedAdvisories = scanRes.advisories
-      if (hazards.length > 0 && !opts.humanApprovedExec) {
+      // 放行点统一判据：绕过不可信高危扫描是「弱化门禁」里最重的一个，
+  // 所以理由必须实质——说清看过哪些高危项、为什么仍可执行、怎么隔离。
+  // 只查非空等于给一句占位词留门，而这道门后面直接是「在不可信代码上跑脚本」。
+  if (opts.humanApprovedExec) {
+    const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '绕过不可信高危扫描的理由' })
+    if (!reasonCheck.ok) {
+      const msg = `${reasonCheck.code}: ${reasonCheck.reason} --human-approved-exec / --human-approved 必须写清：看过哪些高危项、为什么仍可执行、怎么隔离。\n`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: reasonCheck.code, status: reasonCheck.code, message: msg.trim() }, null, 2)}\n`)
+      process.stderr.write(msg)
+      return EXIT.USAGE
+    }
+    opts.releaseReason = reasonCheck.cleaned
+  }
+  if (hazards.length > 0 && !opts.humanApprovedExec) {
         const payload = {
           status: 'BLOCKED_UNTRUSTED_HAZARD',
           exitCode: EXIT.FACT,

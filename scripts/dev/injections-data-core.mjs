@@ -274,8 +274,8 @@ export const INJECTIONS_CORE = [
     id: 'I23',
     what: '放行外部 PR --untrusted-scan 高危 workflow/postinstall 拦截',
     file: 'kit/skills/dev-review/scripts/review-pack.mjs',
-    from: '    if (hazards.length > 0 && !opts.humanApprovedExec) {',
-    to: '    if (false && hazards.length > 0 && !opts.humanApprovedExec) {',
+    from: '  if (hazards.length > 0 && !opts.humanApprovedExec) {',
+    to: '  if (false && hazards.length > 0 && !opts.humanApprovedExec) {',
     expect: '高危 workflow/postinstall 未拦截',
   },
   {

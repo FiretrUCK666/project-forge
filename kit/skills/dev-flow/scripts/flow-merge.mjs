@@ -26,7 +26,7 @@ import {
   resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
-import { buildTargetRepoContext, EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
+import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
 
@@ -40,18 +40,18 @@ export async function assertPreMergeGates({
 } = {}) {
   if (ledger.role === 'contributor-fork') {
     process.stderr.write('BLOCKED_FORK_CANNOT_MERGE: contributor-fork 无权合并上游仓库 PR，请等待上游维护者合并。\n')
-    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_FORK_CANNOT_MERGE' }
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_FORK_CANNOT_MERGE' }
   }
   if (ledger.role === 'clone-readonly' || ledger.role === 'undetermined') {
     process.stderr.write(`BLOCKED_ROLE_CANNOT_MERGE: 当前身份为 ${ledger.role}，不允许执行合并。\n`)
-    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_ROLE_CANNOT_MERGE' }
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_ROLE_CANNOT_MERGE' }
   }
   if (ledger.role === 'generic-git' && !opts['human-approved']) {
     const msg = 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并；'
       + 'merge 会现场取回远端，并按四态合流判定核验，核不到就阻断。确需人工拍板时带 --human-approved --reason "<原因>"。'
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', role: ledger.role }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
-    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED' }
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED' }
   }
 
   const implRoot = ledger.worktreePath ? resolve(mainRoot, ledger.worktreePath) : mainRoot
@@ -70,26 +70,26 @@ export async function assertPreMergeGates({
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突`)
   if (stZ.entries.length > 0) {
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 实施工作区存在未提交改动，请先提交并验证后再执行 merge。\n')
-    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_DIRTY_WORKTREE' }
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_DIRTY_WORKTREE' }
   }
   if (ledger.role !== 'inbound-external-pr' && !hasExploredEvidence(ledger)) {
     const msg = `BLOCKED_NOT_EXPLORED: 任务 ${taskId} 缺少只读探索证据（ledger.explored），请先运行 flow.mjs explore --task ${taskId} 记录后再合并。`
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_NOT_EXPLORED', taskId }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
-    return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_NOT_EXPLORED' }
+    return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_NOT_EXPLORED' }
   }
 
   const currentHead = headRes.ok ? headRes.stdout.trim() : null
   if (!ledger.verifiedHead || (currentHead && ledger.verifiedHead !== currentHead) || ledger.lastVerifyExitCode !== 0) {
     process.stderr.write('BLOCKED_NOT_VERIFIED: 合并前必须有匹配当前 HEAD 的实证通过记录。\n')
-    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_NOT_VERIFIED' }
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_NOT_VERIFIED' }
   }
 
   const stackGate = await checkStackedParentMerged(mainRoot, ledger, { backend, targetRepo, defaultBranch: ledger.stackTargetBase || 'main' })
   if (stackGate.blocked) {
     if (opts.json) process.stdout.write(`${JSON.stringify(stackGate, null, 2)}\n`)
     process.stderr.write(`${stackGate.message}\n`)
-    return { ok: false, exitCode: stackGate.exitCode ?? EXIT_POLICY_BLOCK, code: stackGate.code }
+    return { ok: false, exitCode: stackGate.exitCode ?? EXIT.FACT, code: stackGate.code }
   }
 
   if (Array.isArray(ledger.unresolvedBlockers) && ledger.unresolvedBlockers.length > 0) {
@@ -97,7 +97,7 @@ export async function assertPreMergeGates({
     if (depGate.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify(depGate, null, 2)}\n`)
       process.stderr.write(`${depGate.message}\n`)
-      return { ok: false, exitCode: depGate.exitCode ?? EXIT_POLICY_BLOCK, code: depGate.code }
+      return { ok: false, exitCode: depGate.exitCode ?? EXIT.FACT, code: depGate.code }
     }
   }
 
@@ -121,7 +121,7 @@ export async function assertPreMergeGates({
   if (!evCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: evCheck.code, reason: evCheck.reason, policy }, null, 2)}\n`)
     process.stderr.write(`${evCheck.code}: ${evCheck.reason}\n`)
-    return { ok: false, exitCode: evCheck.exitCode ?? EXIT_POLICY_BLOCK, code: evCheck.code }
+    return { ok: false, exitCode: evCheck.exitCode ?? EXIT.FACT, code: evCheck.code }
   }
 
   const highRiskHits = changed.filter((f) => profile.highRisk.some((pat) => matchGlob(f, pat)))
@@ -140,14 +140,14 @@ export async function assertPreMergeGates({
       process.stderr.write(`BLOCKED_GATE_WEAKENING (one-way door): 检测到门禁弱化改动，须人类确认：${summary}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} --human-approved` }], { repoRoot: mainRoot })
     }
-    return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_GATE_WEAKENING' }
+    return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_GATE_WEAKENING' }
   }
 
   const stopLossActive = Boolean(ledger.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered)
   const humanApprovedUnlock = Boolean(opts['human-approved'] || ledger.humanApprovedStopLoss)
   if (stopLossActive && !humanApprovedUnlock) {
     process.stderr.write('BLOCKED_STOP_LOSS_ESCALATE: 独立审查已触发停损升级（STOP_LOSS_ESCALATE），须人类裁决后带 --human-approved --reason "..." 放行。\n')
-    return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_STOP_LOSS_ESCALATE' }
+    return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_STOP_LOSS_ESCALATE' }
   }
   if (stopLossActive && opts['human-approved']) {
     // 解锁停损是放行点里最重的一个：它让「连续两轮同一阻塞项」或「三轮未收口」的结论
@@ -155,10 +155,10 @@ export async function assertPreMergeGates({
     // 调用点却自己编一个——校验被绕过，而账本里留下一句谁也没说过的「理由」。
     const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '停损解锁理由' })
     if (!reasonCheck.ok) {
-      const msg = `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason} 解锁停损必须写清：为什么这次可以放过、放过的代价是什么。\n`
-      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_SHALLOW_OVERRIDE_REASON', stopLoss: true, message: msg.trim() }, null, 2)}\n`)
+      const msg = `BLOCKED_STOP_LOSS_REASON_REQUIRED: ${reasonCheck.reason} 解锁停损必须写清：为什么这次可以放过、放过的代价是什么。\n`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_STOP_LOSS_REASON_REQUIRED', stopLoss: true, message: msg.trim() }, null, 2)}\n`)
       process.stderr.write(msg)
-      return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_SHALLOW_OVERRIDE_REASON' }
+      return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_STOP_LOSS_REASON_REQUIRED' }
     }
     ledger.humanApprovedStopLoss = true
     ledger.humanApprovedReason = reasonCheck.cleaned
@@ -171,7 +171,7 @@ export async function assertPreMergeGates({
       const msg = `BLOCKED_HIGH_RISK_HUMAN_APPROVAL: 未装配 dev-review 且触及高风险/one-way 边界（${policy.reasons.join('；')}），须人类确认并同时附加 --human-approved --reason "<确认原因>"。\n`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_HIGH_RISK_HUMAN_APPROVAL', reasons: policy.reasons, message: msg.trim() }, null, 2)}\n`)
       process.stderr.write(msg)
-      return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_HIGH_RISK_HUMAN_APPROVAL' }
+      return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_HIGH_RISK_HUMAN_APPROVAL' }
     }
     ledger.humanApprovedReason = reasonCheck.cleaned
   }
@@ -180,23 +180,23 @@ export async function assertPreMergeGates({
   if (requiresReview) {
     if (!effectiveReviewer || effectiveReviewer === ledger.implementerId) {
       process.stderr.write(`BLOCKED_REQUIRES_INDEPENDENT_REVIEW: 触碰高风险路径或需要独立审查（hits=${highRiskHits.join(',') || `case ${ledger.caseType}`}），必须存在 reviewerId !== implementerId 的独立审查 PASS 记录。\n`)
-      return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REQUIRES_INDEPENDENT_REVIEW' }
+      return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_REQUIRES_INDEPENDENT_REVIEW' }
     }
     if (!stopLossActive) {
       if (ledger.reviewPassed !== true) {
         process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 独立审查未通过（reviewPassed=${ledger.reviewPassed}）。\n`)
-        return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REVIEW_NOT_PASSED' }
+        return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_REVIEW_NOT_PASSED' }
       }
       if (lastRound && (lastRound.verdict !== 'pass' || (lastRound.blockers ?? []).length > 0)) {
         process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 最新一轮审查未通过（verdict=${lastRound.verdict}）。\n`)
-        return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REVIEW_NOT_PASSED' }
+        return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_REVIEW_NOT_PASSED' }
       }
     }
   }
 
   if (profile.mergeAuthority === 'human' && !opts['human-approved']) {
     process.stderr.write('BLOCKED_HUMAN_MERGE_AUTHORITY: 项目「取舍」声明了 merge-authority: human，请经人类确认后附加 --human-approved。\n')
-    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_HUMAN_MERGE_AUTHORITY' }
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_HUMAN_MERGE_AUTHORITY' }
   }
 
   const shaGate = validatePreMergeShaAndWorktree({
@@ -211,7 +211,7 @@ export async function assertPreMergeGates({
   if (!shaGate.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: shaGate.code, reason: shaGate.reason }, null, 2)}\n`)
     process.stderr.write(`${shaGate.code}: ${shaGate.reason}\n`)
-    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: shaGate.code }
+    return { ok: false, exitCode: EXIT.FACT, code: shaGate.code }
   }
 
   return { ok: true, implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer, stopLossActive, gateFindings }
@@ -261,7 +261,7 @@ export async function handleMerge(opts, roots) {
       const ciBlock = (code, msg) => {
         if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code, head: currentHead, checks }, null, 2)}\n`)
         process.stderr.write(`${msg}\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
+        return { exitCode: EXIT.FACT }
       }
       if (checks?.ok) {
         const verdict = evaluateRemoteChecks(checks, { ciRequired, headSha: currentHead })
@@ -364,7 +364,7 @@ export async function handleMerge(opts, roots) {
     if (mergeRes.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
       process.stderr.write(`${mergeRes.message}\n`)
-      return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
+      return { exitCode: mergeRes.exitCode ?? EXIT.FACT, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
     }
     if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
       const mergeImplLayers = resolveIdentityLayers({
@@ -543,7 +543,7 @@ export async function handleClaim(opts, roots) {
   const takeoverReason = String(opts.reason ?? '').trim()
   if (isTakeover && !takeoverReason) {
     process.stderr.write('BLOCKED_TAKEOVER_REASON_REQUIRED: --takeover 必须同时传入 --reason "<接管原因>"。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const prevAgent = ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? null
@@ -590,7 +590,7 @@ export async function handleClaim(opts, roots) {
     if (localClaim?.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, taskId, ...localClaim }, null, 2)}\n`)
       process.stderr.write(`${localClaim.message}\n`)
-      return { exitCode: localClaim.exitCode ?? EXIT_POLICY_BLOCK }
+      return { exitCode: localClaim.exitCode ?? EXIT.FACT }
     }
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
@@ -656,7 +656,7 @@ export async function handleClaim(opts, roots) {
             }, null, 2)}\n`)
           }
           process.stderr.write(`BLOCKED_ISSUE_ALREADY_CLAIMED: Issue #${num} 已被 ${activeClaim.actor ?? activeClaim.login ?? '他人'} 认领（分支=${activeClaim.branch ?? '未知'}），且尚无 release/takeover；如需接管请传 --takeover --reason "<接管原因>"。\n`)
-          return { exitCode: EXIT_POLICY_BLOCK }
+          return { exitCode: EXIT.FACT }
         }
         activeClaimsByIssue.set(num, activeClaim)
       }

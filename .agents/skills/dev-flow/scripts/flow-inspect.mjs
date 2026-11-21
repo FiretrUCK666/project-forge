@@ -43,8 +43,6 @@ import {
 import { mountSharedDeps } from './worktree-deps.mjs'
 
 export { analyzeIssueDependencies, buildTargetRepoContext, getChangedFiles, syncTaskDocsSafe }
-export const EXIT_POLICY_BLOCK = 3
-export const EXIT_ACTION_REQUIRED = 4
 
 export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const roots = opts.roots ?? await resolveRepoRoots(targetDir)
@@ -260,7 +258,7 @@ export async function handleStart(opts, roots) {
   const caseType = opts.case !== undefined ? Number(opts.case) : 3
   if (caseType === 5) {
     process.stderr.write('BLOCKED_CASE_5_TDD_CONFLICT: 需求与 docs/TDD.md 或生效 SPEC 冲突，请先更新 TDD.md 并获批后再开工。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
 
   const state = await inspectWorkspace(roots.mainRoot, {
@@ -279,7 +277,7 @@ export async function handleStart(opts, roots) {
     const msg = `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${effectiveExternalPr} 的不可信扫描与隔离审查需要 dev-review 技能，当前仓库未装配该技能；请通过 project-forge 运行 equip 补齐工具包后重试。`
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_REQUIRES_DEV_REVIEW', prNumber: effectiveExternalPr, message: msg }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { exitCode: EXIT.FACT }
   }
   if (!effectiveExternalPr && state.inputs.reuseExistingPr) {
     if (!prNumber && state.inputs.reuseExistingPr.prNumber) prNumber = state.inputs.reuseExistingPr.prNumber
@@ -309,7 +307,7 @@ export async function handleStart(opts, roots) {
         for (const c of guidance.choices) process.stdout.write(`  --clone-choice ${c.choice.padEnd(10)} : ${c.desc}\n`)
         printNextStep([`重新运行带上选择：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${hintTask} --clone-choice <fork|standalone|local>`], { repoRoot: roots.mainRoot })
       }
-      return { exitCode: EXIT_ACTION_REQUIRED }
+      return { exitCode: EXIT.HUMAN }
     }
     if (choice === 'local') {
       writeAtomic(join(roots.gitDir, 'pf-local-mode'), `${JSON.stringify({ mode: 'readonly-override', updatedAt: new Date().toISOString() }, null, 2)}\n`)
@@ -334,7 +332,7 @@ export async function handleStart(opts, roots) {
   if (depCheck.blocked) {
     if (opts.json) process.stdout.write(`${JSON.stringify(depCheck, null, 2)}\n`)
     process.stderr.write(`${depCheck.message}\n`)
-    return { exitCode: depCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: depCheck.exitCode ?? EXIT.FACT }
   }
   if (!effectiveExternalPr && state.inputs.reuseExistingPr) {
     const reqBranch = opts.branch ? String(opts.branch).trim() : null
@@ -347,7 +345,7 @@ export async function handleStart(opts, roots) {
       if (dup.blocked) {
         if (opts.json) process.stdout.write(`${JSON.stringify(dup, null, 2)}\n`)
         process.stderr.write(`${dup.message}\n`)
-        return { exitCode: dup.exitCode ?? EXIT_POLICY_BLOCK }
+        return { exitCode: dup.exitCode ?? EXIT.FACT }
       }
     }
   }
@@ -590,7 +588,7 @@ export async function handleStart(opts, roots) {
     const lines = formatPlanExitGate(planGate)
     if (opts.json) process.stdout.write(`${JSON.stringify(planGate, null, 2)}\n`)
     for (const line of lines) process.stderr.write(`${line}\n`)
-    return { exitCode: planGate.exitCode ?? EXIT_POLICY_BLOCK }
+    return { exitCode: planGate.exitCode ?? EXIT.FACT }
   }
   // 豁免放行时也说一句：被绕过的是哪一条，事后才有得核对。
   for (const line of formatPlanExitGate(planGate)) process.stderr.write(`${line}\n`)
@@ -602,7 +600,7 @@ export async function handleStart(opts, roots) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_SELF_AUTHORED_ACCEPTANCE', file: docRel, ...authored[0] }, null, 2)}\n`)
       else process.stdout.write(`${msg}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
   }
 
@@ -647,7 +645,7 @@ export async function handleStart(opts, roots) {
       const msg = `BLOCKED_BRANCH_IN_USE: 分支 ${branch} 已在工作树 ${checkedOutAt.path} 检出，请传入 --branch <新分支名> 或清理原工作树。`
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_BRANCH_IN_USE', branch, checkedOutAt: checkedOutAt.path }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { exitCode: EXIT.FACT }
     }
     const hasBranch = await resolveLocalBranchRef()
     const addArgs = hasBranch.ok ? ['worktree', 'add', implAbs, branch] : ['worktree', 'add', '-b', branch, implAbs, baseSha]

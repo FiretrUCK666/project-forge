@@ -23,8 +23,8 @@ export const INJECTIONS_EDIT_PYRAMID = [
     what: 'C5 edit-gate 放行无正当锚点的压制注释（suppression-bypass 漏报）',
     file: 'kit/skills/lib/static-gates.mjs',
     alsoDropIn: ['.agents/skills/lib/static-gates.mjs'],
-    from: 'if (!hasJustify && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {',
-    to: 'if (false && !hasJustify && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {',
+    from: 'if (!hasJustify && !(isHackLike && hasIssueRef) && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {',
+    to: 'if (false && !hasJustify && !(isHackLike && hasIssueRef) && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {',
     expect: 'StageC C5',
   },
   {

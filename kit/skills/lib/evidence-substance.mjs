@@ -98,7 +98,10 @@ export function evaluateTextSubstance(raw, { minChars = 6, subject = '实证说�
  */
 export function evaluateReleaseReason(raw, { subject = '放行理由', minChars = 12 } = {}) {
   const base = evaluateTextSubstance(raw, { minChars, subject })
-  if (!base.ok) return base
+  // 底层返回的是「实证太薄」那一档的错误码，而这里判的是「放行理由太薄」。
+  // 两个码属于不同的处置面：实证太薄要去补跑一遍，理由太薄要去补写一段说明。
+  // 原样透传会让调用方照着错误码去改错地方，所以统一换成放行侧的码。
+  if (!base.ok) return { ...base, code: 'BLOCKED_SHALLOW_OVERRIDE_REASON' }
   const stripped = base.cleaned
   // 去掉空白后数一遍实际字数：`a b c d e f g` 这种空格凑出来的串不算说了一段话。
   const compact = stripped.replace(/\s+/g, '')

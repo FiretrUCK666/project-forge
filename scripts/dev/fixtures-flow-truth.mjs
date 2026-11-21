@@ -254,19 +254,19 @@ export function registerFlowTruthCases(cases) {
       return '切得出执行块时仍被判成解析漏读——判据把「读到了」和「没读到」搞反了'
     }
 
-    // 四、流水线文件在、解析得了，但按结构谓词整份被排除（只有发版步骤，没有本地可跑的检查）：
-    // 记不适用、不阻断。判据不能隐含「必须有某种形状的流水线」——那样只有发版流水线的仓
-    // 装完工具就不可用，而它本来没有任何可本地复现的检查。
+    // 四、流水线文件在、解析得了，但按结构谓词整份被排除：仍算失败，不算「不适用」。
+    // 「没有对象」与「有对象却读不出结果」必须分档——后者降级成前者，门禁会静默变空，
+    // 而输出看着只像「这个仓不需要检查」。
     const releaseOnly = repoWith({
       '.github/workflows/release.yml': 'on:\n  push:\n    tags: [\'v*\']\npermissions:\n  contents: write\njobs:\n  rel:\n    runs-on: ubuntu-latest\n    steps:\n      - run: gh release create v1 --repo x/y\n',
     })
     try {
       const gate = deriveMergeGate(releaseOnly)
-      if (gate.verdict !== GATE_VERDICT.NOT_APPLICABLE || gate.blocking) {
-        return `只有发版流水线却判成 ${gate.verdict}（blocking=${gate.blocking}）——非该类 CI 的仓会被无理由卡死`
+      if (gate.verdict !== GATE_VERDICT.FAILED || !gate.blocking) {
+        return `有流水线却派生不出步骤时判成 ${gate.verdict}（blocking=${gate.blocking}）——门禁会静默变空`
       }
       if (!gate.reasons.some((r) => r.includes('release.yml'))) {
-        return `不适用没说清是哪份文件被排除：${JSON.stringify(gate.reasons)}`
+        return `失败没说清是哪份文件：${JSON.stringify(gate.reasons)}`
       }
     } finally { rmTree(releaseOnly) }
 
@@ -576,6 +576,25 @@ export function registerFlowTruthCases(cases) {
 
     // 登记表自身的完整性：四档之内、非空。全仓真实源码的对拍由 preflight 那一侧做——
     // 夹具里再扫一遍全仓，会扫到本夹具故意写错的反例串，只能靠在夹具里开口子才过。
+    // 覆盖率必须随结果一起给出，且分类清楚——只报「核过的都一致」会显得比实际强。
+    const coverage = evaluateExitCodeParity(clean, blockedExitOf).coverage
+    if (coverage.literals !== 2 || coverage.paired !== 2 || coverage.unpaired !== 0) {
+      return `合规写法的覆盖率算错：${JSON.stringify(coverage)}`
+    }
+    const labelOnly = [{ file: 'h.mjs', text: "return { ok: false, code: 'BLOCKED_SHALLOW_EVIDENCE', reason: 'x' }" }]
+    const lc = evaluateExitCodeParity(labelOnly, blockedExitOf).coverage
+    if (lc.paired !== 0 || lc.byKind.label.length !== 1) {
+      return `只当标签用的码没被归到标签类：${JSON.stringify(lc.byKind)}`
+    }
+    const advisory = [{ file: 'i.mjs', text: "return { code: 'WARN_SOMETHING', message: 'x' }" }]
+    if (evaluateExitCodeParity(advisory, blockedExitOf).coverage.byKind.advisory.length !== 1) {
+      return '提示类没被单独归类——提示本来就不阻断，和「判不了」混在一起会让人以为要动手'
+    }
+    const delegated = [{ file: 'j.mjs', text: "return { code: 'ACTION_REQUIRED_CLONE_CHOICE', message: 'x' }" }]
+    if (evaluateExitCodeParity(delegated, blockedExitOf).coverage.byKind.delegated.length !== 1) {
+      return '委派类没被单独归类——它的出口在别处，不该算作「未覆盖」'
+    }
+
     if (REGISTERED_BLOCK_CODES.length === 0) return '登记表是空的'
     for (const code of REGISTERED_BLOCK_CODES) {
       const tier = blockedExitOf(code)
@@ -598,6 +617,50 @@ export function registerFlowTruthCases(cases) {
     // 反例：空值不该进历史（否则「没写 owner」会被当成某人）。
     const none = collectOwnerHistory({ owner: '', previous_owners: ['null', '  '] })
     if (none.length !== 0) return `空负责人进了历史：${JSON.stringify(none)}`
+    return true
+  }])
+
+  cases.push(['M2：接管必须记账，否则「换个身份回来审自己的活」这条路一直是通的', async () => {
+    const { rememberPreviousImplementer, collectImplementerHistory } = await import('../../kit/skills/lib/ledger.mjs')
+
+    // 正例：接管时调用记账，旧实施者进历史，回来自审会被拒。
+    const taken = { implementerId: 'agent-a', claimedBy: 'agent-a' }
+    taken.previousImplementers = rememberPreviousImplementer(taken, 'agent-b')
+    taken.implementerId = 'agent-b'
+    taken.claimedBy = 'agent-b'
+    const hist = collectImplementerHistory(taken)
+    if (!hist.includes('agent-a')) return `接管后历史里没有原实施者：${JSON.stringify(hist)}`
+    const selfHit = hist.find((a) => String(a).toLowerCase() === 'agent-a')
+    if (!selfHit) return '原实施者能绕过历史集合回来自审——判定形同虚设'
+
+    // 判据真正生效在接管入口：直接调一次，确认它会自己记账。
+    // 只测纯函数时，把入口那一行记账删掉不会有任何断言变红——上一版就是这样漏的。
+    const { assertSubmitOwnership } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs')
+    const viaEntry = { implementerId: 'agent-a', claimedBy: 'agent-a', agent: 'agent-a' }
+    const entryRes = assertSubmitOwnership(viaEntry, { agent: 'agent-b', takeover: true, reason: '原实施者已离场，接手收尾' })
+    if (!entryRes.ok) return `合法接管被拒：${entryRes.message}`
+    if (!Array.isArray(viaEntry.previousImplementers) || !viaEntry.previousImplementers.includes('agent-a')) {
+      return `接管入口没有把原实施者记进历史：${JSON.stringify(viaEntry.previousImplementers)}`
+    }
+
+    // 反例：只覆写不记账，历史里就只剩新人，原实施者能过。
+    // 这条反例是判据的边界：记账漏一处，整套历史比对就等于没做。
+    const forgot = { implementerId: 'agent-a', claimedBy: 'agent-a' }
+    forgot.implementerId = 'agent-b'
+    forgot.claimedBy = 'agent-b'
+    const thin = collectImplementerHistory(forgot)
+    if (thin.includes('agent-a')) return '不记账却读到了原实施者——判据在别处另有来源，这条用例失去意义'
+
+    // 反例：同一个人接管自己，不该把自己写进历史。
+    const same = rememberPreviousImplementer({ implementerId: 'agent-a', claimedBy: 'agent-a' }, 'agent-a')
+    if (same.length !== 0) return `自己接管自己被记成换人：${JSON.stringify(same)}`
+
+    // 正例：多次接管累积，别丢掉更早的人。
+    const chain = { implementerId: 'agent-a', claimedBy: 'agent-a', previousImplementers: ['agent-z'] }
+    const next = rememberPreviousImplementer(chain, 'agent-b')
+    if (!next.includes('agent-z') || !next.includes('agent-a')) {
+      return `多次接管丢了更早的历史：${JSON.stringify(next)}`
+    }
     return true
   }])
 

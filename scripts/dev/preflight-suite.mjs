@@ -638,7 +638,13 @@ function checkExitCodeParity({ ROOT, walk, fail, note }) {
   ].map((abs) => ({ file: abs.slice(ROOT.length + 1).replace(/\\/g, '/'), text: readFileSync(abs, 'utf8') }))
   const result = evaluateExitCodeParity(sources, blockedExitOf)
   for (const message of result.failures) fail(`退出码档位：${message}`)
-  if (result.ok) note(`退出码档位：${result.codes} 个阻断码的登记档位与 ${result.checked} 处返回全部一致`)
+  // 覆盖率必须一起报：只说「核过的都一致」而不说「有多少没核」，
+  // 读的人会把前者当成全部——那正是本片要治的那种「看着很干净」。
+  if (result.ok) {
+    const { literals, paired, unpaired, byKind: kind } = result.coverage
+    note(`退出码档位：${result.codes} 个在册阻断码的 ${paired} 处返回与登记一致；`
+      + `另有 ${unpaired}/${literals} 处不在覆盖内：标签类 ${kind.label.length}（退出码由调用方给）、提示类 ${kind.advisory.length}（本就不阻断）、委派类 ${kind.delegated.length}`)
+  }
 }
 
 export async function runSuiteChecks(ctx) {

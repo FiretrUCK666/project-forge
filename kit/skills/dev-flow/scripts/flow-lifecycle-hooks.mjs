@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path'
 
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { execSafe, execShellCommand, gitDiffNameStatusZ, posixPath, readTextSafe } from '../../lib/git.mjs'
-import { hasExploredEvidence } from '../../lib/ledger.mjs'
+import { hasExploredEvidence, rememberPreviousImplementer } from '../../lib/ledger.mjs'
 import {
   loadForgeHooksConfig, resolveStageHookCommands, scanExtensionSlotHazards,
 } from '../../lib/overlay.mjs'
@@ -44,10 +44,13 @@ export function assertSubmitOwnership(ledger, opts = {}) {
         message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者角色 (${rawExplicitAgent}) 不得借 --takeover 代实施者 submit。`,
       }
     }
+    // 覆写之前先记账：历史集合是自审判定的唯一依据，不记就等于没换过人。
+    const superseded = rememberPreviousImplementer(ledger, rawExplicitAgent)
+    ledger.previousImplementers = superseded
     ledger.agent = rawExplicitAgent
     ledger.implementerId = rawExplicitAgent
     ledger.claimedBy = rawExplicitAgent
-    return { ok: true, takenOverBy: rawExplicitAgent }
+    return { ok: true, takenOverBy: rawExplicitAgent, previousImplementers: superseded }
   }
   if (nonImplRole) {
     return {

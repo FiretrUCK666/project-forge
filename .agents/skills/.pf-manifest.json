@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T09:46:14.535Z",
+  "installedAt": "2026-11-21T11:37:46.355Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -46,7 +46,7 @@
       "sha256": "dcbe1fe9449d7d957d0d8dc75259b1e44e4fc09b5f41538988e248de82b5e7c5"
     },
     "dev-flow/scripts/flow-lifecycle-hooks.mjs": {
-      "sha256": "9bdc3d70eeea273653cc74daa4038be6656bc4d3ad210b64b8d1050584d4714a"
+      "sha256": "a828cfd00975214a57cdb7f26e79ac23c8b711271e3c359a1bc27dfceeaf903e"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
       "sha256": "1eab9cfa4b7478e1aa85d7d024128825e99b15124d4d4db15daf27f98d9324d2"
@@ -55,7 +55,7 @@
       "sha256": "505996a9ff7be550873e3c1b68c19f25ecc4510364ce4c04c3ef95f1c3d6fed8"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "df41f455b1a4c3f86e7cbf2beae8cfeea04c1dac676d0fa2ab67894aaaaec1e4"
+      "sha256": "e3a7fa14ec8302cd9d649ae5f7e700e17f6c4cc2785c89a9e37df1c0dce18e89"
     },
     "dev-flow/scripts/flow-sync.mjs": {
       "sha256": "dafdde0f8c26f2678f982298a4a9f9b5e40769bdbb99bffbeb283b01be3c3e62"
@@ -139,7 +139,7 @@
       "sha256": "ebf3cd4dba90af75f7c4234a4da8cbe4e05b888c4e711e55c6a4ab94d4436762"
     },
     "dev-review/scripts/review-empirical-state.mjs": {
-      "sha256": "02eb8fb0f650ccf169a6454e7564163b03da461759ee1a562a291b7e130c555a"
+      "sha256": "b9401118a65e03a8c786ac7dca18b0f8e4160cf7045d387e378f3f19e12fb936"
     },
     "dev-review/scripts/review-empirical.mjs": {
       "sha256": "e1f1cd8586279755dadf89a25e13eaa251919db63beed299a0af8fa7ece1734c"
@@ -154,7 +154,7 @@
       "sha256": "da2927ea56e473c33ac22a56015ad9ce44ec240ac162de51567e5cb0472ba549"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "53e7090449142bec31f10d111f7416752c408fcc25aff00e25c0528c3a1cc6df"
+      "sha256": "b67cb7f1747c86e482fb019d3c056b567909c91e58a2c62fa0b78e6b26575247"
     },
     "dev-review/scripts/review-pr.mjs": {
       "sha256": "6d8c8069ad956e708bdc15aad57cc8785a288b8f90dbeda2047b1278549a2b1c"
@@ -235,7 +235,7 @@
       "sha256": "9fdd0bb397a54d2d1a73c76c92016efc590da60ef7f3af73721eae4c276dc5d7"
     },
     "lib/evidence-substance.mjs": {
-      "sha256": "65239ae7ff441b5d1d5b231d7bdc558dae8a5514e0e382c7c4bc6f3a6b47717f"
+      "sha256": "ddb7dc2bb2a9c5072425d67ae3b6b43bdc6a1cf127ded668489c070a36d1d8ac"
     },
     "lib/exec.mjs": {
       "sha256": "67ad14f3f08c7d9c8928a60c0ac8c62f411d9ea3bcefb9fb2bffc84e7a1d57ed"
@@ -247,7 +247,7 @@
       "sha256": "94acec09609cd5fd14e2f52d643fc55d8d7f4803454136c232f2bb65b64a90e0"
     },
     "lib/gate-truth.mjs": {
-      "sha256": "5007cda6989ca84cd1681d8e9aba95574d539ff17a40b5ffa954a3aa0e588d94"
+      "sha256": "9dca476e303ad75e529455934f7210342f2b4012c7b36a51887c458c03d889cf"
     },
     "lib/git-core.mjs": {
       "sha256": "1802ee6931ceca7cac7a335c1b4b698ad5ae0b5332962d055e0794dee394ab27"

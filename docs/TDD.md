@@ -414,11 +414,12 @@ flowchart TD
 | `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、`Dev Profile` 单源、传递可达性、Mermaid 宽度、套件行数与端到端冒烟 | 每次提交前；退出码 `0` |
 | `scripts/dev/gap-coverage.mjs` | `survey` 全部 `GAP_RULE_IDS` 在 `review.mjs` 与文档指引中的配对覆盖率 | 每次改动勘察/体检规则后；`0` 项遗漏 |
 | `scripts/dev/fixtures.mjs` | 身份判定、统一装配、v2 墓碑/定制、`HostingProvider` 降级、工作流状态机、按需定位、业务分诊与增量审计正反断言 | 每次改动判定或工作流后；`0` 项失败 |
-| `scripts/dev/merge-gate.mjs` | 合入门禁编排：从流水线结构派生清单，一条执行块一步、整块经 shell 实跑，输出 `passed`/`failed`/`unverified`/`not-applicable` 四档；`not-applicable` 不阻断 |
-| `scripts/dev/fixtures-flow-truth.mjs` | `C1..C10` 的正反双向定点用例（批准依据三种合法来源、门禁四档互斥、结构谓词单谓词隔离、参数三重对拍、分诊留源） |
-| `scripts/dev/injections-data-flow-truth.mjs` | 上述判据的故障注入复验表：拆掉任一判据都必须让对应用例变红 |
-| `scripts/dev/cli-parity.mjs` | 参数注册表、帮助声明、读取点三重对拍；声明只认行首与方括号分组两种形态，暗参数按名字锁基线 |
-| `scripts/dev/exit-code-parity.mjs` | 阻断码登记档位与返回处对拍：按源码扫出「码 → 返回档位」配对，未登记、档位不符、一码两档都判失败；夹具里故意写错的反例串按文件名排除 || `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及字节预算校验（`--check`） | 修改契约或模板后；退出码 `0` |
+| `scripts/dev/merge-gate.mjs` | 合入门禁编排：从流水线结构派生清单，一条执行块一步、整块经 shell 实跑，输出 `passed`/`failed`/`unverified`/`not-applicable` 四档；`not-applicable` 不阻断 | 合流前实跑；四档结论互斥 |
+| `scripts/dev/fixtures-flow-truth.mjs` | `C1..C10` 的正反双向定点用例（批准依据三种合法来源、门禁四档互斥、结构谓词单谓词隔离、参数三重对拍、分诊留源） | 判据变更后；全部通过 |
+| `scripts/dev/injections-data-flow-truth.mjs` | 上述判据的故障注入复验表：拆掉任一判据都必须让对应用例变红 | 判据变更后；每条注入都变红 |
+| `scripts/dev/cli-parity.mjs` | 参数注册表、帮助声明、读取点三重对拍；声明只认行首与方括号分组两种形态，暗参数按名字锁基线 | 参数注册变更后；三重对拍一致 |
+| `scripts/dev/exit-code-parity.mjs` | 阻断码登记档位与返回处对拍：按源码扫出「码 → 返回档位」配对，未登记、档位不符、一码两档都判失败；夹具里故意写错的反例串按文件名排除 | 退出码登记变更后；零不一致 |
+| `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及字节预算校验（`--check`） | 修改契约或模板后；退出码 `0` |
 | `scripts/equip.mjs` | `.agents/skills/` 与 `kit/skills/` 及 `.pf-manifest.json` 字节级一致（`--check`） | 修改 `kit/skills/` 后；退出码 `0` |
 | `scripts/review.mjs` | 交付成熟度体检、`claims.mjs` 真实路径/脚本回查与 `staleTddPaths` 检测 | 交付验收与合流前；`0` 个「缺」 |
 | `scripts/sync-toc.mjs` | 双语 README 目录标题与 GitHub 锚点双向一致性 | 修改 README 结构后；退出码 `0` |

@@ -14,7 +14,7 @@ import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ 
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
-import { ensureReviewToken, listTaskLedgers, resolveTaskContext, updateTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
+import { ensureReviewToken, listTaskLedgers, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
@@ -91,6 +91,8 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
           }
           const nextOwner = stAgent || st.account || null
           if (nextOwner && nextOwner !== ledger.implementerId) {
+            // 换人之前先记账：历史集合是自审判定的依据，覆写而不记等于没换过人。
+            ledger.previousImplementers = rememberPreviousImplementer(ledger, nextOwner)
             ledger.implementerId = nextOwner
             changed = true
           }

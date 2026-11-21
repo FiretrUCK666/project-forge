@@ -404,10 +404,21 @@ async function main(argv = process.argv.slice(2)) {
       // 放行点统一判据：绕过不可信高危扫描是「弱化门禁」里最重的一个，
   // 所以理由必须实质——说清看过哪些高危项、为什么仍可执行、怎么隔离。
   // 只查非空等于给一句占位词留门，而这道门后面直接是「在不可信代码上跑脚本」。
-  if (opts.humanApprovedExec) {
-    const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '绕过不可信高危扫描的理由' })
+  //
+  // 两条旁路都要过这一关，一条都不能漏：
+  // - `--human-approved-exec`：允许在不可信代码上执行；
+  // - `--human-approved`：允许把这次扫描记为「已批准」，之后不再拦。
+  // 后者更隐蔽——它当场不执行任何东西，却让账本从此对这段 diff 放行。
+  if (opts.humanApprovedExec || opts['human-approved']) {
+    // 两个开关的语义不同，理由要问的东西也不同：
+    // 执行侧要「怎么隔离」，记账侧要「凭什么判定这批改动可信」。混成一句会让人写套话。
+    const subject = opts.humanApprovedExec
+      ? '在不可信代码上执行的理由'
+      : '把不可信扫描记为已批准的理由'
+    const reasonCheck = evaluateReleaseReason(opts.reason, { subject })
     if (!reasonCheck.ok) {
-      const msg = `${reasonCheck.code}: ${reasonCheck.reason} --human-approved-exec / --human-approved 必须写清：看过哪些高危项、为什么仍可执行、怎么隔离。\n`
+      const flags = opts.humanApprovedExec ? '--human-approved-exec' : '--human-approved'
+      const msg = `${reasonCheck.code}: ${reasonCheck.reason} ${flags} 必须写清：看过哪些高危项、为什么判定可接受、怎么隔离或复核。\n`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: reasonCheck.code, status: reasonCheck.code, message: msg.trim() }, null, 2)}\n`)
       process.stderr.write(msg)
       return EXIT.USAGE
@@ -452,7 +463,11 @@ async function main(argv = process.argv.slice(2)) {
         const { ledger: nextTask } = await updateTaskLedger(mainRoot, task.taskId, (cur) => ({
           ...cur,
           untrustedScanPassed: true,
-          ...(opts['human-approved'] || opts.humanApprovedExec ? { untrustedApproved: true, humanApprovedExec: true } : {}),
+          // 账本里记一笔「这次为什么放行」：只写 untrustedApproved 而不留理由，
+    // 后来读账本的人只能看到「批准过」，看不到「凭什么」——那正是本片要治的失真。
+    ...(opts['human-approved'] || opts.humanApprovedExec
+      ? { untrustedApproved: true, humanApprovedExec: Boolean(opts.humanApprovedExec), untrustedApprovedReason: opts.releaseReason ?? null }
+      : {}),
         }))
         Object.assign(task, nextTask)
       }

@@ -15,6 +15,19 @@
  *    读的人分不清该改命令还是该去找人。
  *
  * 三条都靠扫描源码得出，不靠人工维护第二份清单：第二份清单会和第一份一起过期。
+ *
+ * ## 覆盖边界（必须一起报，不能被读成「全部核过了」）
+ *
+ * 配对要求 `code` 与 `exitCode` 出现在同一个返回对象里。这条规则之外的情形有三类：
+ *
+ * 1. **`code` 只是标签**：函数只返回判定结果，退出码由调用方决定
+ *    （例如 `evidence-substance.mjs` 的 `BLOCKED_SHALLOW_EVIDENCE`）。
+ *    这类码在本条判据的视野之外——它的档位取决于「谁在调、当放行点还是当校验点」。
+ * 2. **提示类**（`WARN_` / `ADVISORY_` / `SUGGEST_`）：本就不阻断，无档可定。
+ * 3. **委派类**（`ACTION_REQUIRED_`）：语义是「这件事交给别人做」，退出码由出口处给。
+ *
+ * 所以本模块能保证的是「**配得上的**都一致」，不是「全部码都一致」。
+ * 覆盖率随结果一起返回，让读的人知道这条判据管到哪为止。
  */
 
 /** 档位字面量到数字的映射。扫描时只认这四个常量名。 */
@@ -72,11 +85,38 @@ export function extractEmittedPairs(text) {
 }
 
 /**
+ * 把「配不上档位」的字面量按原因分类。
+ *
+ * 三类原因指向三种完全不同的处置：提示类不用管、委派类出口在别处、
+ * 标签类取决于调用方。合成一个「未覆盖」数字，读的人没法判断要不要动手。
+ */
+function classifyUnpaired(sources) {
+  const kinds = { label: new Set(), advisory: new Set(), delegated: new Set() }
+  for (const { file, text } of sources) {
+    if (isTestVector(file)) continue
+    const source = String(text ?? '')
+    const pairedCodes = new Set(extractEmittedPairs(source).map((p) => p.code))
+    for (const m of source.matchAll(CODE_RE)) {
+      const code = m[1]
+      if (pairedCodes.has(code)) continue
+      if (/^(?:WARN|ADVISORY|SUGGEST)_/.test(code)) kinds.advisory.add(code)
+      else if (/^ACTION_REQUIRED_|_DELEGATED$/.test(code)) kinds.delegated.add(code)
+      else kinds.label.add(code)
+    }
+  }
+  return {
+    label: [...kinds.label].sort(),
+    advisory: [...kinds.advisory].sort(),
+    delegated: [...kinds.delegated].sort(),
+  }
+}
+
+/**
  * 对拍「登记表 vs 实际返回」。
  *
  * @param {Array<{file:string,text:string}>} sources
  * @param {(code: string) => number|null} lookup  登记表查询；返回 `null` 视为未登记
- * @returns {{ ok: boolean, failures: string[], checked: number, codes: number }}
+ * @returns {{ ok: boolean, failures: string[], checked: number, codes: number, coverage: {literals:number, paired:number, unpaired:number} }}
  */
 /**
  * 测试向量不算实现。
@@ -95,9 +135,12 @@ export function evaluateExitCodeParity(sources, lookup) {
   const failures = []
   const seen = new Map()
   let checked = 0
+  let literals = 0
 
   for (const { file, text } of sources) {
     if (isTestVector(file)) continue
+    // 所有 `code:` 字面量都数一遍，不管配没配上档位——覆盖率要能被看见。
+    literals += [...String(text).matchAll(CODE_RE)].length
     for (const pair of extractEmittedPairs(text)) {
       checked += 1
       const registered = lookup(pair.code)
@@ -122,5 +165,17 @@ export function evaluateExitCodeParity(sources, lookup) {
     }
   }
 
-  return { ok: failures.length === 0, failures, checked, codes: seen.size }
+  return {
+    ok: failures.length === 0,
+    failures,
+    checked,
+    codes: seen.size,
+    // paired 是真正核过的；unpaired 按原因分开，别让「判不了」与「不用判」混成一个数。
+    coverage: {
+      literals,
+      paired: checked,
+      unpaired: Math.max(0, literals - checked),
+      byKind: classifyUnpaired(sources),
+    },
+  }
 }

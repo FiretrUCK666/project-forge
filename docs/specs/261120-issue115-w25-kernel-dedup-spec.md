@@ -1,189 +1,254 @@
 ---
 kind: spec
-title: 共享内核去重：六组已漂移收敛单点、五组未漂移提前收口、同名导出机械对拍
+title: PR-B（#115）共享内核去重、多远端注册表收口、验证治理真实性与性能预算合并方案
 status: draft
 tier: L3
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-22
 issue: 115
 pr: null
-branch: fix/w25-kernel-dedup
-owner: plan-wave25
+branch: feat/w25-kernel-dedup
+owner: plan-prb
 approved: false
 implemented: false
 plan_critique: pending
 related_prd: ../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue115-w25-kernel-dedup-todo.md
-high_risk_paths: [kit/, scripts/lib/]
+high_risk_paths:
+  - kit/
+  - scripts/lib/
+  - scripts/dev/
+  - templates/
+  - AGENTS.md
 task_id: w25-kernel-dedup
 plan_mode: interactive
-depends_on: [w25-flow-defects, w25-deadcode-split]
-scope_files: ["scripts/lib/text.mjs", "kit/skills/lib/git-core.mjs", "kit/skills/lib/platform-probe.mjs", "scripts/lib/protocol.mjs", "kit/skills/lib/static-gates.mjs", "kit/skills/lib/static-gates-lexer.mjs", "scripts/lib/survey-ecosystem.mjs", "scripts/lib/survey-workspace.mjs", "scripts/lib/survey-reentry.mjs", "kit/skills/dev-govern/scripts/govern-checks.mjs", "kit/skills/dev-govern/scripts/govern-docs.mjs", "kit/skills/lib/workflow-policy.mjs", "kit/skills/lib/empirical-artifacts.mjs", "kit/skills/lib/feature-map.mjs", "kit/skills/lib/verify-state.mjs", "kit/skills/lib/skill-discovery.mjs", "kit/skills/lib/profile.mjs", "kit/skills/lib/profile-sniffer.mjs", "kit/skills/dev-flow/scripts/flow-intake.mjs", "kit/skills/dev-flow/scripts/flow-issues.mjs", "kit/skills/dev-flow/scripts/worktree-deps.mjs", "kit/skills/dev-review/scripts/review-empirical-state.mjs", "kit/skills/dev-review/scripts/review-locks.mjs", "kit/skills/dev-verify-tools/scripts/verify-tools.mjs", "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs", "scripts/dev/preflight-suite.mjs", "kit/skills/dev-edit/scripts/edit-gate.mjs", "scripts/dev/fixtures-kernel-dedup.mjs"]
+depends_on: []
+scope_files:
+  - kit/skills/lib/git-core.mjs
+  - kit/skills/lib/git-status-fast.mjs
+  - kit/skills/lib/git-fast.mjs
+  - kit/skills/lib/platform.mjs
+  - kit/skills/lib/platform-probe.mjs
+  - kit/skills/lib/task-backend.mjs
+  - kit/skills/lib/task-backend-local.mjs
+  - kit/skills/lib/issue-template-hydrate.mjs
+  - kit/skills/lib/escalation.mjs
+  - kit/skills/lib/doc-locator.mjs
+  - kit/skills/lib/feature-map.mjs
+  - kit/skills/lib/verify-state.mjs
+  - kit/skills/lib/static-gates.mjs
+  - kit/skills/lib/static-gates-lexer.mjs
+  - kit/skills/lib/static-gates-comment-hygiene.mjs
+  - kit/skills/dev-explore/scripts/doc-locate.mjs
+  - kit/skills/dev-flow/scripts/flow-issues.mjs
+  - kit/skills/dev-flow/scripts/worktree-deps.mjs
+  - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
+  - kit/skills/dev-flow/scripts/flow-lifecycle.mjs
+  - kit/skills/dev-review/scripts/review-empirical-state.mjs
+  - kit/skills/dev-edit/scripts/edit-gate.mjs
+  - kit/skills/dev-edit/SKILL.md
+  - kit/skills/dev-review/SKILL.md
+  - kit/skills/dev-verify-tools/scripts/verify-tools.mjs
+  - kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs
+  - kit/skills/dev-govern/scripts/govern-audit.mjs
+  - kit/skills/dev-govern/scripts/govern-checks.mjs
+  - kit/skills/dev-govern/scripts/govern-retro.mjs
+  - scripts/lib/protocol.mjs
+  - scripts/lib/text.mjs
+  - scripts/lib/update-ops.mjs
+  - scripts/lib/platform/registry.mjs
+  - scripts/lib/survey-ecosystem.mjs
+  - scripts/lib/survey-workspace.mjs
+  - scripts/lib/equip-bootstrap.mjs
+  - scripts/lib/agents-defaults.mjs
+  - scripts/compose-agents.mjs
+  - scripts/lib/review-helpers.mjs
+  - scripts/equip-ci.mjs
+  - scripts/dev/evidence.mjs
+  - scripts/dev/preflight.mjs
+  - scripts/dev/preflight-suite.mjs
+  - scripts/dev/preflight-kernel-parity.mjs
+  - scripts/dev/bench.mjs
+  - scripts/dev/fixtures.mjs
+  - scripts/dev/fixtures-verify-tools.mjs
+  - scripts/dev/fixtures-govern.mjs
+  - scripts/dev/e2e-zip-harness.mjs
+  - scripts/dev/merge-gate.mjs
+  - scripts/dev/injections-data-kernel-dedup.mjs
+  - docs/feature-map.json
+  - AGENTS.md
+  - docs/prd/261120-w25-hardening-prd.md
+  - docs/specs/261120-issue114-w25-perf-budget-spec.md
+  - docs/todo/261120-issue114-w25-perf-budget-todo.md
+  - docs/specs/261120-issue117-w25-verify-map-spec.md
+  - docs/todo/261120-issue117-w25-verify-map-todo.md
+  - docs/specs/261120-issue118-w25-govern-truth-spec.md
+  - docs/todo/261120-issue118-w25-govern-truth-todo.md
+  - docs/specs/261120-issue119-w25-deadcode-split-spec.md
+  - docs/todo/261120-issue119-w25-deadcode-split-todo.md
 ---
 
-# 共享内核去重（Issue `#115`）
+# PR-B（#115）合并技术方案：共享内核去重、平台收口、验证治理与性能预算
 
-> 配对 Todo：[kernel-dedup Todo](../todo/261120-issue115-w25-kernel-dedup-todo.md)
->
-> **基线**：`a0fe4df`。本切片认领总控 PRD `261120-w25-hardening-prd.md` 的 `C2`。前置：`w25-flow-defects`（先把流程入口的引用与路径形状定下来）、`w25-deadcode-split`（先把策略模块拆出边界）。
-
-## 一、目标、红线与非目标
+## 一、目标与非目标
 
 <!-- section: goal -->
 ### 1.1 目标
 
-1. **已漂移的六组收敛为单一实现**：这六组今天已经对同一输入给出不同答案，其中两组会让下游把「读不到」当成「没问题」。收敛后只保留一处定义，其余位置一律重导出，不留兼容别名。
-2. **未漂移的五组提前收口**：它们今天恰好一致，但各自独立演化。同类重复不做提前处理，下一次改动就会变成第六组已漂移。收口前后全套夹具输出必须逐字节一致——这条是「没有偷偷改行为」的唯一证据。
-3. **行数口径单点**：同一个「这个文件多少行」在两处实现里对同一文件给出 798 与 799。度量与规则必须待在一起：`<= 800 行` 这条规则的权威定义处，就是唯一算行数的地方。
-4. **同名导出机械对拍**：新增一条检查，同名导出在全仓只允许一处定义，其余必须是重导出。这条检查的存在，是「同一个病根不会第三次出现」的保证。
-
-### 1.2 非目标（Explicit Non-Goals）
+将 W25 剩余 5 个未合入草案（`#115` + `#119` + `#117` + `#118` + `#114`）合并收口为单一可独立交付的 **Phase 3B（PR-B）**，消除 `scripts/lib/` 与 `kit/skills/` 的底层逻辑分叉，完成多远端/无远端平台注册表收口、四条建单路径统一模板水合、首次接入零误报、`verify-tools` 脚本指纹校验、确定性注释卫生与 `govern` 真实性修复、快路径边界修复与安全并发提速，并在同 PR 内完成冗余草案与 `261120-w25-hardening-prd.md` 退役，保持所有 `.mjs` 严格 `<= 800` 行及 `I370–I385` 故障注入 100% 实证覆盖。
 
 <!-- section: non-goals -->
-- **不把四处产物目录名硬合成一个集合**。实测四处名单的用途根本不同：一处判「这是产物目录，不算源码」、一处判「这里有没有未忽略的产物要提示」、一处判「遍历时跳过」、一处判「依赖安装目录」。硬合成一个 `bin` 与 `.worktrees` 混在一起的集合，会让每一处都在用自己不需要的语义。正确做法是**按用途各留一份、名字里带用途**，并在一张声明表里登记每份的用途与条目差异的理由。
-- **不改 `kit/skills/lib/shared.mjs`**。它是纯重导出层，四十五个以上夹具依赖它的导出面；动它等于同时改动全部夹具的导入路径。
-- **不改 `kit/skills/lib/task-backend.mjs` 里三个 class 的布局**。十七个方法契约靠一份清单守住，拆成三个文件就要拆清单，收益为零。
-- **不拆 `scripts/lib/survey-ecosystem.mjs` 里的生态声明式表**。那两百多行是数据不是逻辑。
-- **不拆 `kit/skills/lib/platform-probe.mjs` 的线性降级链**、`scripts/equip.mjs` 的线性事务、`scripts/lib/fs-atomic.mjs` 的临时清理返回形状。
-- **不动「跳过规划引导」开关**：它有间接读取点，不是死参数。
-- **不改 `arch-rules` 的方向**：`kit/` 不得 import `scripts/lib/`。因此所有共享实现的落点是 `kit/skills/lib/git-core.mjs`（或同层模块），`scripts/lib/` 反向重导出。
-<!-- section: non-goals-end -->
+### 1.2 非目标
 
-### 1.3 各组到判据的对应
+- 不改动 PR-A（`#120`）已合入的波次调度与 `--planning` 隔离核心，除非消费其现成工作流能力。
+- 不新增第 9 个内建 skill，不引入一刀切禁注释，不新建 `docs/adr/` 目录。
+- 不把依赖共享 Git 状态或写锁的集成校验步骤盲目并发化；不改动默认全量 `preflight` 与 `merge-gate` 门禁强度。
+- 不修改已逼近 800 行的无关/只读模块：`kit/skills/dev-flow/scripts/flow-inspect.mjs`（795L）、`kit/skills/lib/docs.mjs`（790L）、`kit/skills/lib/profile-sniffer.mjs`（788L）、`kit/skills/dev-flow/scripts/flow-merge.mjs`（782L）、`scripts/equip.mjs`（781L）。
+- 不在本 PR 内重写 `README.md` / `references/` 全量文档漂移（文档漂移长尾继续归口 `#103`），本 PR 仅修复 `doc-locate`、`compose-agents` 幂等与退役 W25 吸收草案。
 
-| 判据 | 覆盖 | 一句话 |
-| --- | --- | --- |
-| `C1` | 读文本上限、版本号归一、仓库关系 | 同一输入两处同一结果，含空串与超限边界 |
-| `C2` | 仓库路径解析、SSH 配置解析 | 认裸 slug；沙箱注入的家目录对两处同时生效 |
-| `C3` | 路径规范形、同路径判定、主模块判定 | 空串行为由一处决定，夹具全绿 |
-| `C4` | 五组未漂移同名实现 | 收敛后全套夹具逐字节一致 |
-| `C5` | 行数口径 | 800 行边界在两道门禁上同结论 |
-| `C6` | 同名导出对拍 | 一处定义、其余重导出，机械可验 |
-| `C7` | 四处产物目录名单 | 按用途分治并登记差异理由 |
-<!-- section: goal-end -->
+### 1.3 W25 主 PRD 覆盖映射
+
+本 SPEC 在归口 `C1–C8` 验收锚点的同时，承接 `docs/prd/261120-w25-hardening-prd.md` 中除 PR-A（`#120` 已归档）外全部剩余目标（`C1`/`C2`/`C4`/`C5`/`C6`），并由 `2.7` 在合入前规范退役该主 PRD 与 `#114`/`#117`/`#118`/`#119` 草案。
 
 ## 二、技术设计与接口契约
 
 <!-- section: design -->
 ```mermaid
-flowchart TD
-  S1["同名候选"] --> Q{"几处定义?"}
-  Q -->|多处| M1["合并到内核"]
-  Q -->|一处| K1["其余改重导出"]
-  M1 --> T1["夹具逐字节比对"]
-  K1 --> T1
-  T1 --> G1["同名对拍守门"]
+flowchart LR
+  K["内核去重"] --> R["注册表后端"]
+  K --> I["四路建单水合"]
+  V["verify与map"] --> G["govern与卫生"]
+  P["快路径与并发"] --> F["I370-I385"]
 ```
 
-### 2.1 `C1` 读文本、版本归一、仓库关系
+### 2.1 `C1`：共享内核去重与 `#119` 零引用死代码清理
 
-- **影响文件**：`scripts/lib/text.mjs`、`kit/skills/lib/git-core.mjs`。
-- **现状**：读文本上限一处 256KB、一处 512KB；同一份 300KB 文件，后者读得到、前者返回空，而下游通常把空当成「文件没问题」。版本号归一与仓库关系也各有一份。
-- **改法**：`git-core.mjs` 保留实现（它在 `kit/`，`scripts/lib/` 可以 import 它）；`text.mjs` 改为重导出，不再保留第二份实现。上限取较大的那个——「读得进」比「读不进」安全，且读不进时的空返回值是静默失败的最大来源。
-- **行为变化必须被锁住**：上限从 256KB 变 512KB 会改变既有调用方的行为。逐调用点核对（`text.mjs` 内四处自用）并把「300KB 文件现在读得到」写成一条正例断言。
-- **反例边界**：不把上限提到无上限。无上限会让一次误指向大二进制的读取把内存打满。512KB 是保守值，保持不变。
+遵循 `arch-rules`（`scripts/lib/** -> kit/**` 合法，`kit/** -> scripts/lib/**` 禁止），将双层重复底层原语收敛至 `kit/skills/lib/` 单源，`scripts/lib/` 仅做导入或薄重导出：
 
-### 2.2 `C2` 仓库路径与 SSH 配置解析
+| 原语 | 唯一真源 | 清理/修复要点 |
+| --- | --- | --- |
+| `readTextSafe` | `kit/skills/lib/git-core.mjs` | 支持可配 `maxBytes`；替代 `scripts/lib/text.mjs` 同名副本与 `kit/skills/lib/platform-probe.mjs` `importSafeRead` |
+| `isMacOsJunkPath` / `isMacMetadataName` | `kit/skills/lib/git-core.mjs` | 统一 macOS 元数据/垃圾路径判定；`text.mjs` 委托或重导出 |
+| `isInsideDir(candidateAbs, parentAbs)` | `kit/skills/lib/git-core.mjs` | 统一参数序与边界符校验；替换 `worktree-deps.mjs` / `review-empirical-state.mjs` 副本，修复 `scripts/lib/update-ops.mjs` 反序 bug |
+| `parseSshConfigHostMap` / `lookupSshHost` | `kit/skills/lib/platform.mjs` | 显式注入 `env` 参数；消除 `text.mjs` 与 `platform-probe.mjs` 行为漂移 |
+| `countTextLines` | `kit/skills/lib/static-gates.mjs` | 统一按 `split('\n')` 剥离末尾空行语义；`scripts/lib/protocol.mjs` 重导出，`edit-gate.mjs` 与 `preflight` 共用，消除 798/799 偏差 |
 
-- **影响文件**：`scripts/lib/text.mjs`、`kit/skills/lib/platform-probe.mjs`。
-- **现状**：仓库路径解析两份，一份认裸 `owner/repo` 一种写法不认完整 URL，另一份相反；SSH 配置解析两份，签名与返回类型都不同，其中只有一份接受注入的环境变量——而沙箱里注入家目录是唯一能测它的方式。
-- **改法**：保留 `platform-probe.mjs` 那份（认裸 slug、接受环境注入）；`text.mjs` 重导出。它依赖的完整仓名函数一并迁移，避免从 `scripts/lib/` 反向引用 `kit/` 造成循环。
-- **反例边界**：不改变「解析不出来返回什么」。今天两处对失败的处理不同（一处返回空、一处抛错），收敛后必须选定一种并在夹具里写明：返回空表示「格式不认识」，抛错表示「调用方式错」。两者不能混。
+`#119` 死代码与废弃参数清理（零外部消费者已静态核实）：
+- `scripts/lib/protocol.mjs`：移除 `parentOf`、`emitMarker`、`hasMarkers`、`WORKTREES_STATE_RE`；`scripts/lib/text.mjs`：移除 `readTextFile`、`normVersion`、`repoRelation`。
+- `scripts/lib/survey-workspace.mjs`：移除 ~190 行的 `scanWorkspaceRaw`；`scripts/lib/survey-ecosystem.mjs`：移除 `detectTaskEntries`（保留 `detectTaskEntriesDetailed`）。
+- `kit/skills/lib/platform-probe.mjs` / `scripts/lib/review-helpers.mjs` 等：取消零外部消费者内部辅助函数导出或删除确认死函数；在 `scripts/dev/preflight-kernel-parity.mjs` (new) 固化 `--slot` 零残留与重复原语回归检查（不设脆弱的行数自证门禁）。
 
-### 2.3 `C3` 路径规范形、同路径判定、主模块判定
+### 2.2 `C2`：多远端/无远端平台注册表收口
 
-- **影响文件**：`scripts/lib/text.mjs`、`kit/skills/lib/git-core.mjs`。
-- **现状**：三对同义函数各两份，实测空串输入时相反（一处返回空串、一处返回当前工作目录；一处判「不同」、一处判「相同」）。
-- **改法**：收敛到 `git-core.mjs`，`text.mjs` 重导出。**空串行为会变**，所以合并前先跑一遍全套夹具，确认没有断言依赖旧行为；若有，在夹具里写明新语义并说明为什么新语义更对（空输入不是一个路径，把它当成当前目录会让「没给参数」变成「动了这里」）。
-- **必须一起做的核对**：工作树挂载与卸载都校验「主仓与工作树是否同一路径」，该判定现在走的是哪一份实现必须查清；走的是即将被替换那一份时，先补一条夹具锁住它的现有行为。
+1. **适配器契约强校验**：在 `scripts/lib/platform/registry.mjs` 与 `kit/skills/lib/platform.mjs` 的 `registerHostingProvider` 中校验必备方法契约（`matchRemote`、`normalizeRepo`、`parseRelations`、`formatIssueRef` 等），缺方法即 Fail-Closed 抛错。
+2. **注册表分发 `createTaskBackend`**：从 `kit/skills/lib/task-backend.mjs`（当前 799L）拆出 `LocalOnlyBackend` / `GenericRemoteBackend` 至 `kit/skills/lib/task-backend-local.mjs` (new)；`createTaskBackend` 取消硬编码 `role`/`providerId` `if/else`，改为查 `PROVIDER_REGISTRY` 分发远程后端，对 `generic-git` 与 `local-only` 统一回落到安全降级后端。
+3. **`equip-ci` 消费 `artifactPlan`**：`scripts/equip-ci.mjs` 删除直接判定 `providerId !== 'github'` 的分支，改为直接消费 `survey-plan.mjs` 产出的 `facts.artifactPlan` 决定是否写 CI 模板与校验分支保护。
+4. **`declaredRepo` 去宿主化**：`platform.mjs` `detectDeclaredRepo` 与 `survey-ecosystem.mjs` 通过注册表 `normalizeRepo` / 通用远端解析提取仓库标识，不再直调 `githubRepoPath`。
 
-### 2.4 `C4` 五组未漂移同名实现
+### 2.3 `C3`：统一 `hydrateIssueBody` 与首次接入零误报
 
-- **影响文件**：`kit/skills/dev-govern/scripts/govern-checks.mjs`、`kit/skills/lib/static-gates-lexer.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-locks.mjs`、`kit/skills/lib/empirical-artifacts.mjs`、`kit/skills/lib/feature-map.mjs`、`kit/skills/lib/verify-state.mjs`、`scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/skill-discovery.mjs`、`kit/skills/lib/profile.mjs`、`kit/skills/lib/profile-sniffer.mjs`、`kit/skills/dev-flow/scripts/flow-intake.mjs`、`kit/skills/dev-flow/scripts/flow-issues.mjs`、`kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-review/scripts/review-empirical-state.mjs`、`kit/skills/dev-verify-tools/scripts/verify-tools.mjs`、`kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs`。
-- **契约**：五组同名函数各自收敛到一处定义，其余为重导出。收敛前后**全套夹具输出必须逐字节一致**，这是「纯位移不改行为」的证据。
-- **为什么现在做**：这五组今天一致，但它们各自独立演化。不做提前处理，下一个改动它们的人就会制造出第六组已漂移——而那时可能已经有人在依赖其中一份的细微行为。
-- **附带修掉的一处检查盲区**：现有重复解析器检查不覆盖 YAML 值剥离这一对（`stripWrapQuotes` 与 `stripInlineYamlComment`）。收敛后把它们纳入同名对拍，检查盲区随之消失——这是「同一病根不复发」的一部分，不是额外要求。
+1. **统一 Issue 水合器**：新建 `kit/skills/lib/issue-template-hydrate.mjs` (new)，导出与 `hydratePrTemplateBody` 风格一致的 `hydrateIssueBody(repoRoot, kind, fields, opts)`：优先读取目标仓 `.github/ISSUE_TEMPLATE/`（按 `kind` 匹配或回退默认模板），保留用户模板章节，回填上下文/复现/验收段，归一化字面量 `\n`，剥离代码围栏外 `<!-- ... -->`；无模板或 `local-only`/`generic-git` 时干净降级生成结构化正文。
+2. **四路接入**：`flow issue create`（`flow-issues.mjs`）、`flow start --create-issue`（`flow-issues.mjs` `createIssueForStart`）、`escalation.mjs` `buildEscalationIssuePayload`、`govern-audit.mjs` `issues` 全部改走 `hydrateIssueBody`。
+3. **首次接入零误报**：在 `scripts/lib/equip-bootstrap.mjs`（不改 781L `equip.mjs`）为首次接入/空仓落盘合法空 `docs/feature-map.json`，同时 `verify-tools-audit.mjs` 与 `verify-tools.mjs` 在空 `feature-map` 或 `tools` 为空时返回 `NOT_APPLICABLE` 零失败。
+4. **`doc-locate` 与 `compose-agents` 幂等**：`kit/skills/lib/doc-locator.mjs` `discoverContextDocs` 将 `references/*.md` 纳入 `contextIndex`，`doc-locate.mjs` 增加 `--list`；修复 `scripts/compose-agents.mjs` / `scripts/lib/agents-defaults.mjs` 导致 `意图路由`、`探索策略` 在主仓漂移的逻辑，确保单次 `node scripts/compose-agents.mjs .` 后 `--check` 一次通过。
 
-### 2.5 `C5` 行数口径单点
+### 2.4 `C4`：`#117` 验证工具真指纹与功能地图刷新
 
-- **影响文件**：`kit/skills/lib/static-gates.mjs`、`scripts/dev/preflight-suite.mjs`、`kit/skills/dev-edit/scripts/edit-gate.mjs`。
-- **现状**：预检侧算行数时先按行切分、再在尾部是空行时弹出最后一项；改码门禁侧直接取切分后长度。实测同一文件得 798 与 799。两个门禁对「800 行」给出相反结论——恰好卡在边界上的文件，一个红一个绿。
-- **改法**：行数计算收敛到 `static-gates.mjs` 一处（`<= 800 行` 这条规则的定义处就在那里，度量与规则必须待在一起），另两处调用它。语义选定为「按行切分后，若末尾一项为空则不计」——这是「文件有多少行」的通行理解，也是预检侧已有一致行为。
-- **反例边界**：不改 800 这个上限，不改「紧文件预警」的阈值。
+- `kit/skills/lib/feature-map.mjs`：`computeFeatureFingerprint` 除覆盖路径树哈希外，同步纳入关联工具 `scriptPath` 文件内容哈希；校验 `scriptPath` 必须落在仓内安全路径（`isInsideDir`）且不得越界。
+- `kit/skills/dev-verify-tools/scripts/verify-tools.mjs` & `verify-tools-audit.mjs`：当目标工具匹配数 `matched.length === 0`（非空仓 `NOT_APPLICABLE`）或 `executedCount === 0` 时 Fail-Closed 非零退出；移除 stale 通过时静默覆写基线逻辑，并在 `verify-state.mjs` 命中 scratch 校验时落盘 `verify.scratch-used` 信号。
+- 刷新本仓 `docs/feature-map.json`（含 PR-A 与 PR-B 新增核心模块）并重跑全部过时验证工具、清理已归档 `#116` 僵尸引用，达到 `verify-tools audit` 0 stale / 0 zombies / 0 blindSpots。
 
-### 2.6 `C6` 同名导出机械对拍
+### 2.5 `C5`：`#118` 治理真实性 + 三项确定性注释卫生升级
 
-- **影响文件**：`scripts/dev/preflight-suite.mjs`、`scripts/dev/fixtures-kernel-dedup.mjs` (new)。
-- **判据**：扫描 `kit/skills/lib/**` 与 `scripts/lib/**` 的导出声明，凡同一个名字出现在两个以上「函数或常量定义」位置即失败；重导出（`export { x } from ...` 与 `export * from ...`）不计。
-- **为什么这条是对拍的落点**：其它五条判据都是「这次改对了」，只有这一条保证「下次不会改错」。它不需要知道哪个函数该在哪，只需要知道同一个名字不能有两份实现。
+**治理真实性修复**：
+- `scripts/dev/evidence.mjs`：用 `git ls-files -z` + `!isRepoOnlyPath(...)` 替代递归扫工作区，消除打包计数虚高。
+- `kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs` / `flow-lifecycle.mjs`：信号归因选取变更文件时过滤 `.pf-manifest.json`（借助 `flow-lifecycle-helpers.mjs` 保持 `flow-lifecycle.mjs <= 786L`）。
+- `kit/skills/dev-govern/scripts/govern-checks.mjs`：未注册 `.worktrees/*` `orphan_dir` 提示直接清理目录而非误报 `git worktree remove`；`govern-retro.mjs` 淘汰失效历史路径建议；`scripts/lib/review-helpers.mjs` `collectStaleCommandsInfo` 拆解多行/本地命令后再匹配 `AGENTS.md`。
 
-### 2.7 `C7` 四处产物目录名单按用途分治
+**三项确定性注释卫生升级（内聚于 `dev-edit`/`dev-govern`/`dev-review`，不新增 skill、不一刀切禁注释、不新建独立 ADR 目录）**：
+1. `static-gates.mjs` / `edit-gate.mjs`：新增或修改的 `HACK` / `WORKAROUND` / `TEMP` 注释若缺有效 Issue 链接（`#123` 或完整 Issue URL），报错引导执行 `flow.mjs issue create` / `escalation.mjs` 建单跟踪后再引用。
+2. 新建 `kit/skills/lib/static-gates-comment-hygiene.mjs` (new)，复用 `static-gates-lexer.mjs` 精确提取代码注释（排除代码围栏、字符串字面量、URL、glob、正则与示例占位路径），仅检测反引号内的仓内路径引用是否存在；严格限定 `--changed` 变更文件模式 + 基线棘轮，不逼存量仓一次性改旧债，并从 `edit-gate.mjs` 与 `govern-checks.mjs` 接入。
+3. 在 `kit/skills/dev-edit/SKILL.md` 与 `kit/skills/dev-review/SKILL.md`（同步至 `.agents/skills/`）补充「解释 why 而非复述 what」注释纪律与架构决策优先落盘 `docs/TDD.md` / `AGENTS.md ## 取舍` 的核对条款。
 
-- **影响文件**：`scripts/lib/survey-ecosystem.mjs`、`kit/skills/dev-govern/scripts/govern-checks.mjs`、`scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`。
-- **现状**：四处各写一份名单，同名不同义。实测差异是真实的（`bin` 在一处、`.worktrees` 在另一处），但**没有一处写明为什么不同**，于是下一次有人「统一一下」就会把语义抹平。
-- **改法**：四份各自改名为带用途的名字（例如按「源码统计跳过」「未忽略产物提示」「遍历跳过」「依赖安装目录」区分），并在同一模块里放一张声明表：每份名单的用途一句、条目差异一句。检查判据：每份名单都有用途声明，且声明的条目差异与实际差异一致。
-- **为什么不是合成一个**：合成之后每一处都在用自己不需要的语义。`bin` 对「遍历跳过」是对的（编译产物），对「依赖安装目录」是错的（它不是依赖）。用一个集合同时服务四种用途，就是把「看起来像重复」误当成「同一个东西」。
+### 2.6 `C6`：`#114` 性能快路径修复、增量门禁、安全隔离并发与真预算
 
-### 2.8 行数与拆分
+1. **`git-status-fast.mjs` 与 `git-fast.mjs` 边界修复**：`git-status-fast.mjs` 按 `.gitattributes` 规则匹配具体受 `eol=crlf` 影响的候选路径才回退原生 `git`，其余路径保持快路径；`git-fast.mjs` 正确解析多父合并提交（`parents.length > 1`）的父提交数组而非提前返回 `null`。配与原生 `git` 结果完全一致的正反对照测试。
+2. **`preflight.mjs --changed` 增量模式**：`preflight.mjs` 与 `preflight-suite.mjs` 支持 `--changed` 仅校验 `git diff` 涉及模块及契约，默认无参调用与 `merge-gate.mjs` 全量严格度保持不变。
+3. **`bench.mjs` 1x 硬预算**：移除 `budgetScale`（CI 2.5x 放宽），新增 `--strict-budget` 以 1x 硬预算（如 `survey(self) <= 250ms`）校验，超限即非零退出。
+4. **安全隔离并发提速**：现场排查确认 `e2e-zip-harness.mjs` 的 Stage B 与 Evolution（`repo-h..repo-j`、`evo-h..evo-l`）各场景使用独立 `mkdtempSync` 临时沙盒、无共享状态，可按有界并发池并行执行（`mockSrv` 仅包住 Stage B）；`merge-gate.mjs` 中纯只读无共享状态的静态步骤（`preflight`、`gap-coverage`、`compose-agents --check`、`equip --check`、`sync-toc --check`、`review`、`govern-audit`）可并发池运行，有共享仓/重锁步骤（`fixtures`、`verify-injections`、`e2e-zip-harness`、`git archive`）严格保持串行；`fixtures.mjs` 仅并行独立纯临时目录子集；所有并发路径均保持确定性排序输出与完全等价退出码。
 
-- 本切片以「减少重复」为方向，净行数应下降。逐文件核对 `.mjs <= 800`；尤其 `kit/skills/lib/workflow-policy.mjs` 已由前置切片拆过，本片只改其中一段（`decodeUriSafe` 与 `normRel` 的去向），不得把它加长。
-- `scripts/lib/text.mjs` 变薄、`kit/skills/lib/git-core.mjs` 变厚：必须核对后者仍在 800 行以内。超限时把新增的读文本与路径规范化部分下沉为同目录独立模块（`git-core` 只保留重导出），不靠删注释凑数。
-<!-- section: design-end -->
+### 2.7 `C7`：同分支退役被吸收草案与 `261120-w25-hardening-prd.md`
+
+`impl-prb` 在完成 `C1–C6` 编码验证后、执行 `flow finalize` 前，在 `feat/w25-kernel-dedup` 同分支按以下顺序执行退役（全用 `doc-plan.mjs`，不手改状态位）：
+1. 跑 `node .agents/skills/dev-plan/scripts/doc-plan.mjs supersede` / `archive` 将被本 SPEC 吸收的 `#114`、`#117`、`#118`、`#119` 草案 SPEC/Todo 标为 `superseded` 并归档至 `docs/archive/specs/` 与 `docs/archive/todo/`。
+2. 将 `docs/prd/261120-w25-hardening-prd.md` 标为 `implemented` 并经 `doc-plan.mjs archive` 归档至 `docs/archive/prd/`。
+3. 运行 `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit . --json` 验证仅剩 `docs/prd/261120-v10-1-hardening-pillars-docs-prd.md`、`#103`、`#104`（及提交前待 `finalize` 归档的 `#115`）且零报错。
+
+### 2.8 `C8`：文件行数预算拆分策略与故障注入 `I370–I385`
+
+**关键 `.mjs <= 800` 行预算控制**：
+- `kit/skills/lib/task-backend.mjs`（799L）：拆出 `kit/skills/lib/task-backend-local.mjs` (new)，目标 `<= 650L`。
+- `kit/skills/dev-govern/scripts/govern-checks.mjs`（767L）：注释路径检查落 `kit/skills/lib/static-gates-comment-hygiene.mjs` (new)，主模块保持 `<= 775L`。
+- `kit/skills/dev-flow/scripts/flow-lifecycle.mjs`（786L）：过滤逻辑落 `flow-lifecycle-helpers.mjs`（566L），零净增。
+- `scripts/dev/preflight-suite.mjs`（673L）：内核对等门禁落 `scripts/dev/preflight-kernel-parity.mjs` (new)，主模块 `<= 750L`。
+- `scripts/lib/survey-ecosystem.mjs`（784L）、`kit/skills/lib/platform-probe.mjs`（772L）、`scripts/lib/survey-workspace.mjs`（717L）：随 C1/C2 删除死代码后净行数显著下降。
+
+**`scripts/dev/injections-data-kernel-dedup.mjs` (new) 故障注入表（`I370–I385`）**：
+
+| ID | 注入点与故障 | 预期变红目标 |
+| --- | --- | --- |
+| `I370` | `git-core.mjs`：`isInsideDir` 去掉路径分隔符前缀边界判定 | C1 正反边界用例（`/tmp/repo2` 误判在 `/tmp/repo` 内） |
+| `I371` | `static-gates.mjs`：`countTextLines` 漏剥离 `\n` 结尾空行 | `preflight` 行数语义对等与 799/800 用例 |
+| `I372` | `platform.mjs`：`registerHostingProvider` 跳过适配器方法契约校验 | C2 缺方法适配器注入测试 |
+| `I373` | `task-backend.mjs`：`createTaskBackend` 绕过注册表回退硬编码分支 | C2 `generic-git` / 自定义后端分发断言 |
+| `I374` | `equip-ci.mjs`：忽略 `facts.artifactPlan` 恢复 `providerId !== 'github'` 特判 | C2 多远端 `equip-ci` 行为断言 |
+| `I375` | `issue-template-hydrate.mjs` (new)：`hydrateIssueBody` 跳过注释剥离或 `\n` 归一化 | C3 四路建单注释与换行污染断言 |
+| `I376` | `flow-issues.mjs`：`createIssueForStart` 绕过 `hydrateIssueBody` 直写裸正文 | C3 `flow start --create-issue` 模板水合测试 |
+| `I377` | `doc-locator.mjs`：`discoverContextDocs` 跳过把 `references/` 写入 `contextIndex` | C3 `doc-locate` 索引断言 |
+| `I378` | `feature-map.mjs`：`computeFeatureFingerprint` 忽略 `tool.scriptPath` 文件内容哈希 | C4 脚本篡改 stale 检出测试 |
+| `I379` | `verify-tools.mjs`：`run` 在零执行（`matched.length === 0`）时仍返回 0 | C4 零执行 Fail-Closed 测试 |
+| `I380` | `flow-lifecycle-helpers.mjs`：信号归因过滤漏掉 `.pf-manifest.json` | C5 manifest blame 污染测试 |
+| `I381` | `static-gates-comment-hygiene.mjs` (new)：放行变更文件注释内失效反引号路径或绕过 `--changed` 基线棘轮 | C5 注释路径正反双向测试 |
+| `I382` | `evidence.mjs`：退回 `ROOT` 全目录遍历而不走 `git ls-files -z` | C5 发包清单文件数漂移断言 |
+| `I383` | `git-status-fast.mjs`：对 `eol=crlf` 命中文件跳过回退原生 `git status` | C6 CRLF 快路径等价对比测试 |
+| `I384` | `git-fast.mjs`：遇 `parents.length > 1` 合并提交直接返回 `null` | C6 多父合并提交对比测试 |
+| `I385` | `bench.mjs`：恢复 `CI` 2.5x `budgetScale` 放宽使 `--strict-budget` 放行超标耗时 | C6 `--strict-budget` 1x 硬预算断言 |
 
 ## 三、门型评估与验收标准
 
 <!-- section: gates -->
-- **门型**：`one-way`。收敛会改变部分边界的实际行为（读文本上限、空串路径、SSH 配置返回类型），历史上依赖旧行为的调用方必须按新口径重算。回滚路径为反向提交；不改写已推送历史。
-- **风险等级**：`high`（命中 `kit/` 与 `scripts/lib/`，且 `scripts/lib/` 是标记语法、条件求值、报告排版的单一真相源所在层）。
-- **故障注入**：把同名对拍改成恒通过，重复定义用例必须变红；把行数计算改回两份，边界用例必须变红。
-- **验证命令**：
-  - `node scripts/dev/fixtures.mjs`（全量，非按域——本片的判据是「逐字节一致」，必须全跑）
-  - `node scripts/dev/preflight.mjs`
-  - `node scripts/dev/gap-coverage.mjs`
-<!-- section: gates-end -->
+### 3.1 门型与风险定级
+
+- **门型**：`two-way`（独立分支 `feat/w25-kernel-dedup`，经 PR-B 合前 `merge-gate` 与独立审查后合并，可完整回退）；**风险**：`high`（触碰 `kit/`、`scripts/lib/`、`scripts/dev/`、`AGENTS.md` 高风险路径，须全量实证 + `I370–I385` 故障注入）。
 
 <!-- section: acceptance -->
-### 验收标准（正例 / 反例双向可判定）
+### 3.2 验收标准（正反双向）
 
 <!-- criteria:start -->
-- [ ] C1: 同一份 300KB 文本在两处入口都读得到；同一份 600KB 文本在两处入口都读不到；读不到时返回的仍是「空」这一种表示，不得一处返回空另一处抛错。反例：只把上限统一到 512KB 却不核对既有调用点的行为变化，于是某条原本「读不到就跳过」的路径现在读到内容并改了判定。
-- [ ] C2: 裸 `owner/repo` 与完整托管地址两种写法在两处入口解析出同一结果；注入伪造家目录后两处入口都读到伪造目录里的配置，不得有一处仍读真实用户目录。反例：收敛到不接受环境注入的那一份，于是沙箱里根本测不出它——测试全绿而实际行为未验。
-- [ ] C3: 空串路径在两处入口得到同一结果（同为「不是路径」），同路径判定对两个空串给出同一答案；工作树挂载与卸载的「主仓与工作树是否同一」判定有夹具锁住。反例：合并时没查该判定的现有实现，合并后挂载校验偷偷跑到另一条分支上。
-- [ ] C4: 五组同名实现各只有一处定义，其余为重导出；收敛前后全套夹具输出逐字节一致；YAML 值剥离那一对纳入同名对拍，检查盲区为零。反例：只收敛三组、以「另外两组暂时一致」为由留下——同名对拍第一次跑就红。
-- [ ] C5: 行数计算只有一处实现；同一文件在预检与改码门禁上得到同一个数字；恰好 800 行的文件在两处得到同一结论。反例：把两处都改成「按行切分取长度」而不处理末尾空行，于是所有以换行结尾的文件都多算一行。
-- [ ] C6: 同名导出对拍存在且会红——在一个内核模块里复制一个新定义、与既有导出同名，`preflight` 失败并指出两处位置；改成重导出后恢复绿。反例：把对拍写成「只检查文件名相同」或「只检查 import 路径」，于是真正的重复定义照样通过。
-- [ ] C7: 四份产物目录名单各自带用途名与用途声明；声明的条目差异与实际差异一致（逐条比对，多一条少一条都算不一致）。反例：把四份合成一个集合，于是「依赖安装目录」里出现了编译产物目录，安装判定跟着改。
+- [ ] C1: 共享内核五原语（`readTextSafe`/`isMacOsJunkPath`/`isInsideDir`/`parseSshConfigHostMap`/`countTextLines`）收敛唯一真源，正向修复 `update-ops.mjs` `isInsideDir` 参数序与 798/799 行数偏差且 `#119` 零引用死导出清理完毕；反向 `/tmp/repo2` 越界与废弃 `--slot` 均被拦截（`node scripts/dev/preflight-kernel-parity.mjs` 通过）。
+- [ ] C2: `registerHostingProvider` 强校验方法契约、`createTaskBackend` 走注册表分发、`equip-ci` 消费 `artifactPlan`、`declaredRepo` 去宿主化；正向支持 `github` / `generic-git` / `local-only` 三态优雅降级，反向未实现契约的自定义适配器被 Fail-Closed 拒绝。
+- [ ] C3: `hydrateIssueBody` 统一接入 `flow issue create`/`flow start --create-issue`/`escalation.mjs`/`govern-audit issues` 四条路径；首次接入空仓 `equip` 落盘合法空 `feature-map.json` 且 `verify-tools audit` 零误报；`doc-locate` 索引 `references/`；`compose-agents .` 单次幂等（反向含字面 `\n`/HTML 注释模板不泄漏、未改写用户自有模板章节）。
+- [ ] C4: `verify-tools` 落地 `scriptPath` 内容指纹、仓内路径校验、零执行非零退出与 `verify.scratch-used` 信号；刷新本仓 `docs/feature-map.json` 与全部工具后 `verify-tools audit` 达 `0 stale / 0 zombies / 0 blindSpots`（反向篡改脚本或零执行必变红）。
+- [ ] C5: `evidence.mjs` 改用 `git ls-files -z`、`.pf-manifest.json` 从信号 blame 排除、`orphan_dir` 修复提示、`retro` 淘汰旧建议；三项确定性注释卫生升级落地于 `dev-edit`/`dev-govern`/`dev-review`（无第 9 个 skill、无独立 ADR 目录、无禁注释）；反向缺 Issue 的 `HACK`/`WORKAROUND` 及 `--changed` 失效反引号路径被拦，存量旧注释与 URL/示例路径零误报。
+- [ ] C6: `git-status-fast` `eol=crlf` 与 `git-fast` 多父提交修复经正反测试与原生 `git` 结果 100% 一致；`preflight --changed` 可用且默认全量/合前强度不变；`bench.mjs --strict-budget` 落 1x 硬预算（无 2.5x CI 缩放）；`fixtures`/`e2e-zip-harness`/`merge-gate` 隔离并发提速且输出与退出码等价。
+- [ ] C7: 同分支通过 `doc-plan.mjs` 规范退役 `261120-w25-hardening-prd.md` 及 `#114`/`#117`/`#118`/`#119` 草案，PR-B 收尾 `doc-plan.mjs audit . --json` 仅保留 `v10.1` 主 PRD + `#103` + `#104` 且零报错。
+- [ ] C8: 全仓所有 `.mjs` 严格 `<= 800` 行（`task-backend.mjs` 已拆出 `task-backend-local.mjs`）、`I370–I385` 16 条故障注入全部实证变红并完成多后端正反双向 fixture（`merge-gate.mjs` 与 `verify-injections.mjs` 全绿）。
 <!-- criteria:end -->
-<!-- section: acceptance-end -->
 
 ## 四、可复用基础设施与备选方案
 
 <!-- section: reuse -->
-- `kit/skills/lib/git-core.mjs` 是共享基础层，且 `scripts/lib/` 已在实际 import 它（`protocol.mjs`、`agents-sections.mjs`、`markdown.mjs` 等七处），方向已被验证，本切片只是把更多实现搬到这里。
-- `scripts/dev/preflight-suite.mjs` 已有「同名检查」「导出对拍」的落点与报告格式，新判据接进去，不另起脚本。
-- `scripts/lib/text.mjs` 已有 `readTextSafe` 的完整实现与四处置信调用点，收敛时保留其对外形状，只换实现来源。
-- `scripts/dev/fixtures.mjs` 的全量跑法已存在，本切片直接用它做「逐字节一致」的证据来源。
-<!-- section: reuse-end -->
+- 复用 `kit/skills/lib/pr-template-hydrate.mjs`（`stripHtmlCommentsOutsideFences` 等）实现 `hydrateIssueBody`，避免重复编写围栏/注释解析器。
+- 复用 `kit/skills/lib/static-gates-lexer.mjs`（`buildLexedViews`/`extractLineCommentInfo`）构建 `static-gates-comment-hygiene.mjs` (new)。
+- 复用 `kit/skills/lib/verify-state.mjs`（`isSafeTaskScratchPath`/`destroyTaskScratchDir`）与 `scripts/lib/survey-plan.mjs`（`computeArtifactPlan`）。
 
 <!-- section: alternatives -->
-- **方案一（否决）：只收敛已漂移的六组。** 未漂移的五组正好在「还没出事」的阶段，此刻收敛零风险；等它们漂了再收，就要先写脚本判定哪一份是对的。
-- **方案二（否决）：保留两处实现，加一条对拍检查它们相等。** 对拍只能告诉你「不一致」，不能告诉你「应该是什么」；而且每加一组就要加一条对拍，最终对拍表比实现还长。
-- **方案三（否决）：把六组都收敛到 `scripts/lib/`。** `arch-rules` 规定 `kit/` 不得 import `scripts/lib/`，而 `kit/` 里的模块正在用这些函数。收敛到 `scripts/lib/` 等于让 `kit/` 违反架构规则。
-- **方案四（否决）：把四处产物目录名单合成一个带标注的集合。** 四处用途不同，标注只能说明「这是哪一项」，不能阻止某一处拿到不属于它的条目。按用途分治并写清差异才是治本。
-- **方案五（采纳）：`kit/skills/lib/` 单点实现 + `scripts/lib/` 反向重导出 + 同名对拍守住。** 符合既有架构方向，且检查一旦存在，第三次重复会在产生时就红。
-<!-- section: alternatives-end -->
+- 备选 A（未采纳）：新增第 9 个注释审查 skill 或全仓硬扫旧注释。否决原因：破坏既有 `8` skill 收敛边界且强迫存量仓大面积改旧注释。
+- 备选 B（未采纳）：用静态行数阈值做 `arch`/去重自证门禁。否决原因：行数门禁易脆弱误报，改用符号出口parity + 共享原语去重检测。
 
 ## 五、待拍板问题
 
 <!-- section: pending -->
-- 已定：六组已漂移全部收敛到 `kit/skills/lib/` 层（`git-core.mjs` 或其同目录新模块），`scripts/lib/` 反向重导出；依据是 `arch-rules` 的单向依赖与既有七处先例。
-- 已定：读文本上限取 512KB，逐调用点核对行为变化并写成正例断言；不提到无上限。
-- 已定：解析失败统一表示，「返回空」表示格式不认识、「抛错」表示调用方式错，两者不混。
-- 已定：路径规范形的空串行为以「空输入不是路径」为准；合并前跑全套夹具确认无断言依赖旧行为，有则改断言并写明理由。
-- 已定：五组未漂移一并收敛，证据是收敛前后全套夹具逐字节一致；YAML 值剥离那一对同时纳入同名对拍。
-- 已定：行数计算落在 `static-gates.mjs`（规则的定义处），语义为「切分后末尾空项不计」。
-- 已定：四处产物目录名单**不合成**，改为带用途命名 + 一张声明表；声明差异与实际差异须逐条一致。
-- 已定：本切片不碰 `shared.mjs`、`task-backend.mjs` 三 class、生态声明式表、两组线性降级链与线性事务。
-- 已定：本切片前置为 `w25-flow-defects` 与 `w25-deadcode-split`；实施时若二者已合入，以当时默认分支为准，只做核对与补测，不重复实现、不保留两套做法。
-- 已定：与并行度切片（`w25-parallel-dispatch`）写域相邻于 `workflow-helpers.mjs`。本片只动该文件中的路径归一引用，不动波次函数；若并行度切片先合入并已改动该文件，本片按当时内容 rebase，不重写其逻辑。
-<!-- section: pending-end -->
+- 已定：统一内核放置于 `kit/skills/lib/`（`git-core.mjs`/`platform.mjs`/`static-gates.mjs`），严格满足 `arch-rules` 与零第三方依赖。
+- 已定：所有注释卫生规则严限 `--changed` + 基线棘轮与 `dev-edit`/`dev-govern`/`dev-review` 内聚实现，不新增第 9 skill 与独立 ADR 目录。
+- 已定：`bench.mjs` 彻底移除 `2.5x` CI 系数，默认与 `--strict-budget` 均按 1x 基准度量。

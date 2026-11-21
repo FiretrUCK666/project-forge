@@ -1,70 +1,123 @@
 ---
 kind: todo
-title: 共享内核去重实施清单：六组已漂移收敛、五组提前收口、同名导出对拍
+title: PR-B（#115）共享内核去重、平台收口、验证治理与性能预算 Todo
 status: active
+tier: L3
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-22
 issue: 115
 pr: null
-branch: fix/w25-kernel-dedup
-owner: plan-wave25
+branch: feat/w25-kernel-dedup
+owner: plan-prb
 approved: false
-done_at: null
-task_id: w25-kernel-dedup
-planned_at: null
+implemented: false
 related_prd: ../prd/261120-w25-hardening-prd.md
 related_spec: ../specs/261120-issue115-w25-kernel-dedup-spec.md
-plan_mode: interactive
-depends_on: [w25-flow-defects, w25-deadcode-split]
-scope_files: ["scripts/lib/text.mjs", "kit/skills/lib/git-core.mjs", "kit/skills/lib/platform-probe.mjs", "scripts/lib/protocol.mjs", "kit/skills/lib/static-gates.mjs", "kit/skills/lib/static-gates-lexer.mjs", "scripts/lib/survey-ecosystem.mjs", "scripts/lib/survey-workspace.mjs", "scripts/lib/survey-reentry.mjs", "kit/skills/dev-govern/scripts/govern-checks.mjs", "kit/skills/dev-govern/scripts/govern-docs.mjs", "kit/skills/lib/workflow-policy.mjs", "kit/skills/lib/empirical-artifacts.mjs", "kit/skills/lib/feature-map.mjs", "kit/skills/lib/verify-state.mjs", "kit/skills/lib/skill-discovery.mjs", "kit/skills/lib/profile.mjs", "kit/skills/lib/profile-sniffer.mjs", "kit/skills/dev-flow/scripts/flow-intake.mjs", "kit/skills/dev-flow/scripts/flow-issues.mjs", "kit/skills/dev-flow/scripts/worktree-deps.mjs", "kit/skills/dev-review/scripts/review-empirical-state.mjs", "kit/skills/dev-review/scripts/review-locks.mjs", "kit/skills/dev-verify-tools/scripts/verify-tools.mjs", "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs", "scripts/dev/preflight-suite.mjs", "kit/skills/dev-edit/scripts/edit-gate.mjs", "scripts/dev/fixtures-kernel-dedup.mjs"]
+high_risk_paths:
+  - kit/
+  - scripts/lib/
+  - scripts/dev/
+  - templates/
+  - AGENTS.md
+task_id: w25-kernel-dedup
+depends_on: []
+scope_files:
+  - kit/skills/lib/git-core.mjs
+  - kit/skills/lib/git-status-fast.mjs
+  - kit/skills/lib/git-fast.mjs
+  - kit/skills/lib/platform.mjs
+  - kit/skills/lib/platform-probe.mjs
+  - kit/skills/lib/task-backend.mjs
+  - kit/skills/lib/task-backend-local.mjs
+  - kit/skills/lib/issue-template-hydrate.mjs
+  - kit/skills/lib/escalation.mjs
+  - kit/skills/lib/doc-locator.mjs
+  - kit/skills/lib/feature-map.mjs
+  - kit/skills/lib/verify-state.mjs
+  - kit/skills/lib/static-gates.mjs
+  - kit/skills/lib/static-gates-lexer.mjs
+  - kit/skills/lib/static-gates-comment-hygiene.mjs
+  - kit/skills/dev-explore/scripts/doc-locate.mjs
+  - kit/skills/dev-flow/scripts/flow-issues.mjs
+  - kit/skills/dev-flow/scripts/worktree-deps.mjs
+  - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
+  - kit/skills/dev-flow/scripts/flow-lifecycle.mjs
+  - kit/skills/dev-review/scripts/review-empirical-state.mjs
+  - kit/skills/dev-edit/scripts/edit-gate.mjs
+  - kit/skills/dev-edit/SKILL.md
+  - kit/skills/dev-review/SKILL.md
+  - kit/skills/dev-verify-tools/scripts/verify-tools.mjs
+  - kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs
+  - kit/skills/dev-govern/scripts/govern-audit.mjs
+  - kit/skills/dev-govern/scripts/govern-checks.mjs
+  - kit/skills/dev-govern/scripts/govern-retro.mjs
+  - scripts/lib/protocol.mjs
+  - scripts/lib/text.mjs
+  - scripts/lib/update-ops.mjs
+  - scripts/lib/platform/registry.mjs
+  - scripts/lib/survey-ecosystem.mjs
+  - scripts/lib/survey-workspace.mjs
+  - scripts/lib/equip-bootstrap.mjs
+  - scripts/lib/agents-defaults.mjs
+  - scripts/compose-agents.mjs
+  - scripts/lib/review-helpers.mjs
+  - scripts/equip-ci.mjs
+  - scripts/dev/evidence.mjs
+  - scripts/dev/preflight.mjs
+  - scripts/dev/preflight-suite.mjs
+  - scripts/dev/preflight-kernel-parity.mjs
+  - scripts/dev/bench.mjs
+  - scripts/dev/fixtures.mjs
+  - scripts/dev/fixtures-verify-tools.mjs
+  - scripts/dev/fixtures-govern.mjs
+  - scripts/dev/e2e-zip-harness.mjs
+  - scripts/dev/merge-gate.mjs
+  - scripts/dev/injections-data-kernel-dedup.mjs
+  - docs/feature-map.json
+  - AGENTS.md
+  - docs/prd/261120-w25-hardening-prd.md
+  - docs/specs/261120-issue114-w25-perf-budget-spec.md
+  - docs/todo/261120-issue114-w25-perf-budget-todo.md
+  - docs/specs/261120-issue117-w25-verify-map-spec.md
+  - docs/todo/261120-issue117-w25-verify-map-todo.md
+  - docs/specs/261120-issue118-w25-govern-truth-spec.md
+  - docs/todo/261120-issue118-w25-govern-truth-todo.md
+  - docs/specs/261120-issue119-w25-deadcode-split-spec.md
+  - docs/todo/261120-issue119-w25-deadcode-split-todo.md
 ---
 
-# `w25-kernel-dedup` 实施 Todo（Issue `#115`）
+# PR-B（#115）实施任务清单
 
-> 对应 SPEC：[kernel-dedup SPEC](../specs/261120-issue115-w25-kernel-dedup-spec.md)
->
-> **基线**：`a0fe4df`。前置：`w25-flow-defects`（引用与路径形状先定）、`w25-deadcode-split`（策略模块先拆出边界）。
-
-## 一、要做什么
+## 一、目标
 
 <!-- section: goal -->
-把「同一份判定」收敛成一处定义，并用机械检查保证不再复发：
+在独立 worktree `feat/w25-kernel-dedup` 完成 PR-B（`C1–C8`）全量落地：收敛共享内核、收口多远端/无远端平台注册表、统一四路 Issue 模板水合与首次接入零误报、落地 `verify-tools` 脚本指纹并刷新 `feature-map.json`、修复 `govern` 真实性与三项确定性注释卫生、修复快路径与并发预算、规范退役冗余草案并完成 `I370–I385` 故障注入与双向回归。
 
-- **六组已漂移**收敛到 `kit/skills/lib/` 层，`scripts/lib/` 反向重导出；行为变化逐条用夹具锁住。
-- **五组未漂移**一并收口，证据是收敛前后全套夹具逐字节一致。
-- **行数口径**收敛到规则定义处；800 行边界在两道门禁上同结论。
-- **同名导出对拍**：一处定义、其余重导出，机械可验。
-- **四处产物目录名单**按用途分治并写清差异理由，不合成一个集合。
-
-## 二、不做什么
+## 二、非目标
 
 <!-- section: non-goals -->
-不合成产物目录集合；不改纯重导出层；不改后端三 class 布局；不拆生态声明式表；不拆探测模块线性降级链、装备脚本线性事务、原子写临时清理返回形状；不动「跳过规划引导」开关；不改 `arch-rules` 方向；不碰 `docs/archive/`。
-
-不以任何形式打补丁：不留「两份实现 + 一条对拍」的双轨、不用注释说明「这两份要一起改」、不保留兼容别名。
-<!-- section: non-goals-end -->
+- 不改动 PR-A（`#120`）波次/规划隔离核心；不新增第 9 个 skill 或 `docs/adr/`。
+- 不修改逼近 800 行的非目标文件（`flow-inspect.mjs`、`docs.mjs`、`profile-sniffer.mjs`、`flow-merge.mjs`、`equip.mjs`）。
+- 不削弱默认全量 `preflight` 与 `merge-gate` 校验强度。
 
 ## 三、实施任务清单
 
-- [ ] **T1（前置核对）**：确认 `w25-flow-defects` 与 `w25-deadcode-split` 已合入或已在同一波次内落地；未落地则等待，不得先把实现搬进尚未拆分的策略模块。
-- [ ] **T2（`C1` 读文本与两函数）**：`scripts/lib/text.mjs` 的读文本实现改为从 `kit/skills/lib/git-core.mjs` 重导出，上限统一为 512KB；`text.mjs` 内四处自用改走重导出；版本号归一与仓库关系同样改为重导出。补 300KB 与 600KB 两条断言。
-- [ ] **T3（`C2` 仓库路径与 SSH 配置）**：保留 `platform-probe.mjs` 的实现（认裸 slug、接受环境注入），`text.mjs` 重导出；完整仓名依赖一并迁移避免反向引用；解析失败统一表示并在夹具写明。
-- [ ] **T4（`C3` 路径规范形）**：路径规范形、同路径判定、主模块判定收敛到 `git-core.mjs`；先跑全套夹具确认无断言依赖「空串 = 当前目录」；再查工作树挂载与卸载的「同一路径」判定走的是哪一份，先补夹具锁住现状再替换。
-- [ ] **T5（`C4` 五组未漂移）**：五组同名实现逐组收敛到一处，其余重导出；每组收敛后立即跑全量夹具并要求逐字节一致；`stripWrapQuotes` 与 `stripInlineYamlComment` 一并纳入同名对拍。
-- [ ] **T6（`C5` 行数口径）**：行数计算收敛到 `static-gates.mjs` 一处（语义：切分后末尾空项不计）；`preflight-suite.mjs` 与 `edit-gate.mjs` 改调它；补「恰好 800 行」与「末尾有无换行」两组断言。
-- [ ] **T7（`C6` 同名对拍）**：`preflight-suite.mjs` 新增同名导出检查：扫描两个内核层的导出声明，同名出现在两个以上定义处即失败（重导出不计），报告给出两处位置。
-- [ ] **T8（`C7` 产物目录分治）**：四份名单各自改为带用途的名字，用途声明与条目差异写进同一模块的一张声明表；新增检查核对「声明差异 = 实际差异」。
-- [ ] **T9（夹具）**：新增 `scripts/dev/fixtures-kernel-dedup.mjs` (new)，承接 `C1..C7` 每条的正反断言；五组未漂移的收敛证据用「收敛前后全量夹具输出快照比对」形式落盘。
-- [ ] **T10（行数核对）**：逐文件核对 `.mjs <= 800`；`text.mjs` 变薄、`git-core.mjs` 变厚，后者超限时把新增部分下沉为同目录独立模块并保留重导出。
-- [ ] **T11（同步）**：`kit/` 改动后重跑 `node scripts/equip.mjs .`；导出集合变化同提交同步 `docs/TDD.md` 的模块导出列，以及 `kit/skills/lib/shared.mjs` 的重导出清单（后者本片不改实现，只在其导出面变化时同步）。
+<!-- section: tasks -->
+- [ ] **T1（`C1` 共享内核去重与 `#119` 死代码清理）**: 将 `readTextSafe`、`isMacOsJunkPath`、`isInsideDir(candidateAbs, parentAbs)` 收敛至 `kit/skills/lib/git-core.mjs` 并修复 `scripts/lib/update-ops.mjs` 反序 bug；将 `parseSshConfigHostMap`/`lookupSshHost` 统一于 `kit/skills/lib/platform.mjs`；将 `countTextLines` 统一于 `kit/skills/lib/static-gates.mjs` 并重导出至 `protocol.mjs` 与 `edit-gate.mjs`；删除 `protocol.mjs`/`text.mjs`/`survey-workspace.mjs`/`survey-ecosystem.mjs` 等零引用死代码；新增 `scripts/dev/preflight-kernel-parity.mjs` (new) 固化 `--slot` 零残留与重复原语检查。
+- [ ] **T2（`C2` 多远端/无远端注册表收口）**: 在 `scripts/lib/platform/registry.mjs` 与 `kit/skills/lib/platform.mjs` 增加 `registerHostingProvider` 适配器方法契约校验；将 `LocalOnlyBackend`/`GenericRemoteBackend` 从 `kit/skills/lib/task-backend.mjs` 拆入 `kit/skills/lib/task-backend-local.mjs` (new)，并使 `createTaskBackend` 走注册表分发；修改 `scripts/equip-ci.mjs` 消费 `facts.artifactPlan`；将 `detectDeclaredRepo` 与 `survey-ecosystem.mjs` 改为注册表解析去宿主化。
+- [ ] **T3（`C3` 统一 `hydrateIssueBody` 与首次接入零误报）**: 新建 `kit/skills/lib/issue-template-hydrate.mjs` (new) 实现 `hydrateIssueBody`（保留 `.github/ISSUE_TEMPLATE/`、剥离围栏外 `<!-- ... -->`、归一化 `\n`、`local-only`/`generic-git` 干净降级），并接入 `flow issue create`、`flow start --create-issue`、`escalation.mjs` 与 `govern-audit issues`；在 `scripts/lib/equip-bootstrap.mjs` 为空仓落盘合法空 `docs/feature-map.json` 并使 `verify-tools audit` 降级 `NOT_APPLICABLE`；`doc-locator.mjs` 将 `references/` 纳入 `contextIndex` 且 `doc-locate.mjs` 支持 `--list`；修复 `scripts/compose-agents.mjs` 与 `scripts/lib/agents-defaults.mjs` 单次幂等。
+- [ ] **T4（`C4` `#117` 验证工具指纹与功能地图刷新）**: 更新 `kit/skills/lib/feature-map.mjs` `computeFeatureFingerprint` 纳入 `scriptPath` 内容哈希及路径边界校验；更新 `verify-tools.mjs` / `verify-tools-audit.mjs` 落地零执行非零退出、禁止 stale 通过时静默覆写基线，并在 `verify-state.mjs` 记录 `verify.scratch-used`；执行 `node scripts/equip.mjs .` 后刷新 `docs/feature-map.json` 与全部验证工具，清除已归档 `#116` 僵尸引用，实现 `verify-tools audit` 0 stale / 0 zombies / 0 blindSpots。
+- [ ] **T5（`C5` `#118` 治理真实性与三项注释卫生升级）**: 将 `scripts/dev/evidence.mjs` 改为 `git ls-files -z` + `!isRepoOnlyPath`；在 `flow-lifecycle-helpers.mjs`/`flow-lifecycle.mjs` 排除 `.pf-manifest.json` 信号 blame；修复 `govern-checks.mjs` `orphan_dir` 清理提示、`govern-retro.mjs` 失效建议淘汰与 `review-helpers.mjs` 命令匹配；落地三项确定性注释升级（缺 Issue 的 `HACK`/`WORKAROUND`/`TEMP` 引导 `escalation.mjs`、新建 `kit/skills/lib/static-gates-comment-hygiene.mjs` (new) 检查 `--changed` + 基线棘轮反引号失效路径、更新 `dev-edit`/`dev-review` `SKILL.md` why-not-what 与 `docs/TDD.md`/`AGENTS.md ## 取舍` 规则并同步 `.agents/skills/`）。
+- [ ] **T6（`C6` `#114` 快路径、增量门禁、安全并发与 1x 硬预算）**: 修复 `git-status-fast.mjs` `eol=crlf` 按文件匹配回退与 `git-fast.mjs` 多父合并提交，配与原生 `git` 一致性正反测试；为 `preflight.mjs`/`preflight-suite.mjs` 新增 `--changed` 增量模式；移除 `bench.mjs` 2.5x CI 缩放并实现 `--strict-budget` 1x 硬预算；在 `e2e-zip-harness.mjs`、`merge-gate.mjs`、`fixtures.mjs` 对纯只读/独立沙盒步骤实施安全有界并发，保持确定性输出与等价退出码。
+- [ ] **T7（`C7` 规范退役被吸收草案与 `w25-hardening-prd`）**: 在本分支用 `doc-plan.mjs supersede` / `archive` 规范退役 `#114`/`#117`/`#118`/`#119` 草案 SPEC/Todo 与 `docs/prd/261120-w25-hardening-prd.md`，验证 `doc-plan.mjs audit . --json` 仅保留 `v10.1` 主 PRD + `#103` + `#104`（及提交前待 `finalize` 的 `#115`）且零报错。
+- [ ] **T8（`C8` `I370–I385` 故障注入与全量合前验收）**: 新建 `scripts/dev/injections-data-kernel-dedup.mjs` (new) 注册 `I370–I385` 16 条故障注入；在 `fixtures.mjs`/`fixtures-verify-tools.mjs`/`fixtures-govern.mjs` 补齐 GitHub/`generic-git`/`local-only`/存量自定义模板正反双向用例；验证全部 `.mjs <= 800` 行，跑通 `compose-agents .`、`equip . --check`、`preflight.mjs`、`merge-gate.mjs`、`verify-injections.mjs` 与 `bench.mjs --strict-budget`。
 
 ## 四、验收与合前检查
 
-- [ ] `node scripts/dev/fixtures.mjs` 全量通过（本片判据需要全量，不接受按域子集）。
-- [ ] 同名导出对拍存在且正反各有一条断言：复制一份同名定义会红，改成重导出会绿。
-- [ ] 行数口径只有一处实现；恰好 800 行的文件在两道门禁上同结论。
-- [ ] 四处产物目录名单的声明差异与实际差异逐条一致。
-- [ ] `node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs` 全绿。
-- [ ] `.agents/skills/` 与 `kit/skills/` 字节级一致。
-- [ ] 改动未触及未合入的并行切片写域；`workflow-helpers.mjs` 的波次函数零改动。
-- [ ] `doc-plan.mjs audit . --json` 返回 `ok: true`。
+<!-- section: verify -->
+- [ ] `node scripts/compose-agents.mjs . --check` 与 `node scripts/equip.mjs . --check` 通过
+- [ ] `node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --json` 全绿且无 `.mjs > 800` 行
+- [ ] `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit . --json` 达 `0 stale / 0 zombies / 0 blindSpots`
+- [ ] `node scripts/dev/preflight-kernel-parity.mjs` (new)、`node scripts/dev/bench.mjs --strict-budget` 与 `node scripts/dev/merge-gate.mjs` 全绿
+- [ ] `node scripts/dev/verify-injections.mjs`（含 `I370–I385`）全部精准变红通过
+- [ ] `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit . --json` 零报错

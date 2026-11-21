@@ -287,6 +287,7 @@ export function registerLocateIntakeCases(cases) {
         'kind: spec',
         'status: approved',
         'approved: true',
+        'plan_critique: passed',
         'issue: 20',
         'title: CLI 快速扫描优化',
         '---',

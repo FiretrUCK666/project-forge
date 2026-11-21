@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from '../../kit/skills/lib/doc-frontmatter.mjs'
 import { deriveMergeGate, extractExecutionBlocks, GATE_VERDICT } from '../../kit/skills/lib/gate-truth.mjs'
+import { evaluateIntakeTriage } from '../../kit/skills/lib/intake-triage.mjs'
 import { resolveApprovalBasis } from '../../kit/skills/lib/plan-exit-gate.mjs'
 import { auditEntry, auditHandRolled, ENTRY_SPECS, evaluateParity, extractDeclared, HAND_ROLLED_SPECS } from './cli-parity.mjs'
 import { rmTree, tmpProject } from './fixtures-helpers.mjs'
@@ -409,6 +410,85 @@ export function registerFlowTruthCases(cases) {
     if (!evaluateParity([fakeDeclared]).failures.some((f) => f.includes('not-registered'))) {
       return '帮助里声明了没注册的参数却没被抓到'
     }
+    return true
+  }])
+
+  cases.push(['C8：分诊只读平台真相——平台读不到时补充保留但带源，补充不得覆盖平台已有值', async () => {
+    const dir = repoWith({ 'README.md': '# 本地仓\n' })
+    try {
+      const specTextWith = (extra) => [
+        '---',
+        'kind: spec',
+        'status: approved',
+        'approved: true',
+        'plan_critique: passed',
+        'issue: 41',
+        'title: 已批 SPEC',
+        ...extra,
+        '---',
+        '',
+        '# SPEC: 已批 SPEC',
+        '',
+      ].join('\n')
+      mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+      writeFileSync(join(dir, 'docs', 'specs', '261120-issue41-probe-spec.md'), specTextWith([]))
+
+      // 正例：签发完整的文档豁免成立。
+      const exempt = evaluateIntakeTriage(dir, {
+        targetType: 'issue', targetNumber: 41, title: '随便什么标题', body: '按已批 SPEC 推进。',
+      })
+      if (!exempt.exempt || exempt.decisionSource !== 'internal-plan-exempt') {
+        return `签发改完整的文档没有豁免分诊：${JSON.stringify({ exempt: exempt.exempt, src: exempt.decisionSource })}`
+      }
+
+      // 反例一：同一份文档改成「签字过期」就不再豁免——分诊与退场门禁必须同一个答案。
+      // 这一版必须去掉 plan_critique: passed，否则「正常过审」这条依据先成立，
+      // 过期判定根本轮不到执行，反例就成了空壳。
+      writeFileSync(join(dir, 'docs', 'specs', '261120-issue41-probe-spec.md'), [
+        '---',
+        'kind: spec',
+        'status: approved',
+        'approved: true',
+        'plan_critique: rejected',
+        'issue: 41',
+        'title: 已批 SPEC',
+        'critique_override: {"approved":true,"sha":"deadbeefdeadbeef","by":"human","reason":"当时批过"}',
+        '---',
+        '',
+        '# SPEC: 已批 SPEC',
+        '',
+      ].join('\n'))
+      const stale = evaluateIntakeTriage(dir, {
+        targetType: 'issue', targetNumber: 41, title: '随便什么标题', body: '按已批 SPEC 推进。',
+      })
+      if (stale.exempt) {
+        return '签字过期（正文改过了）仍被当成已核准规划——分诊与退场门禁给出了相反的结论'
+      }
+
+      // 正例二：平台读不到某个字段时，补充保留、但要留源。
+      writeFileSync(join(dir, 'docs', 'specs', '261120-issue41-probe-spec.md'), specTextWith([]))
+      const supplemented = evaluateIntakeTriage(dir, {
+        targetType: 'issue', targetNumber: 43, body: '按已批 SPEC 推进。',
+        supplemented: [{ field: 'title', reason: '远端只读拉取失败：401 Bad credentials' }],
+      })
+      if (!supplemented.supplemented || supplemented.supplemented.length !== 1) {
+        return `补充字段没有带源返回：${JSON.stringify(supplemented.supplemented)}`
+      }
+      if (!String(supplemented.reason).includes('调用方补充') || !String(supplemented.reason).includes('401')) {
+        return `补充来源没写进结论：${supplemented.reason}`
+      }
+      if (!String(supplemented.commentBody).includes('401')) {
+        return '补充来源没写进评论正文——平台外的人看不到这条判定读的是什么'
+      }
+
+      // 反例二：没有补充时结论里不许凭空冒出「调用方补充」这种标注。
+      const clean = evaluateIntakeTriage(dir, { targetType: 'issue', targetNumber: 44, title: '普通提案', body: '普通正文' })
+      if (String(clean.reason).includes('调用方补充')) {
+        return '没有补充字段却标注了补充来源——标注本身会立刻变成噪音'
+      }
+      // 反例三：平台读取失败不得让分诊直接失败。
+      if (!clean.ok) return '分诊因为平台读不到直接失败了——离线仓必须还能用'
+    } finally { rmTree(dir) }
     return true
   }])
 }

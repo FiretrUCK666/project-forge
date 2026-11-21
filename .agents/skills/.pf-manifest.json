@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-20T20:12:55.296Z",
+  "installedAt": "2026-11-21T02:05:16.942Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -37,7 +37,7 @@
       "sha256": "e97561f199ad954f48f982b4eea370094e23cec88bb9ae1368ff6bc48c891c44"
     },
     "dev-flow/scripts/flow-intake.mjs": {
-      "sha256": "81b67dbdbedfd337425eda9166180b8ffee9b820b9306bb240145ec9686b422f"
+      "sha256": "e7e7596c93b8a6cff2eb950f57f0e054230a2913206af406f9a8fc32e234feed"
     },
     "dev-flow/scripts/flow-issues.mjs": {
       "sha256": "8368dc2ecd75070fad76734e288bf6691500367aa2b995222f0e89a6159ec30e"
@@ -283,7 +283,7 @@
       "sha256": "cd48d012e0114a5eac8dc4451b72b6c49a353f0700d644802a76a37c6f747fba"
     },
     "lib/intake-triage.mjs": {
-      "sha256": "4279cc641218152feb0f93c5af5b41742789ff17c6f27f0c1a7ea38fe59cbcef"
+      "sha256": "f9002f9e6ba03679fb8dd19752b0c1b6d3812967cb8340550d8aae85533ed16a"
     },
     "lib/ledger.mjs": {
       "sha256": "1354c2cd28a243fec3c70ca6dae40f0ed4546656f5ee7d2da5319ce6304ae7aa"

@@ -66,6 +66,17 @@ function resolveTargetSelection(mainRoot, opts = {}) {
   throw new Error('缺少分诊目标：请传 --pr <M> 或 --issue <N>（或已绑定 Issue/PR 的 --task <id>）')
 }
 
+/**
+ * 把目标 Issue/PR 的元数据按**平台真相优先**聚起来。
+ *
+ * 分诊的结论是「这个提案该不该收」，判定依据必须是平台上真实写着的东西。此前调用方传的
+ * `--title` / `--body` 排在最前面，于是同一份提案可以靠换个标题绕过非目标与重复判定——
+ * 判定读的是他说的，不是记录里的。
+ *
+ * 所以顺序反过来：先读本地镜像，再读远端；两处都读不到某个字段，才退回调用方补充，
+ * 并把「这一条来自补充、以及平台为什么读不到」一起记进 `supplemented`。补充不是禁止的，
+ * 但它必须留源——离线仓、无凭据、接口报错都是真实场景，假装读到了才是问题。
+ */
 async function hydrateTargetMetadata({
   mainRoot,
   gitDir,
@@ -76,37 +87,27 @@ async function hydrateTargetMetadata({
   targetRepo,
   ledger,
 }) {
-  let title = String(opts.title ?? '').trim()
-  let body = String(opts.body ?? '').trim()
-  let branch = String(opts.branch ?? ledger?.branch ?? '').trim() || null
-  let labels = parseCsvList(opts.labels)
-  const files = parseCsvList(opts.files)
-  let closedIssues = []
+  const platform = { title: '', body: '', branch: '', labels: [], closedIssues: [] }
+  const failures = []
 
   const localClosed = listLocalIssues({ mainRoot, gitDir, state: 'closed' })
-  if (localClosed.ok && Array.isArray(localClosed.issues)) {
-    closedIssues = [...localClosed.issues]
-  }
+  if (localClosed.ok && Array.isArray(localClosed.issues)) platform.closedIssues.push(...localClosed.issues)
+  else failures.push('本地镜像里读不到已关闭条目清单')
 
-  if (targetType === 'issue' && (!title || !body)) {
-    const localIss = getLocalIssue({ mainRoot, gitDir, number: targetNumber })
-    if (localIss.ok) {
-      if (!title) title = String(localIss.title ?? '').trim()
-      if (!body) body = String(localIss.body ?? '').trim()
-      if (labels.length === 0 && Array.isArray(localIss.labels)) labels = [...localIss.labels]
-    }
-  } else if (targetType === 'pr' && (!title || !body)) {
-    const localPr = getLocalPr({ mainRoot, gitDir, number: targetNumber })
-    if (localPr.ok) {
-      if (!title) title = String(localPr.title ?? '').trim()
-      if (labels.length === 0 && Array.isArray(localPr.labels)) labels = [...localPr.labels]
-    }
+  const local = targetType === 'issue'
+    ? getLocalIssue({ mainRoot, gitDir, number: targetNumber })
+    : getLocalPr({ mainRoot, gitDir, number: targetNumber })
+  if (local.ok) {
+    platform.title = String(local.title ?? '').trim() || platform.title
+    if (targetType === 'issue') platform.body = String(local.body ?? '').trim() || platform.body
+    if (Array.isArray(local.labels) && local.labels.length > 0) platform.labels = [...local.labels]
+    if (!platform.branch) platform.branch = String(local.headBranch ?? local.branch ?? '').trim()
   }
 
   const shouldTryRemoteRead = Boolean(
     targetRepo
     && (state.github?.providerId === 'github' || opts._ghClient || opts._ghProbe)
-    && (!title || !body),
+    && (!platform.title || !platform.body),
   )
   if (shouldTryRemoteRead) {
     const readClient = await resolveReadClient({
@@ -118,35 +119,60 @@ async function hydrateTargetMetadata({
     })
     if (readClient) {
       try {
-        if (targetType === 'pr' && typeof readClient.getPr === 'function') {
-          const prRes = await readClient.getPr(targetRepo, targetNumber)
-          if (prRes?.ok) {
-            if (!title) title = String(prRes.title ?? '').trim()
-            if (!body) body = String(prRes.body ?? '').trim()
-            if (!branch && prRes.headBranch) branch = prRes.headBranch
-            if (labels.length === 0 && Array.isArray(prRes.labels)) labels = [...prRes.labels]
-          }
-        } else if (targetType === 'issue' && typeof readClient.getIssue === 'function') {
-          const issRes = await readClient.getIssue(targetRepo, targetNumber)
-          if (issRes?.ok) {
-            if (!title) title = String(issRes.title ?? '').trim()
-            if (!body) body = String(issRes.body ?? '').trim()
-            if (labels.length === 0 && Array.isArray(issRes.labels)) labels = [...issRes.labels]
-          }
+        const fetched = targetType === 'pr' && typeof readClient.getPr === 'function'
+          ? await readClient.getPr(targetRepo, targetNumber)
+          : (targetType === 'issue' && typeof readClient.getIssue === 'function'
+            ? await readClient.getIssue(targetRepo, targetNumber)
+            : null)
+        if (fetched?.ok) {
+          platform.title = String(fetched.title ?? '').trim() || platform.title
+          if (targetType === 'issue') platform.body = String(fetched.body ?? '').trim() || platform.body
+          if (!platform.branch && fetched.headBranch) platform.branch = fetched.headBranch
+          if (platform.labels.length === 0 && Array.isArray(fetched.labels)) platform.labels = [...fetched.labels]
+        } else {
+          failures.push(`远端读取 ${targetType === 'pr' ? 'PR' : 'Issue'} #${targetNumber} 未返回可用元数据`)
         }
         if (typeof readClient.listIssues === 'function') {
           const remoteClosed = await readClient.listIssues({ repo: targetRepo, state: 'closed', perPage: 30 })
-          if (remoteClosed?.ok && Array.isArray(remoteClosed.issues)) {
-            closedIssues.push(...remoteClosed.issues)
-          }
+          if (remoteClosed?.ok && Array.isArray(remoteClosed.issues)) platform.closedIssues.push(...remoteClosed.issues)
         }
-      } catch {
-        // 只读拉取失败时不阻断离线规则评估
+      } catch (err) {
+        // 只读拉取失败不阻断离线规则评估，但失败本身要留痕：后面若有字段靠补充，理由就在这。
+        failures.push(`远端只读拉取失败：${err instanceof Error ? err.message : String(err)}`)
       }
+    } else {
+      failures.push('没有可用的远端只读客户端')
     }
   }
 
-  return { title, body, branch, labels, files, closedIssues }
+  // 补充只补平台的空缺，不覆盖平台已有值。
+  const supplemented = []
+  const fill = (field, rawValue) => {
+    const value = String(rawValue ?? '').trim()
+    if (!value || platform[field]) return platform[field]
+    supplemented.push({ field, reason: failures.join('；') || '平台侧未提供该字段' })
+    platform[field] = value
+    return value
+  }
+  const title = fill('title', opts.title)
+  const body = fill('body', opts.body)
+  const branch = fill('branch', opts.branch ?? ledger?.branch)
+  let labels = platform.labels
+  if (labels.length === 0 && parseCsvList(opts.labels).length > 0) {
+    labels = parseCsvList(opts.labels)
+    supplemented.push({ field: 'labels', reason: failures.join('；') || '平台侧未提供标签' })
+  }
+
+  return {
+    title,
+    body,
+    branch: branch || null,
+    labels,
+    files: parseCsvList(opts.files),
+    closedIssues: platform.closedIssues,
+    supplemented,
+    platformFailures: failures,
+  }
 }
 
 function formatIntakeMarkdown(result) {
@@ -162,6 +188,7 @@ function formatIntakeMarkdown(result) {
     ...(result.duplicateOf ? [`- **重复指向**：#${result.duplicateOf}`] : []),
     ...(result.featureRef ? [`- **特性锚点**：${result.featureRef}`] : []),
     ...(result.tddRefs?.length ? [`- **契约依据**：${result.tddRefs.join(', ')}`] : []),
+    ...(result.supplemented?.length ? [`- **补充来源**：${result.supplemented.map((s) => `${s.field}（${s.reason}）`).join('；')}——这些字段不在平台上，判定按调用方补充进行`] : []),
     ...(result.recordPath ? [`- **本地分诊记录**：${result.recordPath}`] : []),
     ...(result.rollbackHint ? [`- **撤销恢复路径**：${result.rollbackHint}`] : []),
     '',
@@ -240,6 +267,7 @@ export async function handleIntake(opts = {}, rootsArg = null) {
     duplicateOf,
     labels: hydrated.labels,
     closedIssues: hydrated.closedIssues,
+    supplemented: hydrated.supplemented,
     gitDir,
     account: actorLayers.account,
     verifiedPlatformLogin: actorLayers.verifiedPlatformLogin,
@@ -328,6 +356,7 @@ export async function handleIntake(opts = {}, rootsArg = null) {
       duplicateOf: evaluation.duplicateOf,
       featureRef: evaluation.featureRef,
       tddRefs: evaluation.tddRefs,
+      supplemented: evaluation.supplemented,
       duplicates: evaluation.duplicates,
       dimensions: evaluation.dimensions,
       rollbackHint: evaluation.rollbackHint,

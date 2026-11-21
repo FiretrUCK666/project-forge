@@ -477,11 +477,9 @@ export async function handleVerify(opts, roots) {
     ledger.visualVerifiedHead = currentHead
     // 这个字段只接受入参原文或既有真实记录；两者都没有就不写。
     //
-    // 它不得由任何开关派生。此前这里会给裸 `--visual-checked` 拼一句「已声明核验」，
-    // 于是「核验过」这件事在账本里有了文字，而文字不是观察——后面读到它的人（和模型）
-    // 分不出「真的看了界面」和「打了个开关」。开关只表示「他声明核验过」，
-    // 这个语义由 `visualVerifiedHead` 与 `empiricalVisualCheckRequired` 两个字段表达，
-    // 不需要也不允许占用观察字段。
+    // 它不得由任何开关派生：给裸 `--visual-checked` 拼一句「已声明核验」，
+    // 会让「核验过」这件事在账本里有了文字，而文字不是观察。开关的语义由
+    // `visualVerifiedHead` 与 `empiricalVisualCheckRequired` 表达，不占用观察字段。
     const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
     ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
@@ -718,9 +716,8 @@ export async function handleSubmit(opts, roots) {
   }
   // 返工与否由账本推导：末轮退回且令牌已消费。不收开关，也不靠「有没有 PR 号」猜。
   const reworkState = deriveReworkState(ledger)
-  // 「这一轮是不是返工」和「PR 在不在」是两件事，不能用一个变量代言：
-  // 前者决定评论与轮次的措辞，后者决定走「复用已有 PR」还是「新建 PR」。
-  // 混在一起就会出现「PR 明明在，却又建了一个」——提案重复、评论各说一半。
+  // 「这一轮是不是返工」和「PR 在不在」是两件事：前者决定评论措辞，后者决定复用还是新建。
+  // 混用一个变量就会出现「PR 明明在，却又建了一个」。
   const hasExistingPr = Boolean(ledger.prNumber)
 
   let prResult = null
@@ -738,11 +735,9 @@ export async function handleSubmit(opts, roots) {
     await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework })
   } else {
     const title = resolveReadablePrTitle(implRoot, ledger, opts.title)
-    // 提案正文由账本与模板确定性生成，不接受整段替换。
-    //
-    // 正文里排着实证上下文（验证绑定哪个 HEAD、门禁跑过什么、界面核验观测到什么），
-    // 而这些都能从账本与实证记录读出来。一旦允许调用方传 `--body`，人（或模型）就会
-    // 传一段自己写的进去，实证栏随即变成自由发挥——它显示的是「他说的」，不是「记录里的」。
+    // 提案正文由账本与模板确定性生成，不接受整段替换：正文里排着的实证上下文
+    // （验证绑定哪个 HEAD、门禁跑过什么、界面核验观测到什么）都能从账本读出来。
+    // 一旦允许传 `--body`，实证栏就成了自由发挥——它显示「他说的」，不是「记录里的」。
     const body = hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
     prResult = await backend.createPr({ targetRepo, head: headSpec, base: ledger.baseBranch, title, body, draft: Boolean(opts.draft) })
     if (prResult.ok && prResult.number) {

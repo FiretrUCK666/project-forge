@@ -102,7 +102,7 @@ function buildSectionValues(fields = {}) {
   const reproParts = []
   if (fields.repro) reproParts.push(normalizeEscapedNewlines(fields.repro).trim())
   if (fields.reproEvidence) reproParts.push(`- 最小复现：${normalizeEscapedNewlines(fields.reproEvidence).trim()}`)
-  if (fields.pocCommand) reproParts.push(`- PoC 命令：\`${String(fields.pocCommand).trim()}\``)
+  if (fields.pocCommand) reproParts.push(`- 复现命令：\`${String(fields.pocCommand).trim()}\``)
 
   const scopeLines = []
   if (fields.scope) scopeLines.push(normalizeEscapedNewlines(fields.scope).trim())

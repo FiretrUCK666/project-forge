@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T18:13:39.955Z",
+  "installedAt": "2026-11-21T18:24:32.101Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "1c6c158011fb5b2d70fdf8f80258a683e464e49905b37374e02bc87c234c4fd5"
@@ -85,7 +85,7 @@
       "sha256": "d864353edb617d74f29c7d1d64fc07c093bb2ff610a1a62e4aea360259b6d181"
     },
     "dev-govern/scripts/govern-retro.mjs": {
-      "sha256": "6581e4e554ab5d42c7f6e780f4c7fbb9c096817a75070a64fa2481787dc9f9e6"
+      "sha256": "360b9cc434ecee33fc53f4b1a1a3c8ca2ef9354afb791f4ed24fd6c3443098ff"
     },
     "dev-govern/scripts/govern-state.mjs": {
       "sha256": "002b1fabc893ef9e3685b3e323b910bd37acf0cf9825bef8494e11314b5d7ea6"
@@ -286,7 +286,7 @@
       "sha256": "f9002f9e6ba03679fb8dd19752b0c1b6d3812967cb8340550d8aae85533ed16a"
     },
     "lib/issue-template-hydrate.mjs": {
-      "sha256": "120fac8a7d4e3becdc97c69b744757aa9e4618e6359591337c70689851871677"
+      "sha256": "0c4f35ddf0a5c3d8724ed456e4e0613f9a7d315c7e757e5aeb31bb40f5903b17"
     },
     "lib/ledger.mjs": {
       "sha256": "edc048fce8d4f69c01fbabebce507b2bb8eec251da97e3fd8a4bbe9c61e1f86c"

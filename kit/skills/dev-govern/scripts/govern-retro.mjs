@@ -294,9 +294,21 @@ export function buildRetroReport({
   const retiredObsoleteProposals = []
 
   for (const rf of repeatedFailures) {
-    const activeFiles = (rf.files ?? []).filter((f) => !isObsoleteRetroTarget(f, rf.defectClass))
-    if ((rf.files?.length ?? 0) > 0 && activeFiles.length === 0) {
-      retiredObsoleteProposals.push({ fingerprint: rf.fingerprint, defectClass: rf.defectClass, files: rf.files, reason: 'target-missing-or-resolved' })
+    const rawIsTier1 = TIER1_CLASSES.has(rf.defectClass)
+      || (rf.defectClass === 'arch-boundary' && (rf.files?.length ?? 0) >= 2)
+      || rf.pyramidTier === 'tier1-architecture'
+    const hasFileTarget = rawIsTier1 || rf.defectClass === 'mock-only-test'
+    const activeFiles = hasFileTarget
+      ? (rf.files ?? []).filter((f) => !isObsoleteRetroTarget(f, rf.defectClass))
+      : (rf.files ?? [])
+    if (hasFileTarget && (rf.files?.length ?? 0) > 0 && activeFiles.length === 0) {
+      const allMissing = rf.files.every((f) => !existsSync(join(workTreeRoot, posixPath(f).replace(/^\.\//, ''))))
+      retiredObsoleteProposals.push({
+        fingerprint: rf.fingerprint,
+        defectClass: rf.defectClass,
+        files: rf.files,
+        reason: allMissing ? 'target-missing' : 'target-resolved',
+      })
       continue
     }
     const scopedRf = activeFiles.length > 0 ? { ...rf, files: activeFiles } : rf
@@ -327,7 +339,14 @@ export function buildRetroReport({
     patches.push(fpPatch)
   }
 
-  for (const hs of hotspots.filter((h) => !isObsoleteRetroTarget(h.file)).slice(0, 3)) {
+  let emittedHotspots = 0
+  for (const hs of hotspots) {
+    if (isObsoleteRetroTarget(hs.file)) {
+      retiredObsoleteProposals.push({ targetFile: hs.file, defectClass: 'hotspot', files: [hs.file], reason: 'target-missing' })
+      continue
+    }
+    if (emittedHotspots >= 3) continue
+    emittedHotspots += 1
     const hsPatch = {
       pyramidTier: hs.count >= 3 ? 'tier1-architecture' : 'tier2-deterministic-gate',
       targetKind: 'fixture',
@@ -388,6 +407,7 @@ export function buildRetroReport({
     tier2Proposals,
     tier3Fallbacks,
     staleTier3Entries,
+    retiredObsoleteProposals,
     patches,
   }
 }

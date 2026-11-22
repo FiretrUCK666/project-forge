@@ -519,6 +519,7 @@ export function normalizePendingConflicts(obj) {
       baseSha256: typeof v.baseSha256 === 'string' ? v.baseSha256 : null,
       diskSha256: typeof v.diskSha256 === 'string' ? v.diskSha256 : null,
       upstreamSha256: typeof v.upstreamSha256 === 'string' ? v.upstreamSha256 : null,
+      ...(v.outOfTree === true ? { outOfTree: true } : {}),
       upstreamFile: typeof v.upstreamFile === 'string' ? v.upstreamFile : `${rel}.upstream`,
       conflictFile: typeof v.conflictFile === 'string' ? v.conflictFile : `${rel}.pf-conflict`,
     }

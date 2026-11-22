@@ -4,9 +4,11 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块）。
  * 核心安全红线：
  *   - 当 `.mjs` 或其它程序代码/配置脚本发生双端冲突时，**严禁向源文件写入 `<<<<<<<` 冲突标记**；
- *   - 保留用户本地可用代码原样，同时产出 `{target}.upstream` 上游新本与 `{target}.pf-conflict` 结构化冲突详情，
- *     供 `equip.mjs` 在 `.pf-manifest.json` 登记 `pendingConflicts` 并返回非零冲突码。
+ *   - 保留用户本地可用代码原样，同时将 `{target}.upstream` 上游新本与 `{target}.pf-conflict` 结构化冲突详情
+ *     写入仓外冲突目录，供 `equip.mjs` 在 `.pf-manifest.json` 登记 `pendingConflicts` 并返回非零冲突码。
  */
+
+import { join } from 'node:path'
 
 const CODE_SAFE_EXT_RE = /\.(?:m?js|cjs|tsx?|jsx?|mts|cts|json|sh|bash|ps1|bat|cmd|py|go|rs|java|kt|cs|rb|php|swift|c|cc|cpp|h|hpp|ya?ml|toml)$/i
 
@@ -49,12 +51,20 @@ const BLOCKING_STATES = new Set([EQUIP_FILE_STATES.LOCAL_AHEAD, EQUIP_FILE_STATE
  */
 export function judgeManagedFile({
   rel = '', upstreamSha = null, diskSha = null, baselineSha = null, customEntry = null, pendingEntry = null,
+  conflictDir = null, skillsDir = null,
 } = {}) {
+  const hintOpts = {
+    outOfTree: Boolean(pendingEntry?.outOfTree),
+    conflictDir,
+    skillsDir,
+    upstreamFile: pendingEntry?.upstreamFile,
+    conflictFile: pendingEntry?.conflictFile,
+  }
   // 缺文件 / 多余文件由调用方先判（那需要看盘），这里只管「三方都在」的情形。
-  if (!diskSha) return { state: EQUIP_FILE_STATES.MISSING, blocking: false, fixHint: fixHintFor(EQUIP_FILE_STATES.MISSING, rel) }
-  if (!upstreamSha) return { state: EQUIP_FILE_STATES.EXTRA, blocking: false, fixHint: fixHintFor(EQUIP_FILE_STATES.EXTRA, rel) }
+  if (!diskSha) return { state: EQUIP_FILE_STATES.MISSING, blocking: false, fixHint: fixHintFor(EQUIP_FILE_STATES.MISSING, rel, hintOpts) }
+  if (!upstreamSha) return { state: EQUIP_FILE_STATES.EXTRA, blocking: false, fixHint: fixHintFor(EQUIP_FILE_STATES.EXTRA, rel, hintOpts) }
   if (pendingEntry) {
-    return { state: EQUIP_FILE_STATES.THREE_WAY_CONFLICT, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.THREE_WAY_CONFLICT, rel) }
+    return { state: EQUIP_FILE_STATES.THREE_WAY_CONFLICT, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.THREE_WAY_CONFLICT, rel, hintOpts) }
   }
   if (diskSha === upstreamSha) {
     return { state: EQUIP_FILE_STATES.SYNCED, blocking: false, fixHint: '' }
@@ -66,17 +76,17 @@ export function judgeManagedFile({
   // 上游也变了、本地也变了 → 两条改动撞在一起，得有人裁决。
   // 登记过定制不代表「永远不跟上上游」：上游改了同一处却不告诉人，就是沉默放过。
   if (customEntry && diskSha === customEntry.baseSha256 && customEntry.upstreamSha256 !== upstreamSha) {
-    return { state: EQUIP_FILE_STATES.THREE_WAY_CONFLICT, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.THREE_WAY_CONFLICT, rel) }
+    return { state: EQUIP_FILE_STATES.THREE_WAY_CONFLICT, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.THREE_WAY_CONFLICT, rel, hintOpts) }
   }
   // 磁盘与清单基线不同、上游没改：本地改动被保留下来。
   if (baselineSha && diskSha !== baselineSha && upstreamSha === baselineSha) {
-    return { state: EQUIP_FILE_STATES.LOCAL_AHEAD, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.LOCAL_AHEAD, rel) }
+    return { state: EQUIP_FILE_STATES.LOCAL_AHEAD, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.LOCAL_AHEAD, rel, hintOpts) }
   }
-  return { state: EQUIP_FILE_STATES.LOCAL_AHEAD, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.LOCAL_AHEAD, rel) }
+  return { state: EQUIP_FILE_STATES.LOCAL_AHEAD, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.LOCAL_AHEAD, rel, hintOpts) }
 }
 
 /** 每类状态一句可执行修法：改了什么、三种合法处置各是什么。 */
-export function fixHintFor(state, rel = '') {
+export function fixHintFor(state, rel = '', opts = {}) {
   const name = rel || '<该文件>'
   if (state === EQUIP_FILE_STATES.LOCAL_AHEAD) {
     return `${name} 磁盘版本与清单基线不同、上游未改。三种合法处置：`
@@ -85,7 +95,15 @@ export function fixHintFor(state, rel = '') {
       + `③ 手工改回上游内容后重跑，等于丢弃本地改动。`
   }
   if (state === EQUIP_FILE_STATES.THREE_WAY_CONFLICT) {
-    return `${name} 上游与本地改到了同一处，不能自动合并。现场已留下 ${name}.upstream（上游新本）与 ${name}.pf-conflict（冲突详情）：`
+    const upLoc = opts.outOfTree && opts.conflictDir
+      ? join(opts.conflictDir, opts.upstreamFile || `${name}.upstream`)
+      : `${name}.upstream`
+    const cfLoc = opts.outOfTree && opts.conflictDir
+      ? join(opts.conflictDir, opts.conflictFile || `${name}.pf-conflict`)
+      : `${name}.pf-conflict`
+    const localLoc = opts.skillsDir ? join(opts.skillsDir, name) : `.agents/skills/${name}`
+    const diffPart = opts.outOfTree && opts.conflictDir ? `（对比：diff -u "${localLoc}" "${upLoc}"）` : ''
+    return `${name} 上游与本地改到了同一处，不能自动合并。冲突对照已写入 ${upLoc}（上游新本）与 ${cfLoc}（冲突详情）${diffPart}：`
       + `① 按冲突详情手工合并，再 node scripts/equip.mjs . --adopt-custom ${name} 登记；`
       + `② node scripts/equip.mjs . --restore ${name} 放弃本地改动采用上游；`
       + `③ 保留本地不动，但需在 .pf-manifest.json 的 pendingConflicts 里显式留痕，命令会一直退非零直到处置。`
@@ -120,7 +138,17 @@ export function formatEquipCheckReport(res) {
   }
   for (const p of res.unregistered ?? []) lines.push(`未登记哈希：${p}`)
   for (const p of res.extraManaged ?? []) lines.push(`多余托管文件：${p}`)
-  for (const p of res.pendingConflicts ?? []) lines.push(`待裁决三方冲突：${p}（见 ${p}.pf-conflict 与 ${p}.upstream）`)
+  const detailByPath = new Map((res.pendingConflictDetails ?? []).map((item) => [item.path, item]))
+  for (const p of res.pendingConflicts ?? []) {
+    const det = detailByPath.get(p)
+    if (det) {
+      lines.push(`待裁决三方冲突：${p}（仓外对照：${det.conflictPath} 与 ${det.upstreamPath}）`)
+      lines.push(`  对比：${det.diffCommand}`)
+      lines.push(`  一键处置：${det.adoptCommand} | ${det.restoreCommand}`)
+    } else {
+      lines.push(`待裁决三方冲突：${p}（见 ${p}.pf-conflict 与 ${p}.upstream）`)
+    }
+  }
   for (const b of res.brokenImports ?? []) lines.push(`相对导入断链：${b}`)
   for (const f of res.invalidFrontmatters ?? []) lines.push(`frontmatter 缺少 name/description：${f}`)
   for (const c of res.customized ?? []) {
@@ -356,16 +384,26 @@ export function formatPfConflictArtifact({
   upstreamHash = null,
   conflicts = [],
   upstreamSidecarRel = `${relPath}.upstream`,
+  conflictSidecarRel = `${relPath}.pf-conflict`,
+  outOfTree = false,
+  upstreamAbsPath = null,
+  conflictAbsPath = null,
+  diskAbsPath = null,
   now = new Date().toISOString(),
 } = {}) {
+  const upDisplay = upstreamAbsPath || upstreamSidecarRel
+  const cfDisplay = conflictAbsPath || conflictSidecarRel
+  const localDisplay = diskAbsPath || `.agents/skills/${relPath}`
   const payload = {
     schemaVersion: 1,
     file: relPath,
     recordedAt: now,
     status: 'pending-conflict',
+    outOfTree,
     preservedLocalFile: true,
     conflictMarkersWrittenToTarget: false,
     upstreamSidecar: upstreamSidecarRel,
+    conflictSidecar: conflictSidecarRel,
     hashes: {
       baseSha256: baseHash,
       currentSha256: currentHash,
@@ -380,8 +418,8 @@ export function formatPfConflictArtifact({
       upstream: c.upstreamLines,
     })),
     resolutionSteps: [
-      `对比保留的本地文件 ${relPath} 与上游新版 ${upstreamSidecarRel}，按需手工融合。`,
-      `确认融合无误后删除 ${upstreamSidecarRel} 与 ${relPath}.pf-conflict，再运行 equip.mjs --adopt-custom ${relPath} 或 equip.mjs --restore ${relPath} 解除 pendingConflict。`,
+      `对比保留的本地文件 ${localDisplay} 与上游新版 ${upDisplay}（详情见 ${cfDisplay}）：diff -u "${localDisplay}" "${upDisplay}"`,
+      `手工融合后执行 node scripts/equip.mjs . --adopt-custom ${relPath}，或放弃本地改动执行 node scripts/equip.mjs . --restore ${relPath}（将自动清理仓外旁路并解除 pendingConflict）。`,
     ],
   }
   return `${JSON.stringify(payload, null, 2)}\n`
@@ -390,6 +428,7 @@ export function formatPfConflictArtifact({
 /** 为 `equip.mjs` 执行单个已修改托管文件的三方升级判定，返回 merge 写盘或无标记冲突旁路方案。 */
 export function resolveThreeWayEquipFile({
   rel, dest, srcBuf, srcSha, oldHash, diskHash, currentText, baseText, now,
+  conflictDir = null, outOfTree = Boolean(conflictDir),
 }) {
   const upstreamText = srcBuf.toString('utf8')
   const m3 = baseText != null
@@ -410,22 +449,32 @@ export function resolveThreeWayEquipFile({
   if (m3.ok) {
     return { kind: 'merged', buf: Buffer.from(m3.mergedText, 'utf8') }
   }
+  const useOutOfTree = Boolean(outOfTree && conflictDir)
+  const upstreamFile = `${rel}.upstream`
+  const conflictFile = `${rel}.pf-conflict`
+  const upstreamDest = useOutOfTree ? join(conflictDir, upstreamFile) : `${dest}.upstream`
+  const conflictDest = useOutOfTree ? join(conflictDir, conflictFile) : `${dest}.pf-conflict`
   const conflictBuf = Buffer.from(formatPfConflictArtifact({
-    relPath: rel, baseHash: oldHash, currentHash: diskHash, upstreamHash: srcSha, conflicts: m3.conflicts, now,
+    relPath: rel, baseHash: oldHash, currentHash: diskHash, upstreamHash: srcSha, conflicts: m3.conflicts,
+    upstreamSidecarRel: upstreamFile, conflictSidecarRel: conflictFile,
+    outOfTree: useOutOfTree,
+    ...(useOutOfTree ? { upstreamAbsPath: upstreamDest, conflictAbsPath: conflictDest, diskAbsPath: dest } : {}),
+    now,
   }), 'utf8')
   return {
     kind: 'conflict',
     writes: [
-      { dest: `${dest}.upstream`, buf: srcBuf },
-      { dest: `${dest}.pf-conflict`, buf: conflictBuf },
+      { dest: upstreamDest, buf: srcBuf },
+      { dest: conflictDest, buf: conflictBuf },
     ],
     pendingEntry: {
       recordedAt: now,
       baseSha256: oldHash,
       diskSha256: diskHash,
       upstreamSha256: srcSha,
-      upstreamFile: `${rel}.upstream`,
-      conflictFile: `${rel}.pf-conflict`,
+      ...(useOutOfTree ? { outOfTree: true } : {}),
+      upstreamFile,
+      conflictFile,
     },
     conflictRecord: {
       path: rel,
@@ -433,8 +482,16 @@ export function resolveThreeWayEquipFile({
       baselineSha256: oldHash,
       diskSha256: diskHash,
       incomingSha256: srcSha,
-      upstreamFile: `${rel}.upstream`,
-      conflictFile: `${rel}.pf-conflict`,
+      outOfTree: useOutOfTree,
+      upstreamFile,
+      conflictFile,
+      ...(useOutOfTree ? {
+        upstreamPath: upstreamDest,
+        conflictPath: conflictDest,
+        diffCommand: `diff -u "${dest}" "${upstreamDest}"`,
+        adoptCommand: `node scripts/equip.mjs . --adopt-custom ${rel}`,
+        restoreCommand: `node scripts/equip.mjs . --restore ${rel}`,
+      } : {}),
     },
   }
 }

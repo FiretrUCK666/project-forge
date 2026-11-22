@@ -92,6 +92,7 @@
         "scripts/equip-ci.mjs",
         "scripts/zip.mjs",
         "scripts/lib/equip-bootstrap.mjs",
+        "scripts/lib/equip-upgrade.mjs",
         "scripts/lib/merge3.mjs",
         "scripts/lib/equip-integrity.mjs",
         "scripts/lib/artifact-executors.mjs",

@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: 零工作区污染 8-Skill 跨代升级与勘察身份提问一致性
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-23
 updated: 2026-11-23
-issue: null
+issue: 151
 pr: null
 branch: feat/upgrade-merge3-and-survey-truth
 owner: coordinator
 plan_mode: autonomous
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critique-pr1, round=1, sha=904821495795, summary=SPEC 与 Todo 通过结构审计且无硬阻塞：零三方依赖与 arch-rules 单向边界成立，三层基线回溯、仓外冲突旁路、tombstonedNew、generic-git undetermined 与 q.git-identity 均可由 C1..C4 机械实证；已标注 800 行上限、homePathLeaks、FORBIDDEN_PLATFORM_RE 及旧测试同步更新等实施防呆边界。)"
 related_prd: null
-related_todo: ../todo/261123-upgrade-merge3-and-survey-truth-todo.md
+related_todo: ../todo/261123-issue151-upgrade-merge3-and-survey-truth-todo.md
 high_risk_paths: [scripts/lib/, SKILL.md]
 ---
 
@@ -24,13 +24,13 @@ high_risk_paths: [scripts/lib/, SKILL.md]
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft` |
+| 当前状态 | `implemented` |
 | 规划级别 | `L3` |
 | 创建 / 更新 | `2026-11-23` / `2026-11-23` |
 | 分支 / Issue / PR | `feat/upgrade-merge3-and-survey-truth` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | coordinator / `pending` |
+| 负责人 / 内审状态 | coordinator / `passed` |
 | 规划态 | `autonomous` |
-| 关联 Todo | `docs/todo/261123-upgrade-merge3-and-survey-truth-todo.md` |
+| 关联 Todo | `docs/archive/todo/261123-issue151-upgrade-merge3-and-survey-truth-todo.md` |
 
 - **变更一句话**：让日常不传 `--base-dir` 的 `equip.mjs` 按 `oldHash` 自动找回基线完成 8 个 Skill 无损三方合并、真冲突旁路迁出工作区保 `git status` 干净并防误 `--restore` 墓碑，同时收敛首次勘察的 `generic-git` 身份判定、Git 署名/hooks 提问与离线只读边界。
 
@@ -118,10 +118,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: 不传 `--base-dir` 对已修改全部 8 个 `SKILL.md`（非重叠修改）与 `.mjs` 执行 `node scripts/equip.mjs` 对 vB 套件升级，8/8 自动无损三方合并（`merged >= 8`）、本地定制与上游新版并存、退出码 `0` 且 `equip --check` 返回 `0`。
-- [ ] C2: 发生同行重叠冲突时，`.agents/skills/` 内零 `.upstream` / `.pf-conflict` 文件且 `.mjs` 零 Git 冲突标记，冲突对照写入 gitCommonDir 下的 `project-forge-conflicts/` 且 `git status --short` 零额外未跟踪文件，`equip --check` 返回 `3`；执行 `--adopt-custom` 或 `--restore` 后仓外旁路被清理且校验通过。
-- [ ] C3: `--adopt-custom` 在上游改版且不传 `--base-dir` 时不再静默跳过，先尝试基线融合，无法合并时触发待裁决冲突；`equip()` 新登记缺失文件为 `removedFiles` 时输出 `tombstonedNew` 并明禁自动 `--restore`。
-- [ ] C4: `GENERIC_GIT_PROVIDER` 对匿名 `https://codeberg.org/pmndrs/zustand.git` 判定为 `role: 'undetermined'`，对本地路径/`file://`/`standaloneMode: true` 保持 `maintainer`；缺本地 Git 署名时 `survey.mjs` 产出 `q.git-identity` 进 `NEEDS_HUMAN`；全量仓库离线门禁（`preflight`、`gap-coverage`、`fixtures --jobs 6`、`e2e-zip-harness`、`compose-agents --check`、`equip --check`、`review.mjs .`）全绿且 `AGENTS.md <= 24KB`。
+- [x] C1: 不传 `--base-dir` 对已修改全部 8 个 `SKILL.md`（非重叠修改）与 `.mjs` 执行 `node scripts/equip.mjs` 对 vB 套件升级，8/8 自动无损三方合并（`merged >= 8`）、本地定制与上游新版并存、退出码 `0` 且 `equip --check` 返回 `0`。
+- [x] C2: 发生同行重叠冲突时，`.agents/skills/` 内零 `.upstream` / `.pf-conflict` 文件且 `.mjs` 零 Git 冲突标记，冲突对照写入 gitCommonDir 下的 `project-forge-conflicts/` 且 `git status --short` 零额外未跟踪文件，`equip --check` 返回 `3`；执行 `--adopt-custom` 或 `--restore` 后仓外旁路被清理且校验通过。
+- [x] C3: `--adopt-custom` 在上游改版且不传 `--base-dir` 时不再静默跳过，先尝试基线融合，无法合并时触发待裁决冲突；`equip()` 新登记缺失文件为 `removedFiles` 时输出 `tombstonedNew` 并明禁自动 `--restore`。
+- [x] C4: `GENERIC_GIT_PROVIDER` 对匿名 `https://codeberg.org/pmndrs/zustand.git` 判定为 `role: 'undetermined'`，对本地路径/`file://`/`standaloneMode: true` 保持 `maintainer`；缺本地 Git 署名时 `survey.mjs` 产出 `q.git-identity` 进 `NEEDS_HUMAN`；全量仓库离线门禁（`preflight`、`gap-coverage`、`fixtures --jobs 6`、`e2e-zip-harness`、`compose-agents --check`、`equip --check`、`review.mjs .`）全绿且 `AGENTS.md <= 24KB`。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -135,6 +135,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：新增 `scripts/lib/equip-upgrade.mjs` 收敛仓外基线缓存、三层 `baseText` 检索（cache -> `.zip` -> `git log`）与按 `<slugHash>` 隔离的仓外冲突目录解析；改造 `scripts/lib/merge3.mjs`、`scripts/lib/equip-bootstrap.mjs` 与 `scripts/equip.mjs` 实现无 `--base-dir` 自动融合、清除 `!hasExplicitBase` 分支、仓外旁路清理、`tombstonedNew` 返回及 `survey-gap-rules.mjs` 墓碑文案对齐；更新 `scripts/lib/platform/registry.mjs`、`scripts/lib/survey-questions.mjs`、`SKILL.md` 与 `references/survey.md`。
+- **与草案的差异**：为严守单文件 `<= 800` 行上限与 `checkOrphanScripts` 可达性，将三层基线回溯与目录/完整性辅助函数独立为 `scripts/lib/equip-upgrade.mjs` 由 `scripts/equip.mjs` 直接导入（`equip.mjs` 745 行，`equip-upgrade.mjs` 383 行）。
+- **关联同步文件**：`docs/TDD.md`、`docs/feature-map.json`、`scripts/dev/{blind-run-matrix,e2e-scenarios-evolution,fixtures-iterate-evolution,fixtures-platform}.mjs`。

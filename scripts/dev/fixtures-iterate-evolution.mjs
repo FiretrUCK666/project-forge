@@ -354,18 +354,19 @@ export function registerIterateEvolutionCases(cases) {
       if (mergedRes.merged.length !== 1 || !mergedDisk.includes('a = 10') || !mergedDisk.includes('c = 30')) {
         return `equip 非重叠三方融合失败: res=${JSON.stringify(mergedRes.merged)} disk=${mergedDisk}`
       }
-      // 3. 重叠 .mjs 冲突：严禁写 <<<<<<<，保留本地文件，输出 .upstream + .pf-conflict + pendingConflicts + CLI exit 3
+      // 3. 重叠 .mjs 冲突：严禁写 <<<<<<<，保留本地文件，旁路迁出工作区 + pendingConflicts + CLI exit 3
       const conflictCli = await runNode('equip.mjs', [dir, '--kit-dir', conflictKit, '--base-dir', cleanUpKit, '--no-backup'])
       const conflictDisk = readFileSync(helperDest, 'utf8')
       if (conflictCli.status !== 3 || conflictDisk.includes('<<<<<<<') || !conflictDisk.includes('a = 10')) {
         return `重叠 .mjs 冲突未保底或退出码非 3: status=${conflictCli.status} disk=${conflictDisk}`
       }
-      if (!existsSync(`${helperDest}.upstream`) || !existsSync(`${helperDest}.pf-conflict`)) {
-        return '重叠冲突未生成 .upstream 或 .pf-conflict 旁路文件'
+      if (existsSync(`${helperDest}.upstream`) || existsSync(`${helperDest}.pf-conflict`)) {
+        return '工作区 .agents/skills/ 不应残留 .upstream 或 .pf-conflict 旁路文件'
       }
       const chkConflict = checkEquip(dir, { kitDir: conflictKit })
-      if (chkConflict.ok || chkConflict.pendingConflicts.length === 0) {
-        return `存在 pendingConflicts 时 equip --check 不应通过: ${JSON.stringify(chkConflict)}`
+      const cDetail = chkConflict.pendingConflictDetails?.find((x) => x.path === 'dev-flow/scripts/helper.mjs')
+      if (chkConflict.ok || chkConflict.pendingConflicts.length === 0 || !cDetail || !existsSync(cDetail.upstreamPath) || !existsSync(cDetail.conflictPath)) {
+        return `存在 pendingConflicts 时 equip --check 未输出仓外旁路路径: ${JSON.stringify(chkConflict)}`
       }
 
       // 4. 静态 ESM ABI 缺导出触发瞬时回滚
@@ -681,5 +682,113 @@ export function registerIterateEvolutionCases(cases) {
       }
       return true
     } finally { rmTree(dir) }
+  }])
+
+  cases.push(['Issue151 C1-C3：无 --base-dir 三层基线自动融合 8-Skill、仓外冲突清理、--adopt-custom 同步与 tombstonedNew', async () => {
+    const names = ['dev-explore', 'dev-plan', 'dev-flow', 'dev-edit', 'dev-review', 'dev-verify-tools', 'dev-govern', 'dev-iterate']
+    const makeKit = (tag, line1Override = null, sep = false) => {
+      const files = {}
+      for (const s of names) {
+        files[`${s}/SKILL.md`] = `---\nname: ${s}\ndescription: ${s}\n---\n# ${s}\nLine A\n${sep ? 'Mid\n' : ''}Line B-${tag}\n`
+        files[`${s}/scripts/t.mjs`] = `export const a = ${line1Override ?? 1}\nexport const b = '${tag}'\n`
+      }
+      return tmpProject(files)
+    }
+    const vA = makeKit('v1')
+    const vB = makeKit('v2')
+    const vC = makeKit('v3', 99)
+    const dir = tmpProject({ 'README.md': '# c1-c3\n' })
+    const zipRepo = tmpProject({ 'README.md': '# zip-layer\n' })
+    const gitRepo = tmpProject({ 'README.md': '# git-layer\n' })
+    const gitCache = tmpProject({})
+    try {
+      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+      gitInit(zipRepo, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+      gitInit(gitRepo, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+
+      // 1. 缓存层：不传 --base-dir，8 个 SKILL.md + .mjs 非重叠改动全自动融合（且相等时不留 customized）
+      if ((await runNode('equip.mjs', [dir, '--kit-dir', vA, '--no-backup'])).status !== 0) return 'vA 装配失败'
+      for (const s of names) {
+        const mdP = join(dir, `.agents/skills/${s}/SKILL.md`)
+        writeFileSync(mdP, readFileSync(mdP, 'utf8').replace('Line A', 'Line A-local'), 'utf8')
+        const jsP = join(dir, `.agents/skills/${s}/scripts/t.mjs`)
+        writeFileSync(jsP, readFileSync(jsP, 'utf8').replace('export const a = 1', 'export const a = 10'), 'utf8')
+      }
+      const upCli = await runNode('equip.mjs', [dir, '--kit-dir', vB, '--no-backup'])
+      if (upCli.status !== 0) return `无 --base-dir 8-Skill 融合失败：exit=${upCli.status} ${upCli.stderr}`
+      const upJson = JSON.parse(upCli.stdout).equip
+      if ((upJson.merged?.length ?? 0) < 16 || !checkEquip(dir, { kitDir: vB }).ok) {
+        return `8-Skill 未全量自动合并或 check 失败：merged=${upJson.merged?.length}`
+      }
+      // 1b. --adopt-custom 在上游改版且不传 --base-dir 时不再静默跳过；mergedSha===src.sha256 时清理 customizedFiles
+      const flowMd = join(dir, '.agents/skills/dev-flow/SKILL.md')
+      writeFileSync(flowMd, readFileSync(flowMd, 'utf8').replace('Line A-local', 'Line A').replace('Line B-v2', 'Line B-v3'), 'utf8')
+      const adoptC = makeKit('v3', 99)
+      await runNode('equip.mjs', [dir, '--kit-dir', vB, '--adopt-custom', 'dev-flow/SKILL.md', '--no-backup'])
+      const syncAdopt = equip(dir, { kitDir: adoptC, noBackup: true })
+      rmTree(adoptC)
+      const mAfterSync = JSON.parse(readFileSync(join(dir, '.agents/skills/.pf-manifest.json'), 'utf8'))
+      if (mAfterSync.customizedFiles?.['dev-flow/SKILL.md'] || !syncAdopt.unchanged.includes('dev-flow/SKILL.md')) {
+        return `mergedSha===src.sha256 未清理 customizedFiles：${JSON.stringify({ unchanged: syncAdopt.unchanged, custom: mAfterSync.customizedFiles })}`
+      }
+      // --adopt-custom 在本地与上游不同但未冲突时自动融合（相等时清理 customizedFiles），冲突时入 pendingConflicts
+      const expMd = join(dir, '.agents/skills/dev-explore/SKILL.md')
+      writeFileSync(expMd, `---\nname: dev-explore\ndescription: dev-explore\n---\n# dev-explore\nLine A-local\nMid\nLine B-v2\n`, 'utf8')
+      const midB = makeKit('v2', null, true)
+      const midC = makeKit('v3', 99, true)
+      await runNode('equip.mjs', [dir, '--kit-dir', midB, '--adopt-custom', 'dev-explore/SKILL.md', '--no-backup'])
+      const midSync = equip(dir, { kitDir: midC, noBackup: true })
+      const expMdAfter = readFileSync(expMd, 'utf8').replace('Line A-local', 'Line A-same').replace('Line B-v3', 'Line B-v2')
+      writeFileSync(expMd, expMdAfter, 'utf8')
+      await runNode('equip.mjs', [dir, '--kit-dir', midB, '--adopt-custom', 'dev-explore/SKILL.md', '--no-backup'])
+      const midSame = makeKit('v3', 99, true)
+      writeFileSync(join(midSame, 'dev-explore/SKILL.md'), `---\nname: dev-explore\ndescription: dev-explore\n---\n# dev-explore\nLine A-same\nMid\nLine B-v3\n`, 'utf8')
+      const eqCleanMerge = equip(dir, { kitDir: midSame, baseDir: midB, noBackup: true })
+      const mSame = JSON.parse(readFileSync(join(dir, '.agents/skills/.pf-manifest.json'), 'utf8'))
+      rmTree(midB); rmTree(midC); rmTree(midSame)
+      if (!midSync.merged.includes('dev-explore/SKILL.md') || !eqCleanMerge.merged.includes('dev-explore/SKILL.md') || mSame.customizedFiles?.['dev-explore/SKILL.md']) {
+        return `--adopt-custom 上游改版合并或相等清理异常：${JSON.stringify({ midSync: midSync.merged, eqCleanMerge: eqCleanMerge.merged, custom: mSame.customizedFiles })}`
+      }
+
+      // 2. 重叠冲突迁出工作区（零 .upstream/.pf-conflict 在 .agents/skills/）+ 解决后清理 + tombstonedNew
+      const confRes = await runNode('equip.mjs', [dir, '--kit-dir', vC, '--no-backup'])
+      if (confRes.status !== 3) return `重叠冲突未返回 3：${confRes.status}`
+      if (existsSync(join(dir, '.agents/skills/dev-flow/scripts/t.mjs.upstream')) || existsSync(join(dir, '.agents/skills/dev-flow/scripts/t.mjs.pf-conflict'))) {
+        return '工作区 .agents/skills/ 内不得存在 .upstream/.pf-conflict'
+      }
+      const mConf = readFileSync(join(dir, '.agents/skills/.pf-manifest.json'), 'utf8')
+      if (!mConf.includes('"outOfTree": true')) return `pendingConflicts 缺少 outOfTree: true：${mConf}`
+      const chkC = checkEquip(dir, { kitDir: vC })
+      const cDet = chkC.pendingConflictDetails?.find((x) => x.path === 'dev-flow/scripts/t.mjs')
+      if (!cDet || !existsSync(cDet.upstreamPath) || !existsSync(cDet.conflictPath)) return '仓外冲突文件缺失'
+      await runNode('equip.mjs', [dir, '--kit-dir', vC, '--adopt-custom', 'dev-flow/scripts/t.mjs', '--no-backup'])
+      if (existsSync(cDet.upstreamPath) || existsSync(cDet.conflictPath)) return '--adopt-custom 后未清理仓外旁路'
+      // 2b. 新建墓碑返回 tombstonedNew，二次运行不重复列
+      rmTree(join(dir, '.agents/skills/dev-edit'))
+      const t1 = equip(dir, { kitDir: vC, noBackup: true })
+      const t2 = equip(dir, { kitDir: vC, noBackup: true })
+      if (!t1.tombstonedNew?.includes('dev-edit') || !/禁[^\n]*--restore/.test(t1.tombstoneNotice ?? '') || (t2.tombstonedNew?.length ?? 0) !== 0) {
+        return `tombstonedNew 行为异常：t1=${JSON.stringify(t1.tombstonedNew)} notice=${t1.tombstoneNotice} t2=${JSON.stringify(t2.tombstonedNew)}`
+      }
+
+      // 3. zip 备份层 + git 历史层（不依赖基线缓存）
+      equip(zipRepo, { kitDir: vA, noBackup: true })
+      const { createBackup } = await import('../backup.mjs')
+      createBackup(zipRepo, { label: 'pre-v2' })
+      rmTree(join(zipRepo, '.git/project-forge-cache'))
+      const zMd = join(zipRepo, '.agents/skills/dev-flow/SKILL.md')
+      writeFileSync(zMd, readFileSync(zMd, 'utf8').replace('Line A', 'Line A-zip'), 'utf8')
+      const zRes = equip(zipRepo, { kitDir: vB, noBackup: true })
+      if (!zRes.merged.includes('dev-flow/SKILL.md')) return `zip 层回溯融合失败：${JSON.stringify(zRes)}`
+
+      equip(gitRepo, { kitDir: vA, noBackup: true })
+      gitCommitFast(gitRepo, 'chore: equip vA')
+      rmTree(join(gitRepo, '.git/project-forge-cache'))
+      const gMd = join(gitRepo, '.agents/skills/dev-flow/SKILL.md')
+      writeFileSync(gMd, readFileSync(gMd, 'utf8').replace('Line A', 'Line A-git'), 'utf8')
+      const gRes = equip(gitRepo, { kitDir: vB, noBackup: true, env: { PF_STATE_DIR: gitCache } })
+      if (!gRes.merged.includes('dev-flow/SKILL.md')) return `git 历史层回溯融合失败：${JSON.stringify(gRes)}`
+      return true
+    } finally { rmTree(vA); rmTree(vB); rmTree(vC); rmTree(dir); rmTree(zipRepo); rmTree(gitRepo); rmTree(gitCache) }
   }])
 }

@@ -59,6 +59,22 @@ export const QUESTION_RULES = [
     text: '认不出这是什么项目。它是什么形态（命令行工具 / 库 / 服务 / 文档 / 插件）？',
   },
   {
+    id: 'q.git-identity',
+    when: (f) => f.git.present === true
+      && f.git.isBare !== true
+      && (!f.git.identity?.name || !f.git.identity?.email)
+      && !hasDecision(f, 'git-identity'),
+    text: (f) => {
+      const missing = [
+        !f.git.identity?.name ? '`user.name`' : null,
+        !f.git.identity?.email ? '`user.email`' : null,
+      ].filter(Boolean).join(' 与 ')
+      return `当前 Git 提交署名缺少 ${missing}，后续提交会被 Git 拒绝或归属不清；`
+        + '请确认要使用的提交姓名与邮箱并配置 `git config user.name` / `user.email`，'
+        + '或在 AGENTS.md「## 取舍」写 `git-identity` 说明暂缓原因'
+    },
+  },
+  {
     id: 'q.role',
     when: (f) => f.git.present === true
       && typeof f.git.remote === 'string'

@@ -253,9 +253,16 @@ async function runScenarioL(pkgRoot, sandbox, env, h) {
   if (confRes.status !== 3) throw new Error(`Scenario L merge3 conflict expected exit=3, got ${confRes.status}: ${confRes.stderr}`)
   const keptLocal = readFileSync(targetMjs, 'utf8')
   if (keptLocal !== localFlow || keptLocal.includes('<<<<<<<')) throw new Error('Scenario L merge3 corrupted local .mjs or wrote conflict markers')
-  if (!existsSync(`${targetMjs}.upstream`) || !existsSync(`${targetMjs}.pf-conflict`)) throw new Error('Scenario L missing .upstream or .pf-conflict sidecar')
+  if (existsSync(`${targetMjs}.upstream`) || existsSync(`${targetMjs}.pf-conflict`)) {
+    throw new Error('Scenario L workspace should not contain .upstream or .pf-conflict sidecar')
+  }
+  const confJson = JSON.parse(confRes.stdout).equip
+  const cDet = confJson?.pendingConflictDetails?.find((x) => x.path === 'dev-flow/scripts/demo.mjs')
+  if (!cDet || !existsSync(cDet.upstreamPath) || !existsSync(cDet.conflictPath)) {
+    throw new Error(`Scenario L missing out-of-tree .upstream or .pf-conflict sidecar: ${confRes.stdout}`)
+  }
   const m3Man = JSON.parse(readFileSync(join(m3Repo, '.agents/skills/.pf-manifest.json'), 'utf8'))
-  if (!m3Man.pendingConflicts?.['dev-flow/scripts/demo.mjs']) throw new Error('Scenario L manifest missing pendingConflicts entry')
+  if (!m3Man.pendingConflicts?.['dev-flow/scripts/demo.mjs']?.outOfTree) throw new Error('Scenario L manifest missing outOfTree pendingConflicts entry')
 
   // 3. equip-integrity rollback on broken syntax / ESM ABI
   const badKit = join(sandbox, 'kit-bad-l')

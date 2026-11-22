@@ -71,6 +71,7 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
     localMode = false,
     forkMode = false,
     standaloneMode = false,
+    sshHostMap,
     topology,
   } = {}) {
     if (localMode === true) {
@@ -113,6 +114,48 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
         providerId: 'generic-git',
         capabilities: NONE_CAPABILITIES,
         reason: '存在 .git/pf-standalone-mode 标记：按独立个人项目维护者处置',
+      }
+    }
+    const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
+    const primaryDesc = topology?.primary ?? resolveRemoteDescriptor(primaryUrl, { sshHostMap: effectiveHostMap })
+    if (primaryDesc?.isLocal === true || /^file:\/\//i.test(primaryUrl)) {
+      return {
+        role: 'maintainer',
+        collaborationScope: 'owner',
+        providerId: 'generic-git',
+        capabilities: NONE_CAPABILITIES,
+        reason: `本地路径或 file:// 通用远端（${primaryUrl}）：按维护者处置`,
+      }
+    }
+    if (declaredSlug && primarySlug && declaredSlug.toLowerCase() === primarySlug.toLowerCase()) {
+      return {
+        role: 'maintainer',
+        collaborationScope: 'owner',
+        providerId: 'generic-git',
+        capabilities: NONE_CAPABILITIES,
+        reason: `声明源仓库（${declaredSlug}）与通用远端（${primarySlug}）匹配：按维护者处置`,
+      }
+    }
+    const isHttp = /^https?:\/\//i.test(primaryUrl)
+    const hasUrlCreds = /^https?:\/\/[^/@\s]+@/i.test(primaryUrl)
+    const pushUrl = topology?.primary?.pushUrl ?? gitFacts.remotePushUrls?.origin
+    const pushDesc = pushUrl && pushUrl !== primaryUrl
+      ? resolveRemoteDescriptor(pushUrl, { sshHostMap: effectiveHostMap })
+      : null
+    const hasPushOverride = Boolean(
+      pushDesc && (pushDesc.isLocal === true || pushDesc.protocol === 'ssh' || /^https?:\/\/[^/@\s]+@/i.test(pushUrl)),
+    )
+    const hasAuthCreds = Boolean(
+      gitFacts.auth?.https?.hasToken === true
+      || gitFacts.auth?.https?.username
+      || gitFacts.auth?.https?.state === 'available',
+    )
+    if (isHttp && !hasUrlCreds && !hasPushOverride && !hasAuthCreds) {
+      return {
+        role: 'undetermined',
+        providerId: 'generic-git',
+        capabilities: NONE_CAPABILITIES,
+        reason: `匿名 HTTP(S) 通用 Git 远端（${primaryUrl}）缺少写权限与正本归属证据，按 undetermined 保守处置（可配 .git/pf-standalone-mode 或在 AGENTS.md「取舍」写 role）`,
       }
     }
     return {

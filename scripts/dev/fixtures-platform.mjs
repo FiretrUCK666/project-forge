@@ -479,4 +479,85 @@ cases.push(['M1 惰性平台探测：默认 probeNetwork=false / PF_NO_REAL_AUTH
   }
 }])
 
+cases.push(['Issue151 C4：匿名通用 HTTPS 远端判 undetermined、本地/file/standalone 放行 maintainer 与 q.git-identity', async () => {
+  const { GENERIC_GIT_PROVIDER, classifyTopologyIdentity } = await import('../lib/platform/registry.mjs')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { pathToFileURL } = await import('node:url')
+
+  // 1. 匿名 https://codeberg.org/... 无 standaloneMode / 无匹配 declaredRepo / 无凭据覆盖 -> undetermined
+  const anonRes = GENERIC_GIT_PROVIDER.classifyIdentity({
+    gitFacts: { present: true, remote: 'https://codeberg.org/pmndrs/zustand.git', remoteUrls: { origin: 'https://codeberg.org/pmndrs/zustand.git' } },
+  })
+  if (anonRes.role !== 'undetermined') {
+    return `匿名 HTTPS 通用远端应判 undetermined，实际：${JSON.stringify(anonRes)}`
+  }
+
+  // 2. 正面放行：file://、local path、standaloneMode: true、声明源匹配、SSH、pushUrl 覆盖 -> maintainer
+  const bareDir = mkdtempSync(join(tmpdir(), 'pf-c4-bare-'))
+  const localFileUrl = pathToFileURL(bareDir).href
+  const fileRes = classifyTopologyIdentity({
+    gitFacts: { present: true, remote: localFileUrl, remoteUrls: { origin: localFileUrl } },
+  })
+  const standaloneRes = GENERIC_GIT_PROVIDER.classifyIdentity({
+    gitFacts: { present: true, remote: 'https://codeberg.org/pmndrs/zustand.git', remoteUrls: { origin: 'https://codeberg.org/pmndrs/zustand.git' } },
+    standaloneMode: true,
+  })
+  const declaredMatchRes = GENERIC_GIT_PROVIDER.classifyIdentity({
+    gitFacts: { present: true, remote: 'https://codeberg.org/pmndrs/zustand.git', remoteUrls: { origin: 'https://codeberg.org/pmndrs/zustand.git' } },
+    declaredRepo: 'pmndrs/zustand',
+  })
+  const sshRes = classifyTopologyIdentity({
+    gitFacts: { present: true, remote: 'git@git.internal.corp:team/app.git', remoteUrls: { origin: 'git@git.internal.corp:team/app.git' } },
+  })
+  if (fileRes.role !== 'maintainer' || standaloneRes.role !== 'maintainer' || declaredMatchRes.role !== 'maintainer' || sshRes.role !== 'maintainer') {
+    rmTree(bareDir)
+    return `file/standalone/declared/ssh 未放行 maintainer：${JSON.stringify({ fileRes, standaloneRes, declaredMatchRes, sshRes })}`
+  }
+
+  // 3. q.git-identity：隔离宿主机全局 Git 配置，缺 user.name/email 时进入 NEEDS_HUMAN
+  const isoHome = tmpProject({})
+  const noIdRepo = tmpProject({ 'README.md': '# no-git-id\n' })
+  const withIdRepo = tmpProject({ 'README.md': '# with-git-id\n' })
+  try {
+    gitInit(noIdRepo, { branch: 'main' })
+    gitInit(withIdRepo, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+    const isoEnv = {
+      ...process.env,
+      HOME: isoHome,
+      USERPROFILE: isoHome,
+      XDG_CONFIG_HOME: join(isoHome, 'xdg'),
+      GIT_CONFIG_GLOBAL: join(isoHome, 'empty-gitconfig'),
+      GIT_CONFIG_NOSYSTEM: '1',
+    }
+    const { spawnSync } = await import('node:child_process')
+    const outNoId = spawnSync(process.execPath, [join(SKILL_ROOT, 'scripts', 'survey.mjs'), noIdRepo, '--json'], {
+      cwd: noIdRepo, encoding: 'utf8', env: isoEnv, windowsHide: true,
+    })
+    if (outNoId.status !== 0) return `survey 隔离执行失败：${outNoId.stderr}`
+    const fNoId = JSON.parse(outNoId.stdout)
+    if (!fNoId.questions?.some((q) => q.id === 'q.git-identity') || !fNoId.needsHuman?.required) {
+      return `缺 Git 署名未产出 q.git-identity 进 NEEDS_HUMAN：${JSON.stringify({ questions: fNoId.questions, needsHuman: fNoId.needsHuman })}`
+    }
+    const outWithId = spawnSync(process.execPath, [join(SKILL_ROOT, 'scripts', 'survey.mjs'), withIdRepo, '--json'], {
+      cwd: withIdRepo, encoding: 'utf8', env: isoEnv, windowsHide: true,
+    })
+    const fWithId = JSON.parse(outWithId.stdout)
+    if (fWithId.questions?.some((q) => q.id === 'q.git-identity')) {
+      return `已配置 Git 署名仍误报 q.git-identity：${JSON.stringify(fWithId.questions)}`
+    }
+    const skillText = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8')
+    const surveyRefText = readFileSync(join(SKILL_ROOT, 'references', 'survey.md'), 'utf8')
+    if (!skillText.includes('NEEDS_HUMAN > 0') || !skillText.includes('网页搜索') || !surveyRefText.includes('NEEDS_HUMAN > 0') || !surveyRefText.includes('网页搜索')) {
+      return 'SKILL.md 或 references/survey.md 缺少 NEEDS_HUMAN > 0 禁写入或离线禁联网明文约束'
+    }
+    return true
+  } finally {
+    rmTree(bareDir)
+    rmTree(isoHome)
+    rmTree(noIdRepo)
+    rmTree(withIdRepo)
+  }
+}])
+
 }

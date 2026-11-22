@@ -187,9 +187,12 @@ export async function runEvolutionBlindMatrix(tracker, sandbox, envExtra) {
       writeFileSync(join(upDir, '.agents/skills/dev-flow/scripts/hook.mjs'), "export const ver = '1-local'\n", 'utf8')
       const upRun = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [upDir, '--kit-dir', upKit, '--base-dir', baseKit, '--no-backup'], upDir, envExtra)
       const localAfter = readFileSync(join(upDir, '.agents/skills/dev-flow/scripts/hook.mjs'), 'utf8')
+      const upParsed = upRun.stdout ? JSON.parse(upRun.stdout).equip : null
+      const cDet = upParsed?.pendingConflictDetails?.find((x) => x.path === 'dev-flow/scripts/hook.mjs')
       const mergeSafeOk = upRun.status === 3 && !localAfter.includes('<<<<<<<')
-        && existsSync(join(upDir, '.agents/skills/dev-flow/scripts/hook.mjs.upstream'))
-        && existsSync(join(upDir, '.agents/skills/dev-flow/scripts/hook.mjs.pf-conflict'))
+        && !existsSync(join(upDir, '.agents/skills/dev-flow/scripts/hook.mjs.upstream'))
+        && !existsSync(join(upDir, '.agents/skills/dev-flow/scripts/hook.mjs.pf-conflict'))
+        && Boolean(cDet && existsSync(cDet.upstreamPath) && existsSync(cDet.conflictPath))
         && existsSync(join(upDir, '.agents/forge-overlays/keep.md'))
       if (mergeSafeOk) {
         metrics.empiricalInterceptsPassed += 1

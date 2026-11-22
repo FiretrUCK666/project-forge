@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
+import { buildContextBrief, extractDocBriefSeeds, formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { formatAttribution } from '../../lib/docs.mjs'
 import { buildSliceGraph } from '../../lib/doc-slice-graph.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
@@ -254,6 +255,15 @@ export async function handleRelease(opts, roots) {
   return { exitCode: EXIT.OK }
 }
 
+function computeClaimContextBrief(roots, claimRoot, ledger, taskId) {
+  const docRels = [ledger?.specFile, ledger?.todoFile, ledger?.prdFile].filter(Boolean)
+  const seeds = extractDocBriefSeeds([claimRoot, roots?.mainRoot], docRels)
+  const paths = [...new Set([...seeds.paths, ...(Array.isArray(ledger?.files) ? ledger.files : [])])]
+  const keywords = [taskId, ledger?.slug, ...seeds.keywords].filter(Boolean)
+  const briefRoot = claimRoot && existsSync(claimRoot) ? claimRoot : (roots?.mainRoot ?? claimRoot)
+  return buildContextBrief(briefRoot, { paths, keywords, excludeFiles: docRels })
+}
+
 export async function handleClaim(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx
@@ -340,9 +350,12 @@ export async function handleClaim(opts, roots) {
       ledger.takenOverAt = ledger.claimedAt
     }
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover }, null, 2)}\n`)
+    const contextBrief = computeClaimContextBrief(roots, claimRoot, ledger, taskId)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover, contextBrief }, null, 2)}\n`)
     else {
       process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
+      const briefLines = formatContextBriefLines(contextBrief)
+      if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
       const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
       printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
     }
@@ -433,10 +446,13 @@ export async function handleClaim(opts, roots) {
     ledger.takenOverAt = ledger.claimedAt
   }
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+  const contextBrief = computeClaimContextBrief(roots, claimRoot, ledger, taskId)
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}) }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}), contextBrief }, null, 2)}\n`)
   } else {
     process.stdout.write(`任务 ${taskId} 已${isTakeover ? '接管' : '认领'}（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
+    const briefLines = formatContextBriefLines(contextBrief)
+    if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
     const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
     printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
   }

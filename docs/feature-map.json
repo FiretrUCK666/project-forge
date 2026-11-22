@@ -460,6 +460,7 @@
         "kit/skills/lib/github-client.mjs",
         "kit/skills/lib/github-labels.mjs",
         "kit/skills/lib/github-parse.mjs",
+        "kit/skills/lib/context-brief.mjs",
         "kit/skills/lib/handoff-package.mjs",
         "kit/skills/lib/intake-triage.mjs",
         "kit/skills/lib/ledger.mjs",
@@ -516,7 +517,8 @@
         "scripts/dev/fixtures-trace-sync.mjs",
         "scripts/dev/injections-data-trace-sync.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-w6c-context-brief.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",

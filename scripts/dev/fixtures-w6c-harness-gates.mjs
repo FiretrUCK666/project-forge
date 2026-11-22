@@ -29,6 +29,7 @@ import { collectDevProfileEmpiricalCmds, computeEmpiricalRequirements } from '..
 import { resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
 import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 import { evaluateSubcommandParity } from './subcommand-parity.mjs'
+import { registerW6cContextBriefCases } from './fixtures-w6c-context-brief.mjs'
 
 async function withQuietIo(fn) {
   const origOut = process.stdout.write.bind(process.stdout)
@@ -721,4 +722,6 @@ export function registerW6cHarnessGatesCases(cases) {
       return true
     } finally { rmTree(dir) }
   }])
+
+  registerW6cContextBriefCases(cases)
 }

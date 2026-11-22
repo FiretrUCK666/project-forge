@@ -415,3 +415,10 @@ export {
   readYamlBlockScalar,
   splitInlineArrayItems,
 } from './doc-frontmatter.mjs'
+
+export {
+  buildContextBrief,
+  extractDocBriefSeeds,
+  extractDocPaths,
+  formatContextBriefLines,
+} from './context-brief.mjs'

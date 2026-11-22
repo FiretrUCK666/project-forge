@@ -23,6 +23,7 @@ import { existsSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { buildContextBrief, formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { resolveHostMode, resolveNonEmptyActor, validateDocOwnerValue } from '../../lib/harness-context.mjs'
@@ -222,6 +223,8 @@ async function main(argv) {
         for (const w of result.coupledSyncWarnings ?? []) {
           process.stdout.write(`  * 联动提醒: 触及 ${w.touchedTriggers.join(', ')} -> 检查同步 ${w.expectedCompanions.join(', ')}\n`)
         }
+        const briefLines = formatContextBriefLines(result.contextBrief)
+        if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
         const steps = result.caseType === 5
           ? ['已阻断直接拆解！请先更新 docs/TDD.md 解决冲突并经独立确认。']
           : result.caseType === 4
@@ -271,9 +274,16 @@ async function main(argv) {
         phase: 'init', file: res.file, files: res.files, taskId: res.taskId ?? opts.task ?? null,
         issueNumber: res.issue ?? null, summary: `初始化 ${res.kind.toUpperCase()}: ${opts.title}`,
       })
+      res.contextBrief = buildContextBrief(res.writeRoot ?? repoRoot, {
+        paths: opts.spec ? [opts.spec] : [],
+        keywords: [opts.title, opts.slug, opts.task].filter(Boolean),
+        excludeFiles: res.files ?? [],
+      })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`已生成 ${res.kind.toUpperCase()}：${res.files.join(', ')}（Planned at: ${res.plannedAt}${res.worktreePath ? `, worktree=${res.worktreePath}` : ''}）\n`)
+        const briefLines = formatContextBriefLines(res.contextBrief)
+        if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
         printNextStep([{ skill: 'dev-plan', text: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${res.file}"` }], { repoRoot: mainRoot })
       }
       return 0

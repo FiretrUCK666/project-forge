@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
+import { buildContextBrief, extractDocBriefSeeds, formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { readTextSafe } from '../../lib/git.mjs'
 import { createExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { generateRepoMap } from '../../dev-explore/scripts/repo-map.mjs'
@@ -50,6 +51,19 @@ export async function handleExplore(opts, roots) {
   const workRoot = existsSync(implRoot) ? implRoot : roots.mainRoot
 
   const map = await generateRepoMap(workRoot, { focus: opts.focus })
+  const docRels = [ledger?.specFile, ledger?.todoFile, ledger?.prdFile].filter(Boolean)
+  const seeds = extractDocBriefSeeds([workRoot, roots.mainRoot], docRels)
+  const paths = [...new Set([
+    ...(opts.focus ? [opts.focus] : []),
+    ...seeds.paths,
+    ...(Array.isArray(ledger?.files) ? ledger.files : []),
+  ])]
+  const keywords = [taskId, ledger?.slug, opts.focus, ...seeds.keywords].filter(Boolean)
+  const contextBrief = buildContextBrief(workRoot, {
+    paths,
+    keywords,
+    excludeFiles: docRels,
+  })
   const tier = opts.tier ? String(opts.tier).trim() : detectExploreTier(workRoot, map)
   const by = opts.by ?? opts.agent ?? ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? ledger.account ?? undefined
   const explored = createExploredEvidence({
@@ -58,6 +72,8 @@ export async function handleExplore(opts, roots) {
     symbolCount: map.symbolCount ?? 0,
     by,
     source: 'repo-map',
+    evergreenDocsCount: contextBrief.totalEvergreenDocs,
+    featureMapCount: contextBrief.featureMap.totalFeaturesCount,
   })
 
   ledger.explored = explored
@@ -70,11 +86,14 @@ export async function handleExplore(opts, roots) {
     codeFileCount: map.codeFileCount ?? 0,
     symbolCount: map.symbolCount ?? 0,
     ...(Array.isArray(map.docLocateHints) ? { docLocateHints: map.docLocateHints } : {}),
+    contextBrief,
   }
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   } else {
-    process.stdout.write(`探索证据已记入账本（task=${taskId}, tier=${explored.tier}, symbols=${explored.symbolCount}, at=${explored.at}）。\n`)
+    process.stdout.write(`探索证据已记入账本（task=${taskId}, tier=${explored.tier}, symbols=${explored.symbolCount}, evergreen=${explored.evergreenDocsCount ?? 0}, features=${explored.featureMapCount ?? 0}, at=${explored.at}）。\n`)
+    const briefLines = formatContextBriefLines(contextBrief)
+    if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK, payload: out }

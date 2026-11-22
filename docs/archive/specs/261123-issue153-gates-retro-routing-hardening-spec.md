@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 门禁精准化、should-fix与lastRetro闭环、浅提示词路由及夹具防泄漏
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-23
 updated: 2026-11-23
@@ -11,7 +11,7 @@ branch: feat/gates-retro-routing-hardening
 owner: coordinator
 plan_mode: autonomous
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critique-pr2-r2, round=2, sha=17f8278144c2, summary=Round 2 pass: BLOCKER-1 (doc-plan-ops skipApproved/override ledger trail + plan-exit-gate + fixtures-flow-truth/docs/w4 compatibility) and BLOCKER-2 (GenericRemoteBackend.mergePr name and conventional unmerged remote blocking) are resolved; fixtures worker TMPDIR isolation, <=760/800 line split guard, AGENTS.md < 24KB, and skill boundary constraints are consistent with source.)"
 related_prd: null
 related_todo: ../todo/261123-issue153-gates-retro-routing-hardening-todo.md
@@ -24,13 +24,13 @@ high_risk_paths: [kit/, templates/]
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft` |
+| 当前状态 | `implemented` |
 | 规划级别 | `L3` |
 | 创建 / 更新 | `2026-11-23` / `2026-11-23` |
 | 分支 / Issue / PR | `feat/gates-retro-routing-hardening` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | coordinator / `pending` |
+| 负责人 / 内审状态 | coordinator / `passed` |
 | 规划态 | `autonomous` |
-| 关联 Todo | `docs/todo/261123-issue153-gates-retro-routing-hardening-todo.md` |
+| 关联 Todo | `docs/archive/todo/261123-issue153-gates-retro-routing-hardening-todo.md` |
 
 - **变更一句话**：精准收紧 `static-gates`/`edit-gate`/`doc-audit`/`govern`/`workflow-policy`/`plan-exit-gate` 与 `task-backend-local`，打通 `--should-fix` -> `signals.jsonl` -> `govern-retro` -> `flow-next` `lastRetro` 闭环，强化 `AGENTS.md`/skill 浅提示词隔离路由，并根治 `fixtures` 临时目录泄漏。
 

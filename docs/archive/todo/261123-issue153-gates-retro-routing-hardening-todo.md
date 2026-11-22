@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 门禁精准化、should-fix与lastRetro闭环、浅提示词路由及夹具防泄漏
-status: active
+status: done
 created: 2026-11-23
 updated: 2026-11-23
 issue: 153
@@ -10,7 +10,7 @@ branch: feat/gates-retro-routing-hardening
 owner: coordinator
 plan_mode: autonomous
 approved: false
-done_at: null
+done_at: 2026-11-23
 task_id: gates-retro-routing-hardening
 planned_at: e5a7b558dfc84ae2093037c234a981869275fa44
 related_prd: null
@@ -29,7 +29,7 @@ related_spec: ../specs/261123-issue153-gates-retro-routing-hardening-spec.md
 | 任务编号 | `gates-retro-routing-hardening` |
 | 负责人 / 审批 | coordinator / `false` |
 | 规划态 | `autonomous` |
-| 关联 SPEC | `docs/specs/261123-issue153-gates-retro-routing-hardening-spec.md` |
+| 关联 SPEC | `docs/archive/specs/261123-issue153-gates-retro-routing-hardening-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch` 与关联分支最新提交。
 

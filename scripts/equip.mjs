@@ -7,15 +7,13 @@
  * - 按 `kit/skills/` 已落盘技能执行统一全量装配，支持 `--adopt-custom` 定制豁免与 `--restore` 恢复。
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { ensurePreWriteBackup } from './backup.mjs'
 import { writeAtomic } from './lib/fs-atomic.mjs'
-import { isAllowedExtensionPath } from '../kit/skills/lib/overlay.mjs'
 import { cleanStaleLocalModeMarker } from '../kit/skills/lib/platform.mjs'
-import { detectSkillKind } from './lib/survey-ecosystem.mjs'
 import { detectOptionalNativeCheckers } from '../kit/skills/lib/profile-sniffer.mjs'
 import {
   generateInitialBootstrappedAgents,
@@ -32,6 +30,14 @@ import {
   walkKitFiles,
 } from './lib/equip-bootstrap.mjs'
 import { captureMemoryRollbackSnapshot, verifyEquippedIntegrityOrRollback } from './lib/equip-integrity.mjs'
+import {
+  buildPendingConflictDetails,
+  cacheBaselineBuffer,
+  collectManagedDirExtras,
+  createBaselineResolver,
+  inspectInstalledIntegrity,
+  resolveConflictDir,
+} from './lib/equip-upgrade.mjs'
 import { computeFileStates, EQUIP_FILE_STATES, formatEquipCheckReport, isCodeLikePath, judgeManagedFile, resolveThreeWayEquipFile } from './lib/merge3.mjs'
 import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
 import { DEFAULT_KIT_SKILLS_DIR } from '../kit/skills/lib/skill-discovery.mjs'
@@ -40,7 +46,6 @@ import {
   PF_MANIFEST_REL,
   PF_MANIFEST_SCHEMA_VERSION,
   getKitSkills,
-  isMacOsMetadata,
 } from './lib/protocol.mjs'
 import { flushAndExit, isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
 
@@ -66,107 +71,14 @@ function buildFilterMatcher(option) {
   }
 }
 
-function collectManagedDirExtras(skillsDir, kitFiles, customizedFiles = {}, extraAllowed = null, kitSkills = getKitSkills(), pendingConflicts = {}) {
-  const extras = []
-  const sidecarAllowed = new Set()
-  for (const [k, info] of Object.entries(pendingConflicts ?? {})) {
-    sidecarAllowed.add(info?.upstreamFile || `${k}.upstream`)
-    sidecarAllowed.add(info?.conflictFile || `${k}.pf-conflict`)
-  }
-  const managedTopDirs = new Set(
-    [...kitSkills, 'lib', ...[...kitFiles.keys()].map((k) => k.split('/')[0]).filter(Boolean)],
-  )
-  for (const top of managedTopDirs) {
-    const topPath = join(skillsDir, top)
-    if (!existsSync(topPath)) continue
-    let st
-    try { st = statSync(topPath) } catch { continue }
-    if (!st.isDirectory()) continue
-    const stack = [topPath]
-    while (stack.length > 0) {
-      const cur = stack.pop()
-      for (const entry of readdirSync(cur, { withFileTypes: true })) {
-        if (isMacOsMetadata(entry.name)) continue
-        const abs = join(cur, entry.name)
-        if (entry.isDirectory()) {
-          stack.push(abs)
-        } else if (entry.isFile()) {
-          const rel = posixPath(relative(skillsDir, abs))
-          if (kitFiles.has(rel) || extraAllowed?.has(rel) || sidecarAllowed.has(rel)) continue
-          if (isAllowedExtensionPath(rel) || isAllowedExtensionPath(`.agents/${rel}`)) continue
-          const customEntry = customizedFiles[rel]
-          if (customEntry && normalizedSha256(readFileSync(abs)) === customEntry.baseSha256) continue
-          extras.push(rel)
-        }
-      }
-    }
-  }
-  return extras.sort()
-}
-
-function walkInstalledMjsFiles(skillsDir) {
-  const out = []
-  if (!existsSync(skillsDir)) return out
-  const visit = (dir, relBase) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (isMacOsMetadata(entry.name) || entry.name === '.pf-manifest.json') continue
-      const full = join(dir, entry.name)
-      const rel = relBase ? `${relBase}/${entry.name}` : entry.name
-      if (entry.isDirectory()) visit(full, rel)
-      else if (entry.isFile() && entry.name.endsWith('.mjs')) out.push({ full, rel })
-    }
-  }
-  visit(skillsDir, '')
-  return out
-}
-
-function inspectInstalledIntegrity(
-  skillsDir,
-  disabledSet,
-  removedMap,
-  existingExists,
-  kitSkills = getKitSkills(),
-) {
-  const disabledCoreSkills = []
-  const brokenImports = []
-  const invalidFrontmatters = []
-
-  for (const skill of kitSkills) {
-    const skillEntry = `${skill}/SKILL.md`
-    if (disabledSet.has(skill) || Boolean(removedMap[skillEntry]) || (existingExists && !existsSync(join(skillsDir, skillEntry)))) {
-      disabledCoreSkills.push(skill)
-    }
-  }
-
-  if (existsSync(skillsDir)) {
-    const relImportRe = /(?:^\s*(?:import|export)[\s\S]*?from\s+|import\s*\(\s*)['"](\.[^'"]+)['"]/gm
-    for (const { full, rel } of walkInstalledMjsFiles(skillsDir)) {
-      const code = readTextSafe(full) ?? ''
-      for (const m of code.matchAll(relImportRe)) {
-        const spec = m[1].trim()
-        if (!existsSync(resolve(dirname(full), spec))) brokenImports.push(`${rel} -> ${spec}`)
-      }
-    }
-    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || isMacOsMetadata(entry.name) || entry.name === 'lib' || entry.name.startsWith('.')) continue
-      if (disabledSet.has(entry.name)) continue
-      const skillDir = join(skillsDir, entry.name)
-      if (!existsSync(join(skillDir, 'SKILL.md'))) continue
-      const detected = detectSkillKind(skillDir)
-      if (!detected?.skillMeta?.hasValidFrontmatter) invalidFrontmatters.push(`${entry.name}/SKILL.md`)
-    }
-  }
-
-  return { disabledCoreSkills, brokenImports, invalidFrontmatters }
-}
-
 /**
  * 字节级与结构一致性只读校验 `<targetDir>/.agents/skills/`（含核心技能、跨目录导入断链与 YAML frontmatter 校验）。
  */
-export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) {
+export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, env = process.env } = {}) {
   const root = resolve(targetDir)
   const skillsDir = join(root, '.agents', 'skills')
   const manifestPath = join(root, PF_MANIFEST_REL)
+  const conflictDir = resolveConflictDir(root, { env })
 
   if (!existsSync(kitDir)) {
     return { ok: false, reason: `找不到源套件目录：${kitDir}`, missing: [], drifted: [], unregistered: [], extraManaged: [], customized: [] }
@@ -181,6 +93,7 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) 
   const customizedMap = existing.valid ? normalizeCustomizedFiles(existing.data?.customizedFiles) : {}
   const pendingConflictsMap = existing.valid ? normalizePendingConflicts(existing.data?.pendingConflicts) : {}
   const pendingConflicts = Object.keys(pendingConflictsMap).sort()
+  const pendingConflictDetails = buildPendingConflictDetails(pendingConflictsMap, skillsDir, conflictDir)
 
   const missing = []
   const drifted = []
@@ -203,6 +116,8 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) 
       baselineSha: prevFiles.get(rel) ?? null,
       customEntry: customizedMap[rel] ?? null,
       pendingEntry: pendingConflictsMap[rel] ?? null,
+      conflictDir,
+      skillsDir,
     })
     if (verdict.state === EQUIP_FILE_STATES.SYNCED) {
       if (existing.valid && prevFiles.get(rel) !== src.sha256) unregistered.push(rel)
@@ -249,6 +164,7 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) 
     ok, target: root, schemaVersion: existing.data?.schemaVersion,
     manifestPath: PF_MANIFEST_REL, missing, drifted, unregistered, extraManaged, customized,
     pendingConflicts,
+    ...(pendingConflictDetails.length > 0 ? { conflictDir, pendingConflictDetails } : {}),
     disabledCoreSkills: integrity.disabledCoreSkills,
     brokenImports: integrity.brokenImports,
     invalidFrontmatters: integrity.invalidFrontmatters,
@@ -268,6 +184,7 @@ export function equip(targetDir, {
   restore = false,
   adoptCustom = false,
   skipIntegrityCheck = false,
+  env = process.env,
   forgeVersion = skillVersion(readTextSafe(join(SKILL_ROOT, 'SKILL.md'))) || '0.0.0',
   now = new Date().toISOString(),
 } = {}) {
@@ -279,6 +196,8 @@ export function equip(targetDir, {
   const existing = readExistingManifest(manifestPath)
   const kitSkills = getKitSkills(kitDir)
   const kitFiles = walkKitFiles(kitDir)
+  const resolver = createBaselineResolver(root, { env })
+  const conflictDir = resolver.conflictDir
 
   const prevFiles = normalizePrevFiles(existing.data?.files)
   const disabledSet = new Set(existing.valid ? normalizeStringArray(existing.data?.disabledSkills) : [])
@@ -307,6 +226,7 @@ export function equip(targetDir, {
     for (const rel of Object.keys(removedMap)) if (restoreMatcher(rel)) delete removedMap[rel]
   }
 
+  const tombstonedNew = []
   if (existing.valid) {
     const trackedBySkill = new Map()
     for (const rel of prevFiles.keys()) {
@@ -320,6 +240,7 @@ export function equip(targetDir, {
       if (restoreMatcher && (restoreMatcher(skill) || trackedRels.some((r) => restoreMatcher(r)))) continue
       if (!existsSync(join(skillsDir, skill))) {
         disabledSet.add(skill)
+        tombstonedNew.push(skill)
         for (const rel of Object.keys(removedMap)) if (rel === skill || rel.startsWith(`${skill}/`)) delete removedMap[rel]
         for (const rel of Object.keys(nextCustomized)) if (rel === skill || rel.startsWith(`${skill}/`)) delete nextCustomized[rel]
       }
@@ -329,7 +250,10 @@ export function equip(targetDir, {
       if (disabledSet.has(top) || !kitFiles.has(rel)) continue
       if (restoreMatcher && restoreMatcher(rel)) continue
       if (!existsSync(join(skillsDir, rel))) {
-        if (!removedMap[rel]) removedMap[rel] = { removedAt: now, baseSha256: oldHash }
+        if (!removedMap[rel]) {
+          removedMap[rel] = { removedAt: now, baseSha256: oldHash }
+          tombstonedNew.push(rel)
+        }
         delete nextCustomized[rel]
       }
     }
@@ -349,11 +273,52 @@ export function equip(targetDir, {
   const pendingWrites = []
   const pendingDeletes = []
   const ensuredGitkeeps = []
-  const clearConflictSidecars = (rel, dest) => {
-    delete nextPendingConflicts[rel]
-    for (const side of [`${dest}.upstream`, `${dest}.pf-conflict`]) {
-      if (existsSync(side)) pendingDeletes.push(side)
+  const queueDelete = (filePath, stopDir = skillsDir) => {
+    if (existsSync(filePath) && !pendingDeletes.some((d) => d.dest === filePath)) {
+      pendingDeletes.push({ dest: filePath, stopDir })
     }
+  }
+  const clearConflictSidecars = (rel, dest) => {
+    const prevEntry = nextPendingConflicts[rel]
+    delete nextPendingConflicts[rel]
+    const inTreeCandidates = [`${dest}.upstream`, `${dest}.pf-conflict`]
+    if (prevEntry && prevEntry.outOfTree !== true) {
+      if (prevEntry.upstreamFile) inTreeCandidates.push(join(skillsDir, prevEntry.upstreamFile))
+      if (prevEntry.conflictFile) inTreeCandidates.push(join(skillsDir, prevEntry.conflictFile))
+    }
+    for (const side of inTreeCandidates) queueDelete(side, skillsDir)
+    const outCandidates = [
+      join(conflictDir, `${rel}.upstream`),
+      join(conflictDir, `${rel}.pf-conflict`),
+      ...(prevEntry?.upstreamFile ? [join(conflictDir, prevEntry.upstreamFile)] : []),
+      ...(prevEntry?.conflictFile ? [join(conflictDir, prevEntry.conflictFile)] : []),
+    ]
+    for (const side of outCandidates) queueDelete(side, conflictDir)
+  }
+  const lookupBaseText = (rel, targetHash) => {
+    if (baseContents && Object.prototype.hasOwnProperty.call(baseContents, rel)) return baseContents[rel]
+    if (baseDir && existsSync(join(baseDir, rel))) return readTextSafe(join(baseDir, rel))
+    return targetHash ? resolver.resolveBaseText(rel, targetHash) : null
+  }
+  const applyThreeWayPlan = (rel, dest, src, oldHash, diskHash, baseText, fallbackOldHash) => {
+    const plan = resolveThreeWayEquipFile({
+      rel, dest, srcBuf: src.buf, srcSha: src.sha256, oldHash: fallbackOldHash, diskHash,
+      currentText: readFileSync(dest, 'utf8'), baseText, now, conflictDir, outOfTree: true,
+    })
+    if (plan.kind === 'merged') {
+      const mergedSha = normalizedSha256(plan.buf)
+      pendingWrites.push({ dest, buf: plan.buf })
+      nextFiles[rel] = { sha256: src.sha256 }
+      if (mergedSha === src.sha256) delete nextCustomized[rel]
+      else nextCustomized[rel] = { adoptedAt: now, baseSha256: mergedSha, upstreamSha256: src.sha256 }
+      clearConflictSidecars(rel, dest)
+      merged.push(rel)
+      return
+    }
+    pendingWrites.push(...plan.writes)
+    nextPendingConflicts[rel] = plan.pendingEntry
+    nextFiles[rel] = { sha256: oldHash || fallbackOldHash || src.sha256 }
+    conflicts.push(plan.conflictRecord)
   }
 
   const kitKeys = [...kitFiles.keys()].sort()
@@ -411,13 +376,15 @@ export function equip(targetDir, {
     }
 
     const customEntry = nextCustomized[rel]
-    const hasExplicitBase = Boolean(
-      (baseContents && Object.prototype.hasOwnProperty.call(baseContents, rel))
-      || (baseDir && existsSync(join(baseDir, rel))),
-    )
-    if (customEntry && customEntry.baseSha256 === diskHash && (customEntry.upstreamSha256 === src.sha256 || !hasExplicitBase)) {
-      nextFiles[rel] = { sha256: oldHash || src.sha256 }
-      customized.push({ path: rel, upstreamChanged: customEntry.upstreamSha256 !== src.sha256 })
+    if (customEntry && customEntry.baseSha256 === diskHash) {
+      if (customEntry.upstreamSha256 === src.sha256) {
+        nextFiles[rel] = { sha256: oldHash || src.sha256 }
+        customized.push({ path: rel, upstreamChanged: false })
+        continue
+      }
+      const targetBaseHash = customEntry.upstreamSha256 || oldHash
+      const baseText = lookupBaseText(rel, targetBaseHash)
+      applyThreeWayPlan(rel, dest, src, oldHash, diskHash, baseText, targetBaseHash)
       continue
     }
 
@@ -434,27 +401,9 @@ export function equip(targetDir, {
       continue
     }
 
-    const baseText = (baseContents && Object.prototype.hasOwnProperty.call(baseContents, rel))
-      ? baseContents[rel]
-      : (baseDir ? readTextSafe(join(baseDir, rel)) : null)
+    const baseText = oldHash !== src.sha256 ? lookupBaseText(rel, oldHash) : null
     if (oldHash !== src.sha256 && (baseText != null || isCodeLikePath(rel))) {
-      const plan = resolveThreeWayEquipFile({
-        rel, dest, srcBuf: src.buf, srcSha: src.sha256, oldHash, diskHash,
-        currentText: readFileSync(dest, 'utf8'), baseText, now,
-      })
-      if (plan.kind === 'merged') {
-        const mergedSha = normalizedSha256(plan.buf)
-        pendingWrites.push({ dest, buf: plan.buf })
-        nextFiles[rel] = { sha256: src.sha256 }
-        if (mergedSha !== src.sha256) nextCustomized[rel] = { adoptedAt: now, baseSha256: mergedSha, upstreamSha256: src.sha256 }
-        clearConflictSidecars(rel, dest)
-        merged.push(rel)
-        continue
-      }
-      pendingWrites.push(...plan.writes)
-      nextPendingConflicts[rel] = plan.pendingEntry
-      nextFiles[rel] = { sha256: oldHash }
-      conflicts.push(plan.conflictRecord)
+      applyThreeWayPlan(rel, dest, src, oldHash, diskHash, baseText, oldHash)
       continue
     }
 
@@ -495,7 +444,7 @@ export function equip(targetDir, {
     }
     const diskHash = normalizedSha256(readFileSync(dest))
     if (diskHash === oldHash) {
-      pendingDeletes.push(dest)
+      queueDelete(dest, skillsDir)
       retired.push(rel)
       delete nextCustomized[rel]
     } else {
@@ -554,17 +503,17 @@ export function equip(targetDir, {
   if (!dryRun) {
     const memorySnapshot = captureMemoryRollbackSnapshot([
       ...pendingWrites.map((item) => item.dest),
-      ...pendingDeletes,
+      ...pendingDeletes.map((item) => item.dest),
       manifestPath,
     ])
     for (const item of pendingWrites) {
       mkdirSync(dirname(item.dest), { recursive: true })
       writeAtomic(item.dest, item.buf)
     }
-    for (const dest of pendingDeletes) {
-      if (existsSync(dest)) {
-        unlinkSync(dest)
-        pruneEmptyParents(dest, skillsDir)
+    for (const item of pendingDeletes) {
+      if (existsSync(item.dest)) {
+        unlinkSync(item.dest)
+        pruneEmptyParents(item.dest, item.stopDir)
       }
     }
     if (manifestChanged) {
@@ -572,7 +521,9 @@ export function equip(targetDir, {
       writeAtomic(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`)
     }
     if (!skipIntegrityCheck && (pendingWrites.length > 0 || pendingDeletes.length > 0)) {
-      const writtenMjsFiles = pendingWrites.map((item) => item.dest).filter((p) => p.endsWith('.mjs'))
+      const writtenMjsFiles = pendingWrites
+        .map((item) => item.dest)
+        .filter((p) => p.endsWith('.mjs') && p.startsWith(skillsDir))
       const isFreshBuiltInCopy = resolve(kitDir) === resolve(DEFAULT_KIT_SKILLS_DIR)
         && merged.length === 0 && upgraded.length === 0 && restored.length === 0
       integrityCheck = verifyEquippedIntegrityOrRollback({
@@ -586,16 +537,23 @@ export function equip(targetDir, {
         throw new Error(`EQUIP_INTEGRITY_ROLLBACK: 语法/ESM ABI 校验失败并已自动回滚（${integrityCheck.rollbackMethod}）：${[...syn, ...abi].slice(0, 4).join('；')}`)
       }
     }
+    for (const src of kitFiles.values()) {
+      cacheBaselineBuffer(resolver.cacheDir, src.sha256, src.buf)
+    }
     const cleaned = cleanStaleLocalModeMarker(root)
     if (cleaned.cleaned) cleanedStaleLocalMode = cleaned.removed
   }
 
+  const pendingConflictDetails = buildPendingConflictDetails(nextManifest.pendingConflicts, skillsDir, conflictDir)
   return {
     target: root, schemaVersion: PF_MANIFEST_SCHEMA_VERSION, dryRun, backup,
     manifestPath: PF_MANIFEST_REL, manifestUpdated: manifestChanged,
     added, restored, upgraded, merged, unchanged, conflicts, retired,
     orphanedModified, adopted, customized,
+    tombstonedNew: tombstonedNew.sort(),
+    ...(tombstonedNew.length > 0 ? { tombstoneNotice: '已登记 v3 用户删除墓碑，未经人点头严禁 --restore' } : {}),
     pendingConflicts: nextManifest.pendingConflicts,
+    ...(pendingConflictDetails.length > 0 ? { conflictDir, pendingConflictDetails } : {}),
     // 写完之后再判一次：动作能解决的都解决了，剩下什么才是结论。
     // 校验路径拿同一个判定算，两条路径对同一份工作区因此给出同一个状态序列。
     endingStates: (() => {

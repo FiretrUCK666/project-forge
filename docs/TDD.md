@@ -106,7 +106,7 @@ flowchart LR
 | `scripts/compose-agents.mjs` | 产品层 | 渲染和刷新 `AGENTS.md` 受管区间，保留手写段落与定制 `Dev Profile`，强制 `<= 30720 B` 且建议 `< 24576 B` |
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（含 `claims.mjs` 路径与脚本真实性回查）与交棒四档退出码净度扫描 |
 | `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 校验原子自更新（含 `15` 分钟失败冷却与回滚）与双语 README 目录锚点同步 |
-| `scripts/lib/` | 产品层 | 安装期与升级专用库：含 `protocol.mjs`、`template.mjs`、`render.mjs`、`claims.mjs`、`merge3.mjs`、`equip-bootstrap.mjs`、`equip-integrity.mjs`、`artifact-executors.mjs`、`starter-templates.mjs`、`agents-defaults.mjs`、`agents-sections.mjs`、`review-helpers.mjs`、`navigation.mjs`、`markdown.mjs`、`fs-atomic.mjs`、`text.mjs`、`update-net.mjs`、`update-ops.mjs`、`survey-*.mjs` 及 `platform/` 下适配器模块 |
+| `scripts/lib/` | 产品层 | 安装期与升级专用库：含 `protocol.mjs`、`template.mjs`、`render.mjs`、`claims.mjs`、`merge3.mjs`、`equip-bootstrap.mjs`、`equip-upgrade.mjs`、`equip-integrity.mjs`、`artifact-executors.mjs`、`starter-templates.mjs`、`agents-defaults.mjs`、`agents-sections.mjs`、`review-helpers.mjs`、`navigation.mjs`、`markdown.mjs`、`fs-atomic.mjs`、`text.mjs`、`update-net.mjs`、`update-ops.mjs`、`survey-*.mjs` 及 `platform/` 下适配器模块 |
 | `kit/skills/lib/` | 产品层 | 内置技能共享的零依赖运行内核（单职责模块，含 `shared.mjs` 统一重导出、`context-brief.mjs` 五入口统一常青/切片简报、`subcommand-meta.mjs`、`doc-facts-commands.mjs`、`credential-scan.mjs`、`harness-context.mjs`、`session-state.mjs`、`gate-enforcement.mjs`、`platform-registry.mjs` 与 `overlay.mjs`） |
 | `kit/skills/templates/` | 产品层 | 四层规划与架构模板单源：`docs-prd.md`、`docs-spec.md`、`docs-todo.md`、`docs-tdd.md` |
 | `kit/skills/dev-explore/` | 产品层 | 只读探索与零写入按需定位（`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/dev-explore/scripts/repo-map-helpers.mjs`、`kit/skills/dev-explore/scripts/doc-locate.mjs`） |
@@ -221,8 +221,8 @@ stateDiagram-v2
 | 尚未安装且不在墓碑中 | 写入托管文件并记录 SHA256 | 文本统一按 LF 写入，校验兼容 CRLF/LF |
 | 用户已删除技能或单文件 | 记入 `disabledSkills` / `removedFiles` 墓碑并跳过 | 绝不擅自恢复，仅 `--restore` 找回 |
 | 磁盘哈希等于基线哈希 | 无损升级至新版并更新哈希 | 同哈希跳过保幂等 |
-| 本地与上游同时修改 | `scripts/lib/merge3.mjs` 执行三方合并 | 非 `.mjs` 无冲突自动融合；`.mjs` 冲突回退保留本地且零冲突标记 |
-| 已通过 `--adopt-custom` 豁免 | 记入 `customizedFiles`，`--check` 返回 `0` | 上游有新版仅提示可供参考合并 |
+| 本地与上游同时修改 | `scripts/lib/equip-upgrade.mjs` 三层基线自动回溯 + `scripts/lib/merge3.mjs` 三方合并 | 无冲突自动融合；冲突留本地版并将 `.upstream`/`.pf-conflict` 迁至仓外冲突目录（`.agents/skills/` 零残留） |
+| 已通过 `--adopt-custom` 豁免 | 记入 `customizedFiles`，上游未改时 `--check` 返回 `0` | 上游改版时先按 `upstreamSha256` 尝试三方融合（相等即清理豁免），无法合并则入 `pendingConflicts` |
 | 新版已移除的退役托管文件 | 未改则物理删除；曾改则保留并标 `orphaned-modified` | 绝不误删用户改过的资产 |
 | 升级后 ESM 语法或导出校验失败 | `scripts/lib/equip-integrity.mjs` 触发整包回滚 | 从写前仓外 `.zip` 快照瞬时恢复 |
 

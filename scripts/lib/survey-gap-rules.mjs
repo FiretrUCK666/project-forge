@@ -155,7 +155,7 @@ export const GAP_RULES = [
     id: 'kit.drifted',
     when: (f) => f.kit?.manifestExists === true
       && (f.kit?.corrupted === true || (f.kit?.missingFiles?.length ?? 0) > 0),
-    text: '受管 .agents/skills/ 清单损坏或缺少托管文件 —— 运行 equip.mjs 可恢复完整套件',
+    text: '受管 .agents/skills/ 清单损坏或存在未登记墓碑的缺失文件 —— 运行 equip.mjs 将登记 v3 删除墓碑（不写回用户删掉的文件）；清单损坏需修复，未经人点头严禁自动执行 --restore',
     review: 'kit.drifted',
   },
 ]

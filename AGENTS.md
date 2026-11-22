@@ -117,6 +117,8 @@ do-not-edit: docs/archive/, docs/release-notes/
 node scripts/dev/preflight.mjs # 结构 + 引用 + 模板 + 自举 + 端到端冒烟
 node scripts/dev/gap-coverage.mjs # survey 缺口与 review 结论配对检查
 node scripts/dev/fixtures.mjs # 正反双向行为断言
+node scripts/dev/bench.mjs # 核心命令与快照性能基准
+node scripts/dev/e2e-zip-harness.mjs # 真包解压 E2E 沙盒全链路实证
 node scripts/compose-agents.mjs . --check # 本仓契约校验（<= 30KB，建议 < 24KB）
 node scripts/equip.mjs . --check # kit/skills 与 .agents/skills 字节级一致
 node scripts/review.mjs . # 交付体检，预期 0 个「缺」
@@ -124,14 +126,14 @@ node scripts/sync-toc.mjs README.md README.en.md --check # 双语 README 目录�
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
 ```
 
-导出包与注入验证（用完删临时文件）：
+导出包与注入验证（用完删临时文件；CI 中执行 node scripts/dev/preflight.mjs --package "${{ runner.temp }}/package-list.txt"）：
 
 ```sh
 git archive --format=tar -o "$TMPDIR/pf-pkg.tar" HEAD && tar -tf "$TMPDIR/pf-pkg.tar" > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt
-node scripts/dev/verify-injections.mjs
+node scripts/dev/verify-injections.mjs --jobs 4
 ```
 
-**跑出来的才算做完（改运行态须跑通 `smoke-verify` 并附 `--e2e-evidence`，异常自动写信号脱敏建单）**——未拿到实际通过输出，不得声称「已验证」。
+**形式门禁通过且真实运行/E2E 观察达标（改运行态且 `smoke-verify` 非 `none` 须跑通并附 `--e2e-evidence`；UI 须走通交互核浅深色图；异常自动脱敏建单）才算做完**——无实证不得声称「已验证」。
 <!-- project-forge: end 构建与验证 -->
 
 <!-- project-forge: begin 修改守则 -->

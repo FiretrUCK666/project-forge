@@ -5,7 +5,7 @@ status: approved
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
-issue: null
+issue: 134
 pr: null
 branch: feat/w4b-govern-evergreen
 owner: plan-harness
@@ -14,7 +14,7 @@ approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-harness-r3, round=3, sha=4c429a59f9ce, summary=R3 independent critique pass: 0 blockers)"
 related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md
-related_todo: ../todo/261122-w4b-govern-evergreen-todo.md
+related_todo: ../todo/261122-issue134-w4b-govern-evergreen-todo.md
 high_risk_paths: [AGENTS.md, templates/]
 task_id: w4b-govern-evergreen
 depends_on: [w4a-harness-core]
@@ -23,7 +23,7 @@ scope_files: [docs/TDD.md, docs/feature-map.json, AGENTS.md, templates/agents-pr
 
 # Wave 2: 基于升级工具的长青文档系统与功能地图刷新 — 功能设计规范（SPEC）
 
-> 所属总控 PRD：[Wave 4 总控 PRD](../prd/261122-w4-harness-and-evergreen-prd.md) ｜ 配对 Todo：[w4b-govern-evergreen Todo](../todo/261122-w4b-govern-evergreen-todo.md)
+> 所属总控 PRD：[Wave 4 总控 PRD](../prd/261122-w4-harness-and-evergreen-prd.md) ｜ 配对 Todo：[w4b-govern-evergreen Todo](../todo/261122-issue134-w4b-govern-evergreen-todo.md)
 >
 > 总控认领范围：认领总控 `C6`、`C7`（严格在 Wave 1 `w4a-harness-core` 合并 `main` 后执行）。
 
@@ -112,8 +112,8 @@ flowchart LR
 
 <!-- section: acceptance -->
 <!-- criteria:start -->
-- [ ] C6: `docs/TDD.md` 经升级版 `dev-govern` 与 `dev-explore` 核实后完成全景刷新：补齐 L1–L4 全量真实模块路径与统计（含 `w4a-harness-core` 新增原语），图 1/图 4/图 5 均反映最新闭环且通过 Mermaid `16/12` 宽度校验，通过 `doc-plan.mjs audit .`、`tdd-structure` 与 `tdd-parity` 全绿。
-- [ ] C7: `docs/feature-map.json` 全量功能域 `docAnchor` 非空且锚点真实可达，`skill` 补齐 `verificationTools`，`check`/`release` 补齐 `testRefs`，`w4a-harness-core` 新增原语与 `assets/readme/*.svg` 均全映射；`AGENTS.md` 消除 `review.mjs .` 校验命令脱节且 `< 24576B`；最终实跑 `verify-tools.mjs audit .` 返回 `Status: OK | StaleTools: 0 | BlindSpots: 0 | Zombies: 0`，`govern-audit.mjs reconcile . --json` 返回 `unmappedSourceModules: []`、`missingEntryPaths: []` 且 `govern-audit.mjs audit . --strict` 与 `preflight.mjs` 全绿。
+- [x] C6: `docs/TDD.md` 经升级版 `dev-govern` 与 `dev-explore` 核实后完成全景刷新：补齐 L1–L4 全量真实模块路径与统计（含 `w4a-harness-core` 新增原语），图 1/图 4/图 5 均反映最新闭环且通过 Mermaid `16/12` 宽度校验，通过 `doc-plan.mjs audit .`、`tdd-structure` 与 `tdd-parity` 全绿。
+- [x] C7: `docs/feature-map.json` 全量功能域 `docAnchor` 非空且锚点真实可达，`skill` 补齐 `verificationTools`，`check`/`release` 补齐 `testRefs`，`w4a-harness-core` 新增原语与 `assets/readme/*.svg` 均全映射；`AGENTS.md` 消除 `review.mjs .` 校验命令脱节且 `< 24576B`；最终实跑 `verify-tools.mjs audit .` 返回 `Status: OK | StaleTools: 0 | BlindSpots: 0 | Zombies: 0`，`govern-audit.mjs reconcile . --json` 返回 `unmappedSourceModules: []`、`missingEntryPaths: []` 且 `govern-audit.mjs audit . --strict` 与 `preflight.mjs` 全绿。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

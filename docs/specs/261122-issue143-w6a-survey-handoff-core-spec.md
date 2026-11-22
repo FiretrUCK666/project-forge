@@ -44,6 +44,9 @@ scope_files:
   - .agents/skills/lib/git-core.mjs
   - .agents/skills/lib/profile-sniffer.mjs
   - .agents/skills/lib/profile-sniffer-packages.mjs
+  - .agents/skills/.pf-manifest.json
+  - AGENTS.md
+  - scripts/dev/cli-parity.mjs
   - scripts/dev/fixtures-w6a-survey-handoff.mjs
   - scripts/dev/fixtures-flow-parallel.mjs
   - scripts/dev/injections-data-w6a.mjs
@@ -121,7 +124,7 @@ flowchart LR
    - `git-core.mjs` 的 `readTextSafe(filePath, maxBytes = 512 * 1024)` 保持默认安全限同时支持传入 `Infinity`（或新增 `readJsonSafe(filePath, maxBytes)`），`scripts/backup.mjs` 在读写备份索引 `index.json` 时显式取消 512KB 读取截断上限并精简冗余条目元数据，确保大仓任意体积 `index.json` 可完整 `list` / `restore`。
    - `scripts/handoff.mjs` 重构 `--verify` 覆盖与净度判定：
      - `walk(root)` 显式跳过锁文件（`*-lock.*`、`*.lock` 及 `LOCKFILE_NAMES`）、非工程大数据静态文件（`.svg`/`.map`/`.min.*`/静态数据资产超过 `MAX_BYTES` 不再置位 `truncated = true`）及合法/有意符号链接（如指向仓内或依赖目录的已知软链不计入 `truncated` 退出码 `3`，仍记录于 `scanCoverage` 统计字段）。
-     - 新增 `--strict-clean` 开关并明确受管态契约：当仓库存在有效 `.agents/skills/.pf-manifest.json` 且未传入 `--strict-clean` 时，持续 `--upgrade` 受管态的 `AGENTS.md` 受管区间标记（`begin`/`end`）不导致 `--verify` 返回退出码 `1`（仅报告未填 `fill`、残留 `.tmp-*` 与悬空内部指针）；传入 `--strict-clean` 时要求彻底剥离全部标记（返回 `1`）。
+     - 新增 `--strict-clean` 开关并明确受管态契约：当仓库存在有效 `.agents/skills/.pf-manifest.json` 且未传入 `--strict-clean` 时，持续 `--upgrade` 受管态的 `AGENTS.md` 受管区间标记（`begin`/`end`）不导致 `--verify` 返回退出码 `1`（仅报告未填 `fill`、残留 `.tmp-*` 与悬空内部指针）；传入 `--strict-clean` 时要求彻底剥离全部标记（返回 `1`）；同步在 `scripts/dev/cli-parity.mjs` 的 `HAND_ROLLED_SPECS`（`scripts/handoff.mjs` 条目 `registered`/`declared`）登记 `'strict-clean'`，确保 `auditHandRolled` 对拍通过。
 
 5. **凭据正文精确判定与 `git.output-dirs` 放行修复（`kit/skills/lib/credential-scan.mjs`、`scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-workspace-secrets.mjs`(new)、`scripts/review.mjs`）**：
    - 将 `survey-workspace.mjs`（722 行）的凭据/泄露/输出目录判定拆出至 `scripts/lib/survey-workspace-secrets.mjs`(new)，保持两文件各自 `< 550` 行。
@@ -133,7 +136,7 @@ flowchart LR
 
 6. **受管 `AGENTS.md` 骨架瘦身、消除指导语泄漏与大小写/软链兼容（`templates/agents-project.md`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/compose-agents.mjs`、`scripts/lib/compose-agents-helpers.mjs`(new)、`scripts/lib/protocol.mjs`）**：
    - 将 `scripts/compose-agents.mjs`（693 行）拆出 `resolveAgentsPath(root)`、大小写/软链保真读写与 `--upgrade`/`--adopt-custom` 辅助至 `scripts/lib/compose-agents-helpers.mjs`(new)。
-   - 精简 `templates/agents-project.md` 受管模板文本：压缩重复话术与冗长示例，使新渲染的受管空骨架严格 `< 16KB`（实测目标约 10-14KB），让既有 ~14KB 存量 `AGENTS.md` 执行 `--upgrade` 后稳居 `30720 B` 上限之下（`<= 28KB`）可无损追加。
+   - 精简 `templates/agents-project.md` 受管模板文本：压缩重复话术与冗长示例，使新渲染的受管空骨架严格 `< 16KB`（实测目标约 10-14KB），让既有 ~14KB 存量 `AGENTS.md` 执行 `--upgrade` 后稳居 `30720 B` 上限之下（`<= 28KB`）可无损追加；改完 `templates/agents-project.md` 后**必须**运行 `node scripts/compose-agents.mjs .` 同步本仓 `AGENTS.md` 的非 `customized` 受管区间（`意图路由`/`行事总纲`/`上下文阅读护栏`/`架构与关键不变量`/`修改守则`/`版本与发布`/`日常协作与风险分流`），并明确保留 `scripts/dev/preflight-suite.mjs:555`（`checkTeamAndTddContracts` 必检词：`团队`、`协作者`、`--probe-auth`、`接管`、`CODEOWNERS`）与 `scripts/dev/preflight-contract-rules.mjs`（`PUSH_TIER_DOCS` / `FINISH_SITES` 7 步收尾结构与命令）的必检契约。
    - 彻底消除 AI 指导语泄漏：
      - 从 `templates/agents-project.md` 移除 `{{CONVENTIONS_HINT}}` 与「目录结尾带 /，单文件不带；默认至少含…」指导句；同步从 `scripts/lib/protocol.mjs` `TEMPLATE_VARS` 移除 `'CONVENTIONS_HINT'`（并顺带把 `protocol.mjs:176` 的 `曾经` 改写为现状描述）；
      - `scripts/lib/equip-bootstrap.mjs` 移除 `- 暂未追加额外项目特有红线（需要时直接在本节增补并删除本句）。` 占位句，改为保留结构化空节或简短客观说明；
@@ -156,9 +159,9 @@ flowchart LR
 
 1. 升级基础原语：`kit/skills/lib/git-core.mjs`（`readTextSafe`/`readJsonSafe` 无上限支持、`matchGlobList` 负向 `!` glob）、`kit/skills/lib/credential-scan.mjs`（动态 PEM 插值识别）。
 2. 拆小并重构发现层：`kit/skills/lib/profile-sniffer-packages.mjs`(new)、`kit/skills/lib/profile-sniffer.mjs`、`scripts/lib/survey-ecosystem.mjs`、`scripts/lib/survey-docs.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/lib/survey-workspace-secrets.mjs`(new)、`scripts/lib/survey-workspace.mjs`。
-3. 更新入口层：`scripts/survey.mjs`（去 S1 写入）、`scripts/backup.mjs`、`scripts/handoff.mjs`、`scripts/review.mjs`、`scripts/equip.mjs`、`scripts/lib/render.mjs`。
-4. 瘦身契约模板与合成器：`templates/agents-project.md`、`scripts/lib/protocol.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/lib/compose-agents-helpers.mjs`(new)、`scripts/compose-agents.mjs`。
-5. 同步 `.agents/skills/`（`node scripts/equip.mjs .`），编写 `scripts/dev/fixtures-w6a-survey-handoff.mjs`(new)、更新 `scripts/dev/fixtures-flow-parallel.mjs` 与 `scripts/dev/injections-data-w6a.mjs`(new)，跑通全量门禁。
+3. 更新入口层：`scripts/survey.mjs`（去 S1 写入）、`scripts/backup.mjs`、`scripts/handoff.mjs`、`scripts/dev/cli-parity.mjs`（`HAND_ROLLED_SPECS` 登记 `strict-clean`）、`scripts/review.mjs`、`scripts/equip.mjs`、`scripts/lib/render.mjs`。
+4. 瘦身契约模板与合成器：`templates/agents-project.md`、`scripts/lib/protocol.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/lib/compose-agents-helpers.mjs`(new)、`scripts/compose-agents.mjs`，并运行 `node scripts/compose-agents.mjs .` 同步本仓 `AGENTS.md`。
+5. 同步 `.agents/skills/`（`node scripts/equip.mjs .`，含派生清单 `.agents/skills/.pf-manifest.json`），编写 `scripts/dev/fixtures-w6a-survey-handoff.mjs`(new)、更新 `scripts/dev/fixtures-flow-parallel.mjs` 与 `scripts/dev/injections-data-w6a.mjs`(new)，跑通全量门禁。
 
 ## 三、备选方案与否决理由
 
@@ -173,10 +176,10 @@ flowchart LR
 | --- | --- | --- | --- |
 | `scripts/lib/survey-docs.mjs` & `scripts/lib/survey-gap-rules.mjs` & `scripts/review.mjs` | 修改 | job 级 `pull_request_target`、现代发布模式、hooks 探测、`secrets-are-placeholders` 接入两档 | `survey.mjs`、`review.mjs` |
 | `scripts/lib/survey-ecosystem.mjs` & `kit/skills/lib/profile-sniffer.mjs` & `kit/skills/lib/profile-sniffer-packages.mjs`(new) & `kit/skills/lib/git-core.mjs` | 修改/新增 | `.slnx`/`jsr.json`/`deno.json`/`!` glob/`hasManifest`、`Benchmarks`/`MinVer` 修正、Linter 探测 | 勘察、多生态发现、`dev-explore`/`dev-govern` |
-| `scripts/survey.mjs` & `scripts/backup.mjs` & `scripts/handoff.mjs` & `scripts/equip.mjs` & `scripts/lib/render.mjs` & `scripts/lib/text.mjs` | 修改 | S1 零写入、`backup` 取消 512KB 上限、`handoff` 锁文件/大文件/软链豁免及 `--strict-clean`、equip 输出 Linter 隔离建议 | 外部项目接入、交棒与回滚 |
+| `scripts/survey.mjs` & `scripts/backup.mjs` & `scripts/handoff.mjs` & `scripts/dev/cli-parity.mjs` & `scripts/equip.mjs` & `scripts/lib/render.mjs` & `scripts/lib/text.mjs` | 修改 | S1 零写入、`backup` 取消 512KB 上限、`handoff` 锁文件/大文件/软链豁免及 `--strict-clean`（并入 `HAND_ROLLED_SPECS`）、equip 输出 Linter 隔离建议 | 外部项目接入、交棒与回滚 |
 | `kit/skills/lib/credential-scan.mjs` & `scripts/lib/survey-workspace.mjs` & `scripts/lib/survey-workspace-secrets.mjs`(new) | 修改/新增 | 动态 `${...}` PEM 豁免、`.env*` 扫描、`git.output-dirs` 跳过跟踪及 `!` 放行目录 | 凭据扫描与忽略检测 |
-| `templates/agents-project.md` & `scripts/lib/agents-defaults.mjs` & `scripts/lib/equip-bootstrap.mjs` & `scripts/compose-agents.mjs` & `scripts/lib/compose-agents-helpers.mjs`(new) & `scripts/lib/protocol.mjs` | 修改/新增 | 空骨架 `< 16KB`、清零指导语泄漏、小写/软链 `agents.md` 保留 | `compose-agents` 与 `equip` |
-| `.agents/skills/lib/*` & `scripts/dev/fixtures-w6a-survey-handoff.mjs`(new) & `scripts/dev/fixtures-flow-parallel.mjs` & `scripts/dev/injections-data-w6a.mjs`(new) | 修改/新增 | 同步 `.agents/skills/`、补全正反双向测试与故障注入 | 回归与故障注入门禁 |
+| `templates/agents-project.md` & `AGENTS.md` & `scripts/lib/agents-defaults.mjs` & `scripts/lib/equip-bootstrap.mjs` & `scripts/compose-agents.mjs` & `scripts/lib/compose-agents-helpers.mjs`(new) & `scripts/lib/protocol.mjs` | 修改/新增 | 空骨架 `< 16KB`、清零指导语泄漏、小写/软链 `agents.md` 保留、`compose-agents .` 同步本仓 `AGENTS.md` | `compose-agents` 与 `equip` |
+| `.agents/skills/lib/*` & `.agents/skills/.pf-manifest.json` & `scripts/dev/fixtures-w6a-survey-handoff.mjs`(new) & `scripts/dev/fixtures-flow-parallel.mjs` & `scripts/dev/injections-data-w6a.mjs`(new) | 修改/新增 | 同步 `.agents/skills/`（含派生清单）、补全正反双向测试与故障注入 | 回归与故障注入门禁 |
 
 - **对外可见的变化**：`handoff.mjs` 新增 `--strict-clean` 选项与无损持续 `--upgrade` 兼容语义；新生成 `AGENTS.md` 受管骨架体积降至 `< 16KB` 且不含 AI 指导语；`survey()` 不再写入 `session-state.json`。
 - **需要同步改的地方**：`scripts/equip.mjs .` 同步 `.agents/skills/lib/`；本切片测试写入 `scripts/dev/fixtures-w6a-survey-handoff.mjs`(new) 与 `scripts/dev/injections-data-w6a.mjs`(new)。
@@ -185,10 +188,10 @@ flowchart LR
 
 - [ ] C1: `scripts/lib/survey-docs.mjs`、`scripts/lib/survey-gap-rules.mjs` 与 `scripts/review.mjs` 按工作流文件+job 粒度结构化判定 `pull_request_target` 与不安全 PR checkout，豁免 `pull_request.number` 与 `# zizmor: ignore[dangerous-triggers]`；补齐 `uv publish`、`dotnet ... publish`、`jsr publish`、`vp pack` 与 `simple-git-hooks` / `.git/hooks/*` 检测（由 `node scripts/dev/fixtures.mjs --domain w6a-survey-handoff` 实证）。
 - [ ] C2: `scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs`、`scripts/lib/agents-defaults.mjs` 与 `kit/skills/lib/git-core.mjs` 支持 `.slnx`、`jsr.json` / `deno.json`、`pnpm-workspace.yaml` 继承、`!` 负向 glob 与 `hasManifest` 边界（消除 80 子包爆炸、`Benchmarks` 误选 `dotnet test`、`*.csproj` 覆盖 `MinVer`）；`equip.mjs` / `survey.mjs` 探测根 Linter/Formatter 输出 `.agents/` 忽略隔离方案；`survey()` 严格零写入（取消误写 `session-state.json`）。
-- [ ] C3: `scripts/backup.mjs` 取消 512KB `index.json` 读取截断上限（支持任意体积与精简条目元数据）；`scripts/handoff.mjs` `--verify` 对锁文件（`*-lock.*`、`*.lock`）、大数据非工程文件及有意软链不计入 `truncated` 退出码 `3`，并区分持续 `--upgrade` 受管态（通过）与 `--strict-clean`（要求剥离）。
+- [ ] C3: `scripts/backup.mjs` 取消 512KB `index.json` 读取截断上限（支持任意体积与精简条目元数据）；`scripts/handoff.mjs` `--verify` 对锁文件（`*-lock.*`、`*.lock`）、大数据非工程文件及有意软链不计入 `truncated` 退出码 `3`，区分持续 `--upgrade` 受管态（通过）与 `--strict-clean`（要求剥离），并在 `scripts/dev/cli-parity.mjs` 的 `HAND_ROLLED_SPECS` 登记 `--strict-clean`。
 - [ ] C4: `kit/skills/lib/credential-scan.mjs`、`scripts/lib/survey-workspace.mjs` 与 `scripts/review.mjs` 识别 `${...}` 动态 PEM 模板字面量、扫描 `.env*` 测试夹具正文、为 `secrets.tracked` 与 `secrets.exposed` 统一接入 `decision: 'secrets-are-placeholders'`，且 `git.output-dirs` 跳过全部受 Git 跟踪或 `.gitignore` `!` 显式放行的目录。
-- [ ] C5: `templates/agents-project.md`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/equip-bootstrap.mjs` 与 `scripts/compose-agents.mjs` 精简受管模板骨架（落盘空骨架 `< 16KB`，14KB 存量 `AGENTS.md` 可无损 `--upgrade`），彻底消除 `CONVENTIONS_HINT` / `暂未追加...` / `目录结尾带 /...` 等 AI 指导语泄漏并保留既有小写 `agents.md` / 软链指向；全部新增/修改 `.mjs` 文件严格 `<= 800` 行。
-- [ ] C6: Slice 6A 正反双向夹具（`scripts/dev/fixtures-w6a-survey-handoff.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6a.mjs`(new)）且 `.agents/skills/` 同步一致，`node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs --jobs 6` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿。
+- [ ] C5: `templates/agents-project.md`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/equip-bootstrap.mjs` 与 `scripts/compose-agents.mjs` 精简受管模板骨架（落盘空骨架 `< 16KB`，14KB 存量 `AGENTS.md` 可无损 `--upgrade`），彻底消除 `CONVENTIONS_HINT` / `暂未追加...` / `目录结尾带 /...` 等 AI 指导语泄漏并保留既有小写 `agents.md` / 软链指向；同步运行 `node scripts/compose-agents.mjs .` 对齐本仓 `AGENTS.md`（保留 `preflight-suite.mjs` 与 `preflight-contract-rules.mjs` 必检契约及 7 步结构）；全部新增/修改 `.mjs` 文件严格 `<= 800` 行。
+- [ ] C6: Slice 6A 正反双向夹具（`scripts/dev/fixtures-w6a-survey-handoff.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6a.mjs`(new)）且 `.agents/skills/`（含 `.agents/skills/.pf-manifest.json`）同步一致，`node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs --jobs 6` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -198,7 +201,7 @@ flowchart LR
 
 ## 澄清与补充记录
 
-- 已定（2026-11-22）：`scripts/lib/protocol.mjs` 与 `kit/skills/lib/credential-scan.mjs` / `kit/skills/lib/git-core.mjs` 均由 6A 独占修改，6B/6C 仅复用其导出符号，零文件重叠。
+- 已定（2026-11-22）：`scripts/lib/protocol.mjs`、`scripts/dev/cli-parity.mjs`、`AGENTS.md` 与 `kit/skills/lib/credential-scan.mjs` / `kit/skills/lib/git-core.mjs` 均由 6A 独占修改，6B/6C 仅复用其导出符号；`.agents/skills/.pf-manifest.json` 属 `DERIVED_MANIFEST_PATHS` 派生清单，由 6A/6B/6C 按 `depends_on` 顺序通过 `node scripts/equip.mjs .` 更新。
 
 ## 实现说明
 

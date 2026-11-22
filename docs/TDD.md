@@ -81,7 +81,7 @@ flowchart LR
 产品层内部按四层单向依赖组织，共享底层原语统一收敛在 `kit/skills/lib/` 作为唯一真源，`scripts/lib/` 仅在安装期复用或做薄重导出，禁止反向被 `kit/` 引用：
 
 1. **L1 基础原语层**：`kit/skills/lib/exec.mjs`、`git-core.mjs`、`git-worktree-env.mjs`、`git.mjs`、`git-index-fast.mjs`、`git-fast-objects.mjs`、`git-fast.mjs`、`git-status-fast.mjs`、`markdown-scan.mjs`、`scripts/zip.mjs`、`scripts/backup.mjs`。提供跨平台无弹窗命令执行、Worktree 共享环境计算、`withFileLock` 并发文件锁、零子进程 Git 对象与状态解析、围栏感知 Markdown 扫描及纯内置 `node:zlib` 的 `.zip` 快照读写。
-2. **L2 环境与拓扑抽象层**：`kit/skills/lib/platform-probe.mjs`、`platform-registry.mjs`、`platform.mjs`、`github-parse.mjs`、`github-labels.mjs`、`github-client.mjs`、`local-issues.mjs`、`task-backend.mjs`、`task-backend-local.mjs`、`issue-template-hydrate.mjs`、`task-graph.mjs`、`profile-sniffer.mjs`、`profile.mjs`、`doc-locator.mjs`、`intake-triage.mjs`、`docs.mjs`、`doc-templates.mjs`。提供惰性平台探测、双端统一平台注册表、本地原子工单库、统一 `TaskBackend` 注册表分发、四路 Issue 模板统一水合、外部阻塞与堆叠图谱、零写入按需定位器与命令嗅探。
+2. **L2 环境与拓扑抽象层**：`kit/skills/lib/platform-probe.mjs`、`kit/skills/lib/platform-registry.mjs`、`platform.mjs`、`github-parse.mjs`、`github-labels.mjs`、`github-client.mjs`、`local-issues.mjs`、`task-backend.mjs`、`task-backend-local.mjs`、`issue-template-hydrate.mjs`、`task-graph.mjs`、`profile-sniffer.mjs`、`profile.mjs`、`doc-locator.mjs`、`intake-triage.mjs`、`docs.mjs`、`doc-templates.mjs`。提供惰性平台探测、双端统一平台注册表、本地原子工单库、统一 `TaskBackend` 注册表分发、四路 Issue 模板统一水合、外部阻塞与堆叠图谱、零写入按需定位器与命令嗅探。
 3. **L3 纯策略与状态机层**：`kit/skills/lib/workflow-policy.mjs`、`workflow-policy-next.mjs`、`plan-sync.mjs`、`plan-exit-gate.mjs`、`doc-slice-graph.mjs`、`empirical-artifacts.mjs`、`workflow-helpers.mjs`、`handoff-package.mjs`、`static-gates.mjs`、`static-gates-lexer.mjs`、`static-gates-comment-hygiene.mjs`、`ledger.mjs`、`exit-codes.mjs`、`gate-truth.mjs`、`evidence-substance.mjs`。提供三正交风险判定、单入口下一跳路由、规划退场白名单、单一三态切片依赖图、实证附件与视觉检查、瘦身交接包及词法静态门禁。
 4. **L4 CLI 入口与安装器层**：`kit/skills/*/scripts/*.mjs` 与 `scripts/*.mjs`。负责参数解析、调用 L3 决策与执行 L1/L2 副作用；首次配置、模板渲染与跨版本升级逻辑放在 `scripts/lib/`，保持 `.agents/skills/` 被复制到任意外部仓库后 100% 自包含可运行。
 
@@ -107,7 +107,7 @@ flowchart LR
 | `kit/skills/dev-govern/` | 产品层 | 只读静态体检、三层常青文档与工作树巡检、信号聚类、三层倒金字塔复盘与发版筹备（`govern-audit.mjs`、`govern-retro.mjs`） |
 | `kit/skills/dev-iterate/` | 产品层 | 盲区与热点识别、原生测试生成（过 `edit-gate`）、并发压测、缺陷升级建单与有界优化循环（`iterate.mjs`、`iterate-cycle.mjs`） |
 | `assets/readme/` | 产品层 | 双语 README 浅深色自适应 SVG 图解 |
-| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（`preflight.mjs`、`fixtures.mjs`、`fixtures-repo-alignment.mjs`、`verify-injections.mjs`、`injections-data-repo-alignment.mjs`、`bench.mjs`、`merge-gate.mjs` 等） |
+| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（`scripts/dev/preflight.mjs`、`scripts/dev/fixtures.mjs`、`scripts/dev/fixtures-repo-alignment.mjs`、`scripts/dev/verify-injections.mjs`、`scripts/dev/injections-data-repo-alignment.mjs`、`scripts/dev/bench.mjs`、`scripts/dev/merge-gate.mjs` 等） |
 
 ### 模块分层与禁引规则
 

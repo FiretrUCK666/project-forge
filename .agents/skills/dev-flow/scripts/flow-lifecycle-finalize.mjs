@@ -47,6 +47,7 @@ export function syncSpecBodyStatusTable(specText, {
 } = {}) {
   const raw = String(specText ?? '')
   if (!raw) return raw
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n'
   const lines = raw.replace(/\r\n/g, '\n').split('\n')
   const out = []
   let inTable = false
@@ -84,19 +85,23 @@ export function syncSpecBodyStatusTable(specText, {
     } else if (critiquePassed && /^(?:负责人\s*\/\s*内审状态|内审状态)$/i.test(key)) {
       nextVal = nextVal.replace(/`pending`/i, '`passed`')
     } else if ((prdRel || todoRel) && /^(?:关联\s*PRD\s*\/\s*Todo|关联文档)$/i.test(key)) {
-      const parts = nextVal.split('/').map((s) => s.trim())
+      const parts = nextVal.split(/\s+\/\s+/).map((s) => s.trim())
       if (parts.length >= 2) {
         const nextPrd = prdRel ? `\`${posixPath(prdRel)}\`` : parts[0]
-        const nextTodo = todoRel ? `\`${posixPath(todoRel)}\`` : parts[1]
+        const nextTodo = todoRel ? `\`${posixPath(todoRel)}\`` : parts.slice(1).join(' / ')
         nextVal = `${nextPrd} / ${nextTodo}`
+      } else if (prdRel && todoRel) {
+        nextVal = `\`${posixPath(prdRel)}\` / \`${posixPath(todoRel)}\``
       } else if (prdRel) {
         nextVal = `\`${posixPath(prdRel)}\``
+      } else if (todoRel) {
+        nextVal = `${parts[0] || '未关联'} / \`${posixPath(todoRel)}\``
       }
     }
     out.push(`${prefix}${nextVal}${suffix}`)
   }
-  const joined = out.join('\n')
-  return raw.endsWith('\n') && !joined.endsWith('\n') ? `${joined}\n` : joined
+  const joined = out.join(eol)
+  return raw.endsWith('\n') && !joined.endsWith('\n') ? `${joined}${eol}` : joined
 }
 
 function syncSpecStatusTableOnDisk(implRoot, specRel, { today, prdRel, todoRel }) {

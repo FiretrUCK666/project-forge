@@ -193,6 +193,16 @@ export function registerW6cHarnessGatesCases(cases) {
       if (!synced.includes('| 当前状态 | `implemented`') || !synced.includes('`2026-11-20` / `2026-11-22`') || !synced.includes('`passed`') || !synced.includes('`docs/archive/todo/t.md`')) {
         return `syncSpecBodyStatusTable 未正确同步正文状态表：\n${synced}`
       }
+      // 幂等性校验：仅传入 prdRel（todoRel: null）且原始单元格含路径斜杠时，二次运行不得发生漂移
+      const prdOnly1 = syncSpecBodyStatusTable(rawSpec.replace('`docs/prd/m.md` / `docs/todo/t.md`', '未关联'), {
+        status: 'implemented', today: '2026-11-22', prdRel: 'docs/prd/m.md', todoRel: null, critiquePassed: true,
+      })
+      const prdOnly2 = syncSpecBodyStatusTable(prdOnly1, {
+        status: 'implemented', today: '2026-11-22', prdRel: 'docs/prd/m.md', todoRel: null, critiquePassed: true,
+      })
+      if (prdOnly1 !== prdOnly2 || prdOnly1.includes('/ prd')) {
+        return `syncSpecBodyStatusTable 含路径斜杠时二次运行非幂等：\n1:\n${prdOnly1}\n2:\n${prdOnly2}`
+      }
       return true
     } finally { rmTree(dir) }
   }])

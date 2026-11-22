@@ -131,7 +131,7 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, env = p
       })
       return
     }
-    drifted.push(verdict.blocking ? { path: rel, state: verdict.state, fixHint: verdict.fixHint } : rel)
+    drifted.push(verdict.fixHint ? { path: rel, state: verdict.state, fixHint: verdict.fixHint } : rel)
   }
 
   for (const [rel, src] of kitFiles.entries()) {

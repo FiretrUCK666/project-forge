@@ -6,14 +6,13 @@
  * 每条判据都配正反双向用例：正例证明改法成立，反例证明不会为了变绿而放宽。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { mkdtempSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
 import {
-  gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, runNode, tmpProject,
+  gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, runNode, SKILL_ROOT, tmpProject,
 } from './fixtures-helpers.mjs'
 
 const SKILL_CMD_RE = /\.agents[\\/]skills[\\/]/
@@ -679,6 +678,55 @@ export function registerFlowDefectsCases(cases) {
       if (afterAdopt.status !== 0) return `登记定制后 --check 仍退非零：exit=${afterAdopt.status} ${String(afterAdopt.stderr).slice(0, 300)}`
       return true
     } finally { rmTree(dir) }
+  }])
+
+  cases.push(['C4b --check 精确区分「上游已更新」「双端均有修改」「本地已改且上游未变」', async () => {
+    const dir = makeDir({ 'README.md': '# c4b\n' })
+    const v1Kit = makeDir()
+    const v2Kit = makeDir()
+    try {
+      cpSync(join(SKILL_ROOT, 'kit', 'skills'), v1Kit, { recursive: true })
+      cpSync(v1Kit, v2Kit, { recursive: true })
+      gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
+
+      const initRes = await runAbsAsync('scripts/equip.mjs', [dir, '--kit-dir', v1Kit, '--no-backup'], {})
+      if (initRes.status !== 0) return `v1 首次装配失败：exit=${initRes.status} ${String(initRes.stderr).slice(0, 200)}`
+
+      // 1) 正例 UPSTREAM_AHEAD：仅上游更新 dev-explore/SKILL.md，本地未改
+      const v2Explore = join(v2Kit, 'dev-explore', 'SKILL.md')
+      writeFileSync(v2Explore, `${readFileSync(v2Explore, 'utf8')}\n# upstream-v2\n`)
+      const upCheck = await runAbsAsync('scripts/equip.mjs', [dir, '--check', '--kit-dir', v2Kit], {})
+      if (upCheck.status !== 3) return `UPSTREAM_AHEAD --check 退出码应为 3，实际=${upCheck.status}`
+      const upReport = `${upCheck.stdout}${upCheck.stderr}`
+      if (!/上游已更新（本地未改）/.test(upReport) || !upReport.includes('equip.mjs')) {
+        return `UPSTREAM_AHEAD 报告缺少状态或升级指引：${upReport.slice(0, 300)}`
+      }
+      if (/本地已改且上游未变/.test(upReport)) {
+        return `未改本地文件竟被误判为「本地已改且上游未变」：${upReport.slice(0, 300)}`
+      }
+
+      // 2) 正例 BOTH_MODIFIED + 3) 反例 LOCAL_AHEAD
+      const localEdit = join(dir, '.agents', 'skills', 'dev-edit', 'SKILL.md')
+      writeFileSync(localEdit, `${readFileSync(localEdit, 'utf8')}\n# local-edit\n`)
+      const v2Edit = join(v2Kit, 'dev-edit', 'SKILL.md')
+      writeFileSync(v2Edit, `${readFileSync(v2Edit, 'utf8')}\n# upstream-edit\n`)
+      const localReview = join(dir, '.agents', 'skills', 'dev-review', 'SKILL.md')
+      writeFileSync(localReview, `${readFileSync(localReview, 'utf8')}\n# local-review\n`)
+
+      const mixCheck = await runAbsAsync('scripts/equip.mjs', [dir, '--check', '--kit-dir', v2Kit], {})
+      if (mixCheck.status !== 3) return `混合状态 --check 退出码应为 3，实际=${mixCheck.status}`
+      const mixReport = `${mixCheck.stdout}${mixCheck.stderr}`
+      if (/本地已改且上游未变：dev-explore\/SKILL\.md/.test(mixReport)) {
+        return `dev-explore/SKILL.md 被误判为 LOCAL_AHEAD：${mixReport.slice(0, 400)}`
+      }
+      if (!/双端均有修改（待三方合并）：dev-edit\/SKILL\.md/.test(mixReport)) {
+        return `BOTH_MODIFIED 未正确报出 dev-edit/SKILL.md：${mixReport.slice(0, 400)}`
+      }
+      if (!/本地已改且上游未变：dev-review\/SKILL\.md/.test(mixReport) || !mixReport.includes('--restore') || !mixReport.includes('--adopt-custom')) {
+        return `LOCAL_AHEAD 未按预期报出 dev-review/SKILL.md 及修法：${mixReport.slice(0, 400)}`
+      }
+      return true
+    } finally { rmTree(dir); rmTree(v1Kit); rmTree(v2Kit) }
   }])
 
   cases.push(['C11 审计零目标输出未适用且退出码非零，有受管文档全通过时仍退零', async () => {

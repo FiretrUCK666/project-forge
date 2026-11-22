@@ -35,14 +35,20 @@ export function isCodeLikePath(relPath) {
 export const EQUIP_FILE_STATES = Object.freeze({
   SYNCED: '同步',
   EXEMPT_CUSTOM: '豁免定制',
+  UPSTREAM_AHEAD: '上游已更新（本地未改）',
   LOCAL_AHEAD: '本地已改且上游未变',
+  BOTH_MODIFIED: '双端均有修改（待三方合并）',
   THREE_WAY_CONFLICT: '三方冲突待裁决',
   MISSING: '缺失',
   EXTRA: '多余',
 })
 
-/** 判定为「需要处置」的状态：这两类之外的四种都不是收工态。 */
-const BLOCKING_STATES = new Set([EQUIP_FILE_STATES.LOCAL_AHEAD, EQUIP_FILE_STATES.THREE_WAY_CONFLICT])
+/** 判定为「需要处置」的阻塞状态：`UPSTREAM_AHEAD` 可直接 `equip` 无损升级，不属本地冲突阻塞。 */
+const BLOCKING_STATES = new Set([
+  EQUIP_FILE_STATES.LOCAL_AHEAD,
+  EQUIP_FILE_STATES.BOTH_MODIFIED,
+  EQUIP_FILE_STATES.THREE_WAY_CONFLICT,
+])
 
 /**
  * 单文件判定。纯函数：只吃哈希与登记项，不读盘、不写盘。
@@ -78,6 +84,14 @@ export function judgeManagedFile({
   if (customEntry && diskSha === customEntry.baseSha256 && customEntry.upstreamSha256 !== upstreamSha) {
     return { state: EQUIP_FILE_STATES.THREE_WAY_CONFLICT, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.THREE_WAY_CONFLICT, rel, hintOpts) }
   }
+  // 磁盘与清单基线一致、上游已有新版：本地未改，可直接无损升级。
+  if (baselineSha && diskSha === baselineSha && upstreamSha !== baselineSha) {
+    return { state: EQUIP_FILE_STATES.UPSTREAM_AHEAD, blocking: false, fixHint: fixHintFor(EQUIP_FILE_STATES.UPSTREAM_AHEAD, rel, hintOpts) }
+  }
+  // 磁盘与上游均相对清单基线有修改：待三方合并。
+  if (baselineSha && diskSha !== baselineSha && upstreamSha !== baselineSha) {
+    return { state: EQUIP_FILE_STATES.BOTH_MODIFIED, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.BOTH_MODIFIED, rel, hintOpts) }
+  }
   // 磁盘与清单基线不同、上游没改：本地改动被保留下来。
   if (baselineSha && diskSha !== baselineSha && upstreamSha === baselineSha) {
     return { state: EQUIP_FILE_STATES.LOCAL_AHEAD, blocking: true, fixHint: fixHintFor(EQUIP_FILE_STATES.LOCAL_AHEAD, rel, hintOpts) }
@@ -88,6 +102,12 @@ export function judgeManagedFile({
 /** 每类状态一句可执行修法：改了什么、三种合法处置各是什么。 */
 export function fixHintFor(state, rel = '', opts = {}) {
   const name = rel || '<该文件>'
+  if (state === EQUIP_FILE_STATES.UPSTREAM_AHEAD) {
+    return `${name} 本地未改、上游已有新版本。运行 node scripts/equip.mjs . 即可直接无损升级。`
+  }
+  if (state === EQUIP_FILE_STATES.BOTH_MODIFIED) {
+    return `${name} 本地与上游均相对基线有修改。运行 node scripts/equip.mjs . 将执行无损三方合并（非重叠改动自动合并；冲突时保留本地并在仓外生成对照，不污染源码）。`
+  }
   if (state === EQUIP_FILE_STATES.LOCAL_AHEAD) {
     return `${name} 磁盘版本与清单基线不同、上游未改。三种合法处置：`
       + `① 先复制一份你的版本留底，再 node scripts/equip.mjs . --restore ${name} 接受上游覆盖；`

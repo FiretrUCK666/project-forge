@@ -214,6 +214,7 @@ async function runScenarioBAndC(pkgRoot, sandbox, env, eng) {
   const filled = readFileSync(agentsPath, 'utf8')
     .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
     .replace('**提交纪律**：', '**提交纪律（项目定制）**：')
+    .replace(/<(?:填写|单文件|运行时|高风险|禁改|禁止|跨层)[^>]*>/g, 'none')
   writeFileSync(agentsPath, filled, 'utf8')
   if (runNodeScript(join(pkgRoot, 'scripts', 'compose-agents.mjs'), [repoB, '--check'], repoB, env).status === 0) {
     throw new Error('Scenario C customized section did not trigger --check drift before --adopt-custom')
@@ -254,28 +255,28 @@ async function runScenarioD(pkgRoot, sandbox, env) {
 
   const flowD1 = join(repoD1, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD1 = join(repoD1, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
-  const startD1 = JSON.parse(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--json'], repoD1, env).stdout)
-  if (!startD1.explored || startD1.explored.source !== 'flow-start') {
-    throw new Error(`Scenario D1 expected auto-explored evidence on start, got ${JSON.stringify(startD1.explored)}`)
+  const startD1 = JSON.parse(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--implementer', 'alice', '--json'], repoD1, env).stdout)
+  if (startD1.explored !== null) {
+    throw new Error(`Scenario D1 expected explored === null on start, got ${JSON.stringify(startD1.explored)}`)
   }
-  assertOk(runNodeScript(flowD1, ['claim', '--task', 'd1'], repoD1, env), 'Scenario D1 claim')
-  const preVerifyD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
-  if (preVerifyD1.phase === 'needs-explore') {
-    throw new Error(`Scenario D1 expected phase != needs-explore after auto-explore, got ${preVerifyD1.phase}`)
-  }
+  assertOk(runNodeScript(flowD1, ['claim', '--task', 'd1', '--agent', 'alice'], repoD1, env), 'Scenario D1 claim')
   const wtD1 = join(repoD1, '.worktrees', 'impl-d1')
   writeFiles(wtD1, { 'src/a.mjs': 'export const a = 2\n' })
   runGit(wtD1, ['add', '-A'])
   runGit(wtD1, ['commit', '-qm', 'fix: d1'])
   assertOk(runNodeScript(flowD1, ['verify', '--task', 'd1', '--mode', 'full'], wtD1, env), 'Scenario D1 verify')
-  assertOk(runNodeScript(flowD1, ['explore', '--task', 'd1'], repoD1, env), 'Scenario D1 explicit explore refresh')
-  assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'Scenario D1 submit after auto-explore')
+  assertOk(runNodeScript(flowD1, ['explore', '--task', 'd1'], repoD1, env), 'Scenario D1 explicit explore')
+  const postExploreD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
+  if (postExploreD1.phase === 'needs-explore') {
+    throw new Error(`Scenario D1 expected phase != needs-explore after explore, got ${postExploreD1.phase}`)
+  }
+  assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1', '--agent', 'alice'], wtD1, env), 'Scenario D1 submit after explore')
   const nextD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
   if (!nextD1.reviewToken) throw new Error(`Scenario D1 missing reviewToken after explore: ${JSON.stringify(nextD1)}`)
   assertOk(runNodeScript(revD1, ['record', '--task', 'd1', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d1',
     '--review-token', nextD1.reviewToken, '--evidence', 'E2E 实测：门禁已跑，输出符合预期'], repoD1, env), 'Scenario D1 review pass')
   assertOk(runNodeScript(flowD1, ['merge', '--task', 'd1'], repoD1, env), 'Scenario D1 merge')
-  assertOk(runNodeScript(flowD1, ['cleanup', '--task', 'd1', '--confirm'], repoD1, env), 'Scenario D1 cleanup')
+  cleanupWithHash(flowD1, 'd1', repoD1, env, 'Scenario D1 cleanup')
 
   // D2: generic-git 在核不到远端事实时阻断，人类签字才放行
   const repoD2 = join(sandbox, 'repo-d2')
@@ -291,16 +292,19 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   runGit(repoD2, ['config', `url.${bareD2.replace(/\\/g, '/')}.pushInsteadOf`, 'https://git.internal.corp/team/app.git'])
 
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoD2, '--no-backup'], repoD2, env), 'Scenario D2 equip')
+  runGit(repoD2, ['add', '-A'])
+  runGit(repoD2, ['commit', '-qm', 'chore: equip'])
   const flowD2 = join(repoD2, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD2 = join(repoD2, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
-  assertOk(runNodeScript(flowD2, ['start', '--task', 'd2', '--case', '2', '--slug', 'd2'], repoD2, env), 'Scenario D2 start')
+  assertOk(runNodeScript(flowD2, ['start', '--task', 'd2', '--case', '2', '--slug', 'd2', '--implementer', 'alice'], repoD2, env), 'Scenario D2 start')
+  assertOk(runNodeScript(flowD2, ['claim', '--task', 'd2', '--agent', 'alice'], repoD2, env), 'Scenario D2 claim')
   assertOk(runNodeScript(flowD2, ['explore', '--task', 'd2'], repoD2, env), 'Scenario D2 explore')
   const wtD2 = join(repoD2, '.worktrees', 'impl-d2')
   writeFiles(wtD2, { 'src/g.mjs': 'export const g = 2\n' })
   runGit(wtD2, ['add', '-A'])
   runGit(wtD2, ['commit', '-qm', 'fix: d2'])
   assertOk(runNodeScript(flowD2, ['verify', '--task', 'd2', '--mode', 'full'], wtD2, env), 'Scenario D2 verify')
-  assertOk(runNodeScript(flowD2, ['submit', '--task', 'd2'], wtD2, env), 'Scenario D2 submit')
+  assertOk(runNodeScript(flowD2, ['submit', '--task', 'd2', '--agent', 'alice'], wtD2, env), 'Scenario D2 submit')
   assertOk(await recordWithToken(flowD2, revD2, 'd2', repoD2, env, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d2']), 'Scenario D2 review pass')
   assertBlocked(runNodeScript(flowD2, ['merge', '--task', 'd2'], repoD2, env), 'BLOCKED_', 'Scenario D2 generic-git unconfirmed merge')
   assertOk(runNodeScript(flowD2, ['merge', '--task', 'd2', '--human-approved', '--reason', '远端是不可达的内网仓，已在别处人工核对合并结果'], repoD2, env), 'Scenario D2 generic-git human-approved')
@@ -316,7 +320,7 @@ async function runScenarioE(pkgRoot, sandbox, env) {
     'src/app.mjs': 'export const app = 1\n',
     'src/untouched.mjs': 'export const untouched = 1\n',
     'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "alice"\nrelated_spec: null\nrelated_todo: null\n---\n# Master\n- [ ] C1: child1\n- [ ] C2: child2\n',
-    'docs/specs/261116-issue12-child2-spec.md': '---\nkind: spec\ntitle: "Child2"\nstatus: draft\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 12\npr: null\nbranch: null\nowner: "alice"\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: null\nhigh_risk_paths: []\n---\n# Child2\n- [ ] C1: future\n',
+    'docs/specs/261116-issue12-child2-spec.md': '---\nkind: spec\ntitle: "Child2"\nstatus: draft\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 12\npr: null\nbranch: null\nowner: "alice"\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: null\nscope_files: [src/untouched.mjs]\ndepends_on: []\nhigh_risk_paths: []\n---\n# Child2\n\n## 要解决的问题\n- 调整 `src/untouched.mjs` 出口。\n\n## 本期不做\n- 不修改 `src/app.mjs`。\n\n## 门型与回滚路径\n- two-way，回滚 `src/untouched.mjs`。\n\n## 验收标准\n- [ ] C1: `src/untouched.mjs` future\n',
   })
 
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoE, '--no-backup'], repoE, env), 'Scenario E equip')
@@ -329,11 +333,11 @@ async function runScenarioE(pkgRoot, sandbox, env) {
   assertOk(initRes, 'Scenario E doc-plan init spec')
   const specRel = JSON.parse(initRes.stdout).file
   const specClean = readFileSync(join(repoE, specRel), 'utf8')
-    .replace('related_prd: null', 'related_prd: ../prd/261116-issue10-master-prd.md')
+    .replace('related_prd: null', 'related_prd: ../prd/261116-issue10-master-prd.md\nscope_files: [src/app.mjs]\ndepends_on: []')
     .replace('<two-way | one-way>', 'two-way')
-    .replace(/<[^>]+>/g, '实际值')
-    .replace('- [ ] C1: 实际值', '- [x] C1: verified `src/app.mjs`')
-    .replace('- [ ] C2: 实际值', '- [x] C2: verified tests')
+    .replace(/<[^>]+>/g, '`src/app.mjs` 实际边界说明（不影响 `src/untouched.mjs`）')
+    .replace(/^- \[ \] C1:.*$/m, '- [x] C1: verified `src/app.mjs`')
+    .replace(/^- \[ \] C2:.*$/m, '- [x] C2: verified tests')
     .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', '- 已实现并通过测试。')
   writeFileSync(join(repoE, specRel), specClean, 'utf8')
 
@@ -380,7 +384,7 @@ async function runScenarioE(pkgRoot, sandbox, env) {
   assertOk(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'bob', '--takeover', '--reason', 'cross-session handoff'], wtE, env), 'Scenario E takeover submit')
 
   assertBlocked(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-2', '--must-fix', 'C1: src/untouched.mjs:1 out of scope']), 'BLOCKED_OUT_OF_SCOPE_MUST_FIX', 'Scenario E out-of-scope must-fix')
-  assertOk(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-2']), 'Scenario E record r2 pass')
+  assertOk(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-2', '--resolved', 'C1']), 'Scenario E record r2 pass')
 
   const sigFile = join(repoE, '.git', 'project-forge-govern', 'signals.jsonl')
   if (!existsSync(sigFile) || !readFileSync(sigFile, 'utf8').includes('verify.gate.pass')) {
@@ -399,6 +403,8 @@ async function runScenarioF(pkgRoot, sandbox, env) {
     'base.mjs': 'export const b = 1\n',
   })
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoF, '--no-backup'], repoF, env), 'Scenario F equip')
+  runGit(repoF, ['add', '-A'])
+  runGit(repoF, ['commit', '-qm', 'chore: equip'])
 
   const { resolveRepoRoots } = await import(pathToFileURL(join(pkgRoot, 'kit/skills/lib/shared.mjs')).href)
   const { handleStart } = await import(pathToFileURL(join(pkgRoot, 'kit/skills/dev-flow/scripts/flow-inspect.mjs')).href)
@@ -411,14 +417,16 @@ async function runScenarioF(pkgRoot, sandbox, env) {
   if (depBlock.exitCode !== 3) throw new Error(`Scenario F expected BLOCKED_UNRESOLVED_DEPENDENCY (exit=3), got ${depBlock.exitCode}`)
 
   const flowF = join(repoF, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
-  assertOk(runNodeScript(flowF, ['start', '--task', 'p1', '--case', '1', '--slug', 'parent'], repoF, env), 'Scenario F parent start')
+  assertOk(runNodeScript(flowF, ['start', '--task', 'p1', '--case', '2', '--slug', 'parent', '--implementer', 'alice'], repoF, env), 'Scenario F parent start')
+  assertOk(runNodeScript(flowF, ['claim', '--task', 'p1', '--agent', 'alice'], repoF, env), 'Scenario F parent claim')
   assertOk(runNodeScript(flowF, ['explore', '--task', 'p1'], repoF, env), 'Scenario F parent explore')
   const wtP = join(repoF, '.worktrees', 'impl-p1')
   writeFiles(wtP, { 'parent.mjs': 'export const p = 1\n' })
   runGit(wtP, ['add', '-A'])
   runGit(wtP, ['commit', '-qm', 'parent work'])
 
-  assertOk(runNodeScript(flowF, ['start', '--task', 'c1', '--case', '1', '--slug', 'child', '--after', 'p1'], repoF, env), 'Scenario F child --after start')
+  assertOk(runNodeScript(flowF, ['start', '--task', 'c1', '--case', '2', '--slug', 'child', '--after', 'p1', '--implementer', 'alice'], repoF, env), 'Scenario F child --after start')
+  assertOk(runNodeScript(flowF, ['claim', '--task', 'c1', '--agent', 'alice'], repoF, env), 'Scenario F child claim')
   assertOk(runNodeScript(flowF, ['explore', '--task', 'c1'], repoF, env), 'Scenario F child explore')
   const wtC = join(repoF, '.worktrees', 'impl-c1')
   writeFiles(wtC, { 'child.mjs': 'export const c = 1\n' })
@@ -443,9 +451,9 @@ async function runScenarioG(pkgRoot, sandbox, env) {
   const flowG = join(repoG, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revG = join(repoG, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
 
-  assertOk(runNodeScript(flowG, ['start', '--task', 'ta', '--case', '1', '--slug', 'ta', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start ta')
-  assertOk(runNodeScript(flowG, ['start', '--task', 'tb', '--case', '1', '--slug', 'tb', '--files', 'src/b.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tb')
-  assertOk(runNodeScript(flowG, ['start', '--task', 'tc', '--case', '1', '--slug', 'tc', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tc')
+  assertOk(runNodeScript(flowG, ['start', '--task', 'ta', '--case', '2', '--slug', 'ta', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start ta')
+  assertOk(runNodeScript(flowG, ['start', '--task', 'tb', '--case', '2', '--slug', 'tb', '--files', 'src/b.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tb')
+  assertOk(runNodeScript(flowG, ['start', '--task', 'tc', '--case', '2', '--slug', 'tc', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tc')
   assertOk(runNodeScript(flowG, ['explore', '--task', 'ta'], repoG, env), 'Scenario G explore ta')
   assertOk(runNodeScript(flowG, ['explore', '--task', 'tb'], repoG, env), 'Scenario G explore tb')
   assertOk(runNodeScript(flowG, ['explore', '--task', 'tc'], repoG, env), 'Scenario G explore tc')
@@ -515,9 +523,15 @@ function parseWorkerArgs(argv) {
   return out
 }
 
+function cleanupWithHash(flowScript, task, cwd, env, label) {
+  const preview = JSON.parse(runNodeScript(flowScript, ['cleanup', '--task', task, '--json'], cwd, env).stdout)
+  if (!preview.previewHash) throw new Error(`${label} missing previewHash`)
+  assertOk(runNodeScript(flowScript, ['cleanup', '--task', task, '--confirm', '--preview-hash', preview.previewHash], cwd, env), label)
+}
+
 async function runSingleScenario(scenarioKey, pkgRoot, sandbox, env) {
   const helpers = {
-    assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
+    assertOk, assertBlocked, cleanupWithHash, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
   }
   if (scenarioKey === 'a-c') {
     const eng = await loadPkgEngines(pkgRoot)

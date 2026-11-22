@@ -380,7 +380,8 @@ async function runScenarioH(pkgRoot, sandbox, baseEnv, helpers) {
     'AGENTS.md': readFileSync(join(repoH, 'AGENTS.md'), 'utf8')
       .replace('<运行时端到端冒烟验证命令，或 none>', 'node test/smoke.mjs')
       .replace('<高风险路径前缀或文件，逗号分隔>', 'none')
-      .replace('<跨层禁引规则如 src/lib/** -> src/ui/**，逗号分隔或 none>', 'none'),
+      .replace('<跨层禁引规则如 src/lib/** -> src/ui/**，逗号分隔或 none>', 'none')
+      .replace(/<(?:填写|单文件)[^>]*>/g, 'none'),
   })
   runGit(repoH, ['add', '-A'])
   runGit(repoH, ['commit', '-qm', 'chore: forge init'])
@@ -400,7 +401,7 @@ async function runScenarioH(pkgRoot, sandbox, baseEnv, helpers) {
   assertOk(runNodeScript(flowH, ['submit', '--task', 'h1', '--agent', 'alice'], wtH1, baseEnv), 'Scenario H h1 submit')
   assertOk(await recordWithToken(flowH, revH, 'h1', repoH, baseEnv, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-h1']), 'Scenario H h1 pass')
   assertOk(runNodeScript(flowH, ['merge', '--task', 'h1'], repoH, baseEnv), 'Scenario H h1 merge')
-  assertOk(runNodeScript(flowH, ['cleanup', '--task', 'h1', '--confirm'], repoH, baseEnv), 'Scenario H h1 cleanup')
+  helpers.cleanupWithHash(flowH, 'h1', repoH, baseEnv, 'Scenario H h1 cleanup')
 
   assertOk(runNodeScript(flowH, ['issue', 'create', '--title', '待迁移本地单', '--milestone', 'v9-H', '--json'], repoH, baseEnv), 'Scenario H local issue #2')
 
@@ -469,10 +470,10 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
     'src/a.mjs': 'export const a = 1\n',
     'src/b.mjs': 'export const b = 1\n',
     'test/smoke.mjs': "console.log('I_SMOKE_OK')\n",
-    'docs/prd/261118-master-i-prd.md': '---\nkind: prd\ntitle: "Master I"\nstatus: active\ncreated: 2026-11-18\nupdated: 2026-11-18\nowner: planner-i\nrelated_spec: null\nrelated_todo: null\n---\n\n# Master I\n\n## 五、验收标准\n- [ ] C1: `src/a.mjs` done\n- [ ] C2: `src/b.mjs` done\n',
-    'docs/specs/261118-issue1-s1-spec.md': '---\nkind: spec\ntitle: "S1"\nstatus: draft\ntier: L3\ncreated: 2026-11-18\nupdated: 2026-11-18\nissue: 1\nowner: planner-i\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261118-master-i-prd.md\nrelated_todo: ../todo/261118-issue1-s1-todo.md\n---\n\n# SPEC: S1\n\n## 要解决的问题\n- a\n\n## 本期不做\n- b\n\n## 门型与回滚路径\n- two-way\n\n## 验收标准\n- [ ] C1: `src/a.mjs` ok\n',
+    'docs/prd/261118-master-i-prd.md': '---\nkind: prd\ntitle: "Master I"\nstatus: active\ncreated: 2026-11-18\nupdated: 2026-11-18\nowner: planner-i\napproved: true\nplan_critique: passed\nrelated_spec: null\nrelated_todo: null\n---\n\n# Master I\n\n## 目标\n- 协调 `src/a.mjs` 与 `src/b.mjs` 分片改造。\n\n## 本期不做\n- 不修改 `test/smoke.mjs`。\n\n## 五、验收标准\n- [ ] C1: `src/a.mjs` done\n- [ ] C2: `src/b.mjs` done\n',
+    'docs/specs/261118-issue1-s1-spec.md': '---\nkind: spec\ntitle: "S1"\nstatus: draft\ntier: L3\ncreated: 2026-11-18\nupdated: 2026-11-18\nissue: 1\nowner: planner-i\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261118-master-i-prd.md\nrelated_todo: ../todo/261118-issue1-s1-todo.md\nscope_files: [src/a.mjs]\ndepends_on: []\n---\n\n# SPEC: S1\n\n## 要解决的问题\n- 修改 `src/a.mjs` 出口值\n\n## 本期不做\n- 不修改 `src/b.mjs`\n\n## 门型与回滚路径\n- two-way\n\n## 验收标准\n- [ ] C1: `src/a.mjs` ok\n',
     'docs/todo/261118-issue1-s1-todo.md': '---\nkind: todo\ntitle: "S1"\nstatus: active\ncreated: 2026-11-18\nupdated: 2026-11-18\nissue: 1\nowner: planner-i\napproved: true\ntask_id: s1\nrelated_prd: ../prd/261118-master-i-prd.md\nrelated_spec: ../specs/261118-issue1-s1-spec.md\n---\n\n# Todo: S1\n\n## 验收标准\n- [ ] C1: `src/a.mjs` ok\n\n## 完成后的记录\n**在合并之前写完，随这次改动一起提交。**\n',
-    'docs/specs/261118-issue2-s2-spec.md': '---\nkind: spec\ntitle: "S2"\nstatus: approved\ntier: L3\ncreated: 2026-11-18\nupdated: 2026-11-18\nissue: 2\nowner: planner-i\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261118-master-i-prd.md\nrelated_todo: ../todo/261118-issue2-s2-todo.md\n---\n\n# SPEC: S2\n\n## 要解决的问题\n- b\n\n## 本期不做\n- x\n\n## 门型与回滚路径\n- two-way\n\n## 验收标准\n- [x] C2: `src/b.mjs` ok\n\n## 实现说明\n- done\n',
+    'docs/specs/261118-issue2-s2-spec.md': '---\nkind: spec\ntitle: "S2"\nstatus: approved\ntier: L3\ncreated: 2026-11-18\nupdated: 2026-11-18\nissue: 2\nowner: planner-i\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261118-master-i-prd.md\nrelated_todo: ../todo/261118-issue2-s2-todo.md\nscope_files: [src/b.mjs]\ndepends_on: []\n---\n\n# SPEC: S2\n\n## 要解决的问题\n- 修改 `src/b.mjs` 出口值\n\n## 本期不做\n- 不修改 `src/a.mjs`\n\n## 门型与回滚路径\n- two-way\n\n## 验收标准\n- [x] C2: `src/b.mjs` ok\n\n## 实现说明\n- done\n',
     'docs/todo/261118-issue2-s2-todo.md': '---\nkind: todo\ntitle: "S2"\nstatus: active\ncreated: 2026-11-18\nupdated: 2026-11-18\nissue: 2\nowner: planner-i\napproved: true\ntask_id: s2\nrelated_prd: ../prd/261118-master-i-prd.md\nrelated_spec: ../specs/261118-issue2-s2-spec.md\n---\n\n# Todo: S2\n\n## 验收标准\n- [x] C2: `src/b.mjs` ok\n\n## 完成后的记录\n**在合并之前写完，随这次改动一起提交。**\n',
   })
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoI, '--no-backup'], repoI, env), 'Scenario I equip')
@@ -496,10 +497,10 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
   runGit(repoI, ['add', '-A'])
   runGit(repoI, ['commit', '-qm', 'docs: approve s1'])
 
-  // low 风险纯文档可选 record 免令牌直合
+  // low 风险纯文档 Case 1 原地微调 + 可选 record 免令牌直合
   assertOk(runNodeScript(flowI, ['start', '--task', 'ilow', '--case', '1', '--slug', 'ilow', '--implementer', 'alice'], repoI, env), 'Scenario I ilow start')
   assertOk(runNodeScript(flowI, ['explore', '--task', 'ilow'], repoI, env), 'Scenario I ilow explore')
-  const wtLow = join(repoI, '.worktrees', 'impl-ilow')
+  const wtLow = repoI
   writeFiles(wtLow, { 'README.md': '# scenario-i\n\nUpdated doc.\n' })
   runGit(wtLow, ['add', '-A'])
   runGit(wtLow, ['commit', '-qm', 'docs: update readme'])
@@ -507,7 +508,7 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
   assertOk(runNodeScript(flowI, ['submit', '--task', 'ilow', '--agent', 'alice'], wtLow, env), 'Scenario I ilow submit')
   assertOk(runNodeScript(revI, ['record', '--task', 'ilow', '--verdict', 'pass', '--reviewer-id', 'rev-low', '--evidence', 'doc static ok'], repoI, env), 'Scenario I low optional record')
   assertOk(runNodeScript(flowI, ['merge', '--task', 'ilow'], repoI, env), 'Scenario I ilow merge')
-  assertOk(runNodeScript(flowI, ['cleanup', '--task', 'ilow', '--confirm'], repoI, env), 'Scenario I ilow cleanup')
+  helpers.cleanupWithHash(flowI, 'ilow', repoI, env, 'Scenario I ilow cleanup')
 
   // Review artifact_baseline + 3 轮停损 + S1 merge
   assertOk(runNodeScript(flowI, ['start', '--task', 's1', '--case', '4', '--spec', 'docs/specs/261118-issue1-s1-spec.md', '--todo', 'docs/todo/261118-issue1-s1-todo.md', '--implementer', 'alice'], repoI, env), 'Scenario I s1 start')
@@ -551,7 +552,7 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
   if (stopR3.status !== 4) throw new Error(`Scenario I R3 stop-loss expected 4 got ${stopR3.status}`)
   assertOk(runNodeScript(revI, ['override', '--task', 's1', '--human-approved', '--reason', 'human resolved stop-loss'], repoI, env), 'Scenario I s1 override')
   assertOk(runNodeScript(flowI, ['merge', '--task', 's1', '--human-approved', '--reason', 'approved override'], repoI, env), 'Scenario I s1 merge')
-  assertOk(runNodeScript(flowI, ['cleanup', '--task', 's1', '--confirm'], repoI, env), 'Scenario I s1 cleanup')
+  helpers.cleanupWithHash(flowI, 's1', repoI, env, 'Scenario I s1 cleanup')
 
   // 最后一片 s2 免 --include-master-prd 自动归档总控 PRD
   assertOk(runNodeScript(flowI, ['start', '--task', 's2', '--case', '4', '--spec', 'docs/specs/261118-issue2-s2-spec.md', '--todo', 'docs/todo/261118-issue2-s2-todo.md', '--implementer', 'alice'], repoI, env), 'Scenario I s2 start')
@@ -612,7 +613,8 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
     'AGENTS.md': agJ
       .replace('<运行时端到端冒烟验证命令，或 none>', 'node test/smoke.mjs')
       .replace('<高风险路径前缀或文件，逗号分隔>', 'none')
-      .replace('<跨层禁引规则如 src/lib/** -> src/ui/**，逗号分隔或 none>', 'none'),
+      .replace('<跨层禁引规则如 src/lib/** -> src/ui/**，逗号分隔或 none>', 'none')
+      .replace(/<(?:填写|单文件)[^>]*>/g, 'none'),
   })
   runGit(repoJ, ['add', '-A'])
   runGit(repoJ, ['commit', '-qm', 'chore: init j'])
@@ -636,6 +638,7 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
   const flowJ = join(repoJ, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revJ = join(repoJ, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
   assertOk(runNodeScript(flowJ, ['start', '--task', 'j1', '--case', '2', '--slug', 'j1', '--implementer', 'alice'], repoJ, env), 'Scenario J start')
+  assertOk(runNodeScript(flowJ, ['claim', '--task', 'j1', '--agent', 'alice'], repoJ, env), 'Scenario J claim')
   assertOk(runNodeScript(flowJ, ['explore', '--task', 'j1'], repoJ, env), 'Scenario J explore')
   const wtJ = join(repoJ, '.worktrees', 'impl-j1')
   writeFiles(wtJ, { 'src/app.mjs': 'export const ok = false\nexport const extra = 1\n' })

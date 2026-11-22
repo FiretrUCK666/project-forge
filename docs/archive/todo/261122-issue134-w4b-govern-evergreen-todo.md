@@ -1,16 +1,16 @@
 ---
 kind: todo
 title: "Wave 2: 基于升级工具的长青文档系统与功能地图刷新"
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: 134
 pr: null
 branch: feat/w4b-govern-evergreen
-owner: plan-harness
+owner: impl-w4b
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-22
 task_id: w4b-govern-evergreen
 planned_at: b6ea3f6a2134373f8139ea581465e8024639e5c6
 related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md

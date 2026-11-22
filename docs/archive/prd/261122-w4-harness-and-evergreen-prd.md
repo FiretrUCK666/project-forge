@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: Wave 4 Harness 内核加固与长青文档更新总控
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: null

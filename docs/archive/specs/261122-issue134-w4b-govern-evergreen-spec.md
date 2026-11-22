@@ -1,17 +1,17 @@
 ---
 kind: spec
 title: "Wave 2: 基于升级工具的长青文档系统与功能地图刷新"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
 issue: 134
 pr: null
 branch: feat/w4b-govern-evergreen
-owner: plan-harness
+owner: impl-w4b
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-harness-r3, round=3, sha=4c429a59f9ce, summary=R3 independent critique pass: 0 blockers)"
 related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md
 related_todo: ../todo/261122-issue134-w4b-govern-evergreen-todo.md
@@ -130,3 +130,9 @@ flowchart LR
 ## 澄清与补充记录
 
 - 已确认（2026-11-22 · user）：按 #519 指令确立 `w4b-govern-evergreen` 为 Wave 2（`depends_on: [w4a-harness-core]`），在 `w4a` 落盘后使用升级工具系统刷新 `docs/TDD.md`、`docs/feature-map.json` 与 `AGENTS.md`。
+
+## 实现说明
+
+
+- 实现提交基线: 633dcfdd68d5ea254a8ddd07b6248305415bcca3
+- 关联任务: w4b-govern-evergreen

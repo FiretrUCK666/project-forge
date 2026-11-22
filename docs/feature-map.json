@@ -345,7 +345,7 @@
         {
           "id": "verify-doc-plan-audit",
           "kind": "command",
-          "command": "node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .",
+          "command": "node scripts/dev/fixtures.mjs --domain doc-rules",
           "scriptPath": null,
           "riskLevel": "medium",
           "triggerHints": [

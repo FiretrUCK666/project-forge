@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-23
 updated: 2026-11-23
 issue: 153
-pr: null
+pr: 154
 branch: feat/gates-retro-routing-hardening
 owner: coordinator
 plan_mode: autonomous

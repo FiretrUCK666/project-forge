@@ -34,6 +34,32 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 
 export { EXIT }
 const VALID_MODES = new Set(['verify', 'pre-edit', 'standalone'])
+const BROWNFIELD_GROWTH_LIMIT = 80
+
+async function resolveRatchetBaseRef(workRoot, isGit, defaultBranch, taskLedger) {
+  if (!isGit) return { hasBranchBase: false, baseRef: null }
+  const fastGitDir = resolveGitDirFast(workRoot)
+  const fastHead = readHeadFast(fastGitDir)
+  const headSha = fastHead?.oid ?? ((await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).stdout?.trim() || null)
+  if (!headSha) return { hasBranchBase: false, baseRef: null }
+
+  const bases = [...new Set([defaultBranch, 'main', 'master'].filter(Boolean))]
+  for (const baseRef of bases) {
+    const fastSha = resolveRefShaFast(fastGitDir, `refs/heads/${baseRef}`) ?? resolveRefShaFast(fastGitDir, `refs/remotes/origin/${baseRef}`)
+    const verify = fastSha ? { ok: true } : await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', baseRef])
+    if (!verify.ok) continue
+    const mb = await gitRun(workRoot, ['--no-optional-locks', 'merge-base', baseRef, 'HEAD'])
+    const mbSha = mb.ok ? mb.stdout.trim() : ''
+    if (mbSha && mbSha !== headSha) {
+      return { hasBranchBase: true, baseRef: mbSha }
+    }
+  }
+  if (taskLedger?.baseSha && taskLedger.baseSha !== headSha) {
+    const verifyBase = await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', `${taskLedger.baseSha}^{commit}`])
+    if (verifyBase.ok) return { hasBranchBase: true, baseRef: taskLedger.baseSha }
+  }
+  return { hasBranchBase: false, baseRef: 'HEAD' }
+}
 
 function printHelp() {
   process.stdout.write([
@@ -321,6 +347,7 @@ export async function runEditGate(opts = {}) {
   }
 
   const tierMeta = detectTestTierMetadata(workTreeRoot, checkedFiles)
+  const ratchetInfo = await resolveRatchetBaseRef(workTreeRoot, isGit, defaultBranch, taskLedger)
   const enableCommentPathCheck = opts.changed === true || !(
     (Array.isArray(opts.files) && opts.files.length > 0) || (typeof opts.files === 'string' && opts.files.trim())
   )
@@ -356,13 +383,19 @@ export async function runEditGate(opts = {}) {
           : '直接修复根因类型或静态检查错误，禁止使用 @ts-ignore/eslint-disable/HACK/WORKAROUND/TEMP/noqa/#[allow( 压制。',
       })
     }
-    if (enableCommentPathCheck && !isTestOrFixtureFile(rel)) {
-      let headText = null
+    let headText = null
+    let headTextLoaded = false
+    const loadHeadText = async () => {
+      if (headTextLoaded) return headText
+      headTextLoaded = true
       if (isGit) {
         const showRes = await gitRun(workTreeRoot, ['show', `HEAD:${rel}`])
         if (showRes.ok) headText = showRes.stdout
       }
-      for (const bp of scanBrokenCommentPaths({ repoRoot: workTreeRoot, fileRel: rel, text: txt, headText })) {
+      return headText
+    }
+    if (enableCommentPathCheck && !isTestOrFixtureFile(rel)) {
+      for (const bp of scanBrokenCommentPaths({ repoRoot: workTreeRoot, fileRel: rel, text: txt, headText: await loadHeadText() })) {
         blockers.push({
           ruleId: 'edit.broken-comment-path',
           defectClass: 'stale-contract',
@@ -382,7 +415,50 @@ export async function runEditGate(opts = {}) {
       blockers.push({ ruleId: 'edit.dead-code-block', defectClass: 'dead-code', severity: 'high', file: rel, line: db.line, endLine: db.endLine, excerpt: db.excerpt, message: `检测到连续注释死代码块（${db.length} 行）：${rel}:${db.line}-${db.endLine}`, fixHint: '直接删除废弃注释代码块，依靠版本历史追溯。' })
     }
     if (hyg.godFile) {
-      blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 800 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: '按单一职责拆分为内聚子模块，保持每个源文件 <= 800 行。' })
+      let baseText = null
+      if (isGit && ratchetInfo.baseRef) {
+        if (ratchetInfo.baseRef === 'HEAD') {
+          baseText = await loadHeadText()
+        } else {
+          const baseShow = await gitRun(workTreeRoot, ['show', `${ratchetInfo.baseRef}:${rel}`])
+          if (baseShow.ok) baseText = baseShow.stdout
+        }
+      }
+      const baseLineCount = baseText !== null ? countTextLines(baseText) : null
+      let isUntouchedOnMain = false
+      if (!ratchetInfo.hasBranchBase && baseText !== null && isGit) {
+        const diffHead = await gitRun(workTreeRoot, ['--no-optional-locks', 'diff', '--quiet', 'HEAD', '--', rel])
+        isUntouchedOnMain = diffHead.ok
+      }
+      if (baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {
+        const netGrowth = fullLineCount - baseLineCount
+        if (netGrowth > BROWNFIELD_GROWTH_LIMIT) {
+          blockers.push({
+            ruleId: 'edit.file-oversized-growth',
+            defectClass: 'file-bloat',
+            severity: 'high',
+            file: rel,
+            line: fullLineCount,
+            lines: fullLineCount,
+            baseLines: baseLineCount,
+            netGrowth,
+            message: `存量大文件单次净增超限（基线 ${baseLineCount} 行 -> 当前 ${fullLineCount} 行，净增 +${netGrowth} > ${BROWNFIELD_GROWTH_LIMIT} 行棘轮上限）：${rel}`,
+            fixHint: `存量 >800 行文件单次净增不得超过 ${BROWNFIELD_GROWTH_LIMIT} 行；请将新增逻辑拆分到独立模块。`,
+          })
+        } else {
+          warnings.push({
+            ruleId: 'edit.existing-oversized',
+            severity: 'medium',
+            file: rel,
+            lines: fullLineCount,
+            baseLines: baseLineCount,
+            netGrowth,
+            message: `存量大文件局部修改放行（基线 ${baseLineCount} 行 -> 当前 ${fullLineCount} 行，净增 ${netGrowth >= 0 ? `+${netGrowth}` : netGrowth} <= ${BROWNFIELD_GROWTH_LIMIT} 行棘轮上限）：${rel}`,
+          })
+        }
+      } else {
+        blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 800 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: '按单一职责拆分为内聚子模块，保持每个源文件 <= 800 行。' })
+      }
     } else if (hyg.nearLimitFile) {
       nearLimitFiles.push(hyg.nearLimitFile)
       warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: fullLineCount, message: `紧文件预警（${fullLineCount}/800 行），建议提前规划模块拆分：${rel}` })

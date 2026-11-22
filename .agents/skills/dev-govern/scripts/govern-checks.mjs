@@ -22,6 +22,9 @@ import {
   extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode,
 } from '../../lib/static-gates.mjs'
 import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
+import {
+  NPMRC_FILE_RE, SAFE_ENV_RE, SECRET_CONTENT_PATTERNS, SECRET_FILE_RE, isSensitiveSecretFile,
+} from '../../lib/credential-scan.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES } from '../../lib/tool-owned.mjs'
 
 export { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES }
@@ -33,19 +36,6 @@ const MAX_READ_BYTES = 512 * 1024
 const OUTPUT_DIRS = [...COMMON_OUTPUT_DIRS, '.worktrees']
 export const TEXT_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1|md|mdx|txt|rst|ya?ml|json|toml|ini|cfg|env)$/i
 const BOM_EXEMPT_EXT_RE = /\.(?:cs|fs|vb|csproj|fsproj|vbproj|sln)$/i
-
-const SECRET_FILE_RE = /^(?:\.env(?:\..+)?|\.npmrc|\.pypirc|id_(?:rsa|ed25519|ecdsa))$|\.(?:pem|key|p12|pfx|keystore)$/i
-const SAFE_ENV_RE = /^\.env\.(?:example|sample|template|defaults)$/i
-
-const SECRET_PATTERNS = [
-  { label: 'GitHub classic token', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b/ },
-  { label: 'GitHub fine-grained token', re: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/ },
-  { label: 'npm token', re: /\bnpm_[A-Za-z0-9]{36}\b/ },
-  { label: 'PyPI token', re: /\bpypi-[A-Za-z0-9_-]{50,}\b/ },
-  { label: 'AWS access key', re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { label: 'API key sk-*', re: /\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b/ },
-  { label: 'PEM private key block', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{16,}/ },
-]
 
 const BACKUP_FILE_RE = /\.(?:bak|orig|old|tmp)$|~$/i
 
@@ -177,19 +167,22 @@ export function walkFiles(root, scopeRel = '') {
 export function auditSecurity(files, trackedSet, findings) {
   for (const f of files) {
     if (SECRET_FILE_RE.test(f.name) && !SAFE_ENV_RE.test(f.name)) {
-      const tracked = trackedSet.has(f.rel)
-      addFinding(findings, {
-        id: `sec.secret-file.${f.rel}`,
-        category: 'security',
-        severity: tracked ? 'critical' : 'high',
-        file: f.rel,
-        title: `${tracked ? 'Tracked' : 'Present'} sensitive credential file: ${f.rel}`,
-        detail: tracked ? 'File is tracked by git history.' : 'Sensitive file exists on disk; verify it is ignored.',
-        action: tracked ? 'Rotate credential, remove from git tracking, and add pattern to .gitignore.' : 'Verify .gitignore covers this pattern.',
-      })
+      const npmrcInfo = NPMRC_FILE_RE.test(f.name) ? readTextStrictInfo(f.full) : null
+      if (!NPMRC_FILE_RE.test(f.name) || isSensitiveSecretFile(f.name, npmrcInfo?.text)) {
+        const tracked = trackedSet.has(f.rel)
+        addFinding(findings, {
+          id: `sec.secret-file.${f.rel}`,
+          category: 'security',
+          severity: tracked ? 'critical' : 'high',
+          file: f.rel,
+          title: `${tracked ? 'Tracked' : 'Present'} sensitive credential file: ${f.rel}`,
+          detail: tracked ? 'File is tracked by git history.' : 'Sensitive file exists on disk; verify it is ignored.',
+          action: tracked ? 'Rotate credential, remove from git tracking, and add pattern to .gitignore.' : 'Verify .gitignore covers this pattern.',
+        })
+      }
     }
 
-    if (!TEXT_EXT_RE.test(f.name) && !f.name.startsWith('.env')) continue
+    if (!TEXT_EXT_RE.test(f.name) && !f.name.startsWith('.env') && !NPMRC_FILE_RE.test(f.name)) continue
     if (SAFE_ENV_RE.test(f.name)) continue
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
@@ -197,7 +190,7 @@ export function auditSecurity(files, trackedSet, findings) {
     const lines = getLinesCached(f.full, info) ?? []
     for (let idx = 0; idx < lines.length; idx += 1) {
       const line = lines[idx]
-      for (const pat of SECRET_PATTERNS) {
+      for (const pat of SECRET_CONTENT_PATTERNS) {
         if (pat.re.test(line)) {
           addFinding(findings, {
             id: `sec.token.${f.rel}:${idx + 1}`,

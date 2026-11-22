@@ -397,17 +397,17 @@ async function main(argv) {
           const fileRefs = [...new Set(docText.match(/`[^`\n]+\/[A-Za-z0-9_.-]+\.[A-Za-z0-9]+`/g) ?? [])]
           const isNonTrivialTodo = Boolean(fm.data?.related_spec) || fileRefs.length >= 3 || /^- \[[ xX]\] C3\b/m.test(docText)
           if (res.docType === 'prd' && !['active', 'done', 'dropped'].includes(statusLow)) {
-            printNextStep([{ skill: 'dev-plan', text: `PRD 须经独立只读 Plan Critique 后执行：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
+            printNextStep([{ skill: 'dev-plan', text: `PRD 须经独立只读 Plan Critique 后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
           } else if (res.docType === 'tdd') {
-            printNextStep([{ skill: 'dev-plan', text: `TDD 架构基线须经独立架构 Critique 确认与 AGENTS.md 模块边界、arch-rules 对齐：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
+            printNextStep([{ skill: 'dev-plan', text: `TDD 架构基线须经独立架构 Critique 确认与 AGENTS.md 模块边界、arch-rules 对齐【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
           } else if (res.docType === 'todo' && !fm.data?.related_spec && !isNonTrivialTodo) {
-            printNextStep([{ skill: 'dev-flow', text: `Todo 自审通过，移交 dev-flow 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` }], { repoRoot: mainRoot })
+            printNextStep([{ skill: 'dev-flow', text: `Todo 自审通过，移交 dev-flow 启动隔离实施【须派发独立实施子代理/新会话认领实施，严禁规划作者在当前上下文自建自改】：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` }], { repoRoot: mainRoot })
           } else if (res.docType === 'todo') {
             printNextStep([
-              { skill: 'dev-flow', text: `Todo 自审通过，启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` },
+              { skill: 'dev-flow', text: `Todo 自审通过，启动隔离实施【须派发独立实施子代理/新会话认领实施，严禁规划作者在当前上下文自建自改】：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` },
             ], { repoRoot: mainRoot })
           } else if (res.docType === 'spec' && statusLow !== 'approved') {
-            printNextStep([{ skill: 'dev-plan', text: `独立只读 Critique 通过后执行：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
+            printNextStep([{ skill: 'dev-plan', text: `独立只读 Critique 通过后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
           }
         }
       }
@@ -589,7 +589,7 @@ async function main(argv) {
       else {
         process.stdout.write(`文档已切换为 ${res.status}：${res.file}（原状态：${res.previousStatus}）\n`)
         if (res.warning) process.stdout.write(`提示：${res.warning}\n`)
-        if (res.nextStep) printNextStep([{ skill: 'dev-flow', text: `规划已批准，移交 dev-flow 启动隔离工作区：${startHint}` }], { repoRoot: mainRoot })
+        if (res.nextStep) printNextStep([{ skill: 'dev-flow', text: `规划已批准，移交 dev-flow 启动隔离工作区【须派发独立实施子代理/新会话认领实施，严禁规划作者在当前上下文自建自改】：${startHint}` }], { repoRoot: mainRoot })
       }
       return 0
     }

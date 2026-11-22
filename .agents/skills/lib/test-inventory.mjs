@@ -4,7 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-govern/govern-tests.mjs 与 dev-iterate/iterate.mjs 共用。
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, posix } from 'node:path'
 
 import { FEATURE_MAP_REL } from './feature-map.mjs'
@@ -358,6 +358,79 @@ export function isPathInQuickTestScope(devProfile, relPath) {
   return false
 }
 
+const TS_TEST_NAME_RE = /\.(?:test|spec)\.(?:ts|tsx|mts|cts)$/i
+const JS_TEST_NAME_RE = /\.(?:test|spec)\.(?:js|mjs|cjs|jsx)$/i
+
+function countTestFilesByLang(repoRoot, dirs = []) {
+  let tsCount = 0
+  let jsCount = 0
+  const stack = dirs.filter((d) => existsSync(join(repoRoot, d))).slice(0, 6)
+  let visited = 0
+  while (stack.length > 0 && visited < 40) {
+    const rel = stack.pop()
+    visited += 1
+    let entries = []
+    try { entries = readdirSync(join(repoRoot, rel), { withFileTypes: true }) } catch { continue }
+    for (const ent of entries) {
+      if (ent.isDirectory() && !ent.name.startsWith('.')) {
+        stack.push(`${rel}/${ent.name}`)
+      } else if (ent.isFile()) {
+        if (TS_TEST_NAME_RE.test(ent.name)) tsCount += 1
+        else if (JS_TEST_NAME_RE.test(ent.name)) jsCount += 1
+      }
+    }
+  }
+  return { tsCount, jsCount }
+}
+
+/** 探测仓库是否为 TypeScript 项目（根/子包存在 tsconfig.json 或测试文件以 *.test.ts 为主）。 */
+export function detectTypeScriptProject(repoRoot, files = [], dirRel = '') {
+  if (existsSync(join(repoRoot, 'tsconfig.json')) || existsSync(join(repoRoot, 'tsconfig.base.json'))) {
+    return true
+  }
+  const fileRels = (files ?? []).map((f) => posixPath(f.rel ?? f)).filter(Boolean)
+  if (fileRels.some((r) => /(?:^|\/)tsconfig(?:\.[^/]+)?\.json$/i.test(r))) {
+    return true
+  }
+  for (const wsDir of ['packages', 'apps', 'services']) {
+    const absWs = join(repoRoot, wsDir)
+    if (!existsSync(absWs)) continue
+    try {
+      for (const ent of readdirSync(absWs, { withFileTypes: true })) {
+        if (ent.isDirectory() && (existsSync(join(absWs, ent.name, 'tsconfig.json')) || existsSync(join(absWs, ent.name, 'tsconfig.base.json')))) {
+          return true
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  let tsTests = fileRels.filter((r) => TS_TEST_NAME_RE.test(r)).length
+  let jsTests = fileRels.filter((r) => JS_TEST_NAME_RE.test(r)).length
+  if (tsTests === 0 && jsTests === 0) {
+    const diskCounts = countTestFilesByLang(repoRoot, [dirRel, 'tests', 'test', '__tests__', 'src'])
+    tsTests = diskCounts.tsCount
+    jsTests = diskCounts.jsCount
+  }
+  return tsTests > 0 && tsTests >= jsTests
+}
+
+/** 探测 Node/TS 测试运行器（优先读取 package.json 声明与 Dev Profile，避免写死单一运行器）。 */
+export function detectNodeTestRunner(repoRoot, pkg = null, devProfile = null) {
+  const manifest = pkg ?? readJsonSafe(join(repoRoot, 'package.json'))
+  const deps = { ...(manifest?.dependencies ?? {}), ...(manifest?.devDependencies ?? {}) }
+  const scriptBlob = Object.values(manifest?.scripts ?? {}).map((v) => String(v ?? '')).join('\n')
+  const profileBlob = [
+    ...(devProfile?.['quick-test'] ?? []),
+    ...(devProfile?.['full-test'] ?? []),
+    ...(devProfile?.['merge-gate'] ?? []),
+  ].join('\n')
+  const combined = `${scriptBlob}\n${profileBlob}`
+  if (deps.vitest || /\bvitest\b/i.test(combined)) return 'vitest'
+  if (deps.jest || deps['ts-jest'] || /\bjest\b/i.test(combined)) return 'jest'
+  if (existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb')) || /\bbun\s+test\b/i.test(combined)) return 'bun'
+  if (deps.tsx || /\btsx\b/i.test(combined)) return 'tsx'
+  return 'node'
+}
+
 /** 推断目标仓原生集成/回归/E2E/性能测试目录与栈命名惯例（严禁写入 `.agents/`，避免污染 `quick-test`）。 */
 export function resolveNativeTestDir(repoRoot, { ecosystem = null, tier = 'integration', devProfile = null, files = [] } = {}) {
   const cleanTier = ['integration', 'e2e', 'perf', 'regression'].includes(String(tier).toLowerCase())
@@ -369,7 +442,7 @@ export function resolveNativeTestDir(repoRoot, { ecosystem = null, tier = 'integ
     if (existsSync(join(repoRoot, 'Cargo.toml'))) stack = 'rust'
     else if (existsSync(join(repoRoot, 'go.mod'))) stack = 'go'
     else if (existsSync(join(repoRoot, 'pyproject.toml')) || existsSync(join(repoRoot, 'pytest.ini')) || existsSync(join(repoRoot, 'requirements.txt'))) stack = 'python'
-    else if (existsSync(join(repoRoot, 'package.json')) || (files ?? []).some((f) => /\.(?:mjs|js|ts)$/.test(f.rel ?? f))) stack = 'node'
+    else if (existsSync(join(repoRoot, 'package.json')) || existsSync(join(repoRoot, 'tsconfig.json')) || (files ?? []).some((f) => /\.(?:mjs|js|ts|tsx)$/.test(f.rel ?? f))) stack = 'node'
     else stack = 'node'
   }
 
@@ -391,34 +464,46 @@ export function resolveNativeTestDir(repoRoot, { ecosystem = null, tier = 'integ
 
   // 防污染：绝不写入 .agents/，若默认目录落在 quick-test 范围内则退避至隔离原生回归子目录
   if (dirRel.startsWith('.agents')) dirRel = `tests/${cleanTier}`
-  const extByStack = { node: '.mjs', python: '.py', go: '_test.go', rust: '.rs' }
+  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
+  const isTypeScript = stack === 'node' ? detectTypeScriptProject(repoRoot, files, dirRel) : false
+  const nodeRunner = stack === 'node' ? detectNodeTestRunner(repoRoot, pkg, devProfile) : null
+  const extByStack = { node: isTypeScript ? '.ts' : '.mjs', python: '.py', go: '_test.go', rust: '.rs' }
   const ext = extByStack[stack] ?? '.mjs'
-  const probeFile = `${dirRel}/probe_${cleanTier}${ext === '.mjs' ? '.test.mjs' : ext}`
+  const probeSuffix = stack === 'node' ? (isTypeScript ? '.test.ts' : '.test.mjs') : ext
+  const probeFile = `${dirRel}/probe_${cleanTier}${probeSuffix}`
   let avoidsQuickTest = !isPathInQuickTestScope(devProfile, probeFile)
   if (!avoidsQuickTest) {
     const isolated = `tests/${cleanTier}-suite`
-    const isoProbe = `${isolated}/probe_${cleanTier}${ext === '.mjs' ? '.test.mjs' : ext}`
+    const isoProbe = `${isolated}/probe_${cleanTier}${probeSuffix}`
     if (!isPathInQuickTestScope(devProfile, isoProbe)) {
       dirRel = isolated
       avoidsQuickTest = true
     }
   }
 
-  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
   const isEsm = stack === 'node' && (pkg?.type === 'module' || (files ?? []).some((f) => /\.mjs$/.test(f.rel ?? f)))
+  const nodeRunnerHints = {
+    vitest: 'npx vitest run',
+    jest: 'npx jest',
+    bun: 'bun test',
+    tsx: 'npx tsx --test',
+    node: 'node --test',
+  }
   const runnerHint = stack === 'python'
     ? 'python3 -m unittest'
     : stack === 'go'
       ? `go test ./${dirRel}/...`
       : stack === 'rust'
         ? 'cargo test --test'
-        : (isEsm ? 'node --test' : 'node --test')
+        : (nodeRunnerHints[nodeRunner] ?? 'node --test')
 
   return {
     stack,
     tier: cleanTier,
     dirRel: posixPath(dirRel),
     ext,
+    isTypeScript,
+    testRunner: nodeRunner ?? stack,
     isEsm,
     runnerHint,
     avoidsQuickTest,
@@ -559,6 +644,50 @@ export function renderNativeTestContent(repoRoot, candidate, stack) {
     ].join('\n')
   }
   const depthUp = testDir.split('/').filter(Boolean).map(() => '..').join('/') || '.'
+  const isTsTarget = /\.(?:ts|tsx|mts|cts)$/i.test(relTest)
+  if (isTsTarget) {
+    const targetRel = modRel ?? 'README.md'
+    const nodeRunner = detectNodeTestRunner(repoRoot)
+    if (nodeRunner === 'vitest' || nodeRunner === 'jest') {
+      const lines = [
+        "import { existsSync, readFileSync } from 'node:fs'",
+        "import { join, resolve } from 'node:path'",
+      ]
+      if (nodeRunner === 'vitest') lines.push("import { expect, test } from 'vitest'")
+      lines.push(
+        '',
+        `const REPO_ROOT: string = existsSync(join(process.cwd(), '${targetRel}'))`,
+        '  ? process.cwd()',
+        `  : resolve(process.cwd(), '${depthUp}')`,
+        '',
+        `test('${label} (${candidate.tier}): target surface exists and stays non-empty', (): void => {`,
+        `  const targetAbs: string = join(REPO_ROOT, '${targetRel}')`,
+        '  expect(existsSync(targetAbs)).toBe(true)',
+        "  const text: string = readFileSync(targetAbs, 'utf8')",
+        '  expect(text.trim().length).toBeGreaterThan(0)',
+        '})',
+        '',
+      )
+      return lines.join('\n')
+    }
+    return [
+      "import * as assert from 'node:assert/strict'",
+      "import { existsSync, readFileSync } from 'node:fs'",
+      "import { dirname, join, resolve } from 'node:path'",
+      "import { test } from 'node:test'",
+      "import { fileURLToPath } from 'node:url'",
+      '',
+      `const REPO_ROOT: string = resolve(dirname(fileURLToPath(import.meta.url)), '${depthUp}')`,
+      '',
+      `test('${label} (${candidate.tier}): target surface exists and stays non-empty', (): void => {`,
+      `  const targetAbs: string = join(REPO_ROOT, '${targetRel}')`,
+      '  assert.equal(existsSync(targetAbs), true, `target file missing: ${targetAbs}`)',
+      "  const text: string = readFileSync(targetAbs, 'utf8')",
+      "  assert.ok(text.trim().length > 0, 'target file must not be empty')",
+      '})',
+      '',
+    ].join('\n')
+  }
   return [
     "import assert from 'node:assert/strict'",
     "import { existsSync, readFileSync } from 'node:fs'",

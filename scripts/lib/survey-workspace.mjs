@@ -10,6 +10,9 @@ import { basename, join, relative } from 'node:path'
 import { prepareExecInvocation, resolveExecutable } from '../../kit/skills/lib/exec.mjs'
 import { hasDotGitInAncestors, readHeadFast, readLooseCommitLogFast } from '../../kit/skills/lib/git-fast.mjs'
 import { inspectSurveyStatusFast } from '../../kit/skills/lib/git-status-fast.mjs'
+import {
+  SAFE_ENV_RE, SECRET_CONTENT_PATTERNS, SECRET_FILE_RE, isNpmrcFile, isSensitiveSecretFile,
+} from '../../kit/skills/lib/credential-scan.mjs'
 
 import {
   detectGitModeMarkers,
@@ -49,25 +52,6 @@ import {
 export { detectConventions, detectDocs } from './survey-docs.mjs'
 
 const { LIKELY_DEFAULT_BRANCHES } = protocol
-
-const SECRET_FILE_PATTERNS = [
-  /^\.env(?:\..+)?$/i,
-  /\.(?:pem|key|p12|pfx|keystore)$/i,
-  /^id_(?:rsa|ed25519|ecdsa)$/i,
-  /^\.npmrc$/i,
-  /^\.pypirc$/i,
-]
-const SAFE_ENV_EXAMPLES = /^\.env\.(?:example|sample|template|defaults)$/i
-
-const SECRET_CONTENT_PATTERNS = [
-  { label: 'GitHub 令牌', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b/ },
-  { label: 'GitHub 细粒度令牌', re: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/ },
-  { label: 'npm 令牌', re: /\bnpm_[A-Za-z0-9]{36}\b/ },
-  { label: 'PyPI 令牌', re: /\bpypi-[A-Za-z0-9_-]{50,}\b/ },
-  { label: 'API 密钥', re: /\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b/ },
-  { label: 'AWS 访问密钥', re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { label: '私钥块', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/ },
-]
 
 export function runCmd(cmd, args, opts = {}) {
   return new Promise((done) => {
@@ -424,11 +408,12 @@ function processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii = true) {
   }
   const isSkillFile = rec.rel.startsWith('.agents/skills/')
   const isCodeFile = CODE_EXT.test(rec.name)
+  const isNpmrc = isNpmrcFile(rec.name)
   if (isSkillFile) rec.rawBuf = buf
-  const needText = !isCodeFile
+  const needText = isNpmrc || (!isCodeFile
     && !rec.rel.startsWith('docs/archive/')
     && !rec.rel.startsWith('kit/')
-    && (!isSkillFile || rec.rel === '.agents/skills/.pf-manifest.json' || rec.rel.endsWith('/SKILL.md') || rec.rel.endsWith('/skill.md'))
+    && (!isSkillFile || rec.rel === '.agents/skills/.pf-manifest.json' || rec.rel.endsWith('/SKILL.md') || rec.rel.endsWith('/skill.md')))
   let text = (needText || !homeIsAscii) ? buf.toString('utf8') : buf.toString('latin1')
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
   if (isCodeFile && !isSkillFile && !rec.rel.startsWith('kit/')) {
@@ -448,7 +433,7 @@ function processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii = true) {
         for (const pat of SECRET_CONTENT_PATTERNS) {
           if (pat.re.test(line)) {
             if (!rec.textSecrets) rec.textSecrets = []
-            rec.textSecrets.push({ file: rec.rel, line: i + 1, kind: pat.label })
+            rec.textSecrets.push({ file: rec.rel, line: i + 1, kind: pat.zhLabel ?? pat.label })
           }
         }
       }
@@ -521,7 +506,7 @@ function collectWorkspaceWalk(root, opts = {}) {
           textLeaks: null,
           unreadable: false,
         }
-        readQueue.push({ rec, full, isText: TEXT_EXT.test(entry.name) })
+        readQueue.push({ rec, full, isText: TEXT_EXT.test(entry.name) || isNpmrcFile(entry.name) })
         files.push(rec)
       }
     }
@@ -608,7 +593,8 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
     }
     for (const f of files) {
       if (!trackedSet.has(f.rel) && !hasIgnoredPrefix(f.rel)) {
-        const isSecret = SECRET_FILE_PATTERNS.some((re) => re.test(f.name)) && !SAFE_ENV_EXAMPLES.test(f.name)
+        const isSecret = SECRET_FILE_RE.test(f.name) && !SAFE_ENV_RE.test(f.name)
+          && (!isNpmrcFile(f.name) || f.size > 256 * 1024 || isSensitiveSecretFile(f.name, f.text))
         if (isSecret || OUTPUT_DIRS.has(f.rel.split('/')[0])) checkList.push(f.rel)
       }
     }
@@ -690,16 +676,18 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
       largeFiles.push({ file: file.rel, sizeMB: Math.round(fileSize / (1024 * 1024)), tracked })
     }
 
-    if (SECRET_FILE_PATTERNS.some((re) => re.test(file.name)) && !SAFE_ENV_EXAMPLES.test(file.name)) {
+    if (SECRET_FILE_RE.test(file.name) && !SAFE_ENV_RE.test(file.name)) {
       const tooLarge = fileSize > 256 * 1024
-      const status = !canAskGit ? 'undetermined'
-        : tooLarge ? 'unverified-large'
-          : tracked ? 'tracked' : (ignored ? 'ignored' : 'exposed')
-      secretFiles.push({ file: file.rel, status, sizeKB: Math.round(fileSize / 1024) })
-      if (tooLarge) skippedLargeFiles += 1
+      if (tooLarge || isSensitiveSecretFile(file.name, file.text)) {
+        const status = !canAskGit ? 'undetermined'
+          : tooLarge ? 'unverified-large'
+            : tracked ? 'tracked' : (ignored ? 'ignored' : 'exposed')
+        secretFiles.push({ file: file.rel, status, sizeKB: Math.round(fileSize / 1024) })
+        if (tooLarge) skippedLargeFiles += 1
+      }
     }
 
-    if (ignored || !TEXT_EXT.test(file.name) || fileSize > 256 * 1024) continue
+    if (ignored || (!TEXT_EXT.test(file.name) && !isNpmrcFile(file.name)) || fileSize > 256 * 1024) continue
     if (file.unreadable) { unreadableFiles += 1; continue }
     if (file.textSecrets) {
       for (const s of file.textSecrets) {

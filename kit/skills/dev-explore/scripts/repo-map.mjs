@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, posix } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { discoverContextDocs } from '../../lib/doc-locator.mjs'
@@ -79,6 +79,41 @@ function resolvePythonModuleRel(targetExpr, dirRel, fileSet) {
   return cands.find((cand) => fileSet.has(cand)) ?? null
 }
 
+const BUILD_OUT_PREFIX_RE = /^(?:dist|build|out|lib|esm|cjs)(?:\/(?:esm|cjs|mjs))?\//i
+
+function isRegularFileRel(root, rel) {
+  const abs = join(root, rel)
+  if (!existsSync(abs)) return false
+  try { return statSync(abs).isFile() } catch { return false }
+}
+
+/**
+ * 解析 package.json 声明入口：磁盘存在则收入；若指向缺失的 `.js`/`.cjs`/`.mjs` 构建产物，
+ * 尝试匹配同名或源码目录对应 `.ts`/`.tsx` 源码，仍缺失则跳过以避免产出僵尸入口。
+ */
+function resolvePkgEntryRel(root, dirRel, rawTarget) {
+  const raw = posixPath(String(rawTarget ?? '').trim()).replace(/^\.\//, '')
+  if (!raw || raw.includes('*') || raw.startsWith('#') || raw.endsWith('/')) return null
+  const combined = posix.normalize(dirRel ? `${dirRel}/${raw}` : raw)
+  if (!combined || combined === '.' || combined.startsWith('..') || combined.startsWith('/')) return null
+  if (isRegularFileRel(root, combined)) return combined
+  if (!/\.(?:js|cjs|mjs)$/i.test(combined)) return null
+
+  const prefix = dirRel ? `${dirRel}/` : ''
+  const relInPkg = prefix && combined.startsWith(prefix) ? combined.slice(prefix.length) : combined
+  const stem = relInPkg.replace(/\.(?:js|cjs|mjs)$/i, '')
+  const cands = [`${stem}.ts`, `${stem}.tsx`, `src/${stem}.ts`, `src/${stem}.tsx`]
+  if (BUILD_OUT_PREFIX_RE.test(stem)) {
+    const stripped = stem.replace(BUILD_OUT_PREFIX_RE, '')
+    cands.push(`src/${stripped}.ts`, `src/${stripped}.tsx`, `${stripped}.ts`, `${stripped}.tsx`)
+  }
+  for (const cand of cands) {
+    const fullRel = `${prefix}${cand}`
+    if (isRegularFileRel(root, fullRel)) return fullRel
+  }
+  return null
+}
+
 function detectEntrypoints(root, files, packages) {
   const entries = new Set()
   const cliEntrypoints = []
@@ -94,26 +129,32 @@ function detectEntrypoints(root, files, packages) {
   }
 
   const addPkgEntries = (dirRel) => {
-    const prefixRel = (raw) => {
-      const clean = posixPath(raw).replace(/^\.\//, '')
-      return dirRel ? `${dirRel}/${clean}` : clean
-    }
     const pkg = readJsonSafe(dirRel ? join(root, dirRel, 'package.json') : join(root, 'package.json'))
     if (pkg) {
       for (const field of [pkg.main, pkg.module]) {
-        if (typeof field === 'string') entries.add(prefixRel(field))
+        if (typeof field === 'string') {
+          const rel = resolvePkgEntryRel(root, dirRel, field)
+          if (rel) entries.add(rel)
+        }
       }
-      for (const expTarget of collectPkgExportStrings(pkg.exports)) entries.add(prefixRel(expTarget))
+      for (const expTarget of collectPkgExportStrings(pkg.exports)) {
+        const rel = resolvePkgEntryRel(root, dirRel, expTarget)
+        if (rel) entries.add(rel)
+      }
       if (typeof pkg.bin === 'string') {
-        const rel = prefixRel(pkg.bin)
-        entries.add(rel)
-        cliEntrypoints.push({ ecosystem: 'node', name: String(pkg.name ?? basename(rel)), file: rel })
+        const rel = resolvePkgEntryRel(root, dirRel, pkg.bin)
+        if (rel) {
+          entries.add(rel)
+          cliEntrypoints.push({ ecosystem: 'node', name: String(pkg.name ?? basename(rel)), file: rel })
+        }
       } else if (pkg.bin && typeof pkg.bin === 'object') {
         for (const [cmdName, v] of Object.entries(pkg.bin)) {
           if (typeof v === 'string') {
-            const rel = prefixRel(v)
-            entries.add(rel)
-            cliEntrypoints.push({ ecosystem: 'node', name: cmdName, file: rel })
+            const rel = resolvePkgEntryRel(root, dirRel, v)
+            if (rel) {
+              entries.add(rel)
+              cliEntrypoints.push({ ecosystem: 'node', name: cmdName, file: rel })
+            }
           }
         }
       }

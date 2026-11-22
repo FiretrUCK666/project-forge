@@ -105,3 +105,90 @@ export function scanBrokenCommentPaths({ repoRoot, fileRel, text, headText = nul
   }
   return broken
 }
+
+const GENERATED_HEADER_RE = /(?:^|\s)@generated\b|\bauto-?generated\b|\bautomatically\s+generated\b|\bmachine[- ]generated\b|\bcode\s+generated\b[^\n]*\bdo\s+not\s+edit\b|\bdo\s+not\s+edit\b[^\n]*\bgenerated\b|\bDO NOT EDIT\b|^\s*do\s+not\s+edit(?:\s*[.!:-]|$)/i
+const GENERATED_CASE_SENSITIVE_DO_NOT_EDIT = /\bDO NOT EDIT\b/
+
+/**
+ * 识别跨语言自动生成源码头标（必须位于前 20 行真实注释头部，严禁被字符串字面量或文件尾部注释伪装）。
+ */
+export function isGeneratedSourceHeader(text, ext = '') {
+  const raw = String(text ?? '')
+  if (!raw) return false
+  const head20 = raw.replace(/\r\n/g, '\n').split('\n').slice(0, 20).join('\n')
+  const views = buildLexedViews(head20, String(ext ?? '').toLowerCase())
+  for (let i = 0; i < views.commentLines.length; i += 1) {
+    const comment = String(views.commentLines[i] ?? '').trim()
+    if (!comment) continue
+    if (GENERATED_CASE_SENSITIVE_DO_NOT_EDIT.test(comment)) return true
+    if (/\bdo\s+not\s+edit\b/i.test(comment) && !/^\s*do\s+not\s+edit(?:\s*[.!:-]|$)|\bgenerated\b/i.test(comment)) {
+      continue
+    }
+    if (GENERATED_HEADER_RE.test(comment)) return true
+  }
+  return false
+}
+
+const CONTROL_FLOW_TOKEN_RE = /\b(?:if|else|for|while|do|switch|case|try|catch|finally|throw|return|yield|await|break|continue|goto|match|select|when|elif|except|raise|loop|defer|function|class|def|fn|func|lambda|proc|sub|impl)\b/g
+const LITERAL_PLACEHOLDER_OR_VAL_RE = /['"`/]|-?\d+|(?:\b(?:true|false|null|nil|None|undefined)\b)|[{}\[\]]/
+
+/**
+ * 基于词法剥离后的纯代码结构识别纯声明式数据源码（如路由表、i18n 字典、规则表），
+ * 防止把混杂业务逻辑或大段注释垫行数的神文件误放行。
+ */
+export function classifyDeclarativeDataFile({ fullText, ext = '', fullLineCount = 0, warnLines = 800 }) {
+  if (!fullText || typeof fullText !== 'string' || fullLineCount <= warnLines) return null
+  const extNorm = String(ext ?? '').toLowerCase()
+  const views = buildLexedViews(fullText, extNorm)
+  const codeNoLit = views.codeNoLiteralLines
+
+  let nonEmptyCodeCount = 0
+  let controlFlowCount = 0
+  let depth = 0
+  let nestedDataLines = 0
+  let literalEntryLines = 0
+  let topLevelDeclCount = 0
+
+  for (let i = 0; i < codeNoLit.length; i += 1) {
+    const line = String(codeNoLit[i] ?? '').trim()
+    if (!line) continue
+    nonEmptyCodeCount += 1
+
+    const cfMatches = line.match(CONTROL_FLOW_TOKEN_RE)
+    if (cfMatches) controlFlowCount += cfMatches.length
+    if (extNorm !== 'php' && /=>/.test(line)) controlFlowCount += 1
+    if (/\bnew\s+[A-Z]/.test(line)) controlFlowCount += 1
+
+    const depthBefore = depth
+    for (const ch of line) {
+      if (ch === '{' || ch === '[') depth += 1
+      else if ((ch === '}' || ch === ']') && depth > 0) depth -= 1
+    }
+
+    const isNested = depthBefore > 0 || depth > 0
+    if (isNested) nestedDataLines += 1
+    else if (/^(?:export\b|const\b|let\b|var\b|pub\b|static\b|[A-Za-z_][A-Za-z0-9_]*\s*=)/.test(line)) {
+      topLevelDeclCount += 1
+    }
+
+    const isEntryLike = isNested
+      ? (/^(?:['"`][^'"`]*['"`]|[A-Za-z0-9_$-]+)\s*[:=]/.test(line)
+        || LITERAL_PLACEHOLDER_OR_VAL_RE.test(line))
+      : (/^\s*(?:export\s+(?:default\s+)?)?(?:const|let|var|pub\s+static|static|final)\b.*[{\[]/.test(line)
+        || /^[}\])]+[,;]?$/.test(line))
+    if (isEntryLike) literalEntryLines += 1
+  }
+
+  // 反注释垫行绕过：真实代码行必须达到全文件相当比例且有足够规模
+  if (nonEmptyCodeCount < Math.max(200, Math.floor(fullLineCount * 0.5))) return null
+  // 混杂业务逻辑/控制流/箭头函数的文件绝不降级
+  if (controlFlowCount > 0) return null
+
+  const nestedRatio = nestedDataLines / nonEmptyCodeCount
+  const literalRatio = Number((literalEntryLines / nonEmptyCodeCount).toFixed(3))
+  // 必须大部分行位于数据字面量结构内（避免把 820 条顶层 `export const k0 = 0` 误判成表驱动文件）
+  if (nestedRatio < 0.7 || literalRatio < 0.65 || topLevelDeclCount > Math.max(30, Math.floor(nonEmptyCodeCount * 0.1))) {
+    return null
+  }
+  return { lines: fullLineCount, literalRatio, controlFlowCount }
+}

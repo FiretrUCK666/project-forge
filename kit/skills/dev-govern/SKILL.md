@@ -80,7 +80,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 1. **禁止默认写回 `AGENTS.md`**：`signals.jsonl` 按 `{ defectClass, pyramidTier, fingerprint, targetArtifact }` 记录结构化故障指纹；`retro` 默认绝不向 `AGENTS.md` 追加自然语言规则，避免契约膨胀。
 2. **同类故障指纹复发 `>= 2` 次强制升格**：
    - **Tier 1（架构重构优先）**：状态分裂、竞态、超长紧文件或跨模块结构耦合经 `escalation.mjs` 自动生成并按指纹去重 Tier 1 重构单。
-   - **Tier 2（确定性门禁次优先）**：可静态拦截缺陷产出 `arch-rules`、`dev-edit/scripts/edit-gate.mjs`、CI 或目标仓既有原生校验配置建议（绝不硬绑定第三方外部 linter 二进制）。
+   - **Tier 2（确定性门禁次优先）**：可静态拦截缺陷产出 `arch-rules`、`.agents/skills/dev-edit/scripts/edit-gate.mjs`、CI 或目标仓既有原生校验配置建议（绝不硬绑定第三方外部 linter 二进制）。
    - **Tier 3（仅显式兜底与定期淘汰）**：仅传 `--allow-tier3-fallback --reason "<原因>"` 方允许写入带 `[TIER-3-FALLBACK]` 标记与到期条件的极简词条；常规 `retro` 自动识别并清理过期或已由 Tier 2 覆盖的陈旧条目。
 - **生命周期自动触发**：`flow finalize`/`verify` 默认自动跑轻量 `audit . --changed --quiet --json`（禁无痕跳过），`flow merge`/`cleanup` 后自动跑 `retro --auto` 并把待整改项注入 `next` 引导；显式跳过必带 `--skip-govern --reason` 留痕。
 

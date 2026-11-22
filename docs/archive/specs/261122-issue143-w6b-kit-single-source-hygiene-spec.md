@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: Slice 6B：kit 单源化、去自用泄漏与门禁精度升级
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
 issue: 143
 pr: null
-branch: docs/w6-universal-architecture-plan
-owner: plan-w6
+branch: feat/w6b-kit-single-source-hygiene
+owner: impl-w6b
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-w6-r2, round=1, sha=91e834312638, summary=Round 2 independent critique PASS (#599))"
-related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
+related_prd: ../../prd/261122-issue143-w6-universal-architecture-prd.md
 related_todo: ../todo/261122-issue143-w6b-kit-single-source-hygiene-todo.md
 high_risk_paths: [kit/, AGENTS.md]
 task_id: w6b-kit-single-source-hygiene
@@ -33,7 +33,7 @@ scope_files: [kit/skills/lib/subcommand-meta.mjs, kit/skills/lib/doc-verify.mjs,
 | 分支 / Issue / PR | 见 Frontmatter `branch` / #143 / 未关联 |
 | 负责人 / 内审状态 | plan-w6 / `pending` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | `docs/prd/261122-issue143-w6-universal-architecture-prd.md` / `docs/todo/261122-issue143-w6b-kit-single-source-hygiene-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261122-issue143-w6-universal-architecture-prd.md` / `docs/archive/todo/261122-issue143-w6b-kit-single-source-hygiene-todo.md` |
 
 - **变更一句话**：将 `kit/` 子命令表与履历/墓碑词表收敛为唯一真源、清除全部本仓自用符号硬编码并加静态门禁、修准 `feature-map` / `repo-map` / `static-gates` / `dev-govern` 精度并同步文档与历史基线。
 
@@ -150,13 +150,13 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C7: 单源导出 `SUBCOMMAND_META`（`{ name, mutating }`），统一 `doc-plan.mjs`、`govern-audit.mjs`、`verify-tools.mjs`、`iterate.mjs`、`doc-verify.mjs`、`triage-rules.mjs` 与新增 `scripts/dev/subcommand-parity.mjs`(new)（接入 `scripts/dev/preflight-suite.mjs`，分阶段校验 6 套入口子命令并随 `preflight.mjs` 退出 `0`）。
-- [ ] C8: `kit/skills/lib/doc-verify.mjs` 与 `kit/skills/lib/doc-facts.mjs` 复用 `COMMON_SKIP_DIRS`、通用多生态只读命令与目标仓 `Dev Profile` 替代 `node|npm|npx|git` 硬编码，扩充多语言后缀识别。
-- [ ] C9: 清零 `kit/` 中全部 `project-forge` 自用逻辑与示例（`intake-triage.mjs` 动态读取目标仓 `AGENTS.md` 与权威文档、`edit-gate.mjs` 与 `govern-tests.mjs` 去掉 `verify-injections|gap-coverage` 硬编码、`evidence-substance.mjs` 等清理），在 `scripts/dev/preflight-suite.mjs` 新增零本仓私有符号静态门禁并通过扫描；`edit-gate.mjs` 补齐 `--base` 与游离 `HEAD` 槽位兼容以支撑 6C `verify-edit-gate`。
-- [ ] C10: 合并 `TOMBSTONE_COMMENT_RE` 与 `kit/skills/lib/no-changelog-voice.mjs` 为单源词形引擎（剥离字面量后同步查 `.mjs` 注释，保留 `TOMBSTONE_COMMENT_RE` 兼容 `shared.mjs:127`），清零 `doc-verify.mjs`、`gate-truth.mjs`、`profile.mjs`、`tdd-parity.mjs`、`references/plugin-ecosystems.md` 等存量履历注释并清空 `.github/changelog-voice-baseline.json` 为 `{}`；同步 `docs/TDD.md`（去易变计数）、`README.md` / `README.en.md`（补 `scripts/zip.mjs`）与 `kit/skills/dev-govern/SKILL.md`。
-- [ ] C11: 提高 `feature-map.mjs`、`repo-map.mjs`、`static-gates.mjs` 与 `dev-govern` 精度（同生态与路径边界匹配、过滤 `dist/`/`.github/workflows/`/`*.test.*`/`.agents/`、`UI_VISUAL_EXT_RE` 正则排除测试/夹具路径并导出 `isUiVisualFile` 免疫全部 6 处调用、`TEST_CASE_RE` 排除 `.test(`、`govern-audit --save-baseline --quiet` 不跳过 `tests`/`perf`、`reconcile` 联动 `verify-tools audit`、`govern-docs` 跳过译文 `docs/{lang}/`、`govern-evergreen` 识别 VitePress 根路由与子包路径、`govern-checks` 跳过纯跟踪源码目录 `build/`）；全部新增/修改 `.mjs` `<= 800` 行。
-- [ ] C12: Slice 6B 新增正反双向夹具（`scripts/dev/fixtures-w6b-kit-hygiene.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6b.mjs`(new)），运行 `node scripts/equip.mjs .` 后，`node scripts/equip.mjs . --check`、`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --jobs 6`、`node scripts/dev/verify-injections.mjs --jobs 4` 与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 全绿。
-- [ ] C19: 在 `kit/skills/lib/static-gates.mjs`（`scanStructuralHygiene`）、`kit/skills/lib/static-gates-comment-hygiene.mjs`、`kit/skills/dev-edit/scripts/edit-gate.mjs` 与 `kit/skills/dev-review/scripts/review-gates.mjs` 补齐 `<= 800` 行门禁两类误拦边界（禁按框架文件名硬编码）：(1) 跨语言自动生成源码豁免（识别前 20 行标准自动生成头标后免检 `godFile` / `nearLimitFile` / 履历墓碑 / 注释死代码，同时保留 `scripts/dev/preflight-suite.mjs` 对本仓 `kit/` 脚本的 800 行硬检）；(2) 纯声明式数据源码降级（高字面量占比、极低控制流密度的纯表驱动文件在 `scanStructuralHygiene` 中不置位 `godFile` 而改为 `declarativeDataFile`，使 `edit-gate.mjs` 降级为 warning/结构提示放行且 `review-gates.mjs` 不误报 `godFiles`；真实混杂业务逻辑的 `>800` 行神文件仍严格拦截，并配双向正反测试防注释/假表绕过）。
+- [x] C7: 单源导出 `SUBCOMMAND_META`（`{ name, mutating }`），统一 `doc-plan.mjs`、`govern-audit.mjs`、`verify-tools.mjs`、`iterate.mjs`、`doc-verify.mjs`、`triage-rules.mjs` 与新增 `scripts/dev/subcommand-parity.mjs`(new)（接入 `scripts/dev/preflight-suite.mjs`，分阶段校验 6 套入口子命令并随 `preflight.mjs` 退出 `0`）。
+- [x] C8: `kit/skills/lib/doc-verify.mjs` 与 `kit/skills/lib/doc-facts.mjs` 复用 `COMMON_SKIP_DIRS`、通用多生态只读命令与目标仓 `Dev Profile` 替代 `node|npm|npx|git` 硬编码，扩充多语言后缀识别。
+- [x] C9: 清零 `kit/` 中全部 `project-forge` 自用逻辑与示例（`intake-triage.mjs` 动态读取目标仓 `AGENTS.md` 与权威文档、`edit-gate.mjs` 与 `govern-tests.mjs` 去掉 `verify-injections|gap-coverage` 硬编码、`evidence-substance.mjs` 等清理），在 `scripts/dev/preflight-suite.mjs` 新增零本仓私有符号静态门禁并通过扫描；`edit-gate.mjs` 补齐 `--base` 与游离 `HEAD` 槽位兼容以支撑 6C `verify-edit-gate`。
+- [x] C10: 合并 `TOMBSTONE_COMMENT_RE` 与 `kit/skills/lib/no-changelog-voice.mjs` 为单源词形引擎（剥离字面量后同步查 `.mjs` 注释，保留 `TOMBSTONE_COMMENT_RE` 兼容 `shared.mjs:127`），清零 `doc-verify.mjs`、`gate-truth.mjs`、`profile.mjs`、`tdd-parity.mjs`、`references/plugin-ecosystems.md` 等存量履历注释并清空 `.github/changelog-voice-baseline.json` 为 `{}`；同步 `docs/TDD.md`（去易变计数）、`README.md` / `README.en.md`（补 `scripts/zip.mjs`）与 `kit/skills/dev-govern/SKILL.md`。
+- [x] C11: 提高 `feature-map.mjs`、`repo-map.mjs`、`static-gates.mjs` 与 `dev-govern` 精度（同生态与路径边界匹配、过滤 `dist/`/`.github/workflows/`/`*.test.*`/`.agents/`、`UI_VISUAL_EXT_RE` 正则排除测试/夹具路径并导出 `isUiVisualFile` 免疫全部 6 处调用、`TEST_CASE_RE` 排除 `.test(`、`govern-audit --save-baseline --quiet` 不跳过 `tests`/`perf`、`reconcile` 联动 `verify-tools audit`、`govern-docs` 跳过译文 `docs/{lang}/`、`govern-evergreen` 识别 VitePress 根路由与子包路径、`govern-checks` 跳过纯跟踪源码目录 `build/`）；全部新增/修改 `.mjs` `<= 800` 行。
+- [x] C12: Slice 6B 新增正反双向夹具（`scripts/dev/fixtures-w6b-kit-hygiene.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6b.mjs`(new)），运行 `node scripts/equip.mjs .` 后，`node scripts/equip.mjs . --check`、`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --jobs 6`、`node scripts/dev/verify-injections.mjs --jobs 4` 与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 全绿。
+- [x] C19: 在 `kit/skills/lib/static-gates.mjs`（`scanStructuralHygiene`）、`kit/skills/lib/static-gates-comment-hygiene.mjs`、`kit/skills/dev-edit/scripts/edit-gate.mjs` 与 `kit/skills/dev-review/scripts/review-gates.mjs` 补齐 `<= 800` 行门禁两类误拦边界（禁按框架文件名硬编码）：(1) 跨语言自动生成源码豁免（识别前 20 行标准自动生成头标后免检 `godFile` / `nearLimitFile` / 履历墓碑 / 注释死代码，同时保留 `scripts/dev/preflight-suite.mjs` 对本仓 `kit/` 脚本的 800 行硬检）；(2) 纯声明式数据源码降级（高字面量占比、极低控制流密度的纯表驱动文件在 `scanStructuralHygiene` 中不置位 `godFile` 而改为 `declarativeDataFile`，使 `edit-gate.mjs` 降级为 warning/结构提示放行且 `review-gates.mjs` 不误报 `godFiles`；真实混杂业务逻辑的 `>800` 行神文件仍严格拦截，并配双向正反测试防注释/假表绕过）。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -172,6 +172,6 @@ flowchart LR
 
 > 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
 
-- **实际落地摘要**：待实施后填写
-- **与草案的差异**：待实施后填写
-- **关联同步文件**：待实施后填写
+- **实际落地摘要**：完成 Slice 6B `C7..C12` 与 `C19` 全部改造：`SUBCOMMAND_META` 单源表与分阶段 `subcommand-parity.mjs` 对拍门禁、`doc-facts-commands.mjs` 多生态只读核查与 `COMMON_SKIP_DIRS`、清零 `kit/` 自用泄漏与新增 `scanKitPrivateLeaks`、统一 `CHANGELOG_VOICE_TOMBSTONE_RE` 引擎并清空履历基线、`feature-map`/`repo-map`/`static-gates`/`dev-govern` 多维精度提升、拆分 `repo-map-helpers.mjs` 与 `govern-checks-hygiene.mjs` 守住 `<= 800` 行上限、`edit-gate.mjs` 支持 `--base` 与游离 `HEAD`，以及 `scanStructuralHygiene` 跨语言自动生成头标豁免与纯声明式数据降级闭合 `edit-gate`/`review-gates` 契约。
+- **与草案的差异**：顺带在 `govern-checks.mjs` `auditSecurity` 接入 `matchSecretContentLine` 消费 6A 动态 PEM 豁免并在 `auditHygiene` 履历扫描中跳过 `isTestOrFixtureFile`，使 `govern-audit.mjs audit . --strict` 全仓通过；在 `scanStructuralHygiene` 增加 `skipFixtureCheck` 选项以保持 `govern-checks.mjs` 对 `I158` 门禁测试的独立捕获能力。
+- **关联同步文件**：已同步 `.agents/skills/` 与 `.pf-manifest.json`（`equip.mjs`）、`docs/TDD.md`、`README.md`、`README.en.md`、`kit/skills/dev-govern/SKILL.md`、`references/plugin-ecosystems.md`、`.github/changelog-voice-baseline.json`，并补齐 `scripts/dev/fixtures-w6b-kit-hygiene.mjs` 与 `scripts/dev/injections-data-w6b.mjs`。

@@ -16,7 +16,7 @@ import {
 } from '../../lib/profile-sniffer.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
-  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, stripCodeCommentsLines,
+  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, isMetaTestHarness, stripCodeCommentsLines,
 } from '../../lib/static-gates.mjs'
 import {
   cmdCoversTestFile, collectConfiguredTestEntries, collectTestInventory, expandVerificationCommands,
@@ -130,8 +130,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
     const isUnitTier = fileTier === 'unit'
     const codeLines = stripCodeCommentsLines(info.text, ext)
     const codeOnlyText = codeLines.join('\n')
-    const isMetaFixtureHarness = /(?:^|\/)(?:fixtures|verify-injections|gap-coverage)\.[^/]+$/i.test(f.rel)
-      || /\bfunction\s+tmpProject\s*\(/.test(info.text)
+    const isMetaFixtureHarness = isMetaTestHarness(f.rel, info.text)
 
     let actualSkipCount = 0
     let testDeclCount = 0

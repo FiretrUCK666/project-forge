@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
+import { isTestOrFixtureFile } from './static-gates.mjs'
 import {
   VALID_RISK_LEVELS,
   computeFeatureFingerprint,
@@ -272,6 +273,66 @@ export function mergeFeatureMapIncremental(existing, discovered) {
   return { featureMap: sanitizeFeatureMap({ version: FEATURE_MAP_VERSION, features: merged }), addedFeatures, updatedFeatures }
 }
 
+const ECO_BY_EXT = new Map([
+  ...['js', 'mjs', 'cjs', 'mts', 'cts', 'ts', 'tsx', 'jsx', 'vue', 'svelte', 'astro'].map((e) => [e, 'jsts']),
+  ['py', 'python'],
+  ['go', 'go'],
+  ['rs', 'rust'],
+  ...['java', 'kt', 'kts', 'scala', 'groovy'].map((e) => [e, 'jvm']),
+  ...['cs', 'fs', 'vb'].map((e) => [e, 'dotnet']),
+  ['rb', 'ruby'],
+  ['php', 'php'],
+  ['swift', 'swift'],
+  ['dart', 'dart'],
+  ...['c', 'cc', 'cpp', 'cxx', 'h', 'hpp'].map((e) => [e, 'cpp']),
+  ...['sh', 'bash', 'zsh', 'ps1'].map((e) => [e, 'shell']),
+])
+
+function ecosystemOfPath(relPath) {
+  const ext = posixPath(relPath).split('.').pop()?.toLowerCase() ?? ''
+  return ECO_BY_EXT.get(ext) ?? null
+}
+
+function testBaseStemOf(relPath) {
+  const base = basename(posixPath(relPath))
+  const noExt = base.replace(/\.[^.]+$/, '')
+  return noExt
+    .replace(/\.(?:test|spec)$/i, '')
+    .replace(/(?:_test|_unittest|_spec)$/i, '')
+    .replace(/(?:Tests?|IT)$/, '')
+    .replace(/^test_/i, '')
+    .toLowerCase()
+}
+
+export function isNonFeatureArtifactPath(relPath) {
+  const p = normRelPath(relPath)
+  if (!p) return true
+  if (/^(?:dist|build|coverage|\.github|\.agents|\.worktrees|node_modules)\//i.test(p)) return true
+  return isTestOrFixtureFile(p)
+}
+
+/** 按同生态边界与文件名/路径词边界匹配源码对应的测试文件。 */
+export function matchTestsForSourceFile(srcPath, testFiles = []) {
+  const srcNorm = normRelPath(srcPath)
+  if (!srcNorm) return []
+  const srcEco = ecosystemOfPath(srcNorm)
+  const rawStem = basename(srcNorm).replace(/\.[^.]+$/, '').toLowerCase()
+  if (!rawStem) return []
+  const escaped = rawStem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const wordRe = new RegExp(`(?:^|[._-])${escaped}(?:$|[._-])`, 'i')
+
+  return (Array.isArray(testFiles) ? testFiles : []).filter((rawTest) => {
+    const tNorm = normRelPath(rawTest)
+    if (!tNorm) return false
+    const testEco = ecosystemOfPath(tNorm)
+    if (srcEco && testEco && srcEco !== testEco) return false
+    const tStem = testBaseStemOf(tNorm)
+    if (!tStem) return false
+    if (rawStem.length <= 2) return tStem === rawStem
+    return tStem === rawStem || wordRe.test(tStem)
+  })
+}
+
 function isRunnableVerifyCommand(cmd) {
   const s = String(cmd ?? '').trim()
   return Boolean(s) && !/^(?:待补充|未配置|none\b)/i.test(s) && !/\(或\s+/.test(s)
@@ -307,9 +368,9 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false 
 
   for (const fm of Array.isArray(repoMap?.featureMap) ? repoMap.featureMap : []) {
     const src = normRelPath(fm.source)
-    if (!src) continue
+    if (isNonFeatureArtifactPath(src)) continue
     const stem = basename(src).replace(/\.[^.]+$/, '')
-    const matchedTests = testFiles.filter((t) => t.toLowerCase().includes(stem.toLowerCase())).slice(0, 6)
+    const matchedTests = matchTestsForSourceFile(src, testFiles).slice(0, 6)
     const relatedFlows = flowsList
       .filter((fl) => normRelPath(fl.entry) === src || normRelPath(fl.source) === src)
       .map((fl) => `[${fl.surface}] ${fl.name} (${fl.entry})`)
@@ -321,10 +382,10 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false 
   }
   for (const fl of flowsList) {
     const ep = normRelPath(fl.entry)
-    if (!ep) continue
+    if (isNonFeatureArtifactPath(ep)) continue
     const stem = basename(ep).replace(/\.[^.]+$/, '')
     if (seen.has(slugifyFeatureId(stem))) continue
-    const matchedTests = testFiles.filter((t) => t.toLowerCase().includes(stem.toLowerCase())).slice(0, 6)
+    const matchedTests = matchTestsForSourceFile(ep, testFiles).slice(0, 6)
     addCandidate({
       id: stem, name: fl.name || stem, entrypoints: [ep], modules: [ep],
       businessFlows: [`[${fl.surface}] ${fl.name} (${ep})`],

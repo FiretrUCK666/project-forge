@@ -24,6 +24,54 @@ import { checkEvergreenAuthorityDocs, discoverEvergreenAuthorityDocs } from './g
 export { discoverEvergreenAuthorityDocs }
 
 const REPO_PATH_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|sh|ps1|rs|go|java|kt|cs|json|ya?ml|toml|lock|txt|cfg|ini|md)$/i
+const TRANSLATED_DOCS_DIR_RE = /^docs\/(?:(?:zh|en|ja|ko|fr|de|es|pt|ru|it|nl|pl|tr|vi|th|ar|hi|uk|cs|sv|da|fi|he|el|ro|hu|bg|ca|ms|bn|fa)(?:[-_][A-Za-z0-9]{2,4})?|[a-z]{2}[-_][A-Za-z]{2,4})\//i
+
+export function isTranslatedDocPath(rel) {
+  return TRANSLATED_DOCS_DIR_RE.test(posixPath(String(rel ?? '')).replace(/^\.\//, ''))
+}
+
+function detectVitePressRoots(repoRoot) {
+  const roots = new Set()
+  for (const cfgRel of ['.vitepress/config.mjs', '.vitepress/config.js', '.vitepress/config.ts', '.vitepress/config.mts', 'docs/.vitepress/config.mjs', 'docs/.vitepress/config.js', 'docs/.vitepress/config.ts', 'docs/.vitepress/config.mts']) {
+    const abs = join(repoRoot, cfgRel)
+    if (!existsSync(abs)) continue
+    const baseRoot = cfgRel.startsWith('docs/') ? 'docs' : ''
+    const txt = readTextStrictInfo(abs)?.text ?? ''
+    const srcM = /\bsrcDir\s*:\s*['"]([^'"]+)['"]/.exec(txt)
+    if (srcM) {
+      const clean = posixPath(srcM[1]).replace(/^\.\//, '').replace(/^\/+|\/+$/g, '')
+      if (clean && clean !== '.') roots.add(baseRoot ? `${baseRoot}/${clean}` : clean)
+    }
+    roots.add(baseRoot || 'docs')
+  }
+  if (existsSync(join(repoRoot, 'docs'))) roots.add('docs')
+  return [...roots]
+}
+
+function markdownTargetExists(repoRoot, fromFileAbs, decoded, vitePressRoots = []) {
+  if (decoded.startsWith('/')) {
+    const route = decoded.replace(/^\/+/, '').replace(/\/+$/, '')
+    const candidates = [route, `${route}.md`, `${route}/index.md`]
+    if (/\.html$/i.test(route)) {
+      const stem = route.replace(/\.html$/i, '')
+      candidates.push(`${stem}.md`, `${stem}/index.md`)
+    }
+    for (const vpRoot of ['', ...vitePressRoots]) {
+      const prefix = vpRoot ? `${vpRoot}/` : ''
+      for (const c of candidates) {
+        if (c && existsSync(join(repoRoot, `${prefix}${c}`))) return true
+      }
+    }
+    return false
+  }
+  const directAbs = resolve(dirname(fromFileAbs), decoded)
+  if (existsSync(directAbs)) return true
+  if (/\.html$/i.test(decoded)) {
+    const mdAlt = resolve(dirname(fromFileAbs), decoded.replace(/\.html$/i, '.md'))
+    if (existsSync(mdAlt)) return true
+  }
+  return false
+}
 
 function isRootReadmeRel(rel) {
   return /^readme$/i.test(rel)
@@ -164,9 +212,10 @@ function decodeUriSafe(raw) {
 }
 
 function checkMarkdownDeadLinks(repoRoot, files, findings) {
+  const vitePressRoots = detectVitePressRoots(repoRoot)
   for (const f of files) {
     if (!/\.mdx?$/i.test(f.name)) continue
-    if (f.rel.startsWith('templates/') || f.rel.startsWith('docs/archive/')) continue
+    if (f.rel.startsWith('templates/') || f.rel.startsWith('docs/archive/') || isTranslatedDocPath(f.rel)) continue
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
     const lines = info.text.split('\n')
@@ -200,8 +249,7 @@ function checkMarkdownDeadLinks(repoRoot, files, findings) {
         const clean = noTitle.split(/[?#]/)[0].trim()
         if (!clean) continue
         const decoded = decodeUriSafe(clean)
-        const targetAbs = decoded.startsWith('/') ? join(repoRoot, decoded.slice(1)) : resolve(dirname(f.full), decoded)
-        if (!existsSync(targetAbs)) {
+        if (!markdownTargetExists(repoRoot, f.full, decoded, vitePressRoots)) {
           perFileCount += 1
           if (perFileCount <= 15) {
             addFinding(findings, {
@@ -508,7 +556,7 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
 
   for (const f of files) {
     if (!/\.mdx?$/i.test(f.name)) continue
-    if (f.rel.startsWith('templates/') || f.rel.startsWith('docs/archive/')) continue
+    if (f.rel.startsWith('templates/') || f.rel.startsWith('docs/archive/') || isTranslatedDocPath(f.rel)) continue
     const info = readTextStrictInfo(f.full)
     if (!info?.text || !/```+\s*mermaid/i.test(info.text)) continue
     const mRes = checkMermaidLabelWidth(info.text)

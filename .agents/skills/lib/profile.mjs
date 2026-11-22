@@ -286,7 +286,7 @@ export function isProfileExplicitNone(profile, key) {
 /**
  * 层级名到 Dev Profile 键的唯一映射：`gate` → `merge-gate`，其余同名。
  *
- * 这套对应关系以前写在三个地方（分层证据校验、试合、verify 选命令），一处改了另两处
+ * 如果把这套对应关系分散写在三个地方（分层证据校验、试合、verify 选命令），一处改了另两处
  * 不知道，于是「verify 跑的是 merge-gate、试合跑的是 full-test」这种偏差没有任何东西
  * 会报错。映射本身只有一份，取命令时再按「有没有显式 none」决定要不要用它。
  */

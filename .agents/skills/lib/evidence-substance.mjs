@@ -64,7 +64,7 @@ export function evaluateTextSubstance(raw, { minChars = 6, subject = '实证说�
     return {
       ok: false,
       code: 'BLOCKED_SHALLOW_EVIDENCE',
-      reason: `${subject}「${trimmed}」只是无实质的水话，请写清跑过的命令或看到的状态（如 "node scripts/survey.mjs . --json exit=0"）。`,
+      reason: `${subject}「${trimmed}」只是无实质的水话，请写清跑过的命令或看到的状态（如 "npm test -- --run exit=0"）。`,
       cleaned: '',
     }
   }

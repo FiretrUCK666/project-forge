@@ -4,12 +4,16 @@
  * governance loop tracking, GitHub issue payloads, harness reconcile, and release-prep.
  *
  * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
+ *
+ * 子命令：
+ *   audit | reconcile | plan | issues | record | cluster | sample | retro | release-prep
  */
 
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
+import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import {
   canonicalPath, gitRun, gitRunBuffer, isMacOsJunkPath, isMainModule,
   posixPath, resolveDefaultBranch, resolveRepoRoots, samePath, writeAtomic,
@@ -18,9 +22,10 @@ import { readGitIndexPathsFast, readHeadFast } from '../../lib/git-fast.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
 import {
-  auditDeadcode, auditHygiene, auditPerf, auditSecurity,
+  addFinding, auditDeadcode, auditHygiene, auditPerf, auditSecurity,
   createFileContentCache, readTextStrictInfo, setActiveFileCache, walkFiles,
 } from './govern-checks.mjs'
+import { runReconcileVerifyToolsAudit } from './govern-checks-hygiene.mjs'
 import {
   buildClusterReport, buildGovernNextSteps, buildIssues, applyIssuesToBackend,
   collectChangedFilesSet, countBySeverity, filterFindingsByBaselineAndChanged,
@@ -35,7 +40,7 @@ import { handleReleasePrep } from './release-prep-lib.mjs'
 
 const ALL_CATEGORIES = ['security', 'deadcode', 'tests', 'docs', 'hygiene', 'perf']
 const VALID_CATEGORIES = new Set(ALL_CATEGORIES)
-const SUBCOMMANDS = ['audit', 'reconcile', 'plan', 'issues', 'record', 'cluster', 'sample', 'retro', 'release-prep']
+const SUBCOMMANDS = subcommandNamesFor('govern-audit')
 
 function printHelp() {
   process.stdout.write([
@@ -196,7 +201,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
         'source', 'message', 'title', 'note', 'task', 'reason',
       ],
       aliases: { rule: 'pattern', title: 'message' },
-      usageHint: 'govern-audit.mjs [audit|reconcile|plan|issues|record|cluster|sample|retro|release-prep] [dir]',
+      usageHint: `govern-audit.mjs [${SUBCOMMANDS.join('|')}] [dir]`,
     })
     opts = normalizeParsedArgs(cli)
     if (runtimeOpts && typeof runtimeOpts === 'object') {
@@ -300,8 +305,8 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
     if (runLiveAudit && !skipFullForEmptyChanged) {
       if (catSet.has('security')) auditSecurity(scopedFiles, trackedSet, rawFindings)
       if (catSet.has('deadcode')) auditDeadcode(scopedFiles, rawFindings)
-      if (catSet.has('tests') && !opts.quiet) testsMeta = auditTests(workTreeRoot, files, devProfile, rawAgentsMeta, rawFindings)
-      if (catSet.has('perf') && !opts.quiet) auditPerf(workTreeRoot, scopedFiles, rawFindings)
+      if (catSet.has('tests') && (!opts.quiet || opts.saveBaseline)) testsMeta = auditTests(workTreeRoot, files, devProfile, rawAgentsMeta, rawFindings)
+      if (catSet.has('perf') && (!opts.quiet || opts.saveBaseline)) auditPerf(workTreeRoot, scopedFiles, rawFindings)
     }
     let hygieneMeta = { worktrees: { total: 0, counts: {}, entries: [], stale: [] }, manifest: { present: false, status: 'not-checked', issues: [] }, archViolations: [] }
     if (runLiveAudit && !skipFullForEmptyChanged) {
@@ -318,9 +323,14 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       hygieneMeta = hygRes
     }
 
+    let verifyToolsAudit = null
+    if (opts.reconcile) {
+      verifyToolsAudit = await runReconcileVerifyToolsAudit(workTreeRoot, mainRoot, gitDir, rawFindings, addFinding)
+    }
+
     return await finishAudit({
       opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
-      scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet, files,
+      scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, verifyToolsAudit, preChangedSet, files,
     })
   } finally {
     setActiveFileCache(null)
@@ -330,7 +340,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
 
 async function finishAudit({
   opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
-  scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet = null, files = [],
+  scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, verifyToolsAudit = null, preChangedSet = null, files = [],
 }) {
 
   let baselineSavedInfo = null
@@ -358,7 +368,10 @@ async function finishAudit({
     const evergreenDocs = evDiscovery.docs
     const duplicateGroups = evDiscovery.duplicateGroups
     const fm = readFeatureMapSafe(workTreeRoot)
-    const staleFeatures = fm.valid ? fm.features.filter((f) => f.stale === true).map((f) => f.id ?? f.name).filter(Boolean) : []
+    const staleFeatures = [...new Set([
+      ...(fm.valid ? fm.features.filter((f) => f.stale === true).map((f) => f.id ?? f.name).filter(Boolean) : []),
+      ...((verifyToolsAudit?.staleTools ?? []).map((s) => s.featureId).filter(Boolean)),
+    ])]
     const missingEntryPaths = []
     const mappedPaths = new Set()
     if (fm.valid) {
@@ -402,6 +415,9 @@ async function finishAudit({
       || duplicateGroups.length > 0
       || missingEntryPaths.length > 0
       || staleFeatures.length > 0
+      || (verifyToolsAudit?.zombies?.length ?? 0) > 0
+      || (verifyToolsAudit?.staleTools?.length ?? 0) > 0
+      || (verifyToolsAudit?.schemaOk === false)
       || unmappedSourceModules.length > 0
       || emptyDocAnchors.length > 0
       || emptyToolDomains.length > 0
@@ -410,6 +426,9 @@ async function finishAudit({
     const nextCommands = docGapOrDrift
       ? [
           'node ".agents/skills/dev-explore/scripts/repo-map.mjs"',
+          ...((verifyToolsAudit?.zombies?.length || verifyToolsAudit?.staleTools?.length || verifyToolsAudit?.schemaOk === false)
+            ? ['node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" audit']
+            : []),
           ...evDiscovery.markdownDocs.slice(0, 6).map((d) => `node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --file "${d.path}"`),
         ]
       : []
@@ -421,6 +440,7 @@ async function finishAudit({
       emptyDocAnchors,
       emptyToolDomains,
       emptyTestRefDomains,
+      verifyToolsAudit,
       featureMap: {
         path: FEATURE_MAP_REL,
         present: fm.present,

@@ -18,12 +18,14 @@ import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
 import { DEV_PROFILE_KEYS } from '../../kit/skills/lib/profile.mjs'
 import { auditEntry, auditGlobalWhitelist, auditHandRolled, evaluateParity, ENTRY_SPECS, HAND_ROLLED_SPECS } from './cli-parity.mjs'
+import { evaluateSubcommandParity } from './subcommand-parity.mjs'
 import { evaluateExitCodeParity } from './exit-code-parity.mjs'
 import { blockedExitOf } from '../../kit/skills/lib/exit-codes.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 import { runKernelParityChecks } from './preflight-kernel-parity.mjs'
 import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
+import { buildLexedViews } from '../../kit/skills/lib/static-gates-lexer.mjs'
 import {
   checkEvergreenFreshness,
   checkOwnInstances,
@@ -442,6 +444,45 @@ function checkStructureRules({ ROOT, readText, fail, note }) {
   note(`结构规则：.gitattributes 与 REPO_ONLY_* 一致（${codeDirs.length} 处目录、${codeFiles.length} 个文件）`)
 }
 
+const KIT_PRIVATE_SYMBOL_RE = /\b(?:verify-injections|gap-coverage|write-probe-audit|preflight-suite|preflight\.mjs)\b|docs\/TDD\.md#(?:技术基线与运行约束|明确非目标)|AGENTS\.md#(?:版本管理与回滚底线|项目特有红线)|SKILL\.md#/
+const KIT_SURVEY_CALL_RE = /\bscripts\/survey\.mjs\b/
+
+function walkDirFiles(dir, pred, out = []) {
+  if (!existsSync(dir)) return out
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    if (ent.name === '.git' || ent.name === 'node_modules' || ent.name === '.worktrees') continue
+    const full = join(dir, ent.name)
+    if (ent.isDirectory()) walkDirFiles(full, pred, out)
+    else if (ent.isFile() && pred(full)) out.push(full)
+  }
+  return out
+}
+
+/** 扫描 `kit/` 下全部 `.mjs` 与 `.md`，拦截本仓私有脚本、测试夹具及固定锚点泄漏。 */
+export function scanKitPrivateLeaks(ROOT) {
+  const leaks = []
+  const files = walkDirFiles(join(ROOT, 'kit'), (f) => /\.(?:md|mjs)$/i.test(f))
+  for (const abs of files) {
+    const name = abs.slice(ROOT.length + 1).replace(/\\/g, '/')
+    const text = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
+    const lines = text.split('\n')
+    const isMjs = name.endsWith('.mjs')
+    const codeLines = isMjs ? buildLexedViews(text, 'mjs').codeLines : lines
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = KIT_PRIVATE_SYMBOL_RE.exec(lines[i])
+      if (m) {
+        leaks.push(`${name}:${i + 1} 泄漏本仓私有符号「${m[0]}」`)
+        continue
+      }
+      const lineToScan = isMjs ? codeLines[i] : lines[i]
+      if (lineToScan && KIT_SURVEY_CALL_RE.test(lineToScan)) {
+        leaks.push(`${name}:${i + 1} 泄漏本仓私有脚本调用「scripts/survey.mjs」`)
+      }
+    }
+  }
+  return leaks
+}
+
 export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, note }, syntaxErrors) {
   const kitSkillsRoot = join(ROOT, 'kit', 'skills')
   const eq = checkEquip(ROOT, { kitDir: kitSkillsRoot })
@@ -464,6 +505,9 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
       const m = privatePathRe.exec(line)
       if (m) fail(`${name} 第 ${i + 1} 行泄露了本仓私有路径「${m[0]}」——用户包里不存在该路径`)
     }
+  }
+  for (const leak of scanKitPrivateLeaks(ROOT)) {
+    fail(`内置套件自用泄漏：${leak}`)
   }
 
   const { skills: discovered, diagnostics } = discoverKitSkillsDetailed(kitSkillsRoot)
@@ -539,7 +583,7 @@ function checkHygiene({ ROOT, rel, walk, fail, changedSet }) {
     // `.agents/` 是 `.kit/skills` 的镜像，同一个问题会在两处各报一次；
     // 镜像由 `equip --check` 保证字节一致，不需要在这里重复扫。
     if (/^(?:docs\/archive|docs\/release-notes|node_modules|\.agents)\//.test(name)) continue
-    // 夹具的存在意义就是装错的样本：写「早先这里是 join 拼接」是为了证明检测器抓得到。
+    // 夹具的存在意义就是装错的样本：刻意保留履历例句是为了证明检测器抓得到。
     // 用同一条规则去判它，等于要求测谎仪自己不能说谎。
     if (/^scripts\/dev\/fixtures-[^/]+\.mjs$/.test(name)) continue
     for (const hit of findChangelogVoice(readFileSync(file, 'utf8'), { file: name })) found.push(hit)
@@ -688,6 +732,9 @@ export async function runSuiteChecks(ctx) {
   checkStructureRules(ctx)
   checkKitSuite(ctx, syntaxErrors)
   checkCliParity(ctx)
+  const subParity = evaluateSubcommandParity(ctx.ROOT)
+  for (const message of subParity.failures) ctx.fail(`子命令对拍：${message}`)
+  if (subParity.ok) ctx.note(`子命令对拍：${subParity.notes.join('、')} 全部与 SUBCOMMAND_META 对齐`)
   checkExitCodeParity(ctx)
   checkKitWriteProbes(ctx)
   runKernelParityChecks(ctx)

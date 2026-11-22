@@ -203,6 +203,7 @@ PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 | --- | --- |
 | `node scripts/survey.mjs <目录>` | 只读盘点结构、文档、远端拓扑与鉴权状态 |
 | `node scripts/backup.mjs create <目录>` | 在仓库外部创建增量 `.zip` 快照（支持 `list` / `restore`） |
+| `scripts/zip.mjs` | 纯内置 `node:zlib` zip 读写库（供 `backup.mjs` 与 `update.mjs` 复用） |
 | `node scripts/equip.mjs <目录>` | 统一装配或无损刷新 `.agents/skills/`（支持 `--check`、`--adopt-custom`、`--restore`、`--bootstrap-empty`） |
 | `node scripts/compose-agents.mjs <目录>` | 生成或无损刷新 `AGENTS.md`（建议 `< 24KB`，上限 `<= 30KB`） |
 | `node scripts/equip-ci.mjs <目录>` | 按勘察事实生成 CI 工作流或配置分支保护 |

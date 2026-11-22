@@ -7,12 +7,16 @@
  *   - `create`：仓外 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 试制，经 `edit-gate` 与实跑通过后沉淀登记地图与基线；
  *   - `run`：按变更文件/功能/工具 ID 反查，执行免手工日期过时校验与低/中/高三级风险分派，透传任务参数实跑并刷新基线；
  *   - `audit` / `clean`：校验 Schema、僵尸脚本/模块、符号漂移、核心盲区、跨 >=2 PR 固化提示及安全销毁过期 `scratch/` 残留。
+ *
+ * 子命令：
+ *   sync | create | run | audit | clean
  */
 
 import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import {
   FEATURE_MAP_REL, VALID_RISK_LEVELS, VALID_TOOL_KINDS,
   computeFeatureFingerprint, ensureTaskScratchDir, evaluateToolStaleness,
@@ -34,7 +38,7 @@ import { guardExistingFeatureMapForWrite, handleAudit, handleClean } from './ver
 export { handleAudit, handleClean }
 
 export { EXIT }
-const SUBCOMMANDS = ['sync', 'create', 'run', 'audit', 'clean']
+const SUBCOMMANDS = subcommandNamesFor('verify-tools')
 
 function printHelp() {
   process.stdout.write([
@@ -635,7 +639,7 @@ async function main(argv = process.argv.slice(2)) {
         'from-scratch', 'draft-file', 'draft-content', 'task', 'risk', 'entrypoints',
         'modules', 'flows', 'test-refs', 'hints', 'files', 'base', 'live-e2e-cmd',
       ],
-      usageHint: 'verify-tools.mjs <sync|create|run|audit|clean> [dir] [options]',
+      usageHint: `verify-tools.mjs <${SUBCOMMANDS.join('|')}> [dir] [options]`,
     })
   } catch (err) {
     process.stderr.write(`Error: ${err.message}\n`)

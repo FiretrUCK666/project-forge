@@ -5,6 +5,9 @@
  * 增量回挂 docs/feature-map.json testRefs、分片并发实跑与 escalation 缺陷升级闭环。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块与 kit/skills/lib/），绝不直接修改业务源码。
+ *
+ * 子命令：
+ *   plan | generate | run | cycle
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -12,6 +15,7 @@ import { cpus } from 'node:os'
 import { basename, dirname, join, posix, relative, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
+import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { locateDocuments } from '../../lib/doc-locator.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
 import {
@@ -32,13 +36,13 @@ import { buildCyclePlan, formatCycleText, loadCycleState, saveCycleState } from 
 
 export { validateGeneratedTestQuality }
 
-const SUBCOMMANDS = ['plan', 'generate', 'run', 'cycle']
+const SUBCOMMANDS = subcommandNamesFor('iterate')
 const VALID_TIERS = new Set(['integration', 'e2e', 'perf', 'regression'])
 const SKIP_DIRS = new Set([...COMMON_SKIP_DIRS, '.git', '.worktrees', '.agents', 'docs'])
 
 function printHelp() {
   process.stdout.write([
-    '用法：node iterate.mjs [plan|generate|run] [targetDir] [options]',
+    '用法：node iterate.mjs [plan|generate|run|cycle] [targetDir] [options]',
     '',
     'Subcommands:',
     '  plan        交叉比对 feature-map / signals.jsonl / 近期变更（或 --focus 主题）输出补测候选计划',
@@ -599,7 +603,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       positionalDir: 'auto',
       booleanFlags: ['write', 'escalate', 'no-signals'],
       valueFlags: ['focus', 'tier', 'limit', 'targets', 'concurrency', 'timeout-ms', 'perf-budget-ms', 'goal', 'max-rounds', 'progress-history', 'pending-gates'],
-      usageHint: 'iterate.mjs [plan|generate|run|cycle] [dir]',
+      usageHint: `iterate.mjs [${SUBCOMMANDS.join('|')}] [dir]`,
     })
   } catch (err) {
     process.stderr.write(`iterate 错误：${err instanceof Error ? err.message : String(err)}\n`)

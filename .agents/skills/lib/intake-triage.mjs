@@ -15,7 +15,7 @@ import { posixPath, readJsonSafe, readTextSafe, withFileLock, writeJsonAtomic } 
 import { parseBodyRelations, parsePfStateTags } from './github-parse.mjs'
 import { listTaskLedgers, sanitizeTaskId } from './ledger.mjs'
 import { listLocalIssues, resolveEffectiveCommonGitDir } from './local-issues.mjs'
-import { parseDevProfile } from './profile.mjs'
+import { parseDevProfile, resolveAuthoritativeTddPath } from './profile.mjs'
 
 export const INTAKE_DECISIONS = Object.freeze(['accept', 'reject', 'merge-duplicate', 'needs-info', 'defer'])
 export const INTAKE_BLOCKING_DECISIONS = Object.freeze(['reject', 'merge-duplicate'])
@@ -271,11 +271,12 @@ function similarityScore(textA, textB) {
   return Math.max(jaccard, overlap * 0.8)
 }
 
-function extractMarkdownSection(text, headingRe) {
-  if (!text) return ''
+function extractMarkdownSectionWithHeading(text, headingRe) {
+  if (!text) return { heading: null, body: '' }
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   let capturing = false
   let level = 0
+  let heading = null
   const out = []
   for (const line of lines) {
     const hm = /^(#{1,6})\s+(.+)$/.exec(line)
@@ -285,88 +286,108 @@ function extractMarkdownSection(text, headingRe) {
       if (!capturing && headingRe.test(hm[2])) {
         capturing = true
         level = curLevel
+        heading = hm[2].trim()
         out.push(line)
         continue
       }
     }
     if (capturing) out.push(line)
   }
-  return out.join('\n').trim()
+  return { heading, body: out.join('\n').trim() }
+}
+
+function collectSectionBullets(sectionText) {
+  if (!sectionText) return []
+  return sectionText
+    .split('\n')
+    .filter((l) => /^\s*(?:[-*]|\d+\.)\s+/.test(l))
+    .map((l) => l.replace(/^\s*(?:[-*]|\d+\.)\s+/, '').trim())
+    .filter(Boolean)
+}
+
+function matchProhibitionBullet(bullet, combinedText, lowCombined) {
+  if (!bullet || /^定位\s*[:：]/.test(bullet)) return false
+  const cleanBullet = bullet
+    .replace(/\*\*/g, '')
+    .replace(/^(?:非目标|不做|红线|不变量|Non-Goals?|Out\s+of\s+Scope)\s*[:：]\s*/i, '')
+    .replace(/^(?:绝?不(?:要|得|允许|生成|执行|绑定|提供|支持|开发|包含|使用|引入|替|为)|严禁|禁止(?:使用|引入|生成|执行)?|do\s+not\s+(?:build|generate|support|include|use|add)|never\s+(?:use|add|generate|expose))\s*/i, '')
+    .replace(/[。.;；]+$/, '')
+    .trim()
+  if (!cleanBullet || cleanBullet.length < 4) return false
+
+  const clauses = cleanBullet
+    .split(/[、；;]|(?:\s+or\s+)|(?:\s+and\s+)|或|与/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 4)
+
+  const isForbiddenContext = /(?:绝?不|严禁|禁止|do\s+not|never|forbid|prohibit|non-?goals?)/i.test(bullet)
+  for (const cl of [cleanBullet, ...clauses]) {
+    if (cl.length >= 5 && lowCombined.includes(cl.toLowerCase())) return true
+    if (cl.length >= 6 && similarityScore(combinedText, cl) >= 0.56) return true
+  }
+  if (isForbiddenContext && /emoji/i.test(bullet) && /(?:添加|加入|输出|引入|使用|add|enable|support)\s*emoji|表情图标|[\u{1F300}-\u{1FAFF}]/u.test(combinedText)) {
+    return true
+  }
+  if (isForbiddenContext && /(?:第三方|外部)\s*(?:依赖|包|库)|third-?party\s+dependenc/i.test(bullet)
+    && /(?:引入|添加|安装|add|install)\s*(?:第三方|外部)?\s*(?:依赖|包|库|npm|pip|cargo)/i.test(combinedText)) {
+    return true
+  }
+  return false
 }
 
 function evaluateNonGoalsAndRedlines(repoRoot, combinedText, featureRef) {
-  const tddText = readTextSafe(join(repoRoot, 'docs', 'TDD.md')) ?? ''
-  const skillText = readTextSafe(join(repoRoot, 'SKILL.md')) ?? ''
   const agentsText = readTextSafe(join(repoRoot, 'AGENTS.md')) ?? ''
-  const repoDocs = `${tddText}\n${skillText}\n${agentsText}`
-  const tddRefs = []
+  const tddRel = resolveAuthoritativeTddPath(repoRoot) ?? (existsSync(join(repoRoot, 'docs', 'TDD.md')) ? 'docs/TDD.md' : null)
+  const tddText = tddRel ? (readTextSafe(join(repoRoot, tddRel)) ?? '') : ''
+  const readmeText = readTextSafe(join(repoRoot, 'README.md')) ?? ''
+  const docRefs = []
   const hits = []
 
   if (featureRef) {
     const escaped = String(featureRef).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = new RegExp(escaped, 'i')
-    if (tddText && re.test(tddText)) tddRefs.push(`docs/TDD.md#${featureRef}`)
-    if (skillText && re.test(skillText)) tddRefs.push(`SKILL.md#${featureRef}`)
+    if (tddText && tddRel && re.test(tddText)) docRefs.push(`${tddRel}#${featureRef}`)
+    if (agentsText && re.test(agentsText)) docRefs.push(`AGENTS.md#${featureRef}`)
+    if (readmeText && re.test(readmeText)) docRefs.push(`README.md#${featureRef}`)
   }
 
-  const nonGoalsBlock = extractMarkdownSection(tddText, /非目标|Non-Goals?|不做/i)
-  const redlineBlock = `${extractMarkdownSection(agentsText, /红线|关键不变量/i)}\n${extractMarkdownSection(tddText, /关键不变量|核心不变量|技术基线/i)}`
+  const sources = [
+    ...(tddRel && tddText ? [{ rel: tddRel, text: tddText }] : []),
+    ...(agentsText ? [{ rel: 'AGENTS.md', text: agentsText }] : []),
+    ...(readmeText ? [{ rel: 'README.md', text: readmeText }] : []),
+  ]
 
-  const hasZeroDepRule = /零第三方依赖|zero\s+(?:third-party\s+)?dependenc/i.test(repoDocs)
-  if (hasZeroDepRule && /\b(?:lodash|axios|express|chalk|commander|yargs|zod|moment|dayjs|rxjs|underscore|webpack|esbuild|npm\s+install\s+\S+|yarn\s+add\s+\S+|pnpm\s+add\s+\S+)\b|引入(?:第三方|外部)(?:依赖|包|库)|添加\s*npm\s*依赖/i.test(combinedText)) {
-    hits.push('违反「零第三方依赖」红线（提案要求引入外部依赖包）')
-    tddRefs.push('docs/TDD.md#技术基线与运行约束')
-  }
-
-  const hasNoHostRule = /不绑定(?:特定|具体)\s*AI\s*宿主|宿主.*边界/i.test(repoDocs)
-  if (hasNoHostRule && /(?:硬编码|绑定)(?:特定|具体|私有)\s*(?:AI\s*)?(?:宿主|IDE|客户端)|(?:host|vendor|ide)-specific\s+(?:env|path|config|binding)|私有环境变量|私有宿主路径/i.test(combinedText)) {
-    hits.push('违反「不绑定特定 AI 宿主」红线（提案包含特定宿主私有名称/路径/环境变量）')
-    tddRefs.push('docs/TDD.md#明确非目标')
-  }
-
-  const hasNoEmojiRule = /禁\s*emoji|禁止.*emoji/i.test(repoDocs)
-  const proposesEmoji = /(?:添加|加上|加入|输出|引入|使用|add|enable|support)\s*emoji|表情图标|[\u{1F300}-\u{1FAFF}]/u.test(combinedText)
-  if (hasNoEmojiRule && proposesEmoji) {
-    hits.push('违反「禁 emoji」项目红线')
-    tddRefs.push('AGENTS.md#项目特有红线')
-  }
-
-  const hasNoBizGenRule = /不生成业务|不执行服务器运维部署|云资源开通/i.test(`${nonGoalsBlock}\n${agentsText}\n${skillText}`)
-  if (hasNoBizGenRule && /(?:生成|脚手架|scaffold|generate)\s*(?:React|Vue|Next\.?js|Angular|Django|Spring|Express|业务(?:应用|代码|CRUD))|(?:terraform|kubernetes|k8s|helm|aws\s+cdk|云服务器|一键部署|运维部署|云资源开通)/i.test(combinedText)) {
-    hits.push('命中「明确非目标（Non-Goals）」：本项目只做工程治理，不生成业务应用代码或执行服务器运维/云资源部署')
-    tddRefs.push('docs/TDD.md#明确非目标')
-  }
-
-  if (hits.length === 0 && nonGoalsBlock) {
-    const bullets = nonGoalsBlock.split('\n').filter((l) => /^\s*[-*]\s+/.test(l)).map((l) => l.replace(/^\s*[-*]\s+/, '').trim())
-    const lowCombined = combinedText.toLowerCase()
-    for (const bullet of bullets) {
-      if (/^定位\s*[:：]/.test(bullet)) continue
-      const cleanBullet = bullet
-        .replace(/^(?:非目标|不做|Non-Goals?)\s*[:：]\s*/i, '')
-        .replace(/^(?:绝?不(?:生成|执行|绑定|提供|支持|开发|包含|替|为)|do\s+not\s+(?:build|generate|support|include))\s*/i, '')
-        .replace(/[。.;；]+$/, '')
-        .trim()
-      const clauses = cleanBullet.split(/[、；;]|(?:\s+or\s+)|或/).map((s) => s.trim()).filter((s) => s.length >= 5)
-      const matchedClause = clauses.find((cl) => lowCombined.includes(cl.toLowerCase()) || similarityScore(combinedText, cl) >= 0.58)
-      if (matchedClause || (cleanBullet.length >= 6 && similarityScore(combinedText, cleanBullet) >= 0.58)) {
-        hits.push(`与文档明确非目标条目高度重叠：「${bullet.slice(0, 60)}」`)
-        tddRefs.push('docs/TDD.md#明确非目标')
-        break
+  const lowCombined = combinedText.toLowerCase()
+  let hasAnyPolicySection = false
+  for (const src of sources) {
+    const nonGoalsSec = extractMarkdownSectionWithHeading(src.text, /非目标|Non-Goals?|Out\s+of\s+Scope|不做/i)
+    const redlineSec = extractMarkdownSectionWithHeading(src.text, /红线|关键不变量|核心不变量|Invariants?|Guardrails?|Constraints?/i)
+    for (const [kindLabel, sec] of [['非目标', nonGoalsSec], ['红线/不变量', redlineSec]]) {
+      if (!sec.body) continue
+      hasAnyPolicySection = true
+      for (const bullet of collectSectionBullets(sec.body)) {
+        if (matchProhibitionBullet(bullet, combinedText, lowCombined)) {
+          hits.push(`命中文档${kindLabel}约束（「${bullet.slice(0, 60)}」）`)
+          docRefs.push(sec.heading ? `${src.rel}#${sec.heading}` : src.rel)
+          break
+        }
       }
+      if (hits.length > 0) break
     }
+    if (hits.length > 0) break
   }
 
-  const uniqRefs = [...new Set(tddRefs)]
+  const uniqRefs = [...new Set(docRefs)]
   return {
     dimension: {
       id: 'non-goals-redlines',
       name: '非目标与红线对照',
       status: hits.length > 0 ? 'fail' : 'ok',
-      detail: hits.length > 0 ? hits.join('；') : (nonGoalsBlock || redlineBlock ? '未命中明确 Non-Goal 或项目红线' : '未发现冲突的 Non-Goal 声明'),
+      detail: hits.length > 0 ? hits.join('；') : (hasAnyPolicySection ? '未命中明确 Non-Goal 或项目红线' : '未发现冲突的 Non-Goal 声明'),
     },
     tddRefs: uniqRefs,
     hits,
+    tddRel,
   }
 }
 
@@ -506,16 +527,16 @@ function evaluateConflictSurface(repoRoot, { files = [], body = '', taskId = nul
   }
 }
 
-function evaluateDependencyContract(combinedText) {
+function evaluateDependencyContract(combinedText, tddRel = null) {
   const hits = []
   const refs = []
-  if (/(?:删除|移除|删掉|drop|remove)\s*(?:AGENTS\.md\s*(?:协作|规则|防呆)|\.pf-manifest\.json|pf-manifest|write-probe-audit)/i.test(combinedText)) {
-    hits.push('提案试图移除受管契约或核心账本/门禁协议')
-    refs.push('docs/TDD.md#明确非目标')
+  if (/(?:删除|移除|删掉|drop|remove)\s*(?:AGENTS\.md\s*(?:协作|规则|防呆)|\.pf-manifest\.json|pf-manifest|\.github\/workflows|CODEOWNERS)/i.test(combinedText)) {
+    hits.push('提案试图移除受管契约、工作流或核心账本协议')
+    refs.push(tddRel || 'AGENTS.md')
   }
-  if (/(?:降级|下移|downgrade)\s*Node(?:\.js)?\s*(?:14|16|版本下限)|(?:强推|force[\s-]?push)\s*(?:main|master|已推送历史)|绕过(?:门禁|独立审查|preflight)/i.test(combinedText)) {
-    hits.push('提案破坏版本下限只上移不动、禁强推或门禁不可绕过契约')
-    refs.push('AGENTS.md#版本管理与回滚底线')
+  if (/(?:强推|force[\s-]?push)\s*(?:main|master|已推送历史)|绕过(?:门禁|独立审查|CI\s*检查|静态门禁)/i.test(combinedText)) {
+    hits.push('提案破坏禁强推或门禁不可绕过契约')
+    refs.push('AGENTS.md')
   }
   return {
     dimension: {
@@ -638,7 +659,7 @@ export function evaluateIntakeTriage(repoRoot, input = {}) {
   const dim1 = evaluateNonGoalsAndRedlines(repoRoot, combinedText, featureRef)
   const dim2 = evaluateDuplicateCheck(repoRoot, { title, body, gitDir: input.gitDir, closedIssues: input.closedIssues, duplicateOf })
   const dim3 = evaluateConflictSurface(repoRoot, { files: input.files, body, taskId: input.taskId, branch: input.branch, targetNumber })
-  const dim4 = evaluateDependencyContract(combinedText)
+  const dim4 = evaluateDependencyContract(combinedText, dim1.tddRel)
   const dim5 = evaluateComplexityValue({ title, body, touchedFiles: dim3.touchedFiles, highRiskHits: dim3.highRiskHits, exempt: exemption.exempt })
 
   const dimensions = [dim1.dimension, dim2.dimension, dim3.dimension, dim4.dimension, dim5.dimension]

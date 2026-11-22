@@ -38,14 +38,16 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { DOC_CMD_RE } from './doc-facts-commands.mjs'
+
 /** 反引号里的东西。 */
 const TICK_RE = /`([^`\n]+)`/g
 
 /** 看起来像仓库相对路径：有斜杠、有扩展名、不带空格。 */
-const PATH_RE = /^(?<![\w./-])((?:[\w.-]+\/)+[\w.-]+\.(?:mjs|js|cjs|ts|md|json|ya?ml|toml))/
+const PATH_RE = /^(?<![\w./-])((?:[\w.-]+\/)+[\w.-]+\.(?:mjs|js|cjs|mts|cts|ts|tsx|jsx|vue|svelte|astro|py|rs|go|java|kt|kts|scala|cs|fs|vb|csproj|fsproj|vbproj|slnx?|swift|dart|c|cc|cpp|cxx|h|hpp|rb|php|ex|exs|zig|sh|bash|ps1|md|mdx|json|ya?ml|toml|sql|proto|gradle))$/i
 
 /** 看起来像一条可执行命令。 */
-const CMD_RE = /^(?:node|npm|npx|pnpm|yarn|git|python|pytest|cargo|go|make)\s+/
+const CMD_RE = DOC_CMD_RE
 
 /**
  * 抽一份文档里的可核实断言。

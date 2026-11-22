@@ -5,6 +5,7 @@
  */
 
 import { posixPath } from '../../lib/git.mjs'
+import { allSubcommandNames } from '../../lib/subcommand-meta.mjs'
 
 export const CONCERN_FACES = [
   { id: 'docs', re: /\bdocs?\b|readme|contributing|changelog|文档|说明|指南|文案|错别字|拼写|注释|翻译/i },
@@ -23,8 +24,11 @@ export const EXPLICIT_FEATURE_RE = /\b(?:feat|feature|implement|add\s+(?:support
 const CODE_PATH_IN_TEXT_RE = /(?<![A-Za-z0-9_./-])([A-Za-z0-9_./-]+\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx|vue|svelte|go|py|rs|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1|yml|yaml|json|toml|lock|ini|cfg|sql|proto|graphql|css|scss|html))(?![A-Za-z0-9_.-])/gi
 const GITHUB_CFG_IN_TEXT_RE = /(?<![A-Za-z0-9_./-])(\.github\/[A-Za-z0-9_./*-]*)/gi
 const CLI_FLAG_IN_TEXT_RE = /(^|[\s(（"'`])(--[a-z0-9][a-z0-9-]*)(?=$|[\s)）"'`,，。])/gi
-const TOOL_PREFIX_RE = /(?<![A-Za-z0-9_-])((?:doc|review|govern|flow|repo|survey|worktree|triage|static|handoff|critique|tdd|symbol|command|profile|task|github|platform|agents|starter|equip|preflight|fixtures)-(?!only\b)[a-z0-9-]+(?:\s+(?:init|triage|audit|link|archive|start|verify|submit|merge|record|override|cleanup|rework|sync|batch|inspect|claim|release|pack|plan|reconcile|sample|retro|check|create|restore))?)(?![A-Za-z0-9_-])/gi
-const CLI_SUBCOMMAND_RE = /(?<![A-Za-z0-9_-])((?:doc-plan|planx|flow|review-pack|govern-audit|repo-map|survey|equip|backup|compose-agents|handoff|sync-toc)\s+(?:init|triage|audit|link|archive|start|verify|submit|merge|record|override|cleanup|rework|sync|batch|inspect|claim|release|pack|plan|reconcile|sample|retro|check|create|restore)|[a-z][a-z0-9-]*\s+init)(?![A-Za-z0-9_-])/gi
+const SUBCOMMAND_ALT = [...new Set([...allSubcommandNames(), 'check', 'create', 'restore'])]
+  .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  .join('|')
+const TOOL_PREFIX_RE = new RegExp(`(?<![A-Za-z0-9_-])((?:doc|review|govern|flow|repo|survey|worktree|triage|static|handoff|critique|tdd|symbol|command|profile|task|github|platform|agents|starter|equip|preflight|fixtures)-(?!only\\b)[a-z0-9-]+(?:\\s+(?:${SUBCOMMAND_ALT}))?)(?![A-Za-z0-9_-])`, 'gi')
+const CLI_SUBCOMMAND_RE = new RegExp(`(?<![A-Za-z0-9_-])((?:doc-plan|planx|flow|review-pack|govern-audit|verify-tools|iterate|repo-map|survey|equip|backup|compose-agents|handoff|sync-toc)\\s+(?:${SUBCOMMAND_ALT})|[a-z][a-z0-9-]*\\s+init)(?![A-Za-z0-9_-])`, 'gi')
 const COMMENT_OUT_RE = /\bcomment\s+out\b|注释掉|把[^\n]{0,24}注释掉/gi
 const LOGIC_SIGNAL_RE = /(?:正则|\bregex(?:p)?\b|\bparser\b|false\s+positive|误判|误报|剪光|裁剪|路径正则)/gi
 const DOC_TARGET_FILE_RE = /\b(?:README(?:\.[A-Za-z0-9_-]+)?|CONTRIBUTING(?:\.[A-Za-z0-9_-]+)?|CHANGELOG(?:\.[A-Za-z0-9_-]+)?|LICENSE(?:-[A-Za-z0-9_-]+)?|SECURITY|CODE_OF_CONDUCT)(?:\.(?:md|txt|rst))?\b|[A-Za-z0-9_./-]+\.(?:md|markdown|txt|rst|adoc)\b/gi

@@ -9,7 +9,7 @@
  *   这些**不需要判断**，机器一秒能核完；
  * - 「这条判据能不能证伪」「这个取舍对不对」——这些**只有人能判**。
  *
- * 原来的做法是让审核人把两件事一起干：他每次都拿手去核几十条事实，
+ * 手工核对方式会把两件事混在一起：审核人每次都要人工逐条核几十条事实，
  * 十几分钟全花在机器该干的活上，真正需要判断的那几条反而没时间细看。
  *
  * 这里把前一半接过来。审核人拿到的是：
@@ -36,12 +36,18 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 import { checkPathClaim, collectDocClaims } from './doc-facts.mjs'
-import { CODE_EXT_RE } from './git-core.mjs'
+import { evaluateReadonlyDocCommand } from './doc-facts-commands.mjs'
+import { CODE_EXT_RE, COMMON_SKIP_DIRS } from './git-core.mjs'
+import { parseDevProfile } from './profile.mjs'
 
 const run = promisify(execFile)
 
-/** 核名字时不扫的目录：历史归档、依赖、构建产物。 */
-const SCAN_SKIP = /^(?:node_modules|\.git|dist|build|coverage|\.worktrees|docs\/archive)\//
+/** 核名字时不扫的目录：复用单源 COMMON_SKIP_DIRS 叠加历史归档。 */
+function isSkippedScanPath(rel) {
+  if (rel.startsWith('docs/archive/')) return true
+  const parts = String(rel ?? '').split('/')
+  return parts.slice(0, -1).some((seg) => COMMON_SKIP_DIRS.has(seg))
+}
 
 /** 只扫这些扩展名——它们才可能「定义」一个名字。 */
 const CODE_EXT = CODE_EXT_RE
@@ -65,7 +71,7 @@ function readCodebase(root) {
   } catch {
     files = []
   }
-  const code = files.filter((f) => CODE_EXT.test(f) && !SCAN_SKIP.test(f))
+  const code = files.filter((f) => CODE_EXT.test(f) && !isSkippedScanPath(f))
   let text = ''
   for (const f of code) {
     try { text += readFileSync(join(root, f), 'utf8') } catch { /* 读不到就跳过 */ }
@@ -96,24 +102,9 @@ function checkNameExists(codeText, name) {
  * @param {string} cmd
  * @returns {Promise<object>}
  */
-async function checkCommandClaim(root, cmd) {
-  if (!/^(?:node|npm|npx|git)\s/.test(cmd)) return { ok: true, ran: false, why: '非只读命令，未执行' }
-  if (/^git\s/i.test(cmd) && !/^git\s+(?:status|log|diff|show|ls-files|rev-parse|describe|symbolic-ref|check-ignore)(?:\s|$)/i.test(cmd)) {
-    return { ok: true, ran: false, why: '非只读 Git 子命令，未执行' }
-  }
-  if (/^(?:npm|npx)\s/i.test(cmd) && !/^npm\s+(?:test|run\s+(?:test|lint|typecheck|check|build))\b/i.test(cmd)) {
-    return { ok: true, ran: false, why: '包管理命令存在副作用风险，未执行' }
-  }
-  if (/(?:cleanup|--confirm|--force|--hard|\brm\s|\bremove\b|\bpush\b|\bdelete\b|--fix|\b-e\b|--eval\b)/i.test(cmd)) {
-    return { ok: true, ran: false, why: '命令带副作用，未执行' }
-  }
-  if (/^node\s+[^\n]*(?:equip(?:-ci)?\.mjs|backup\.mjs|compose-agents\.mjs)(?!.*--check\b)/i.test(cmd)) {
-    return { ok: true, ran: false, why: '写入型脚手架命令，未执行' }
-  }
-  if (/^node\s+[^\n]*flow\.mjs\s+(?:start|claim|explore|finalize|merge|cleanup|abort|release|batch|submit|rework|sync)\b/i.test(cmd)
-    || /^node\s+[^\n]*doc-plan\.mjs\s+(?:init|clarify|link|critique-pass|approve|archive|supersede)\b/i.test(cmd)) {
-    return { ok: true, ran: false, why: '状态变更子命令，未执行' }
-  }
+async function checkCommandClaim(root, cmd, profile = null) {
+  const policy = evaluateReadonlyDocCommand(cmd, profile)
+  if (!policy.allowed) return { ok: true, ran: false, why: policy.why ?? '非只读命令，未执行' }
 
   const parts = cmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
   const args = parts.slice(1).map((a) => a.replace(/^["']|["']$/g, ''))
@@ -147,8 +138,9 @@ export async function verifyDocClaims(root, text) {
   const paths = claims.paths.map((rel) => ({ rel, ...checkPathClaim(root, rel) }))
   const names = claims.identifiers.map((name) => ({ name, ...checkNameExists(codeText, name) }))
 
+  const profile = parseDevProfile(root)
   const commands = []
-  for (const cmd of claims.commands) commands.push({ cmd, ...(await checkCommandClaim(root, cmd)) })
+  for (const cmd of claims.commands) commands.push({ cmd, ...(await checkCommandClaim(root, cmd, profile)) })
 
   const failedPaths = paths.filter((r) => !r.ok)
   const failedNames = names.filter((r) => !r.ok)

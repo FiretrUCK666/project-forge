@@ -21,7 +21,7 @@ const SUBCOMMANDS_RE = /\bSUBCOMMANDS\b/
  * 新增/删除行里找「对外符号」。
  *
  * 先剥注释再匹配：扔进注释里的 `export function Foo` 是**说明**，不是定义。
- * 不剥的话，一句「这类东西以前写成 `export const Foo`」就能让判据以为符号还在，
+ * 不剥的话，一句「这类东西可写成 `export const Foo`」就能让判据以为符号还在，
  * 于是真正被删掉的那个导出再也没人核对。
  */
 function exportSymbolsOf(lines, file) {

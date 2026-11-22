@@ -26,7 +26,7 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
+  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
 } from '../../lib/static-gates.mjs'
 import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
@@ -36,16 +36,36 @@ export { EXIT }
 const VALID_MODES = new Set(['verify', 'pre-edit', 'standalone'])
 const BROWNFIELD_GROWTH_LIMIT = 80
 
-async function resolveRatchetBaseRef(workRoot, isGit, defaultBranch, taskLedger) {
+async function isDetachedHead(workRoot, fastHead) {
+  if (fastHead) return !fastHead.branch
+  const sym = await gitRun(workRoot, ['symbolic-ref', '--quiet', 'HEAD'])
+  return !sym.ok
+}
+
+async function resolveCompareBaseSha(workRoot, isGit, defaultBranch, taskLedger, explicitBase = null) {
   if (!isGit) return { hasBranchBase: false, baseRef: null }
   const fastGitDir = resolveGitDirFast(workRoot)
   const fastHead = readHeadFast(fastGitDir)
   const headSha = fastHead?.oid ?? ((await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).stdout?.trim() || null)
   if (!headSha) return { hasBranchBase: false, baseRef: null }
 
-  const bases = [...new Set([defaultBranch, 'main', 'master'].filter(Boolean))]
+  if (explicitBase) {
+    const cleanBase = String(explicitBase).trim()
+    const verify = await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', `${cleanBase}^{commit}`])
+    if (verify.ok && verify.stdout.trim()) {
+      const targetSha = verify.stdout.trim()
+      const mb = await gitRun(workRoot, ['--no-optional-locks', 'merge-base', targetSha, 'HEAD'])
+      const mbSha = mb.ok ? mb.stdout.trim() : ''
+      if (mbSha && mbSha !== headSha) return { hasBranchBase: true, baseRef: mbSha }
+      if (targetSha !== headSha) return { hasBranchBase: true, baseRef: targetSha }
+    }
+  }
+
+  const bases = [...new Set([defaultBranch, 'main', 'master', 'origin/main', 'origin/master'].filter(Boolean))]
   for (const baseRef of bases) {
-    const fastSha = resolveRefShaFast(fastGitDir, `refs/heads/${baseRef}`) ?? resolveRefShaFast(fastGitDir, `refs/remotes/origin/${baseRef}`)
+    const fastSha = baseRef.startsWith('origin/')
+      ? resolveRefShaFast(fastGitDir, `refs/remotes/${baseRef}`)
+      : (resolveRefShaFast(fastGitDir, `refs/heads/${baseRef}`) ?? resolveRefShaFast(fastGitDir, `refs/remotes/origin/${baseRef}`))
     const verify = fastSha ? { ok: true } : await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', baseRef])
     if (!verify.ok) continue
     const mb = await gitRun(workRoot, ['--no-optional-locks', 'merge-base', baseRef, 'HEAD'])
@@ -58,17 +78,24 @@ async function resolveRatchetBaseRef(workRoot, isGit, defaultBranch, taskLedger)
     const verifyBase = await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', `${taskLedger.baseSha}^{commit}`])
     if (verifyBase.ok) return { hasBranchBase: true, baseRef: taskLedger.baseSha }
   }
+  if (await isDetachedHead(workRoot, fastHead)) {
+    const parentRes = await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', 'HEAD~1'])
+    if (parentRes.ok && parentRes.stdout.trim() && parentRes.stdout.trim() !== headSha) {
+      return { hasBranchBase: true, baseRef: parentRes.stdout.trim(), detachedFallback: true }
+    }
+  }
   return { hasBranchBase: false, baseRef: 'HEAD' }
 }
 
 function printHelp() {
   process.stdout.write([
-    '用法：node edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--with-native] [--dir <path>] [--task <id>] [--final] [--skip-edit-gate --reason <why>] [--json]',
+    '用法：node edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--base <ref>] [--with-native] [--dir <path>] [--task <id>] [--final] [--skip-edit-gate --reason <why>] [--json]',
     '',
     'Options:',
     '  --mode <mode>       verify | pre-edit | standalone (default: standalone)',
     '  --files <a,b>       Comma-separated target files to check',
     '  --changed           Collect uncommitted and branch-changed files from git',
+    '  --base <ref>        Explicit base git ref/SHA for --changed diff (supports detached HEAD)',
     '  --with-native       Optionally run declared native lint/typecheck commands if configured',
     '  --dir <path>        Repository root directory (default: cwd)',
     '  --task <id>         Optional task ID for audit signal / ledger attribution',
@@ -88,7 +115,7 @@ function normalizeRelFile(repoRoot, raw) {
   return posixPath(rel).replace(/^\.\//, '').replace(/^\/+/, '')
 }
 
-async function collectChangedEntries(workRoot, isGit, defaultBranch) {
+async function collectChangedEntries(workRoot, isGit, defaultBranch, { taskLedger = null, explicitBase = null } = {}) {
   const byFile = new Map()
   const deletedFiles = new Set()
   if (!isGit) return { entries: [], deletedFiles }
@@ -112,27 +139,23 @@ async function collectChangedEntries(workRoot, isGit, defaultBranch) {
   const hasHead = fastHead ? Boolean(fastHead.oid) : (await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).ok
   if (!hasHead) return { entries: [...byFile.values()], deletedFiles }
 
-  const bases = [...new Set([defaultBranch, 'main', 'master'].filter(Boolean))]
-  for (const baseRef of bases) {
-    const fastSha = resolveRefShaFast(fastGitDir, `refs/heads/${baseRef}`) ?? resolveRefShaFast(fastGitDir, `refs/remotes/origin/${baseRef}`)
-    const verify = fastSha ? { ok: true } : await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', baseRef])
-    if (!verify.ok) continue
-    const mb = await gitRun(workRoot, ['--no-optional-locks', 'merge-base', baseRef, 'HEAD'])
-    const headSha = fastHead?.oid ?? (await gitRun(workRoot, ['rev-parse', 'HEAD'])).stdout.trim()
-    if (mb.ok && mb.stdout.trim() && mb.stdout.trim() !== headSha) {
-      const diff = await gitDiffNameStatusZ(workRoot, [`${mb.stdout.trim()}..HEAD`])
-      if (diff.ok) {
-        for (const e of diff.entries) {
-          if (!e.file || isMacOsJunkPath(e.file)) continue
-          const rel = posixPath(e.file)
-          if (e.status === 'D') {
-            deletedFiles.add(rel)
-            continue
-          }
-          if (!byFile.has(rel)) byFile.set(rel, { file: rel, status: String(e.status || 'M') })
+  const baseInfo = await resolveCompareBaseSha(workRoot, isGit, defaultBranch, taskLedger, explicitBase)
+  const shouldDiffBase = baseInfo.hasBranchBase
+    && baseInfo.baseRef
+    && baseInfo.baseRef !== 'HEAD'
+    && (!baseInfo.detachedFallback || (byFile.size === 0 && deletedFiles.size === 0))
+  if (shouldDiffBase) {
+    const diff = await gitDiffNameStatusZ(workRoot, [`${baseInfo.baseRef}..HEAD`])
+    if (diff.ok) {
+      for (const e of diff.entries) {
+        if (!e.file || isMacOsJunkPath(e.file)) continue
+        const rel = posixPath(e.file)
+        if (e.status === 'D') {
+          deletedFiles.add(rel)
+          continue
         }
+        if (!byFile.has(rel)) byFile.set(rel, { file: rel, status: String(e.status || 'M') })
       }
-      break
     }
   }
   return { entries: [...byFile.values()].sort((a, b) => a.file.localeCompare(b.file)), deletedFiles }
@@ -265,6 +288,15 @@ export async function runEditGate(opts = {}) {
   const highRiskGlobs = devProfile['high-risk'] ?? []
   const archRules = devProfile['arch-rules'] ?? []
 
+  let taskLedger = taskId ? readTaskLedger(mainRoot, taskId) : null
+  if (!taskLedger && isGit) {
+    const wtRel = roots.isWorktree ? posixPath(relative(mainRoot, workTreeRoot)) : null
+    const br = readHeadFast(resolveGitDirFast(workTreeRoot), gitDir)?.branch ?? null
+    if (wtRel || (br && !['main', 'master'].includes(br))) {
+      taskLedger = listTaskLedgers(mainRoot, { includeTerminal: false }).find((l) => (wtRel && l.worktreePath === wtRel) || (br && l.branch === br)) ?? null
+    }
+  }
+
   let entries = []
   let deletedFiles = new Set()
   if (Array.isArray(opts.files) && opts.files.length > 0) {
@@ -272,7 +304,7 @@ export async function runEditGate(opts = {}) {
   } else if (typeof opts.files === 'string' && opts.files.trim()) {
     entries = opts.files.split(',').map((f) => normalizeRelFile(workTreeRoot, f)).filter(Boolean).map((file) => ({ file, status: 'M' }))
   } else {
-    const collected = await collectChangedEntries(workTreeRoot, isGit, defaultBranch)
+    const collected = await collectChangedEntries(workTreeRoot, isGit, defaultBranch, { taskLedger, explicitBase: opts.base })
     entries = collected.entries
     deletedFiles = collected.deletedFiles
   }
@@ -290,15 +322,6 @@ export async function runEditGate(opts = {}) {
   const nearLimitFiles = []
   const highRiskHits = []
   const checkedFiles = dedupEntries.map((e) => e.file)
-
-  let taskLedger = taskId ? readTaskLedger(mainRoot, taskId) : null
-  if (!taskLedger && isGit) {
-    const wtRel = roots.isWorktree ? posixPath(relative(mainRoot, workTreeRoot)) : null
-    const br = readHeadFast(resolveGitDirFast(workTreeRoot), gitDir)?.branch ?? null
-    if (wtRel || (br && !['main', 'master'].includes(br))) {
-      taskLedger = listTaskLedgers(mainRoot, { includeTerminal: false }).find((l) => (wtRel && l.worktreePath === wtRel) || (br && l.branch === br)) ?? null
-    }
-  }
   const ownArchived = new Set(
     taskLedger?.finalized
       ? [taskLedger.archivedTodoFile, taskLedger.archivedSpecFile, taskLedger.archivedPrdFile].filter(Boolean).map((p) => posixPath(p))
@@ -347,7 +370,7 @@ export async function runEditGate(opts = {}) {
   }
 
   const tierMeta = detectTestTierMetadata(workTreeRoot, checkedFiles)
-  const ratchetInfo = await resolveRatchetBaseRef(workTreeRoot, isGit, defaultBranch, taskLedger)
+  const ratchetInfo = await resolveCompareBaseSha(workTreeRoot, isGit, defaultBranch, taskLedger, opts.base)
   const enableCommentPathCheck = opts.changed === true || !(
     (Array.isArray(opts.files) && opts.files.length > 0) || (typeof opts.files === 'string' && opts.files.trim())
   )
@@ -364,7 +387,7 @@ export async function runEditGate(opts = {}) {
 
     const lines = txt.replace(/\r\n/g, '\n').split('\n')
     const fullLineCount = countTextLines(txt)
-    const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullLineCount, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES })
+    const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullText: txt, fullLineCount, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES })
 
     for (const s of hyg.excuseSuppressions) {
       const isIssueMissing = s.kind === 'missing-issue-link'
@@ -459,12 +482,22 @@ export async function runEditGate(opts = {}) {
       } else {
         blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 800 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: '按单一职责拆分为内聚子模块，保持每个源文件 <= 800 行。' })
       }
+    } else if (hyg.declarativeDataFile) {
+      warnings.push({
+        ruleId: 'edit.declarative-data-file',
+        severity: 'low',
+        file: rel,
+        lines: fullLineCount,
+        literalRatio: hyg.declarativeDataFile.literalRatio,
+        controlFlowCount: hyg.declarativeDataFile.controlFlowCount,
+        message: `纯声明式数据源码超出 800 行（${fullLineCount} 行，字面量占比 ${Math.round(hyg.declarativeDataFile.literalRatio * 100)}%，控制流 ${hyg.declarativeDataFile.controlFlowCount}），已降级放行（建议按领域拆表或外置 JSON）：${rel}`,
+      })
     } else if (hyg.nearLimitFile) {
       nearLimitFiles.push(hyg.nearLimitFile)
       warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: fullLineCount, message: `紧文件预警（${fullLineCount}/800 行），建议提前规划模块拆分：${rel}` })
     }
 
-    const isMetaHarness = /(?:^|\/)(?:fixtures|verify-injections|gap-coverage)\.[^/]+$/i.test(rel) || /\bfunction\s+tmpProject\s*\(/.test(txt)
+    const isMetaHarness = isMetaTestHarness(rel, txt)
     if (TEST_FILE_RE.test(rel) && !FIXTURE_FILE_RE.test(rel) && !isMetaHarness) {
       const { tier } = classifyTestFileTier(rel, txt, tierMeta)
       for (const hit of scanTestAntiCheat({ fileRel: rel, text: txt, assertionRe: ASSERTION_RE, testCaseRe: TEST_CASE_RE, isNonUnit: tier !== 'unit' })) {
@@ -574,8 +607,8 @@ export async function runCli(argv = process.argv.slice(2)) {
       allowPositionalWithoutSubcommand: true,
       positionalDir: 'auto',
       booleanFlags: ['changed', 'with-native', 'skip-edit-gate', 'final', 'emit-signals'],
-      valueFlags: ['mode', 'files', 'task', 'reason'],
-      usageHint: 'edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--with-native] [--json]',
+      valueFlags: ['mode', 'files', 'task', 'reason', 'base'],
+      usageHint: 'edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--base <ref>] [--with-native] [--json]',
     })
   } catch (err) {
     process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`)
@@ -587,6 +620,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     dir: targetDir,
     files: opts.files,
     changed: Boolean(opts.changed),
+    base: opts.base,
     withNative: Boolean(opts['with-native']),
     task: opts.task,
     skipEditGate: Boolean(opts['skip-edit-gate']),

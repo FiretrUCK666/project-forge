@@ -5,10 +5,13 @@
  * 子命令：
  *   triage         --summary <text> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
  *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
+ *   clarify        --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]
  *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name> --owner-reason "<原因>"] [--status <s>] [--json]
  *   audit          [--file <docPath> | .] [--json]
+ *   critique-scope    --file <docPath> [--reviewer <id>] [--round <n>] [--json]
  *   critique-pass     --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--json]
  *   critique-reject   --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--findings <t>...] [--json]
+ *   critique-continue --file <docPath> --reason <改进方向> [--by <actor>] [--task <id>] [--json]
  *   critique-override --file <docPath> --human-approved --reason <text> [--by <actor>] [--json]
  *   approve           --file <specPath> [--skip-critique-reason <text>] [--json]
  *   archive        [<slug-or-path>] [--task <id>] [--done-at YYYY-MM-DD] [--include-master-prd] [--json]
@@ -20,6 +23,7 @@ import { existsSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { resolveHostMode, resolveNonEmptyActor, validateDocOwnerValue } from '../../lib/harness-context.mjs'
 import { recordTriageDecision } from '../../lib/session-state.mjs'
@@ -141,7 +145,7 @@ function printHelp() {
   ].join('\n') + '\n')
 }
 
-const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-scope', 'critique-pass', 'critique-reject', 'critique-continue', 'critique-override', 'approve', 'archive', 'supersede', 'list']
+const SUBCOMMANDS = subcommandNamesFor('doc-plan')
 
 async function main(argv) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') { printHelp(); return 0 }
@@ -154,7 +158,7 @@ async function main(argv) {
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
-      usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|critique-reject|critique-continue|critique-override|approve|archive|supersede|list>',
+      usageHint: `doc-plan.mjs <${SUBCOMMANDS.join('|')}>`,
     })
   } catch (err) {
     process.stderr.write(`doc-plan 错误：${err.message}\n`)

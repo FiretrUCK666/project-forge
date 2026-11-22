@@ -10,6 +10,8 @@ import { join, posix as pathPosix, resolve } from 'node:path'
 
 import { CODE_EXT_RE, matchGlob } from './git-core.mjs'
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
+import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
+import { classifyDeclarativeDataFile, isGeneratedSourceHeader } from './static-gates-comment-hygiene.mjs'
 
 export { CODE_EXT_RE, matchGlob }
 import {
@@ -41,13 +43,30 @@ export const PACKAGE_LOCKFILES = Object.freeze([
 
 export const LOCKFILE_NAMES = new Set(PACKAGE_LOCKFILES.map((n) => n.toLowerCase()))
 
-export const UI_VISUAL_EXT_RE = /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i
 export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs|e2e|src\/test|src\/it)\/|(?:\.(?:test|spec)\.[^/]+$)|_test\.[^/]+$|(?:^|\/)test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$|\.Tests\//i
 export const FIXTURE_FILE_RE = /(?:^|\/)(?:fixtures?|__fixtures__|testdata|__mocks__)\/|(?:\.(?:fixtures?|mocks?|testdata)\.[^/]+$)|(?:^|\/)fixtures(?:-[^/]+)?\.[^/]+$|(?:^|\/)injections-data(?:-[^/]+)?\.[^/]+$/i
+export const UI_VISUAL_EXT_RE = new RegExp(
+  `^(?!.*(?:${TEST_FILE_RE.source}|${FIXTURE_FILE_RE.source})).*\\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$`,
+  'i',
+)
 
 export function isTestOrFixtureFile(rel) {
   const p = posixPath(rel)
   return TEST_FILE_RE.test(p) || FIXTURE_FILE_RE.test(p)
+}
+
+export function isUiVisualFile(fileRel) {
+  const p = posixPath(String(fileRel ?? '')).replace(/^\.\//, '')
+  if (!p || isTestOrFixtureFile(p)) return false
+  return /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i.test(p)
+}
+
+export function isMetaTestHarness(fileRel, text = '') {
+  const p = posixPath(String(fileRel ?? ''))
+  if (FIXTURE_FILE_RE.test(p)) return true
+  if (/(?:^|\/)(?:test-?harness|test-?generator|meta-?test)\.[^/]+$/i.test(p)) return true
+  return /\bfunction\s+(?:tmpProject|createTempRepo|createTempProject)\s*\(/.test(String(text ?? ''))
+    || /\bexport\s+function\s+register\w*Cases\s*\(/.test(String(text ?? ''))
 }
 
 export const GATE_WORKFLOW_FILE_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|\.circleci\/config\.ya?ml|azure-pipelines\.ya?ml|Jenkinsfile)$/i
@@ -55,12 +74,12 @@ export const GATE_SHELL_OR_SCRIPT_RE = /(?:^|\/)(?:\.github\/(?:workflows|action
 export const GATE_SKIP_RE = /(?:^|[^\w.])(?:(?:it|test|describe|context|suite)\.(?:skip|only)\s*\(|(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(|@(?:pytest\.mark\.skip(?:if)?|unittest\.skip|Disabled|Ignore)\b|#\[\s*ignore\b|\bt\.Skip(?:f|Now)?\s*\(|\[(?:Fact|Theory)\s*\([^\)]*\bSkip\s*=)|\bDISABLED_[A-Za-z0-9_]+|\{\s*(?:skip|only)\s*:\s*true\b/
 export const ASSERTION_RE = /\b(?:[Aa]ssert(?:\.\w+)?|[Ee]xpect|[Ss]hould|pytest\.raises|t\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals|NotEquals|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\b\s*(?:\(|!|\.)|\b[Aa]ssert\s+/
 export const GATE_ASSERTION_RE = ASSERTION_RE
-export const TEST_CASE_RE = /\b(?:it|test|describe|context|suite)(?:\.(?:skip|only|todo))?\s*\(|\b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]|@(?:Test|ParameterizedTest)\b|\[(?:Fact|Theory)\b/
+export const TEST_CASE_RE = /(?<![.\w$])(?:it|test|describe|context|suite)(?:\.(?:skip|only|todo))?\s*\(|(?<![.\w$])(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]|@(?:Test|ParameterizedTest)\b|\[(?:Fact|Theory)\b/
 export const TEST_SKIP_RE = GATE_SKIP_RE
 export const GATE_CI_PERM_WRITE_RE = /\b(?:contents|id-token|packages|security-events|actions|pull-requests|checks|deployments|issues)\s*:\s*write\b/i
 export const GATE_SHELL_BYPASS_RE = /(?:^|[\s;|&"'])\|\|\s*true(?:\s|$|["';&|])/
 
-export const TOMBSTONE_COMMENT_RE = /\b(?:used to be|previously (?:was|were|called|used)|migrated from|replaced old|formerly\b|removed in favor of|deprecated since v?\d|changed from\b.{1,30}\bto\b)|(?:以前是|原先是|原本是|之前是|旧版是|后来改成|后来改为|历史兼容保留)/i
+export const TOMBSTONE_COMMENT_RE = CHANGELOG_VOICE_TOMBSTONE_RE
 export const TOMBSTONE_DATE_RE = /\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\s*(?:fixed|changed|updated|migrated|removed|replaced|修复|改为|改成|迁移|删除|替换)/i
 export const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
 export const EXCUSE_TEMP_RE = /\bTEMP\b/
@@ -386,7 +405,7 @@ export function summarizeHunkChanges(fileDiff) {
   return { added, removed, hunks }
 }
 
-const CI_VERIFY_CMD_RE = /\b(?:test|tests|spec|specs|lint|check|typecheck|tsc|eslint|flake8|mypy|ruff|clippy|vet|audit|verify|preflight|fixtures|gap-coverage|bench|compose-agents|equip|review|sync-toc|e2e|pytest|unittest|jest|vitest|mocha|ava|tap|cargo\s+(?:test|check|clippy)|go\s+(?:test|vet)|npm\s+(?:test|run\b)|pnpm\s+(?:test|lint|check|verify|run\b)|yarn\s+(?:test|lint|check|verify|run\b)|dotnet\s+test|mvn\b|mvnw\b|gradle\b|gradlew\b|ctest|meson\s+test|swift\s+test|dart\s+test|mix\s+test|bundle\s+exec\s+(?:rspec|rake)|make\s+(?:test|check|verify|lint)|just\s+(?:test|check|verify|lint)|task\s+(?:test|check|verify|lint)|node\s+(?:--test|\S+\.mjs))\b/i
+const CI_VERIFY_CMD_RE = /\b(?:test|tests|spec|specs|lint|check|typecheck|tsc|eslint|flake8|mypy|ruff|clippy|vet|audit|verify|e2e|pytest|unittest|jest|vitest|mocha|ava|tap|cargo\s+(?:test|check|clippy)|go\s+(?:test|vet)|npm\s+(?:test|run\b)|pnpm\s+(?:test|lint|check|verify|run\b)|yarn\s+(?:test|lint|check|verify|run\b)|dotnet\s+test|mvn\b|mvnw\b|gradle\b|gradlew\b|ctest|meson\s+test|swift\s+test|dart\s+test|mix\s+test|bundle\s+exec\s+(?:rspec|rake)|make\s+(?:test|check|verify|lint)|just\s+(?:test|check|verify|lint)|task\s+(?:test|check|verify|lint)|node\s+(?:--test|\S+\.mjs))\b/i
 const CI_VERIFY_STEP_NAME_RE = /\b(?:test|tests|check|checks|lint|verify|audit|gate|e2e|bench|preflight|门禁|自检|断言|体检|审计|测试|校验)\b/i
 const CI_SHELL_BOILERPLATE_RE = /^(?:echo|printf|mkdir|cd|export|set|if|then|else|elif|fi|for|do|done|exit|return|true|false|rm|cp|mv|cat|\{|\}|#|$)/i
 
@@ -652,19 +671,24 @@ export async function detectGateWeakening(implRoot, baseRef, baseBranch, opts = 
   return findings
 }
 
-/** 扫描源码增行中的履历注释、借口压制、注释死代码与大文件/紧文件指标。 */
-export function scanStructuralHygiene({ fileRel, lines = [], fullLineCount = 0, warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES }) {
+/** 扫描源码增行中的履历注释、借口压制、注释死代码、自动生成头标豁免、纯声明式数据降级与大文件/紧文件指标。 */
+export function scanStructuralHygiene({ fileRel, lines = [], fullText = null, fullLineCount = 0, warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES, skipFixtureCheck = false }) {
   const rel = posixPath(fileRel)
   const ext = rel.split('.').pop()?.toLowerCase() ?? ''
   const isFixture = FIXTURE_FILE_RE.test(rel)
-  const views = buildLexedViews(Array.isArray(lines) ? lines.join('\n') : String(lines ?? ''), ext)
+  const rawJoined = Array.isArray(lines) ? lines.join('\n') : String(lines ?? '')
+  const effectiveFullText = typeof fullText === 'string' && fullText.length > 0
+    ? fullText
+    : (Array.isArray(lines) && lines.length >= fullLineCount && lines.length > 0 ? rawJoined : '')
+  const generatedExempt = Boolean(!rel.startsWith('kit/skills/') && effectiveFullText && isGeneratedSourceHeader(effectiveFullText, ext))
+  const views = buildLexedViews(rawJoined, ext)
   const tombstoneComments = []
   const excuseSuppressions = []
   if (!isFixture) {
     for (let i = 0; i < views.lines.length; i += 1) {
       const line = views.lines[i]
       const commentText = views.commentLines[i]
-      if (commentText && (TOMBSTONE_COMMENT_RE.test(commentText) || TOMBSTONE_DATE_RE.test(commentText))) {
+      if (!generatedExempt && commentText && (TOMBSTONE_COMMENT_RE.test(commentText) || TOMBSTONE_DATE_RE.test(commentText))) {
         tombstoneComments.push({ file: rel, line: i + 1, excerpt: line.trim().slice(0, 120) })
       }
       const hasJustify = JUSTIFICATION_ANCHOR_RE.test(commentText || line)
@@ -680,13 +704,17 @@ export function scanStructuralHygiene({ fileRel, lines = [], fullLineCount = 0, 
       }
     }
   }
-  const deadCodeBlocks = isFixture ? [] : detectCommentedDeadCodeBlocks(views).map((b) => ({ file: rel, line: b.startLine, endLine: b.endLine, length: b.length, excerpt: b.excerpt }))
-  const isCheckableSrc = !isTestOrFixtureFile(rel) && !rel.endsWith('.min.js')
-  const godFile = (isCheckableSrc && fullLineCount > warnLines)
+  const deadCodeBlocks = (isFixture || generatedExempt) ? [] : detectCommentedDeadCodeBlocks(views).map((b) => ({ file: rel, line: b.startLine, endLine: b.endLine, length: b.length, excerpt: b.excerpt }))
+  const isCheckableSrc = (skipFixtureCheck || !isTestOrFixtureFile(rel)) && !rel.endsWith('.min.js') && !generatedExempt
+  const declMeta = (isCheckableSrc && fullLineCount > warnLines && effectiveFullText)
+    ? classifyDeclarativeDataFile({ fullText: effectiveFullText, ext, fullLineCount, warnLines })
+    : null
+  const declarativeDataFile = declMeta ? { file: rel, ...declMeta } : null
+  const godFile = (isCheckableSrc && !declarativeDataFile && fullLineCount > warnLines)
     ? { file: rel, lines: fullLineCount, severity: fullLineCount > highLines ? 'high' : 'warn' }
     : null
-  const nearLimitFile = (isCheckableSrc && fullLineCount >= nearLimitLines && fullLineCount <= warnLines)
+  const nearLimitFile = (isCheckableSrc && !declarativeDataFile && fullLineCount >= nearLimitLines && fullLineCount <= warnLines)
     ? { file: rel, lines: fullLineCount, limit: warnLines }
     : null
-  return { tombstoneComments, excuseSuppressions, deadCodeBlocks, godFile, nearLimitFile }
+  return { generatedExempt, declarativeDataFile, tombstoneComments, excuseSuppressions, deadCodeBlocks, godFile, nearLimitFile }
 }

@@ -22,7 +22,7 @@ import { collectOwnerHistory, isApprovingStatus, PREVIOUS_OWNERS_KEY } from './d
 import { EXIT } from './exit-codes.mjs'
 import { gitRun, posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { hasDotGitInAncestors, isPathInGitIndexFast } from './git-fast.mjs'
-import { listTaskLedgers, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
+import { listTaskLedgers, recordPlanningProvenance, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
 
 export {
   DOC_LEGACY_NAME_RE,
@@ -593,6 +593,9 @@ export async function syncDocsLifecycle(repoRoot, {
 
   const groupRelList = finalSiblings.flatMap((s) => [s.oldRel, s.rel])
   const effectiveLedgerRoot = await resolveLedgerRoot(repoRoot, ledgerRoot)
+  recordPlanningProvenance(effectiveLedgerRoot, {
+    docRoot: repoRoot, docRels: updated.map((u) => u.file), isLegitimateTransfer: Boolean(owner && ownerReason), renameMap,
+  })
   for (const ledger of listTaskLedgers(effectiveLedgerRoot)) {
     const patch = {}
     let dirty = false

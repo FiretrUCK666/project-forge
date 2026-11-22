@@ -11,7 +11,7 @@ import { hasExecutableCodeMutation } from '../../lib/gate-enforcement.mjs'
 import { updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead,
-  readVerificationEvidence, validateE2eEvidenceText,
+  readVerificationEvidence, resolveScopedVerificationGate, runLowRiskDocStaticCheck, validateE2eEvidenceText,
 } from '../../lib/workflow-policy.mjs'
 import { evaluateStoredVisualEvidence, mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { EXIT } from './review-diff.mjs'
@@ -41,7 +41,7 @@ function hasSubstantiveStoredObservation(holder, headSha) {
 }
 
 export function computeEmpiricalRequirements({
-  diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null, explicitCmds = [],
+  diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null, explicitCmds = [], repoRoot = null,
 }) {
   const allFiles = [...new Set([...(diff?.files ?? []).map((f) => f.file), ...(diff?.untracked ?? [])])]
   const isEmptyDiff = allFiles.length === 0
@@ -66,8 +66,14 @@ export function computeEmpiricalRequirements({
       explicitNone: effectiveProfile?.explicitNone,
     },
   })
-  const { autoCommands: profileAutoCmds, hasDevProfileTestCmds } = collectDevProfileEmpiricalCmds(effectiveProfile)
-  const toolAutoCmds = (reviewContext?.healthyToolCommands ?? []).filter(Boolean)
+  const scopedGate = resolveScopedVerificationGate({
+    repoRoot,
+    changedFiles: allFiles,
+    profile: effectiveProfile,
+  })
+  const { autoCommands: profileAutoCmds, hasDevProfileTestCmds, skippedCommands: scopedSkippedCommands } = collectDevProfileEmpiricalCmds(effectiveProfile, { scopedGate })
+  const toolAutoRaw = (reviewContext?.healthyToolCommands ?? []).filter(Boolean)
+  const toolAutoCmds = scopedGate.scoped ? scopedGate.filterCommands(toolAutoRaw).kept : toolAutoRaw
   const extraCmds = (Array.isArray(explicitCmds) ? explicitCmds : [explicitCmds]).map((s) => String(s ?? '').trim()).filter(Boolean)
   const baseAuto = profileAutoCmds.length > 0 ? profileAutoCmds : toolAutoCmds
   const autoCommands = [...new Set([...baseAuto, ...extraCmds])]
@@ -75,8 +81,8 @@ export function computeEmpiricalRequirements({
   const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
   const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
 
-  const empiricalRequired = !isEmptyDiff
-  const faultRequired = !isEmptyDiff && (runtimeTouched || smokeRequired || hasDevProfileTestCmds || !isLowRiskPureDoc)
+  const empiricalRequired = !isEmptyDiff && !isLowRiskPureDoc
+  const faultRequired = !isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired || hasDevProfileTestCmds || !isLowRiskPureDoc)
   const visualCheckRequired = !isEmptyDiff && Boolean(behavioralGate?.empiricalVisualCheckRequired)
   const businessFlowEmpiricalRequired = !isEmptyDiff && !isLowRiskPureDoc && runtimeTouched && !policy.smokeExplicitNone
   const e2eObservationRequired = !isEmptyDiff && !isLowRiskPureDoc && (smokeRequired || visualCheckRequired || businessFlowEmpiricalRequired)
@@ -84,8 +90,15 @@ export function computeEmpiricalRequirements({
   return {
     isEmptyDiff,
     isLowRiskPureDoc,
+    changedFiles: allFiles,
     riskTier: policy.riskTier,
     autoCommands,
+    scopedGate: {
+      scoped: scopedGate.scoped,
+      affectedStacks: scopedGate.affectedStacks,
+      affectedPackages: scopedGate.affectedPackages,
+      skippedCommands: scopedSkippedCommands,
+    },
     hasDevProfileTestCmds,
     empiricalRequired,
     faultRequired,
@@ -137,8 +150,10 @@ export function evaluateIncludeDiffGate({
     mode, round, headSha, diffScope, currentFingerprint: workspaceFingerprint,
   }) || ((mode === 'task' || mode === 'pr') && dirtyEntries.length > 0)
 
-  const mechanicalDone = Boolean(matchesBaseline && receipt.mechanicalPackSeen === true)
-  const empiricalDone = Boolean(
+  const mechanicalDone = Boolean(
+    requirements.isLowRiskPureDoc || (matchesBaseline && receipt.mechanicalPackSeen === true),
+  )
+  const empiricalDone = !requirements.empiricalRequired || Boolean(
     matchesBaseline
     && receipt.empiricalVerified
     && receipt.empiricalVerified.fingerprint === workspaceFingerprint
@@ -214,9 +229,17 @@ export function evaluateIncludeDiffGate({
     ),
   )
 
+  const staticDocCheck = (requirements.isLowRiskPureDoc && Array.isArray(requirements.changedFiles) && requirements.changedFiles.length > 0 && reviewRoot)
+    ? runLowRiskDocStaticCheck(reviewRoot, requirements.changedFiles)
+    : null
+  const staticDocBlock = staticDocCheck && !staticDocCheck.ok
+    ? { code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', reason: `BLOCKED_STATIC_DOC_CHECK_FAILED: ${staticDocCheck.errors.map((e) => e?.message ?? String(e)).join('；')}`, errors: staticDocCheck.errors }
+    : null
+
   const missingSteps = []
   if (!mechanicalDone) missingSteps.push('mechanical-pack')
   if (!empiricalDone) missingSteps.push('check-empirical')
+  if (staticDocBlock) missingSteps.push('static-doc-check')
   if (requirements.faultRequired && !faultFailDone) missingSteps.push('check-fault:fail')
   if (requirements.faultRequired && !faultRestoreDone) missingSteps.push('check-fault:restore')
   if (requirements.visualCheckRequired && !visualDone) missingSteps.push('visual-check')
@@ -239,9 +262,11 @@ export function evaluateIncludeDiffGate({
     required: requirements.empiricalRequired,
     faultRequired: requirements.faultRequired,
     visualCheckRequired: requirements.visualCheckRequired,
+    isLowRiskPureDoc: Boolean(requirements.isLowRiskPureDoc),
     readyForDiff,
     dirtyFaultResidue,
     shallowE2eEvidence,
+    ...(staticDocBlock ? { staticDocBlock } : {}),
     ...(artifactBlock ? { artifactBlock } : {}),
     ...(requirements.visualCheckRequired && !visualDone && !artifactVisual.ok
       ? { visualBlock: { code: artifactVisual.code, reason: artifactVisual.reason, uiFiles: artifactVisual.visual.uiFiles } }
@@ -249,12 +274,14 @@ export function evaluateIncludeDiffGate({
     mode, round, targetRoot: posixPath(reviewRoot), headSha, diffScope, workspaceFingerprint,
     baselineFingerprint: matchesBaseline ? receipt.baselineFingerprint : null,
     steps: {
-      mechanicalPack: { done: mechanicalDone, at: mechanicalDone ? receipt.mechanicalPackAt : null },
+      mechanicalPack: { done: mechanicalDone, at: (matchesBaseline ? receipt.mechanicalPackAt : null) ?? null },
       empirical: {
         done: empiricalDone,
-        status: empiricalDone ? (receipt.empiricalVerified.status ?? 'passed') : 'pending',
-        commands: empiricalDone ? (receipt.empiricalVerified.commands ?? []) : [],
-        at: empiricalDone ? receipt.empiricalVerified.verifiedAt : null,
+        status: matchesBaseline && receipt?.empiricalVerified
+          ? (receipt.empiricalVerified.status ?? 'passed')
+          : (requirements.isLowRiskPureDoc ? 'low-risk-pure-doc-exempt' : 'pending'),
+        commands: matchesBaseline && receipt?.empiricalVerified ? (receipt.empiricalVerified.commands ?? []) : [],
+        at: matchesBaseline && receipt?.empiricalVerified ? receipt.empiricalVerified.verifiedAt : null,
       },
       faultFail: {
         done: faultFailDone, required: requirements.faultRequired,
@@ -320,7 +347,7 @@ export async function handleCheckEmpirical(ctx) {
 
   const explicitCmds = (opts.cmd ?? []).map((s) => String(s).trim()).filter(Boolean)
   const requirements = computeEmpiricalRequirements({
-    diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext: ctx.reviewContext ?? null, explicitCmds,
+    diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext: ctx.reviewContext ?? null, explicitCmds, repoRoot: reviewRoot,
   })
   const commandsToRun = requirements.autoCommands
   const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })

@@ -29,7 +29,7 @@ export function sanitizeCmdTemplate(rawCmd) {
     .trim()
 }
 
-export function collectDevProfileEmpiricalCmds(devProfile = {}) {
+export function collectDevProfileEmpiricalCmds(devProfile = {}, { scopedGate = null } = {}) {
   const auto = []
   for (const key of ['quick-test', 'smoke-verify', 'full-test']) {
     for (const raw of devProfile[key] ?? []) {
@@ -42,9 +42,19 @@ export function collectDevProfileEmpiricalCmds(devProfile = {}) {
     const clean = sanitizeCmdTemplate(raw)
     if (clean && !mergeCmds.includes(clean)) mergeCmds.push(clean)
   }
-  const effectiveAuto = auto.length > 0 ? auto : mergeCmds
-  const allTestCmds = [...new Set([...effectiveAuto, ...mergeCmds])]
-  return { autoCommands: effectiveAuto, hasDevProfileTestCmds: allTestCmds.length > 0 }
+  const rawEffective = auto.length > 0 ? auto : mergeCmds
+  const rawAll = [...new Set([...rawEffective, ...mergeCmds])]
+  if (scopedGate?.scoped && typeof scopedGate.filterCommands === 'function') {
+    const filteredEffective = scopedGate.filterCommands(rawEffective)
+    const filteredAll = scopedGate.filterCommands(rawAll)
+    return {
+      autoCommands: filteredEffective.kept,
+      hasDevProfileTestCmds: filteredAll.kept.length > 0,
+      skippedCommands: filteredAll.skipped,
+      scopedGate,
+    }
+  }
+  return { autoCommands: rawEffective, hasDevProfileTestCmds: rawAll.length > 0, skippedCommands: [], scopedGate: null }
 }
 
 /**

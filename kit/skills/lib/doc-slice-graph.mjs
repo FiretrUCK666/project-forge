@@ -634,7 +634,7 @@ export function buildMultiTaskWavePlan(activeTasks = [], filesByTask = null) {
       ...rawDeps.filter((d) => !activeIds.has(d)),
     ])]
     const deps = rawDeps.filter((d) => activeIds.has(d))
-    const conservativeSerial = Boolean(t.conservativeSerial || (t.hasWriteScope === false && files.length === 0))
+    const conservativeSerial = Boolean(t.conservativeSerial || files.length === 0)
     return {
       taskId: t.taskId, files, matchers, deps, rawDeps, unreadyDeps, conservativeSerial,
       readyUnstarted: Boolean(t.readyUnstarted), specFile: t.specFile ?? null, todoFile: t.todoFile ?? null,

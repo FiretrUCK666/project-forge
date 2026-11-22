@@ -19,7 +19,7 @@ import { SUBCOMMAND_META, subcommandNamesFor } from '../../kit/skills/lib/subcom
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_ROOT = resolve(HERE, '..', '..')
-const STRICT_6B_TOOLS = new Set(['doc-plan', 'govern-audit', 'verify-tools', 'iterate'])
+const STRICT_TOOLS = new Set(Object.keys(SUBCOMMAND_META))
 
 function setDiff(expected, actual) {
   const expSet = new Set(expected)
@@ -132,7 +132,7 @@ export function evaluateSubcommandParity(ROOT = DEFAULT_ROOT) {
     const text = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
     const expected = subcommandNamesFor(toolKey)
     const hasMetaImport = text.includes('subcommand-meta.mjs')
-    const enforceFull = STRICT_6B_TOOLS.has(toolKey) || hasMetaImport
+    const enforceFull = STRICT_TOOLS.has(toolKey) || hasMetaImport
 
     if (!enforceFull) {
       const staticArr = extractStaticSubcommandsArray(text)

@@ -15,9 +15,10 @@ import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, samePath } from '../../lib/git.mjs'
 import { enforceSlotBoundary } from '../../lib/harness-context.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveIdentityLayers, probeForWrite } from '../../lib/platform.mjs'
+  detectDeclaredRepo, parseRemoteUrls, parseRemotesTopology, probeForWrite, resolveIdentityLayers,
+} from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { classifyDoorType, detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -29,9 +30,13 @@ import {
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
+import {
+  analyzeIssueClaimState, assertClaimOrMergeProvenance, evaluateMasterIssueCloseGuard,
+  handleClaim, handleRelease,
+} from './flow-merge-claim.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
 
-export { handleAbort, handleCleanup, handleStatus }
+export { analyzeIssueClaimState, handleAbort, handleClaim, handleCleanup, handleRelease, handleStatus }
 
 /**
  * 一次写评论的成败，从后端返回值里读。
@@ -241,6 +246,18 @@ export async function assertPreMergeGates({
     return { ok: false, exitCode: EXIT.FACT, code: shaGate.code }
   }
 
+  const provActor = (ledger.claimedBy && ledger.claimedBy !== 'local-agent' ? ledger.claimedBy : null)
+    ?? (ledger.agent && ledger.agent !== 'local-agent' ? ledger.agent : null)
+    ?? (ledger.implementerId && ledger.implementerId !== 'local-agent' ? ledger.implementerId : null)
+  const provGate = assertClaimOrMergeProvenance({
+    mainRoot, docRoot: implRoot, ledger, taskId, actor: provActor, opts,
+  })
+  if (provGate.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, ...provGate }, null, 2)}\n`)
+    process.stderr.write(`${provGate.code}: ${provGate.reason}\n`)
+    return { ok: false, exitCode: provGate.exitCode ?? EXIT.FACT, code: provGate.code }
+  }
+
   return { ok: true, implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer, stopLossActive, gateFindings }
 }
 
@@ -283,6 +300,7 @@ export async function handleMerge(opts, roots) {
   // 本次合并发出的回告逐条记成败：两条合并路径共用一份，报告里统一列出未发出的那些。
   const mergeComments = []
   const syncFailures = []
+  const issueCloseDecisions = []
 
   if (canUseGhApi && ledger.prNumber) {
     if (currentHead) {
@@ -326,6 +344,16 @@ export async function handleMerge(opts, roots) {
         : (mergeRes.mergeBlocked ? `405 合并受阻(${mergeRes.error ?? ''})` : (mergeRes.state ?? mergeRes.error))
       throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
     }
+    // 先同步 mainRoot，确保 1:N 总控 Issue 关单保护读取到最新主线切片终态。
+    const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
+    if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
+      await gitRun(roots.mainRoot, ['fetch', pushRemote, baseBranch])
+      const fastMainBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
+      const curMainBr = fastMainBr ? { ok: true, stdout: fastMainBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+      if (curMainBr.ok && curMainBr.stdout.trim() === baseBranch) {
+        await gitRun(roots.mainRoot, ['merge', '--ff-only', '--no-edit', `${pushRemote}/${baseBranch}`])
+      }
+    }
     const mergeImplLayers = resolveIdentityLayers({
       ghLogin: ghProbe?.env?.trackB?.login,
       ghTier: ghProbe?.env?.trackB?.tier,
@@ -348,8 +376,6 @@ export async function handleMerge(opts, roots) {
       reviewerId: effectiveReviewer, reviewerDisplay, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
       humanApprovedReason: ledger.humanApprovedReason ?? null, bypassed: mergeBypassed,
     })
-    // 回告写没写出去，要看返回值。后端在没有直连凭据时返回的是「未成功 + 已转交」，
-    // 裸 await 把这件事吞掉，报告里一个字都不会出现。
     try {
       const prCmt = judgeCommentOutcome(await backend.postComment({
         repo: originFull,
@@ -366,8 +392,12 @@ export async function handleMerge(opts, roots) {
     }
     for (const iss of ledger.linkedIssues ?? []) {
       try {
+        const closeGuard = evaluateMasterIssueCloseGuard({
+          mainRoot: roots.mainRoot, implRoot, issueNumber: iss, ledger, taskId, baseBranch,
+        })
+        const issBody = closeGuard.progressNote ? `${mergeIssueBody}\n\n${closeGuard.progressNote}` : mergeIssueBody
         const issCmt = judgeCommentOutcome(await backend.postComment({
-          repo: originFull, number: iss, body: mergeIssueBody,
+          repo: originFull, number: iss, body: issBody,
           statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
         }))
         mergeComments.push({ target: `Issue #${iss}`, ...issCmt })
@@ -375,20 +405,22 @@ export async function handleMerge(opts, roots) {
         await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
         await backend.removeLabel({ repo: originFull, number: iss, label: 'in-review' })
         await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
-        await backend.closeIssue({ repo: originFull, number: iss })
+        if (closeGuard.shouldClose) {
+          await backend.closeIssue({ repo: originFull, number: iss })
+          issueCloseDecisions.push({ issue: iss, action: 'closed', reason: closeGuard.reason ?? 'merged' })
+        } else {
+          issueCloseDecisions.push({
+            issue: iss,
+            action: 'kept-open',
+            reason: closeGuard.reason,
+            masterPrd: closeGuard.masterPrd,
+            remainingSiblings: closeGuard.remainingSiblings,
+          })
+        }
       } catch (err) {
         const msg = err?.message ?? String(err)
         mergeComments.push({ target: `Issue #${iss}`, ok: false, reason: msg })
         syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: msg })
-      }
-    }
-    const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
-    if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
-      await gitRun(roots.mainRoot, ['fetch', pushRemote, baseBranch])
-      const fastMainBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
-      const curMainBr = fastMainBr ? { ok: true, stdout: fastMainBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-      if (curMainBr.ok && curMainBr.stdout.trim() === baseBranch) {
-        await gitRun(roots.mainRoot, ['merge', '--ff-only', '--no-edit', `${pushRemote}/${baseBranch}`])
       }
     }
   } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
@@ -435,8 +467,12 @@ export async function handleMerge(opts, roots) {
       })
       for (const iss of ledger.linkedIssues ?? []) {
         try {
+          const closeGuard = evaluateMasterIssueCloseGuard({
+            mainRoot: roots.mainRoot, implRoot, issueNumber: iss, ledger, taskId, baseBranch,
+          })
+          const issBody = closeGuard.progressNote ? `${localMergeBody}\n\n${closeGuard.progressNote}` : localMergeBody
           const issCmt = judgeCommentOutcome(await backend.postComment({
-            taskId, number: iss, body: localMergeBody,
+            taskId, number: iss, body: issBody,
             statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null },
           }))
           mergeComments.push({ target: `Issue #${iss}`, ...issCmt })
@@ -444,7 +480,18 @@ export async function handleMerge(opts, roots) {
           await backend.removeLabel({ taskId, number: iss, label: 'in-progress' })
           await backend.removeLabel({ taskId, number: iss, label: 'in-review' })
           await backend.removeLabel({ taskId, number: iss, label: 'changes-requested' })
-          await backend.closeIssue({ number: iss, reason: `merged into ${baseBranch}` })
+          if (closeGuard.shouldClose) {
+            await backend.closeIssue({ number: iss, reason: `merged into ${baseBranch}` })
+            issueCloseDecisions.push({ issue: iss, action: 'closed', reason: closeGuard.reason ?? 'merged' })
+          } else {
+            issueCloseDecisions.push({
+              issue: iss,
+              action: 'kept-open',
+              reason: closeGuard.reason,
+              masterPrd: closeGuard.masterPrd,
+              remainingSiblings: closeGuard.remainingSiblings,
+            })
+          }
         } catch (err) {
           const msg = err?.message ?? String(err)
           mergeComments.push({ target: `Issue #${iss}`, ok: false, reason: msg })
@@ -471,9 +518,12 @@ export async function handleMerge(opts, roots) {
     knownCleanWorktrees: ledger.worktreePath ? [ledger.worktreePath] : [],
   })
   const unreported = mergeComments.filter((c) => !c.ok)
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist, ...(mergeComments.length > 0 ? { mergeComments } : {}), ...(unreported.length > 0 ? { unreportedComments: unreported } : {}), ...(syncFailures.length > 0 ? { syncFailures } : {}) }, null, 2)}\n`)
+  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist, ...(issueCloseDecisions.length > 0 ? { issueCloseDecisions } : {}), ...(mergeComments.length > 0 ? { mergeComments } : {}), ...(unreported.length > 0 ? { unreportedComments: unreported } : {}), ...(syncFailures.length > 0 ? { syncFailures } : {}) }, null, 2)}\n`)
   else {
     process.stdout.write(`合并状态已确认（task=${taskId}, status=${ledger.status}）。未自动删除任何分支或 Worktree。\n`)
+    for (const d of issueCloseDecisions.filter((x) => x.action === 'kept-open')) {
+      process.stdout.write(`[1:N 关单保护] Issue #${d.issue} 保留开启（${d.masterPrd} 仍有 ${d.remainingSiblings?.length ?? '?'} 个未完成兄弟切片）。\n`)
+    }
     // 回告没发出去必须看得见：静默吞掉等于对外部提案人一声不吭地合了单。
     for (const u of unreported) {
       process.stdout.write(`回告未发出：${u.target}（${u.reason}）\n`)
@@ -486,308 +536,3 @@ export async function handleMerge(opts, roots) {
   return { exitCode: EXIT.OK }
 }
 
-export async function handleRelease(opts, roots) {
-  const ctx = await resolveTaskContext(roots, opts)
-  const { taskId, ledger } = ctx
-  const parsedPos = parseFlowInputs(opts._ ?? [])
-  const extraIssues = [
-    ...(opts.issue || opts.issues ? parseIssueNumbers([opts.issue, opts.issues], { strict: true }) : []),
-    ...parsedPos.issues.map((i) => i.number),
-  ]
-  if (extraIssues.length > 0) ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
-
-  const reason = String(opts.reason ?? '').trim()
-  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
-  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
-  const remoteUrls = parseRemoteUrls(remoteRes.stdout)
-  const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
-
-  const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
-  const releaseResults = []
-  if (!skipApi) {
-    // 认领/释放都要往平台写。写之前必须联网探清通道——
-    // 用「不联网」的探测结果判断「能不能写」，必然得到「不能」，而且不报错。
-    const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
-    const ghClient = opts._ghClient ?? ghProbe.client
-    const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    const relLayers = resolveIdentityLayers({
-      explicitAgent: opts.agent,
-      ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login,
-      ghTier: ghProbe.env?.trackB?.tier ?? ghClient?.tier ?? (ghClient ? 'authenticated' : null),
-      ledgerAccount: ledger.account,
-      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
-      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
-    })
-    const actorDisplay = formatAttribution({ ...relLayers, capabilities: backend.capabilities })
-    const rel = await backend.releaseTask({
-      taskId, issues: ledger.linkedIssues,
-      account: relLayers.account, verifiedPlatformLogin: relLayers.verifiedPlatformLogin, agent: relLayers.agent,
-      actor: relLayers.agent || relLayers.account, actorDisplay, branch: ledger.branch, reason,
-    })
-    releaseResults.push(...(rel.results ?? []))
-  } else {
-    const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    const relLayers = resolveIdentityLayers({
-      explicitAgent: opts.agent,
-      ledgerAccount: ledger.account,
-      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
-      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
-    })
-    const actorDisplay = formatAttribution({ ...relLayers, capabilities: localBackend.capabilities })
-    await localBackend.releaseTask({
-      taskId, issues: ledger.linkedIssues,
-      account: relLayers.account, verifiedPlatformLogin: relLayers.verifiedPlatformLogin, agent: relLayers.agent,
-      actor: relLayers.agent || relLayers.account, actorDisplay, branch: ledger.branch, reason,
-    })
-  }
-
-  ledger.status = 'released'
-  ledger.releasedAt = new Date().toISOString()
-  ledger.releaseReason = reason || null
-  ledger.claimedAt = null
-  ledger.claimedBy = null
-  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-
-  if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, taskId, role: ledger.role, mode: skipApi ? 'local-ledger-only' : 'remote-synced', status: ledger.status, reason: ledger.releaseReason, releaseResults }, null, 2)}\n`)
-  } else {
-    process.stdout.write(`任务 ${taskId} 已释放认领（status=released${skipApi ? '，仅本地账本' : `, issues=${ledger.linkedIssues.join(',')}`}）。\n`)
-    printNextStep([
-      { skill: 'dev-flow', text: `如需由其他人接手：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --agent <agent>` },
-      { skill: 'dev-flow', text: `或安全放弃任务与工作区：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` },
-    ], { repoRoot: roots.mainRoot })
-  }
-  return { exitCode: EXIT.OK }
-}
-
-/** 解析 Issue 评论流中的最新有效认领状态（claim/takeover 激活，release 释放）。 */
-export function analyzeIssueClaimState(comments = []) {
-  let activeClaim = null
-  for (const c of Array.isArray(comments) ? comments : []) {
-    const states = Array.isArray(c?.pfStates) && c.pfStates.length > 0 ? c.pfStates : (c?.pfState ? [c.pfState] : parsePfStateTags(c?.body ?? ''))
-    for (const st of states) {
-      const action = String(st?.action ?? '').toLowerCase()
-      if (action === 'claim' || action === 'takeover') {
-        activeClaim = {
-          action, actor: st.agent || st.actor || st.owner || c?.author || null,
-          account: st.account ?? null,
-          verifiedPlatformLogin: Boolean(st.verifiedPlatformLogin),
-          agent: st.agent ?? null,
-          login: c?.author ?? null, taskId: st.taskId ?? null, branch: st.branch ?? null,
-          reason: st.reason ?? null, commentId: c?.id ?? null, createdAt: c?.createdAt ?? null,
-        }
-      } else if (action === 'release') {
-        const relActor = st.agent || st.actor || c?.author || null
-        if (!activeClaim || !relActor || !activeClaim.actor
-          || String(relActor).toLowerCase() === String(activeClaim.actor).toLowerCase()
-          || (c?.author && activeClaim.login && c.author.toLowerCase() === activeClaim.login.toLowerCase())
-          || (st.taskId && activeClaim.taskId && st.taskId === activeClaim.taskId)) {
-          activeClaim = null
-        }
-      }
-    }
-  }
-  return activeClaim
-}
-
-function isSameClaimant(activeClaim, actor, viewerLogin) {
-  if (!activeClaim) return true
-  const aNorm = String(actor ?? '').trim().toLowerCase()
-  const cNorm = String(activeClaim.actor ?? '').trim().toLowerCase()
-  if (cNorm && aNorm) return cNorm === aNorm
-  if (viewerLogin && activeClaim.login) return String(viewerLogin).trim().toLowerCase() === String(activeClaim.login).trim().toLowerCase()
-  return false
-}
-
-export async function handleClaim(opts, roots) {
-  const ctx = await resolveTaskContext(roots, opts)
-  const { taskId, ledger } = ctx
-  const parsedPos = parseFlowInputs(opts._ ?? [])
-  const extraIssues = [
-    ...(opts.issue || opts.issues ? parseIssueNumbers([opts.issue, opts.issues], { strict: true }) : []),
-    ...parsedPos.issues.map((i) => i.number),
-  ]
-  if (extraIssues.length > 0) ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
-  const claimPr = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : (parsedPos.prs[0]?.number ?? null)
-  if (claimPr) ledger.prNumber = claimPr
-
-  const isTakeover = Boolean(opts.takeover)
-  const takeoverReason = String(opts.reason ?? '').trim()
-  if (isTakeover && !takeoverReason) {
-    process.stderr.write('BLOCKED_TAKEOVER_REASON_REQUIRED: --takeover 必须同时传入 --reason "<接管原因>"。\n')
-    return { exitCode: EXIT.FACT }
-  }
-
-  const prevAgent = ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? null
-  const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-
-  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
-  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
-  const remoteUrls = parseRemoteUrls(remoteRes.stdout)
-  const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
-
-  const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
-  if (skipApi) {
-    const gitNameRes = await gitRun(roots.mainRoot, ['config', 'user.name']).catch(() => ({ ok: false, stdout: '' }))
-    const localLayers = resolveIdentityLayers({
-      explicitAgent: opts.agent,
-      gitName: gitNameRes.ok ? gitNameRes.stdout.trim() : null,
-      ledgerAccount: ledger.account,
-      ledgerAgent: prevAgent,
-      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
-    })
-    const nextLocalActor = String(opts.agent ?? '').trim() || localLayers.agent || localLayers.account || null
-    if (nextLocalActor) {
-      // 换人认领或接管覆写之前先记账：历史集合是自审判定的唯一依据，不记就等于没换过人。
-      ledger.previousImplementers = rememberPreviousImplementer(ledger, nextLocalActor)
-    }
-    if (localLayers.account) {
-      ledger.account = localLayers.account
-      ledger.verifiedPlatformLogin = localLayers.verifiedPlatformLogin
-    }
-    if (localLayers.agent) {
-      ledger.agent = localLayers.agent
-      ledger.implementerId = localLayers.agent
-    } else if (!ledger.implementerId && localLayers.account) {
-      ledger.implementerId = localLayers.account
-    }
-    if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
-      const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
-      await syncTaskDocsSafe(claimRoot, ledger)
-    }
-    const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    const actorDisplay = formatAttribution({ ...localLayers, capabilities: localBackend.capabilities })
-    const localClaim = await localBackend.claimTask({
-      taskId, issues: ledger.linkedIssues, prNumber: ledger.prNumber,
-      account: localLayers.account, verifiedPlatformLogin: localLayers.verifiedPlatformLogin, agent: localLayers.agent,
-      actor: localLayers.agent || localLayers.account, actorDisplay, branch: ledger.branch,
-      takeover: isTakeover, reason: takeoverReason,
-    })
-    if (localClaim?.blocked) {
-      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, taskId, ...localClaim }, null, 2)}\n`)
-      process.stderr.write(`${localClaim.message}\n`)
-      return { exitCode: localClaim.exitCode ?? EXIT.FACT }
-    }
-    ledger.status = 'claimed'
-    ledger.claimedAt = new Date().toISOString()
-    ledger.claimedBy = String(opts.agent ?? '').trim() || localLayers.agent || localLayers.account || null
-    if (isTakeover) {
-      ledger.takeoverReason = takeoverReason
-      ledger.takenOverAt = ledger.claimedAt
-    }
-    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover }, null, 2)}\n`)
-    else {
-      process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
-      const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-      printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
-    }
-    return { exitCode: EXIT.OK }
-  }
-
-  // 认领/释放都要往平台写。写之前必须联网探清通道——
-  // 用「不联网」的探测结果判断「能不能写」，必然得到「不能」，而且不报错。
-  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
-  const ghClient = opts._ghClient ?? ghProbe.client
-  const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-  const onlineLayers = resolveIdentityLayers({
-    explicitAgent: opts.agent,
-    ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login,
-    ghTier: ghProbe.env?.trackB?.tier ?? ghClient?.tier ?? (ghClient ? 'authenticated' : null),
-    ledgerAccount: ledger.account,
-    ledgerAgent: prevAgent,
-    ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
-  })
-  const nextOnlineActor = String(opts.agent ?? '').trim() || onlineLayers.agent || onlineLayers.account || null
-  if (nextOnlineActor) {
-    // 换人认领或接管覆写之前先记账：历史集合是自审判定的唯一依据，不记就等于没换过人。
-    ledger.previousImplementers = rememberPreviousImplementer(ledger, nextOnlineActor)
-  }
-  if (onlineLayers.account) {
-    ledger.account = onlineLayers.account
-    ledger.verifiedPlatformLogin = onlineLayers.verifiedPlatformLogin
-  }
-  if (onlineLayers.agent) {
-    ledger.agent = onlineLayers.agent
-    ledger.implementerId = onlineLayers.agent
-  } else if (!ledger.implementerId && onlineLayers.account) {
-    ledger.implementerId = onlineLayers.account
-  }
-  if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
-    const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
-    await syncTaskDocsSafe(claimRoot, ledger)
-  }
-  const actorKey = onlineLayers.agent || onlineLayers.account
-  const actorDisplay = formatAttribution({ ...onlineLayers, capabilities: backend.capabilities })
-  const canQueryComments = Boolean(opts._ghClient) || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token'
-  const activeClaimsByIssue = new Map()
-  if (canQueryComments) {
-    for (const num of ledger.linkedIssues) {
-      const listRes = await backend.listComments({ repo: targetRepo, number: num })
-      if (!listRes.ok) continue
-      const activeClaim = analyzeIssueClaimState(listRes.comments)
-      if (activeClaim && !isSameClaimant(activeClaim, actorKey, ghProbe.env.trackB.login)) {
-        if (!isTakeover) {
-          if (opts.json) {
-            process.stdout.write(`${JSON.stringify({
-              blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', taskId, issue: num, activeClaim,
-              nextStep: `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --takeover --reason "<接管原因>"`,
-            }, null, 2)}\n`)
-          }
-          process.stderr.write(`BLOCKED_ISSUE_ALREADY_CLAIMED: Issue #${num} 已被 ${activeClaim.actor ?? activeClaim.login ?? '他人'} 认领（分支=${activeClaim.branch ?? '未知'}），且尚无 release/takeover；如需接管请传 --takeover --reason "<接管原因>"。\n`)
-          return { exitCode: EXIT.FACT }
-        }
-        activeClaimsByIssue.set(num, activeClaim)
-      }
-    }
-  }
-
-  const prevClaim = [...activeClaimsByIssue.values()][0] ?? null
-  const prevActors = [...activeClaimsByIssue.values()].map((c) => c.agent ?? c.actor ?? c.login).filter(Boolean)
-  if (isTakeover && prevActors.length > 0 && nextOnlineActor) {
-    for (const prev of prevActors) {
-      ledger.previousImplementers = rememberPreviousImplementer(
-        { previousImplementers: ledger.previousImplementers, implementerId: prev },
-        nextOnlineActor,
-      )
-    }
-  }
-  const claimOut = await backend.claimTask({
-    taskId,
-    issues: ledger.linkedIssues,
-    prNumber: ledger.prNumber,
-    account: onlineLayers.account,
-    verifiedPlatformLogin: onlineLayers.verifiedPlatformLogin,
-    agent: onlineLayers.agent,
-    actor: actorKey,
-    actorDisplay,
-    branch: ledger.branch,
-    takeover: isTakeover,
-    reason: takeoverReason,
-    previousActor: prevActors[0] ?? null,
-    previousAccount: prevClaim?.account ?? null,
-    previousVerifiedPlatformLogin: Boolean(prevClaim?.verifiedPlatformLogin),
-    previousAgent: prevClaim?.agent ?? prevActors[0] ?? null,
-  })
-  const claimResults = claimOut.results ?? []
-  const prTakeoverResult = claimOut.prResult ?? null
-
-  ledger.status = 'claimed'
-  ledger.claimedAt = new Date().toISOString()
-  ledger.claimedBy = String(opts.agent ?? '').trim() || onlineLayers.agent || onlineLayers.account || null
-  if (isTakeover) {
-    ledger.takeoverReason = takeoverReason
-    ledger.takenOverAt = ledger.claimedAt
-  }
-  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-  if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}) }, null, 2)}\n`)
-  } else {
-    process.stdout.write(`任务 ${taskId} 已${isTakeover ? '接管' : '认领'}（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
-    const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-    printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
-  }
-  return { exitCode: EXIT.OK }
-}

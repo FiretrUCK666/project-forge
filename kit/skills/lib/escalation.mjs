@@ -6,13 +6,64 @@
  */
 
 import { EXIT } from './exit-codes.mjs'
-import { posixPath, gitRun } from './git.mjs'
+import { gitRun, posixPath, sha256Text } from './git.mjs'
 import { hydrateIssueBody } from './issue-template-hydrate.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from './platform.mjs'
 import { createTaskBackend } from './task-backend.mjs'
 
 const EXPLICIT_WORK_PREFIX_RE = /^(?:(?:docs|fix|feat|refactor|chore|test|ci|build|perf|style|revert)(?:\([^)]+\))?:\s+|\[[^\]]+\]\s*)/i
+const PF_SIG_RE = /\bpf-sig:([0-9a-f]{12})\b/i
+
+/** 规范化错误摘要片段：剥离易变行号/列号、临时 worktree 前缀、盘符绝对路径与 SHA/时间戳，生成稳定签名输入。 */
+export function normalizeEscalationSignaturePart(text) {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/(?:[A-Za-z]:\\|\/(?:tmp|var\/folders|private\/var\/folders)\/)[^\s"'`)]+/g, (p) => {
+      const norm = p.replace(/\\/g, '/')
+      const wtIdx = norm.lastIndexOf('/.worktrees/')
+      if (wtIdx >= 0) return norm.slice(wtIdx + 1).replace(/^\.worktrees\/[^/]+\//, '')
+      const anchor = /\/((?:src|kit|scripts|lib|packages|apps|test|tests)\/.+)$/i.exec(norm)
+      if (anchor) return anchor[1]
+      return '<tmp>'
+    })
+    .replace(/\.worktrees\/[^/\s]+\//g, '')
+    .replace(/:\d+(?::\d+)?\b/g, '')
+    .replace(/\bline\s+\d+\b/gi, 'line')
+    .replace(/\b[0-9a-f]{7,40}\b/gi, '<sha>')
+    .replace(/\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)?/g, '<ts>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+/** 计算稳定错误签名指纹（`pf-sig:<hash12>`），消除行号/路径差异导致的重复建单。 */
+export function computeEscalationFingerprint(item = {}) {
+  const explicit = typeof item?.fingerprint === 'string' ? PF_SIG_RE.exec(item.fingerprint.trim()) : null
+  if (explicit) return `pf-sig:${explicit[1].toLowerCase()}`
+  const files = Array.isArray(item?.files) ? item.files : (item?.files ? [item.files] : [])
+  const primaryFile = files
+    .map((f) => posixPath(String(f ?? '')).replace(/^\.worktrees\/[^/]+\//, '').replace(/^\.\//, '').trim())
+    .filter(Boolean)
+    .sort()[0] ?? ''
+  const rawSummary = item?.signatureText ?? item?.summary ?? item?.title ?? item?.rootCause ?? ''
+  const cleanTitle = String(rawSummary ?? '').replace(EXPLICIT_WORK_PREFIX_RE, '').trim()
+  const key = {
+    category: String(item?.category ?? item?.source ?? 'escalation').trim().toLowerCase(),
+    code: String(item?.code ?? item?.pattern ?? '').trim().toUpperCase(),
+    target: primaryFile,
+    summary: normalizeEscalationSignaturePart(cleanTitle || rawSummary),
+  }
+  return `pf-sig:${sha256Text(JSON.stringify(key)).slice(0, 12)}`
+}
+
+export function extractEscalationFingerprint(bodyOrIssue) {
+  const raw = typeof bodyOrIssue === 'string'
+    ? bodyOrIssue
+    : `${bodyOrIssue?.body ?? ''}\n${bodyOrIssue?.title ?? ''}`
+  const m = PF_SIG_RE.exec(raw)
+  return m ? `pf-sig:${m[1].toLowerCase()}` : null
+}
 
 /** 根据 Case 档位返回默认工作类型前缀（Case 1 -> docs, Case 2 -> fix, Case >= 3 -> feat）。 */
 export function workTypePrefix(caseType = 3) {
@@ -137,7 +188,7 @@ export function buildEscalationIssuePayload(item = {}, opts = {}) {
   const nextStep = String(item.nextStep ?? 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --touches-contract --summary "Escalation follow-up"').trim()
   const repoRoot = opts?.repoRoot ?? item.repoRoot ?? item.mainRoot ?? null
 
-  const body = (typeof item.body === 'string' && item.body.trim())
+  const rawHydrated = (typeof item.body === 'string' && item.body.trim())
     ? hydrateIssueBody(repoRoot, caseType === 2 ? 'bug' : 'feature', { rawBody: item.body }).trim()
     : hydrateIssueBody(repoRoot, caseType === 2 ? 'bug' : 'feature', {
       title: item.title ?? item.summary ?? '未命名升级问题',
@@ -158,9 +209,13 @@ export function buildEscalationIssuePayload(item = {}, opts = {}) {
       nextStep,
     }).trim()
 
+  const fingerprint = computeEscalationFingerprint(item)
+  const body = rawHydrated.includes(fingerprint) ? rawHydrated : `${rawHydrated}\n\n<!-- ${fingerprint} -->`
+
   return {
     title,
     body,
+    fingerprint,
     labels,
     caseType,
     escalationTier,
@@ -339,11 +394,34 @@ export async function escalateToBackend({
     try {
       const openRes = await activeBackend.listIssues({ repo: resolvedRepo, state: 'open', perPage: 50 })
       if (openRes?.ok && Array.isArray(openRes.issues)) {
-        const dup = openRes.issues.find((x) => String(x?.title ?? '').trim() === payload.title)
+        const dup = openRes.issues.find((x) => {
+          const sameTitle = String(x?.title ?? '').trim() === payload.title
+          if (sameTitle) return true
+          const bodySig = extractEscalationFingerprint(x)
+          if (bodySig && bodySig === payload.fingerprint) return true
+          const normFallback = computeEscalationFingerprint({
+            category: item.category ?? item.source,
+            code: item.code ?? item.pattern,
+            files: item.files,
+            summary: x?.title,
+          })
+          return normFallback === payload.fingerprint
+        })
         if (dup) {
+          if (item.appendProgressComment !== false && typeof activeBackend.postComment === 'function') {
+            try {
+              const progressBody = [
+                `[进展去重] 命中同一错误签名 \`${payload.fingerprint}\`，跳过重复建单。`,
+                item.summary ? `- 最新摘要：${String(item.summary).trim()}` : null,
+              ].filter(Boolean).join('\n')
+              await activeBackend.postComment({ repo: resolvedRepo, number: dup.number, body: progressBody, deduplicate: true })
+            } catch { /* ignore progress comment fallback error */ }
+          }
           return {
             ok: true,
             deduplicated: true,
+            fingerprint: payload.fingerprint,
+            matchedBy: String(dup?.title ?? '').trim() === payload.title ? 'title' : 'signature',
             tier: payload.escalationTier,
             title: payload.title,
             number: dup.number,

@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 
-import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, assertNoAsciiControlChars, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { stripPfStateTags } from '../../lib/github-client.mjs'
 import {
@@ -39,9 +39,11 @@ function readRationaleText(mainRoot, opts = {}) {
   if (fileArg) {
     const abs = isAbsolute(String(fileArg)) ? String(fileArg) : resolve(mainRoot, String(fileArg))
     if (!existsSync(abs)) throw new Error(`--rationale-file 指定的文件不存在：${abs}`)
-    return readFileSync(abs, 'utf8').replace(/\r\n/g, '\n').trim()
+    const text = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n').trim()
+    return assertNoAsciiControlChars(text, '--rationale-file')
   }
-  return String(opts.rationale ?? '').replace(/\r\n/g, '\n').trim()
+  const text = String(opts.rationale ?? '').replace(/\r\n/g, '\n').trim()
+  return assertNoAsciiControlChars(text, '--rationale')
 }
 
 /**

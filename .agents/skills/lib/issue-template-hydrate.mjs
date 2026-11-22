@@ -8,6 +8,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { assertNoAsciiControlChars } from './cli.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { removeSectionIfPresent, replaceSectionIfPresent, stripHtmlCommentsOutsideFences } from './pr-template-hydrate.mjs'
 
@@ -160,6 +161,8 @@ function buildFallbackIssueBody(fields = {}, sec) {
  */
 export function hydrateIssueBody(repoRoot, kind = 'feature', fields = {}, opts = {}) {
   const rawExplicit = typeof fields?.rawBody === 'string' ? normalizeEscapedNewlines(fields.rawBody).trim() : ''
+  if (rawExplicit) assertNoAsciiControlChars(rawExplicit, 'Issue rawBody')
+  if (fields?.summary) assertNoAsciiControlChars(String(fields.summary), 'Issue summary')
   if (rawExplicit && /^##\s+/m.test(rawExplicit) && !opts.forceTemplate) {
     return `${stripHtmlCommentsOutsideFences(rawExplicit).replace(/\n{3,}/g, '\n\n').trim()}\n`
   }
@@ -173,28 +176,43 @@ export function hydrateIssueBody(repoRoot, kind = 'feature', fields = {}, opts =
   if (!tpl) return buildFallbackIssueBody(effectiveFields, sec)
 
   let md = stripHtmlCommentsOutsideFences(stripYamlFrontmatter(tpl.raw))
-  md = replaceSectionIfPresent(md, ['期望发生什么', '期望的用法与结果', 'Expected Behavior', 'Expected Result'], sec.expected).text
-  md = replaceSectionIfPresent(md, ['实际发生什么', '想解决什么问题', '背景与现象', 'Actual Behavior', 'Problem', 'Context'], sec.actual).text
-  const reproCandidates = ['怎么复现', '复现步骤', 'Steps to Reproduce', 'Reproduction']
-  md = sec.repro
-    ? replaceSectionIfPresent(md, reproCandidates, sec.repro).text
-    : removeSectionIfPresent(md, reproCandidates).text
-  md = replaceSectionIfPresent(md, ['环境', '版本与环境', 'Environment'], sec.environment).text
+  let matchedCount = 0
+  const applyReplace = (candidates, val) => {
+    const r = replaceSectionIfPresent(md, candidates, val)
+    md = r.text
+    if (r.matched) matchedCount += 1
+    return r.matched
+  }
+
+  applyReplace(['期望发生什么', '期望的用法与结果', '预期行为', 'Expected Behavior', 'Expected Result', 'Expected'], sec.expected)
+  applyReplace([
+    '实际发生什么', '想解决什么问题', '背景与现象', '问题概述', '问题描述', '现象',
+    'Actual Behavior', 'Describe the bug', 'What happened', 'What happened?', 'Problem', 'Context', 'Summary', 'Description', 'Is your feature request related to a problem?',
+  ], sec.actual)
+  const reproCandidates = ['怎么复现', '复现步骤', 'Steps to Reproduce', 'To Reproduce', 'Reproduction']
+  if (sec.repro) applyReplace(reproCandidates, sec.repro)
+  else md = removeSectionIfPresent(md, reproCandidates).text
+  applyReplace(['环境', '版本与环境', 'Environment', 'Desktop', 'System Info'], sec.environment)
   const scopeCandidates = ['影响范围', '范围与依据', 'Scope', 'Impact']
-  md = sec.scope
-    ? replaceSectionIfPresent(md, scopeCandidates, sec.scope).text
-    : removeSectionIfPresent(md, scopeCandidates).text
-  md = replaceSectionIfPresent(md, ['备选方案，以及不这样做的后果', '备选方案', 'Alternatives'], sec.alternatives).text
-  const extraCandidates = ['补充信息', 'Additional Context', '根因与影响']
-  md = sec.extra
-    ? replaceSectionIfPresent(md, extraCandidates, sec.extra).text
-    : removeSectionIfPresent(md, extraCandidates).text
-  md = replaceSectionIfPresent(md, ['验收标准', 'Acceptance Criteria'], sec.criteria).text
-  md = replaceSectionIfPresent(md, ['不在本次范围', 'Out of Scope'], sec.outOfScope).text
-  md = replaceSectionIfPresent(md, ['关联的设计产物', 'Related Docs'], sec.docRefs).text
+  if (sec.scope) applyReplace(scopeCandidates, sec.scope)
+  else md = removeSectionIfPresent(md, scopeCandidates).text
+  applyReplace(['备选方案，以及不这样做的后果', '备选方案', 'Alternatives', 'Describe alternatives you\'ve considered'], sec.alternatives)
+  const extraCandidates = ['补充信息', 'Additional Context', 'Additional context', '根因与影响']
+  if (sec.extra) applyReplace(extraCandidates, sec.extra)
+  else md = removeSectionIfPresent(md, extraCandidates).text
+  applyReplace(['验收标准', 'Acceptance Criteria'], sec.criteria)
+  applyReplace(['不在本次范围', 'Out of Scope'], sec.outOfScope)
+  applyReplace(['关联的设计产物', 'Related Docs', 'Related Issues'], sec.docRefs)
+
+  if (rawExplicit && (matchedCount === 0 || !md.includes(rawExplicit))) {
+    const stripped = md.trimEnd()
+    md = stripped ? `${stripped}\n\n${rawExplicit}` : rawExplicit
+  }
 
   if (effectiveFields.nextStep && !/\[NEXT STEP\]/.test(md)) {
     md = `${md.trimEnd()}\n\n## [NEXT STEP]\n\n[NEXT STEP] ${String(effectiveFields.nextStep).trim()}`
   }
-  return `${md.replace(/\n{3,}/g, '\n\n').trim()}\n`
+  const rendered = `${md.replace(/\n{3,}/g, '\n\n').trim()}\n`
+  assertNoAsciiControlChars(rendered, 'Issue 模板渲染正文')
+  return rendered
 }

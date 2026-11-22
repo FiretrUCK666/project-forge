@@ -405,13 +405,16 @@ export function registerReviewEmpiricalCases(cases) {
         const emptyDiffRes = await runRp(['--local', '--include-diff', '--json'], docOnly)
         if (emptyDiffRes.status !== 0) return `空 diff 不应死锁：exit=${emptyDiffRes.status} out=${emptyDiffRes.stdout}`
 
-        // low 级纯文档改动：先阻断 -> check-empirical（免 fault）-> 解锁
+        // low 级纯文档改动：豁免强制 runtime check-empirical 与 faultRequired，直接放行 --include-diff 且保留静态检查与机械包校验
         writeFileSync(join(docOnly, 'docs/guide.md'), '# Guide\n\nUpdated docs.\n')
         const docPre = await runRp(['--local', '--include-diff', '--json'], docOnly)
-        if (docPre.status !== 3) return `纯文档未跑 check-empirical 前也应先阻断：exit=${docPre.status}`
+        if (docPre.status !== 0 || JSON.parse(docPre.stdout).diff?.diffIncluded !== true) {
+          return `low 级纯文档应豁免 runtime 实证直接放行 --include-diff：exit=${docPre.status} out=${docPre.stdout}`
+        }
         const docPack = await runRp(['--local', '--json'], docOnly)
-        if (docPack.status !== 0 || JSON.parse(docPack.stdout).empiricalGate?.faultRequired !== false) {
-          return `low 级纯文档 faultRequired 应为 false：${docPack.stdout}`
+        const docPackJson = JSON.parse(docPack.stdout)
+        if (docPack.status !== 0 || docPackJson.empiricalGate?.required !== false || docPackJson.empiricalGate?.faultRequired !== false) {
+          return `low 级纯文档 required/faultRequired 均应为 false：${docPack.stdout}`
         }
         const docEmp = await runRp(['check-empirical', '--local', '--json'], docOnly)
         if (docEmp.status !== 0) return `纯文档 check-empirical 失败：${docEmp.stdout} ${docEmp.stderr}`

@@ -21,9 +21,48 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { canonicalPath, isInsideDir, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
 import { isPathInGitIndexFast } from '../../lib/git-fast.mjs'
+import { listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import { discoverWorkspacePackages } from '../../lib/profile.mjs'
 
 const NODE_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
+const VITE_CONFIG_NAMES = ['vite.config.ts', 'vite.config.mts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cts', 'vite.config.cjs']
+
+function detectPnpmWorkspace(mainAbs, cmpUnits = []) {
+  if (existsSync(join(mainAbs, 'pnpm-lock.yaml')) || existsSync(join(mainAbs, 'pnpm-workspace.yaml')) || existsSync(join(mainAbs, 'node_modules', '.pnpm'))) {
+    return true
+  }
+  return cmpUnits.some((u) => (u.lockfiles ?? []).some((lf) => (typeof lf === 'string' ? lf : lf?.path ?? '').endsWith('pnpm-lock.yaml')))
+}
+
+function detectViteConfigDirs(mainAbs, wtAbs, cmpUnits = []) {
+  const dirs = new Set([''])
+  for (const u of cmpUnits) if (u?.dirRel) dirs.add(u.dirRel)
+  for (const d of dirs) {
+    for (const root of [wtAbs, mainAbs]) {
+      if (VITE_CONFIG_NAMES.some((fn) => existsSync(d ? join(root, d, fn) : join(root, fn)))) return true
+      const pkg = readJsonSafe(d ? join(root, d, 'package.json') : join(root, 'package.json'))
+      if (pkg?.dependencies?.vite || pkg?.devDependencies?.vite) return true
+    }
+  }
+  return false
+}
+
+export function buildWorktreeMountHints(mainAbs, wtAbs, cmpUnits = [], mountedItems = []) {
+  const hasNodeMount = mountedItems.some((m) => /(?:^|\/)node_modules$/.test(String(m?.path ?? '')))
+  const isPnpm = detectPnpmWorkspace(mainAbs, cmpUnits)
+  const hasVite = detectViteConfigDirs(mainAbs, wtAbs, cmpUnits)
+  const envHints = {}
+  const hints = []
+  if (hasNodeMount && (isPnpm || mountedItems.some((m) => m.linkType === 'junction'))) {
+    envHints.npm_config_verify_deps_before_run = 'false'
+    hints.push('pnpm 共享挂载检测：已导出 npm_config_verify_deps_before_run=false（避免 pnpm 误判 junction node_modules 过期而重装）。')
+  }
+  if (hasNodeMount && hasVite) {
+    const allowPaths = [...new Set([canonicalPath(mainAbs), ...mountedItems.map((m) => m.target).filter(Boolean).map(canonicalPath)])]
+    hints.push(`Vite 跨路径放行提示：请在 vite.config.* 的 server.fs.allow 中加入 ${JSON.stringify(allowPaths)} 以放行共享 node_modules 真实路径。`)
+  }
+  return { envHints, hints, isPnpm, hasVite }
+}
 const PY_LOCKFILES = ['uv.lock', 'poetry.lock', 'Pipfile.lock', 'requirements.txt', 'requirements-dev.txt']
 const PYTHON_DEP_DIRS = ['.venv', 'venv']
 
@@ -336,6 +375,7 @@ export function mountSharedDeps(mainRoot, wtRoot, opts = {}) {
     reason = isolatedUnits[0].reason
   }
 
+  const mountHints = buildWorktreeMountHints(mainAbs, wtAbs, cmp.units, [...mounted, ...alreadyMounted])
   return {
     ok: true,
     mode,
@@ -346,6 +386,8 @@ export function mountSharedDeps(mainRoot, wtRoot, opts = {}) {
     mountedPaths: mountedRelPaths,
     isolatedUnits,
     skipped,
+    envHints: mountHints.envHints,
+    hints: mountHints.hints,
   }
 }
 
@@ -640,6 +682,7 @@ function printHelp() {
     '选项：',
     '  --main <path>             主仓库根目录',
     '  --worktree <path>         目标 worktree 目录',
+    '  --task <id>               关联任务 ID（同步写回账本 mountedDepsByWorktree）',
     '  --allow-outbound <path>   显式放行待解绑外链（可重复）',
     '  --strict                  删 worktree 前的严格外链校验档',
     '  --json                    输出结构化 JSON',
@@ -652,7 +695,7 @@ function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       subcommands: ['mount', 'unmount', 'scan', 'status'],
-      valueFlags: ['main', 'worktree'],
+      valueFlags: ['main', 'worktree', 'task'],
       multiFlags: ['allow-outbound'],
       booleanFlags: ['strict'],
       usageHint: 'worktree-deps.mjs <mount|unmount|scan|status> --main <dir> --worktree <dir>',
@@ -671,8 +714,25 @@ function main(argv) {
     let res
     if (cli.sub === 'status') res = compareLockfiles(cli.opts.main, cli.opts.worktree)
     else if (cli.sub === 'scan') res = scanOutboundLinks(cli.opts.worktree)
-    else if (cli.sub === 'mount') res = mountSharedDeps(cli.opts.main, cli.opts.worktree)
-    else if (cli.sub === 'unmount') {
+    else if (cli.sub === 'mount') {
+      res = mountSharedDeps(cli.opts.main, cli.opts.worktree)
+      if (res.envHints) {
+        for (const [k, v] of Object.entries(res.envHints)) process.env[k] = String(v)
+      }
+      const mainAbs = canonicalPath(cli.opts.main)
+      const wtAbs = canonicalPath(cli.opts.worktree)
+      const wtRel = posixPath(relative(mainAbs, wtAbs))
+      const matchedLedger = cli.opts.task
+        ? readTaskLedger(mainAbs, sanitizeTaskId(cli.opts.task))
+        : listTaskLedgers(mainAbs).find((l) => (l.worktreePath && posixPath(l.worktreePath) === wtRel) || (l.reviewWorktreePath && posixPath(l.reviewWorktreePath) === wtRel))
+      if (matchedLedger?.taskId) {
+        recordMountedDepsInLedger(matchedLedger, wtRel, res)
+        writeTaskLedger(mainAbs, matchedLedger)
+        res.ledgerUpdated = true
+        res.taskId = matchedLedger.taskId
+        res.mountedDepsByWorktree = matchedLedger.mountedDepsByWorktree
+      }
+    } else if (cli.sub === 'unmount') {
       // 这个子命令的本职是「清场以便重挂依赖」，所以默认走 deps 档（worktree 不会消失）。
       // 要删 worktree 就必须显式加 --strict，让「跟随 junction 递归删除」这道闸生效。
       res = unmountSharedDeps(cli.opts.main, cli.opts.worktree, {
@@ -685,6 +745,7 @@ function main(argv) {
       process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
     } else {
       process.stdout.write(`worktree-deps (${cli.sub}): ${JSON.stringify(res)}\n`)
+      for (const h of res.hints ?? []) process.stdout.write(`[HINT] ${h}\n`)
       if (cli.sub === 'unmount' && res.ok === false) {
         process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree 里有 ${res.blocked.length} 条指向外部的链接未获准删除。`
           + '`git worktree remove --force` 会跟随 junction 递归删除，删了主仓那些目标就没了。\n')

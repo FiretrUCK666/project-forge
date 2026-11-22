@@ -1,16 +1,16 @@
 ---
 kind: todo
 title: Slice 6C：跨仓隔离、并发实证豁免与角色溯源防绕过
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: 143
 pr: null
-branch: docs/w6-universal-architecture-plan
+branch: feat/w6c-harness-gates-provenance
 owner: plan-w6
 plan_mode: interactive
 approved: true
-done_at: null
+done_at: 2026-11-22
 task_id: w6c-harness-gates-provenance
 planned_at: 836e964ca5bb77e4ce14c1848e280bb15a1e3b9b
 related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
@@ -29,7 +29,7 @@ related_spec: ../specs/261122-issue143-w6c-harness-gates-provenance-spec.md
 | 任务编号 | `w6c-harness-gates-provenance` |
 | 负责人 / 审批 | plan-w6 / `false` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | #143 / 未关联 / `docs/specs/261122-issue143-w6c-harness-gates-provenance-spec.md` |
+| 关联 Issue / PR / SPEC | #143 / 未关联 / `docs/archive/specs/261122-issue143-w6c-harness-gates-provenance-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -43,12 +43,12 @@ related_spec: ../specs/261122-issue143-w6c-harness-gates-provenance-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C13: `kit/skills/lib/cli.mjs`、`kit/skills/lib/exit-codes.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` 与 `kit/skills/dev-flow/scripts/flow-issues.mjs` 实现跨仓工作目录不匹配 fail-closed 拦截（在 `exit-codes.mjs` 登记 `BLOCKED_CROSS_REPO_CWD_MISMATCH`）；`flow.mjs` 与 `review-pack.mjs` 接入 `SUBCOMMAND_META` 单源并对齐文件头，6/6 脚本通过 `subcommand-parity.mjs`。
-- [ ] C14: `kit/skills/lib/issue-template-hydrate.mjs` 与 `kit/skills/lib/pr-template-hydrate.mjs` 兼容 `**Bold**` 提示模板且零 section 命中时完整保留 `--body`；`flow.mjs finalize` 同步归档 `SPEC` 正文状态表与 YAML `status: implemented`。
-- [ ] C15: `kit/skills/dev-review/scripts/review-empirical.mjs`、`review-pack.mjs` 与 `kit/skills/lib/escalation.mjs` 对 `low` 风险纯文档变更豁免强制 runtime `check-empirical` / `faultRequired` / `--include-diff` 阻塞，且 `escalation.mjs` 按错误签名去重不重复建单。
-- [ ] C16: `kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `kit/skills/dev-review/scripts/review-empirical-state.mjs` 扩展 `isEquivalentConcurrentCommand` 识别 `--maxWorkers` / `--workers` / `--bail` / `--config.verify-deps-before-run=false`；为多语言仓单栈局部变更提供子包/单栈作用域验证识别并在 `collectDevProfileEmpiricalCmds` 接入过滤（未改栈缺失环境不误阻塞）。
-- [ ] C17: `kit/skills/dev-flow/scripts/worktree-deps.mjs` 与 `docs/feature-map.json` 修复独立 `mount` 更新 `mountedDepsByWorktree`、为 `pnpm` junction 透传 `npm_config_verify_deps_before_run=false` 并给出 Vite `fs.allow` 引导，基于 6B 在 `edit-gate.mjs` 落地的 `--base` 与游离 `HEAD` 支持修复 `verify-edit-gate` 在游离 review 槽执行兼容性；拆小 `flow-lifecycle.mjs`（798 行）、`flow-merge.mjs`（793 行）、`flow-inspect.mjs`（792 行）严守 `<= 800` 行。
-- [ ] C18: 强化规划/实施/审查真实角色溯源校验：由 `doc-plan init/link`（`doc-plan-ops.mjs` / `docs.mjs` / `doc-approval.mjs` / `ledger.mjs`）写入仓外 `.git/project-forge-flow/` `planningProvenance` 基线，在 `start`/`claim`/`submit` 拦截未经 `doc-plan link` 直改 Todo `owner:` 的篡改（在 `exit-codes.mjs` 登记 `BLOCKED_PROVENANCE_TAMPERED`）与历史规划作者重叠（`BLOCKED_AUTHOR_IS_IMPLEMENTER`），不按 Git commit author 误杀本地隔离实施代理并诚实界定 `handoff-package.mjs` 证明边界；Slice 6C 新增正反双向夹具（`scripts/dev/fixtures-w6c-harness-gates.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6c.mjs`(new)），执行 `node scripts/equip.mjs .` 后全量门禁全绿。
+- [x] C13: `kit/skills/lib/cli.mjs`、`kit/skills/lib/exit-codes.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` 与 `kit/skills/dev-flow/scripts/flow-issues.mjs` 实现跨仓工作目录不匹配 fail-closed 拦截（在 `exit-codes.mjs` 登记 `BLOCKED_CROSS_REPO_CWD_MISMATCH`）；`flow.mjs` 与 `review-pack.mjs` 接入 `SUBCOMMAND_META` 单源并对齐文件头，6/6 脚本通过 `subcommand-parity.mjs`。
+- [x] C14: `kit/skills/lib/issue-template-hydrate.mjs` 与 `kit/skills/lib/pr-template-hydrate.mjs` 兼容 `**Bold**` 提示模板且零 section 命中时完整保留 `--body`；`flow.mjs finalize` 同步归档 `SPEC` 正文状态表与 YAML `status: implemented`。
+- [x] C15: `kit/skills/dev-review/scripts/review-empirical.mjs`、`review-pack.mjs` 与 `kit/skills/lib/escalation.mjs` 对 `low` 风险纯文档变更豁免强制 runtime `check-empirical` / `faultRequired` / `--include-diff` 阻塞，且 `escalation.mjs` 按错误签名去重不重复建单。
+- [x] C16: `kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `kit/skills/dev-review/scripts/review-empirical-state.mjs` 扩展 `isEquivalentConcurrentCommand` 识别 `--maxWorkers` / `--workers` / `--bail` / `--config.verify-deps-before-run=false`；为多语言仓单栈局部变更提供子包/单栈作用域验证识别并在 `collectDevProfileEmpiricalCmds` 接入过滤（未改栈缺失环境不误阻塞）。
+- [x] C17: `kit/skills/dev-flow/scripts/worktree-deps.mjs` 与 `docs/feature-map.json` 修复独立 `mount` 更新 `mountedDepsByWorktree`、为 `pnpm` junction 透传 `npm_config_verify_deps_before_run=false` 并给出 Vite `fs.allow` 引导，基于 6B 在 `edit-gate.mjs` 落地的 `--base` 与游离 `HEAD` 支持修复 `verify-edit-gate` 在游离 review 槽执行兼容性；拆小 `flow-lifecycle.mjs`（798 行）、`flow-merge.mjs`（793 行）、`flow-inspect.mjs`（792 行）严守 `<= 800` 行。
+- [x] C18: 强化规划/实施/审查真实角色溯源校验：由 `doc-plan init/link`（`doc-plan-ops.mjs` / `docs.mjs` / `doc-approval.mjs` / `ledger.mjs`）写入仓外 `.git/project-forge-flow/` `planningProvenance` 基线，在 `start`/`claim`/`submit` 拦截未经 `doc-plan link` 直改 Todo `owner:` 的篡改（在 `exit-codes.mjs` 登记 `BLOCKED_PROVENANCE_TAMPERED`）与历史规划作者重叠（`BLOCKED_AUTHOR_IS_IMPLEMENTER`），不按 Git commit author 误杀本地隔离实施代理并诚实界定 `handoff-package.mjs` 证明边界；Slice 6C 新增正反双向夹具（`scripts/dev/fixtures-w6c-harness-gates.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6c.mjs`(new)），执行 `node scripts/equip.mjs .` 后全量门禁全绿。
 
 ## 执行步骤
 
@@ -74,6 +74,17 @@ related_spec: ../specs/261122-issue143-w6c-harness-gates-provenance-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：待实施后填写
-- **文档同步检查**：待实施后填写
+- **实际验证命令与结果**：
+  - `node scripts/equip.mjs . --check`：exit 0（套件校验通过）
+  - `node scripts/compose-agents.mjs . --check`：exit 0（AGENTS.md 一致）
+  - `node scripts/dev/preflight.mjs`：exit 0（0 项失败，41 项读数）
+  - `node scripts/dev/gap-coverage.mjs`：exit 0（20 条各有处置）
+  - `node scripts/dev/subcommand-parity.mjs`：exit 0（6/6 入口全量对齐）
+  - `node scripts/review.mjs .`：exit 0（可以交付，0 missing）
+  - `node scripts/dev/fixtures.mjs --jobs 6`：exit 0（460 项通过 / 0 项失败）
+  - `node scripts/dev/verify-injections.mjs --jobs 6`：exit 0（388 条判据全部抓到，含 `I443`–`I451`）
+  - `node scripts/dev/e2e-zip-harness.mjs`：exit 0（Scenarios A–L 全通，232 包条目）
+  - `node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --json`：exit 0（checked 72, blockers 0, violations 0）
+  - `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict`：exit 0（critical=0, high=0）
+- **文档同步检查**：已运行 `node scripts/equip.mjs .` 同步 `.agents/skills/` 与 `.agents/skills/.pf-manifest.json`，并勾选本 Todo、6C SPEC 与 1:N 总控 PRD（`C1..C19` 全部完成）待随 PR 成对归档。
 - **遗留问题**：无

@@ -17,7 +17,7 @@ import {
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { ensureWorktreesIgnored, gitRun, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
+import { readTaskLedger, recordPlanningProvenance, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { parseIssueNumbers } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
@@ -417,6 +417,13 @@ export async function initDoc({
   }
 
   const primary = planned[planned.length - 1]
+  if (mainRoot) {
+    recordPlanningProvenance(mainRoot, {
+      docRoot: writeRoot,
+      docRels: planned.filter((p) => p.kind !== 'tdd').map((p) => p.file),
+      taskId: effTaskId && !(effectiveKind === 'prd' && multiSpec) ? effTaskId : null,
+    })
+  }
   return {
     type: effectiveKind, kind: effectiveKind, writeRoot, file: primary.file, absFile: primary.absFile,
     files: planned.map((p) => p.file), created: planned.map((p) => ({ kind: p.kind, file: p.file })),

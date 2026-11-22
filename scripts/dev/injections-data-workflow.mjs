@@ -165,7 +165,7 @@ export const INJECTIONS_WORKFLOW = [
     id: 'I70',
     what: '在 static-gates.mjs ASSERTION_RE 重新混入 test( 与小写 require( 使死检查回退失效',
     file: 'kit/skills/lib/static-gates.mjs',
-    from: 'export const ASSERTION_RE = /\\b(?:[Aa]ssert(?:\\.\\w+)?|[Ee]xpect|[Ss]hould|pytest\\.raises|t\\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals|NotEquals|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\\b\\s*(?:\\(|!|\\.)|\\b[Aa]ssert\\s+/',
+    from: 'export const ASSERTION_RE = /\\b(?:[Aa]ssert(?:\\.\\w+)?|[Ee]xpect|[Ss]hould|pytest\\.raises|t\\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals?|NotEquals?|DeepEqual|NoError|Error|Contains|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\\b\\s*(?:\\(|!|\\.)|\\b[Aa]ssert\\s+/',
     to: 'export const ASSERTION_RE = /\\b(?:assert|expect|test|require)\\b/i',
     expect: 'zero-assertion/mock-tautology 死检查回退失效',
   },

@@ -9,7 +9,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
-import { evaluateCritiqueOverride, parseCritiqueRounds, readPlanCritiqueEntrySync } from '../../lib/critique-rounds.mjs'
+import { evaluateCritiqueOverride, parseCritiqueRounds, persistPlanCritiqueEntrySync, readPlanCritiqueEntrySync } from '../../lib/critique-rounds.mjs'
 import {
   DOC_FRONTMATTER_KEY_ORDER, docDateTag, docIsoDate, parseDocFrontmatter,
   renderStandardDocTemplate, resolveRepoCustomDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
@@ -56,11 +56,14 @@ export function approveSpec({
   let workingText = text
   let critiqueSkipped = false
   let skippedCritiqueValue = null
+  let skipApprovalEntry = null
+  let existingCritiqueEntry = null
 
   if (docType === 'spec' || docType === 'prd') {
     const { entry: planCritiqueEntry } = readPlanCritiqueEntrySync({
       repoRoot, mainRoot, gitDir, taskId, fmData: fm.data, relDoc: audit.file,
     })
+    existingCritiqueEntry = planCritiqueEntry
     const priorRounds = parseCritiqueRounds(fm.data, workingText, planCritiqueEntry)
     const critiqueState = evaluateCritiqueOverride(workingText, fm.data, planCritiqueEntry)
     const override = critiqueState.override
@@ -93,6 +96,14 @@ export function approveSpec({
             )
           }
           skippedCritiqueValue = `skipped (reason=${reasonCheck.cleaned})`
+          skipApprovalEntry = {
+            approved: true,
+            hostMode,
+            humanApproved: true,
+            reason: reasonCheck.cleaned,
+            sha: currentSha,
+            at: new Date().toISOString(),
+          }
           if (!fm.hasFrontmatter) {
             const skipLine = `- Plan Critique: ${skippedCritiqueValue}`
             workingText = /^(?:-\s+)?Plan Critique:.*$/mi.test(workingText)
@@ -123,6 +134,21 @@ export function approveSpec({
     updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
   } else {
     writeAtomic(abs, workingText.replace(/^((?:-\s+)?Status:\s*)\S+(\s*)$/mi, `$1${nextStatus}$2`))
+  }
+  if (skipApprovalEntry) {
+    persistPlanCritiqueEntrySync({
+      repoRoot,
+      mainRoot,
+      gitDir,
+      taskId: taskId ?? fm.data?.task_id ?? null,
+      fmData: fm.data,
+      relDoc: audit.file,
+      entry: {
+        ...(existingCritiqueEntry ?? {}),
+        skipApproved: skipApprovalEntry,
+        updatedAt: skipApprovalEntry.at,
+      },
+    })
   }
 
   const criteria = extractCriteria(workingText)

@@ -5,7 +5,7 @@
  */
 
 import { EXIT } from '../../lib/exit-codes.mjs'
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
@@ -290,8 +290,16 @@ export async function handleVerify(opts, roots) {
     return { exitCode: EXIT.ACTION }
   }
   const wtEnv = computeWorktreeEnv({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId, slotIndex: ledger.slotIndex })
+  const hasSharedNodeModules = roots.mainRoot !== implRoot && (
+    ledger.depsMode === 'shared'
+    || (Array.isArray(ledger.mountedDeps) && ledger.mountedDeps.some((p) => /(?:^|\/)node_modules$/.test(String(p))))
+    || (() => { try { return lstatSync(join(implRoot, 'node_modules')).isSymbolicLink() } catch { return false } })()
+  )
+  const envForCmd = (cmdStr) => (hasSharedNodeModules && /\bpnpm\b/i.test(String(cmdStr ?? ''))
+    ? { ...wtEnv, PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false' }
+    : wtEnv)
   const tRunStart = Date.now()
-  const runRes = await execShellCommand(cmd, implRoot, { timeout: timeoutMs, env: wtEnv })
+  const runRes = await execShellCommand(cmd, implRoot, { timeout: timeoutMs, env: envForCmd(cmd) })
   const runDurationMs = Date.now() - tRunStart
   const { currentHead, dirty, stStdout, changedFiles, policy, diffText } = await computeVerifyPolicy()
   let smokeCmdUsed = mode === 'smoke' ? cmd : null
@@ -310,7 +318,7 @@ export async function handleVerify(opts, roots) {
       } else if (runRes.ok) {
         smokeCmdUsed = profile.smokeVerify
         const tSmokeStart = Date.now()
-        smokeRunRes = await execShellCommand(profile.smokeVerify, implRoot, { timeout: timeoutMs, env: wtEnv })
+        smokeRunRes = await execShellCommand(profile.smokeVerify, implRoot, { timeout: timeoutMs, env: envForCmd(profile.smokeVerify) })
         smokeDurationMs = Date.now() - tSmokeStart
         smokeExecuted = true
       }

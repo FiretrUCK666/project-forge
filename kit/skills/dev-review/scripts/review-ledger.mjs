@@ -27,8 +27,8 @@ import {
   buildReviewStopLossPacket, checkDistinctRoundReviewer, checkHistoricalStopLoss,
   checkIncrementalScopeLock, checkSameHeadRereview, collectExcludedReviewers,
   computeDispositionStats, computeReviewArtifactBaseline, evaluatePassBlockers,
-  evaluateThreeRoundStopLoss, isOptionalLowRiskReview, normActorId, normalizeAdvisoryList,
-  normalizeMustFixObj, parseDispositions, parseMustFixItem, sameBlockerItem,
+  evaluateThreeRoundStopLoss, extractFileAndLines, isOptionalLowRiskReview, normActorId,
+  normalizeAdvisoryList, normalizeMustFixObj, parseDispositions, parseMustFixItem, sameBlockerItem,
 } from './review-locks.mjs'
 import { collectNormalReviewEscalations, syncReviewToGitHub } from './review-sync.mjs'
 
@@ -515,6 +515,24 @@ export async function handleRecord(opts, roots) {
       source: 'review-finding', file: mf.file || '', line: mf.line ?? undefined,
       message: `[${mf.id}] ${mf.summary}`, taskId, round, verdict,
       meta: { findingId: mf.id, blockerFingerprint: mf.fingerprint, criterion: mf.criterion ?? null },
+    })
+  }
+  for (let i = 0; i < shouldFixList.length; i += 1) {
+    const sfText = shouldFixList[i]
+    const sfParsed = extractFileAndLines(sfText)
+    const modRoot = inferSignalModule(sfParsed.file)
+    const ruleId = 'review.should-fix'
+    const defectClass = inferDefectClass({ ruleId, pattern: 'review.should-fix', category: 'review.should-fix', message: sfText })
+    const pyramidTier = inferPyramidTier(defectClass, { stopLoss: false })
+    const fingerprint = computeSignalFingerprint({ ruleId, pattern: 'review.should-fix', defectClass, moduleRoot: modRoot })
+    await appendGovernSignal({
+      mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, workRoot: targetRoot,
+      category: 'review.should-fix', module: modRoot,
+      pattern: 'review.should-fix', ruleId, defectClass, pyramidTier, fingerprint,
+      targetArtifact: sfParsed.file || modRoot, severity: 'should-fix',
+      source: 'review-finding', file: sfParsed.file || '', line: sfParsed.line ?? undefined,
+      message: sfText, taskId, round, verdict,
+      meta: { index: i + 1, kind: 'should-fix' },
     })
   }
   const nextSteps = resolveRecordNextSteps({ taskId, verdict, round, role: updated.role, mainRoot, excludedReviewers })

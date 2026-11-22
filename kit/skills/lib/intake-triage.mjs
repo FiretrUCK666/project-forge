@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { readPlanCritiqueEntrySync } from './critique-rounds.mjs'
 import { buildIntakeDecisionComments } from './doc-comments.mjs'
 import { parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { resolveApprovalBasis } from './plan-exit-gate.mjs'
@@ -158,10 +159,12 @@ export function hasIntakeBlockingSignal({ record = null, localPr = null, labels 
  * 分诊要豁免的是「这份规划已经被人认过」，那就要问同一个问题、得同一个答案——
  * 两处各算一次，必然出现「退场门禁说没依据、分诊说已核准」。
  */
-function approvalOfDoc(raw, rel) {
+function approvalOfDoc(raw, rel, { repoRoot = null, ledger = null } = {}) {
   const parsed = parseDocFrontmatter(raw)
   const data = parsed.data ?? {}
-  const basis = resolveApprovalBasis({ rel, text: raw, data })
+  const ledgerEntry = ledger?.planCritique?.[rel]
+    ?? (repoRoot ? readPlanCritiqueEntrySync({ repoRoot, fmData: data, relDoc: rel }).entry : null)
+  const basis = resolveApprovalBasis({ rel, text: raw, data, ledgerEntry })
   const approvedFlag = data.approved === true || String(data.approved ?? '').trim().toLowerCase() === 'true'
   return { approved: approvedFlag && basis.applicable && basis.hasBasis, basis, data }
 }
@@ -207,7 +210,7 @@ export function isApprovedInternalPlan(repoRoot, input = {}) {
   for (const rel of candidateDocs) {
     const raw = readTextSafe(join(repoRoot, rel))
     if (!raw) continue
-    const verdict = approvalOfDoc(raw, rel)
+    const verdict = approvalOfDoc(raw, rel, { repoRoot, ledger: matchedLedger })
     if (!verdict.approved) continue
     const fm = { data: verdict.data }
     const fn = parseDocFilename(rel)

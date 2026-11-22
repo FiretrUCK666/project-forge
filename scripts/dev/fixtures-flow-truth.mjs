@@ -118,12 +118,13 @@ const WRITE_SCOPE_ONLY_PIPELINE = [
 ].join('\n')
 
 /** 从文档全文算出批准依据结论，省得每处都拼一次。 */
-function basisOf(text, docType = 'spec') {
+function basisOf(text, docType = 'spec', extra = {}) {
   return resolveApprovalBasis({
     rel: docType === 'spec' ? 'docs/specs/x-spec.md' : `docs/${docType}/x-${docType}.md`,
     docType,
     text,
     data: parseDocFrontmatter(text).data ?? {},
+    ...extra,
   })
 }
 
@@ -150,19 +151,35 @@ export function registerFlowTruthCases(cases) {
     if (basisOf(specText({ planCritique: 'passed' })).basis !== 'passed') {
       return '正常过审没有被判成 passed'
     }
-    // 依据二：带实质理由的 skipped
-    const skippedOk = basisOf(specText({ planCritique: 'skipped (reason=紧急修复，停线事故先放行)' }))
+    const { critiqueTextFingerprint } = await import('../../kit/skills/lib/critique-rounds.mjs')
+    // 依据二：带实质理由的 skipped 且账本有对应授权留痕
+    const skippedText = specText({ planCritique: 'skipped (reason=紧急修复，停线事故先放行)' })
+    const skippedOk = basisOf(skippedText, 'spec', {
+      ledgerEntry: {
+        skipApproved: {
+          approved: true,
+          hostMode: 'single-session',
+          humanApproved: true,
+          reason: '紧急修复，停线事故先放行',
+          sha: critiqueTextFingerprint(skippedText),
+        },
+      },
+    })
     if (!skippedOk.hasBasis || skippedOk.basis !== 'skipped') {
-      return `带实质理由的 skipped 没被认成合法依据：${JSON.stringify(skippedOk)}`
+      return `带实质理由与授权留痕的 skipped 没被认成合法依据：${JSON.stringify(skippedOk)}`
     }
-    // 依据二的反例：占位词的 skipped 不算依据
+    // 依据二的反例 A：裸写 YAML skipped 但账本无授权留痕 -> 不得算合法依据
+    const bareSkipped = basisOf(skippedText, 'spec', { ledgerEntry: null })
+    if (bareSkipped.hasBasis) {
+      return `裸写 YAML skipped 无账本留痕却被放行：${JSON.stringify(bareSkipped)}`
+    }
+    // 依据二的反例 B：占位词的 skipped 不算依据
     const skippedStub = basisOf(specText({ planCritique: 'skipped (reason=todo)' }))
     if (skippedStub.hasBasis) {
       return '占位词的 skipped 被当成了合法依据——理由就该是理由，不是记一个「跳过」'
     }
     // 依据三：有效的 human-override。这是 SPEC 原文漏掉的第三种，漏了就会把人签的字判成「依据缺失」。
     const bare = specText({ planCritique: 'rejected (reviewer=crit-3, round=3, sha=f841d5825ad0)' })
-    const { critiqueTextFingerprint } = await import('../../kit/skills/lib/critique-rounds.mjs')
     const overrideJson = JSON.stringify({
       approved: true, reason: 'approved after stop-loss', by: 'human-maintainer',
       at: '2026-11-20T00:00:00.000Z', sha: critiqueTextFingerprint(bare), overriddenRounds: [3],

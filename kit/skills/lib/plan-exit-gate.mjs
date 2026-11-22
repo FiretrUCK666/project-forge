@@ -276,11 +276,26 @@ export function resolveApprovalBasis(doc) {
     }
   }
 
-  // 严格白名单依据二：显式跳过且实质理由达标。
+  // 严格白名单依据二：显式跳过且实质理由达标（存在账本/仓上下文时须命中授权留痕，禁裸写 YAML 绕过）。
   if (critique === 'skipped') {
     const reason = skippedReasonOf(stamp)
+    const skipAuth = ledgerEntry?.skipApproved
+    const hasLedgerContext = Boolean(doc && ('ledgerEntry' in doc || 'planCritiqueEntry' in doc || doc.repoRoot))
     if (reason.length >= SKIPPED_REASON_MIN_CHARS) {
-      return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.SKIPPED, evidence: reason, warning: null }
+      if (hasLedgerContext) {
+        const skipValid = Boolean(
+          skipAuth?.approved === true
+          && skipAuth?.humanApproved === true
+          && skipAuth?.hostMode === 'single-session'
+          && typeof skipAuth?.reason === 'string' && skipAuth.reason.trim().length >= SKIPPED_REASON_MIN_CHARS
+          && (!skipAuth?.sha || skipAuth.sha.toLowerCase() === critiqueTextFingerprint(text).toLowerCase()),
+        )
+        if (skipValid) {
+          return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.SKIPPED, evidence: reason, warning: null }
+        }
+      } else {
+        return { applicable: true, hasBasis: true, basis: APPROVAL_BASIS.SKIPPED, evidence: reason, warning: null }
+      }
     }
   }
 
@@ -473,7 +488,8 @@ function evaluateMasterPrd(repoRoot, specDoc, { requireApproval = true, warnings
   const prd = readPlanDoc(repoRoot, prdRelFromRoot)
   if (!prd || !prd.exists) return []
   if (isArchivedFinalizedPrd(prd)) return []
-  const ledgerEntry = planCritique?.[prd.rel] ?? null
+  const ledgerEntry = planCritique?.[prd.rel]
+    ?? readPlanCritiqueEntrySync({ repoRoot, fmData: prd.data, relDoc: prd.rel }).entry
   return evaluateDoc({ ...prd, kind: 'prd', ledgerEntry }, { requireApproval, warnings }).map((r) => ({
     ...r,
     message: `${r.message}（作为 ${specDoc.rel} 认领的总控 PRD）`,

@@ -131,7 +131,7 @@ export function computeFingerprint(criterion, file, summary) {
   return createHash('sha1').update(key || 'empty').digest('hex').slice(0, 12)
 }
 
-function extractFileAndLines(text) {
+export function extractFileAndLines(text) {
   const raw = normalizePathSeparators(text)
   const m = FILE_LINE_RE.exec(raw)
   if (m && !/^https?:/i.test(m[1])) {

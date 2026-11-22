@@ -247,6 +247,15 @@ export async function handleFinalize(opts, roots) {
       prdRel: archivedGroup.byKind.prd ?? prdRel,
       todoRel: archivedGroup.byKind.todo ?? todoRel,
     })
+    const pathsToStage = [
+      ...archivedGroup.moved.flatMap((m) => [m.from, m.to]),
+      archivedGroup.byKind.prd,
+      archivedGroup.byKind.spec,
+      archivedGroup.byKind.todo,
+    ].filter(Boolean)
+    if (pathsToStage.length > 0 && roots.isGit) {
+      await gitRun(implRoot, ['add', '-A', '--', ...new Set(pathsToStage)])
+    }
   }
 
   const governHook = await runLifecycleGovernHook({ stage: 'finalize', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })

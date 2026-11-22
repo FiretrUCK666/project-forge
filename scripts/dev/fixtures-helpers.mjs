@@ -27,23 +27,40 @@ export { textsOf }
  */
 export { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 
+const trackedTempDirs = new Set()
+let tempExitHookRegistered = false
+
+function ensureTempExitCleanup() {
+  if (tempExitHookRegistered) return
+  tempExitHookRegistered = true
+  process.on('exit', () => {
+    for (const dir of trackedTempDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
+      } catch { /* 留给系统清理 */ }
+    }
+  })
+}
+
+export function trackTempDir(dir) {
+  if (!dir) return dir
+  ensureTempExitCleanup()
+  trackedTempDirs.add(dir)
+  return dir
+}
+
 export function initTestBackupDir() {
   if (!String(process.env.PF_NO_REAL_AUTH_PROBE ?? '').trim()) {
     process.env.PF_NO_REAL_AUTH_PROBE = '1'
   }
   if (!String(process.env.PF_BACKUP_DIR ?? '').trim()) {
-    const testBackupRoot = mkdtempSync(join(tmpdir(), 'pf-test-bk-'))
+    const testBackupRoot = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-test-bk-')))
     process.env.PF_BACKUP_DIR = testBackupRoot
-    process.on('exit', () => {
-      try {
-        rmSync(testBackupRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-      } catch { /* 留给系统清理 */ }
-    })
   }
 }
 
 export function tmpProject(files) {
-  const dir = mkdtempSync(join(tmpdir(), 'pf-fix-'))
+  const dir = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-fix-')))
   for (const [rel, content] of Object.entries(files)) {
     const full = join(dir, rel)
     mkdirSync(dirname(full), { recursive: true })
@@ -55,7 +72,8 @@ export function tmpProject(files) {
 export function rmTree(dir) {
   try {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-  } catch { /* 留给系统清理 */ }
+    trackedTempDirs.delete(dir)
+  } catch { /* 留给退出清理 */ }
 }
 
 export function existingKept(result, pid) {
@@ -97,36 +115,27 @@ let seedGitRepoDir
 let seedBareGitDir
 function getEmptyGitTemplateDir() {
   if (!emptyGitTplDir) {
-    emptyGitTplDir = mkdtempSync(join(tmpdir(), 'pf-gtpl-'))
-    process.on('exit', () => {
-      try { rmSync(emptyGitTplDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
-    })
+    emptyGitTplDir = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-gtpl-')))
   }
   return emptyGitTplDir
 }
 
 function getSeedGitDir() {
   if (!seedGitRepoDir) {
-    const repo = mkdtempSync(join(tmpdir(), 'pf-gseed-'))
+    const repo = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-gseed-')))
     gitSync(repo, ['init', '-q', `--template=${getEmptyGitTemplateDir()}`])
     appendFileSync(join(repo, '.git', 'config'), '[core]\n\tfsync = none\n[gc]\n\tauto = 0\n', 'utf8')
     seedGitRepoDir = join(repo, '.git')
-    process.on('exit', () => {
-      try { rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
-    })
   }
   return seedGitRepoDir
 }
 
 export function gitInitBare(dir) {
   if (!seedBareGitDir) {
-    const bare = mkdtempSync(join(tmpdir(), 'pf-gbare-'))
+    const bare = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-gbare-')))
     gitSync(undefined, ['init', '--bare', '-q', `--template=${getEmptyGitTemplateDir()}`, bare])
     appendFileSync(join(bare, 'config'), '[core]\n\tfsync = none\n[gc]\n\tauto = 0\n', 'utf8')
     seedBareGitDir = bare
-    process.on('exit', () => {
-      try { rmSync(bare, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
-    })
   }
   cpSync(seedBareGitDir, dir, { recursive: true })
 }
@@ -338,7 +347,7 @@ export async function seedExploredFor(mainRoot, ...taskIds) {
 
 /** 构造仅本地运行的 fake `gh` CLI 垫片环境（绕开真网探测，用于测真实 API 通道与 PR SHA 解析）。 */
 export function createFakeGhEnv({ prs = {}, issues = {}, login = 'fake-dev', failAuth = false } = {}) {
-  const sb = mkdtempSync(join(tmpdir(), 'pf-fake-gh-'))
+  const sb = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-fake-gh-')))
   const binDir = join(sb, 'bin')
   mkdirSync(binDir, { recursive: true })
   const dataFile = join(sb, 'gh-data.json')

@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { execSafe, resolveExecutable } from '../../lib/exec.mjs'
 import {
-  gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, isMacOsJunkPath, isMainModule,
+  gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, isMacOsJunkPath, isMainModule,
   posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
@@ -26,7 +26,7 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
+  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
@@ -198,7 +198,7 @@ function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived = new S
   if (!rel.startsWith('docs/archive/')) return false
   const st = String(entry?.status ?? '')
   if (/^R/i.test(st)) return true
-  if (/^A/i.test(st)) {
+  if (/^(?:A|\?\?|M)/i.test(st)) {
     if (ownArchived.has(rel)) return true
     const origRel = rel.replace(/^docs\/archive\//, 'docs/')
     if (deletedFiles.has(origRel)) return true
@@ -323,9 +323,14 @@ export async function runEditGate(opts = {}) {
   const highRiskHits = []
   const checkedFiles = dedupEntries.map((e) => e.file)
   const ownArchived = new Set(
-    taskLedger?.finalized
-      ? [taskLedger.archivedTodoFile, taskLedger.archivedSpecFile, taskLedger.archivedPrdFile].filter(Boolean).map((p) => posixPath(p))
-      : [],
+    [
+      taskLedger?.archivedTodoFile,
+      taskLedger?.archivedSpecFile,
+      taskLedger?.archivedPrdFile,
+      ...(Array.isArray(taskLedger?.archivedDocs) ? taskLedger.archivedDocs : []),
+      ...[taskLedger?.todoFile, taskLedger?.specFile, taskLedger?.prdFile]
+        .filter((p) => typeof p === 'string' && posixPath(p).startsWith('docs/archive/')),
+    ].filter(Boolean).map((p) => posixPath(p)),
   )
 
   for (const entry of dedupEntries) {
@@ -375,6 +380,13 @@ export async function runEditGate(opts = {}) {
     (Array.isArray(opts.files) && opts.files.length > 0) || (typeof opts.files === 'string' && opts.files.trim())
   )
   const codeRelList = []
+  let diffChunks = null
+  if (isGit && ratchetInfo.baseRef && dedupEntries.some((e) => CODE_EXT_RE.test(e.file))) {
+    const diffRes = await gitRunBuffer(workTreeRoot, ['--no-optional-locks', 'diff', '--unified=3', '--no-ext-diff', '--no-color', ratchetInfo.baseRef])
+    if (diffRes.ok) {
+      diffChunks = splitDiffByFile(diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n'))
+    }
+  }
 
   for (const entry of dedupEntries) {
     const rel = entry.file
@@ -385,7 +397,11 @@ export async function runEditGate(opts = {}) {
     if (txt === undefined) continue
     codeRelList.push(rel)
 
-    const lines = txt.replace(/\r\n/g, '\n').split('\n')
+    const isNewEntry = entry.status === '??' || /^A/i.test(String(entry.status ?? ''))
+    const fileChunk = (!isNewEntry && diffChunks && diffChunks.has(rel)) ? diffChunks.get(rel) : null
+    const lines = fileChunk !== null
+      ? summarizeHunkChanges(fileChunk).added
+      : txt.replace(/\r\n/g, '\n').split('\n')
     const fullLineCount = countTextLines(txt)
     const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullText: txt, fullLineCount, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES })
 

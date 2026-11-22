@@ -6,11 +6,11 @@
 
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { collectExcludedReviewers } from '../../lib/critique-rounds.mjs'
-import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
+import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, readJsonSafe } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
@@ -18,6 +18,7 @@ import { readSessionState } from '../../lib/session-state.mjs'
 import { ensureReviewToken, listTaskLedgers, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { computeSignalFingerprint, readSignalsJsonl } from '../../lib/signals.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
 import {
   determineWorkflowPolicy, evaluateNextState, hasRepoCiWorkflow,
@@ -145,6 +146,63 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
     }))
   }
   return { rehydrated: true, changed, remoteRoundsCount: remoteRounds.length }
+}
+
+function buildRetroHint({ mainRoot, gitDir, isGit }) {
+  const governState = readJsonSafe(join(mainRoot, '.worktrees', '.state', 'govern-state.json'))
+  const lastRetro = governState?.lastRetro ?? null
+  const lastAtMs = lastRetro?.at ? Date.parse(lastRetro.at) : NaN
+  const overdueDays = Number.isFinite(lastAtMs) ? (Date.now() - lastAtMs) / (24 * 3600 * 1000) : 0
+  const overdue = Boolean(lastRetro?.at && overdueDays >= 7)
+
+  const { events } = readSignalsJsonl({ mainRoot, gitDir, isGit })
+  const clusterCounts = new Map()
+  for (const ev of events) {
+    const sev = String(ev?.severity ?? 'medium').toLowerCase()
+    const pat = String(ev?.pattern ?? 'signal')
+    if (sev === 'info' || /\.pass$/.test(pat)) continue
+    if (Number.isFinite(lastAtMs) && ev?.ts) {
+      const evMs = Date.parse(ev.ts)
+      if (Number.isFinite(evMs) && evMs <= lastAtMs) continue
+    }
+    const fp = ev.fingerprint || computeSignalFingerprint({
+      ruleId: ev.ruleId || pat,
+      defectClass: ev.defectClass || 'general',
+      moduleRoot: ev.module || 'repo',
+    })
+    const prev = clusterCounts.get(fp) ?? { fingerprint: fp, pattern: pat, module: ev.module || 'repo', count: 0 }
+    prev.count += 1
+    clusterCounts.set(fp, prev)
+  }
+  const undigestedClusters = [...clusterCounts.values()].filter((c) => c.count >= 2).sort((a, b) => b.count - a.count)
+  const tier1Count = Number(lastRetro?.tier1Count ?? 0)
+  const tier2Count = Number(lastRetro?.tier2Count ?? 0)
+  const today = new Date().toISOString().slice(0, 10)
+  const expiredTier3 = (Array.isArray(governState?.tier3Fallbacks) ? governState.tier3Fallbacks : [])
+    .filter((x) => x?.expires && String(x.expires) < today).length
+
+  if (!overdue && tier1Count === 0 && tier2Count === 0 && undigestedClusters.length === 0 && expiredTier3 === 0) {
+    return null
+  }
+  const parts = []
+  if (tier1Count > 0 || tier2Count > 0) parts.push(`上次 retro 遗留 Tier1=${tier1Count}、Tier2=${tier2Count}`)
+  if (undigestedClusters.length > 0) parts.push(`未消化复发聚簇 ${undigestedClusters.length} 组`)
+  if (overdue) parts.push(`距上次 retro 已逾 ${Math.floor(overdueDays)} 天`)
+  if (expiredTier3 > 0) parts.push(`过期 Tier3 条款 ${expiredTier3} 条`)
+
+  return {
+    code: 'WARN_RETRO_PENDING',
+    overdue,
+    lastRetroAt: lastRetro?.at ?? null,
+    lastRetroTaskId: lastRetro?.taskId ?? null,
+    tier1Count,
+    tier2Count,
+    expiredTier3,
+    undigestedClusterCount: undigestedClusters.length,
+    undigestedClusters: undigestedClusters.slice(0, 5),
+    command: 'node ".agents/skills/dev-govern/scripts/govern-audit.mjs" retro --auto --json',
+    message: `治理复盘提醒（${parts.join('，')}）；建议运行 \`govern-audit.mjs retro --auto --json\` 收口升格。`,
+  }
 }
 
 /** 唯一路由入口：处理 0 任务 idle、多任务 ambiguous 与单任务全态判定。 */
@@ -383,11 +441,21 @@ export async function handleNext(opts, roots) {
     out = { ...out, handoff: handoff.fields, handoffPrompt: handoff.prompt }
   }
 
+  const retroHint = buildRetroHint({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, isGit: roots.isGit })
+  if (retroHint) {
+    const mergedWarnings = [...(out.warnings ?? [])]
+    if (!mergedWarnings.some((w) => w.code === retroHint.code)) {
+      mergedWarnings.push({ code: retroHint.code, message: retroHint.message })
+    }
+    out = { ...out, warnings: mergedWarnings }
+  }
+
   const orient = out.phase === 'idle' ? buildSessionOrientation(roots.mainRoot) : null
   const sessionState = readSessionState(roots.mainRoot)
   const payload = {
     ...out,
     hydration,
+    ...(retroHint ? { retroHint } : {}),
     ...(sessionState ? { sessionState } : {}),
     ...(orient ? { orientation: { docs: orient.docs, stuck: orient.stuck, nextSteps: orient.nextSteps } } : {}),
   }

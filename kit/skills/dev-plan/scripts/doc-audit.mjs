@@ -33,7 +33,7 @@ import {
 import { collectMarkdownFiles, listDocs, runRepoDocsAudit } from './doc-audit-repo.mjs'
 import {
   candHasNewAnnotation, collectPlaceholderErrors, extractFrontmatterIssueInt,
-  extractLinePathCandidates, findFmKeyLine,
+  extractLinePathCandidates, findFmKeyLine, resolveDocBodyPathCandidate,
 } from './doc-audit-helpers.mjs'
 
 export { collectMarkdownFiles, listDocs, stripCritiqueMeta }
@@ -432,19 +432,40 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
     if (item.skipPathCheck) continue
     for (const rawCand of extractLinePathCandidates(item.strippedLine)) {
       if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue
-      const cleanRel = rawCand.replace(/^\.\//, '').replace(/\/+$/, '')
-      if (!cleanRel || cleanRel === relDoc || !candHasNewAnnotation(item.strippedLine, rawCand)) continue
-      const parentRel = posixPath(dirname(cleanRel))
-      const parentExists = parentRel === '.' || existsSync(join(repoRoot, parentRel)) || declaredNewDirs.has(parentRel)
+      if (!candHasNewAnnotation(item.strippedLine, rawCand)) continue
+      const resolved = resolveDocBodyPathCandidate({ repoRoot, absDoc: abs, rawCand, declaredNewFiles, declaredNewDirs })
+      if (!resolved.cleanRel || resolved.cleanRel === relDoc) continue
+      if (!resolved.insideRepo) {
+        errors.push({
+          code: 'NEW_PATH_MISSING_PARENT',
+          line: item.lineNo,
+          path: resolved.cleanRel,
+          message: `第 ${item.lineNo} 行标注新建路径 "${resolved.cleanRel}" 超出仓库根目录范围`,
+          fixHint: '请使用仓库内部合法相对路径。',
+        })
+        continue
+      }
+      let targetRel = resolved.cleanRel
+      let parentRel = resolved.parentRel
+      let parentExists = parentRel === '.' || existsSync(join(repoRoot, parentRel)) || declaredNewDirs.has(parentRel)
+      if (!parentExists && rawCand.startsWith('./')) {
+        const rootCand = rawCand.replace(/^\.\//, '').replace(/\/+$/, '')
+        const rootParent = posixPath(dirname(rootCand))
+        if (rootParent === '.' || existsSync(join(repoRoot, rootParent)) || declaredNewDirs.has(rootParent)) {
+          targetRel = rootCand
+          parentRel = rootParent
+          parentExists = true
+        }
+      }
       if (parentExists) {
-        if (rawCand.endsWith('/')) declaredNewDirs.add(cleanRel)
-        declaredNewFiles.add(cleanRel)
+        if (rawCand.endsWith('/')) declaredNewDirs.add(targetRel)
+        declaredNewFiles.add(targetRel)
       } else {
         errors.push({
           code: 'NEW_PATH_MISSING_PARENT',
           line: item.lineNo,
-          path: cleanRel,
-          message: `第 ${item.lineNo} 行标注新建路径 "${cleanRel}"，但其父目录 "${parentRel}" 不存在`,
+          path: targetRel,
+          message: `第 ${item.lineNo} 行标注新建路径 "${targetRel}"，但其父目录 "${parentRel}" 不存在`,
           fixHint: `请核实父目录 ${parentRel} 真实存在（或先声明上级新建目录并补充真实基础路径）。`,
         })
       }
@@ -457,16 +478,16 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
     for (const rawCand of extractLinePathCandidates(item.strippedLine)) {
       if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue
       if (rawCand.startsWith('docs/archive/') && /归档|archive/i.test(item.rawLine)) continue
-      const cleanRel = rawCand.replace(/^\.\//, '').replace(/\/+$/, '')
-      if (!cleanRel || cleanRel === relDoc) continue
-      if (docsFolderExists && CONVENTION_DOC_DIRS.has(cleanRel)) continue
       if (candHasNewAnnotation(item.strippedLine, rawCand)) continue
-      if (!existsSync(join(repoRoot, cleanRel)) && !declaredNewFiles.has(cleanRel) && !declaredNewDirs.has(cleanRel)) {
+      const resolved = resolveDocBodyPathCandidate({ repoRoot, absDoc: abs, rawCand, declaredNewFiles, declaredNewDirs })
+      if (!resolved.cleanRel || resolved.cleanRel === relDoc) continue
+      if (resolved.insideRepo && docsFolderExists && CONVENTION_DOC_DIRS.has(resolved.cleanRel)) continue
+      if (!resolved.insideRepo || !resolved.exists) {
         errors.push({
           code: 'HALLUCINATED_PATH',
           line: item.lineNo,
-          path: cleanRel,
-          message: `第 ${item.lineNo} 行引用了仓库中不存在的路径 "${cleanRel}"（疑似未核实编造路径）`,
+          path: resolved.cleanRel,
+          message: `第 ${item.lineNo} 行引用了仓库中不存在的路径 "${resolved.cleanRel}"（疑似未核实编造路径）`,
           fixHint: '先通过 dev-explore 核对真实文件名；若确实为本任务拟新建文件，请在其后标注 (new) 并保证父目录存在。',
         })
       }

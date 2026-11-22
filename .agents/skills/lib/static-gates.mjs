@@ -72,7 +72,8 @@ export function isMetaTestHarness(fileRel, text = '') {
 export const GATE_WORKFLOW_FILE_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|\.circleci\/config\.ya?ml|azure-pipelines\.ya?ml|Jenkinsfile)$/i
 export const GATE_SHELL_OR_SCRIPT_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|package\.json|Makefile|justfile|Taskfile\.ya?ml)$|\.(?:sh|bash|ps1)$/i
 export const GATE_SKIP_RE = /(?:^|[^\w.])(?:(?:it|test|describe|context|suite)\.(?:skip|only)\s*\(|(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(|@(?:pytest\.mark\.skip(?:if)?|unittest\.skip|Disabled|Ignore)\b|#\[\s*ignore\b|\bt\.Skip(?:f|Now)?\s*\(|\[(?:Fact|Theory)\s*\([^\)]*\bSkip\s*=)|\bDISABLED_[A-Za-z0-9_]+|\{\s*(?:skip|only)\s*:\s*true\b/
-export const ASSERTION_RE = /\b(?:[Aa]ssert(?:\.\w+)?|[Ee]xpect|[Ss]hould|pytest\.raises|t\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals|NotEquals|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\b\s*(?:\(|!|\.)|\b[Aa]ssert\s+/
+export const ASSERTION_RE = /\b(?:[Aa]ssert(?:\.\w+)?|[Ee]xpect|[Ss]hould|pytest\.raises|t\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals?|NotEquals?|DeepEqual|NoError|Error|Contains|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\b\s*(?:\(|!|\.)|\b[Aa]ssert\s+/
+export const TAUTOLOGY_ASSERT_RE = /\bassert\s+(?:True|true)\b(?:\s*(?:,|;|$))|\bassert\s*\(\s*(?:True|true)\s*\)|\bexpect\s*\(\s*(?:true|false)\s*\)\s*\.\s*(?:toBe|toEqual|toStrictEqual|to\.(?:be|equal|eql))\s*\(\s*(?:true|false)\s*\)|\bexpect\s*\(\s*true\s*\)\s*\.\s*toBeTruthy\s*\(\s*\)|\bassert\.(?:ok|isTrue)\s*\(\s*true\s*(?:,|\))|\bassertTrue\s*\(\s*true\s*(?:,|\))|\bassert(?:Equal|Equals|StrictEqual|DeepEqual)\s*\(\s*(?:true\s*,\s*true|false\s*,\s*false)\s*(?:,|\))|\bassert\.(?:strictEqual|equal|deepStrictEqual|deepEqual)\s*\(\s*(?:true\s*,\s*true|false\s*,\s*false)\s*(?:,|\))|\bassert_eq!\s*\(\s*(?:true\s*,\s*true|false\s*,\s*false)\s*(?:,|\))/
 export const GATE_ASSERTION_RE = ASSERTION_RE
 export const TEST_CASE_RE = /(?<![.\w$])(?:it|test|describe|context|suite)(?:\.(?:skip|only|todo))?\s*\(|(?<![.\w$])(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]|@(?:Test|ParameterizedTest)\b|\[(?:Fact|Theory)\b/
 export const TEST_SKIP_RE = GATE_SKIP_RE
@@ -511,6 +512,9 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
     if (isTest && codeText.trim() && GATE_SKIP_RE.test(codeText) && !isRegexLine(line)) {
       hits.push({ type: 'test-skip-or-only', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '新增测试 skip/only/ignore 跳过标记', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
     }
+    if (isTest && codeText.trim() && TAUTOLOGY_ASSERT_RE.test(codeText) && !isRegexLine(line)) {
+      hits.push({ type: 'tautology-assertion', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '新增恒真占位断言（tautology assertion）', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
+    }
 
     if (isWorkflow) {
       const indent = line.length - line.trimStart().length
@@ -571,11 +575,20 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
       const info = extractLineCommentInfo(l, false, ext)
       return info.codeText.trim() && (ASSERTION_RE.test(info.codeText) || TEST_CASE_RE.test(info.codeText))
     }
+    const isEffectiveAddedAssert = (l) => {
+      const info = extractLineCommentInfo(l, false, ext)
+      const code = info.codeText.trim()
+      if (!code || TAUTOLOGY_ASSERT_RE.test(code)) return false
+      return ASSERTION_RE.test(code) || TEST_CASE_RE.test(code)
+    }
     for (const hk of hunkList) {
       const remAsserts = hk.removed.filter(hasAssertOrTest)
-      const addAsserts = hk.added.filter(hasAssertOrTest)
+      const addAsserts = hk.added.filter(isEffectiveAddedAssert)
       if (remAsserts.length > addAsserts.length) {
-        hits.push({ type: 'deleted-assertion', category: 'gate-weakening', severity: 'advisory', file: rel, reason: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, detail: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, excerpt: remAsserts.slice(0, 4).map((l) => `- ${l}`) })
+        const netRemoved = remAsserts.length - addAsserts.length
+        const removeRatio = remAsserts.length > 0 ? netRemoved / remAsserts.length : 0
+        const severity = netRemoved >= 3 && removeRatio >= 0.5 ? 'deterministic' : 'advisory'
+        hits.push({ type: 'deleted-assertion', category: 'gate-weakening', severity, file: rel, reason: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, detail: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, excerpt: remAsserts.slice(0, 4).map((l) => `- ${l}`) })
       }
     }
   }

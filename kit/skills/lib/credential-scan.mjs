@@ -12,7 +12,7 @@ export const ENV_FILE_RE = /^\.env(?:\..+)?$/i
 
 export const NPMRC_CREDENTIAL_RE = /(?:_authToken|_auth|_password|\/\/[^/\s]+\/:|\btoken\s*=|\bsecret\s*=)/i
 
-const TEST_FIXTURE_PATH_RE = /(?:^|\/)(?:tests?|specs?|__tests__|fixtures?|examples?|__mocks__|testdata)(?:\/|$)/i
+export const TEST_FIXTURE_PATH_RE = /(?:^|\/)(?:tests?|specs?|__tests__|fixtures?|examples?|__mocks__|testdata)(?:\/|$)/i
 const ENV_PLACEHOLDER_VAL_RE = /^(?:$|""|''|<[^>\n]+>|\$\{[^}]+\}|\{\{[^}]+\}\}|(?:x+|dummy|mock|fake|placeholder|example|sample|test|changeme|replace_me|todo|none|null|true|false|\d+|localhost|127\.0\.0\.1)|(?:https?|postgres(?:ql)?|mysql|redis|mongodb):\/\/(?:[^@/\s]+@)?(?:localhost|127\.0\.0\.1|example\.com)\b[^\s]*|(?:your|my|test|demo|sample|fake|dummy|placeholder|example|mock|changeme|local|dev)[_-][a-z0-9_.-]+|[a-z0-9_.-]+[_-](?:placeholder|example|sample|dummy|mock|fake|test))$/i
 const ENV_SENSITIVE_KEY_RE = /(?:secret|token|password|passwd|pwd|api[_-]?key|private[_-]?key|auth|credential|access[_-]?key)/i
 

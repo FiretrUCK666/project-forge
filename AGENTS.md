@@ -184,7 +184,7 @@ node scripts/dev/verify-injections.mjs --jobs 4
 
   风险定级：`low`（非可执行文本，走 `runLowRiskDocStaticCheck`）/ `medium` / `high`（高风险/`one-way`/Case>=4 须独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 1-4 在隔离 `impl` 位派 `impl` 代理。
 
-- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 可原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。
+- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 可原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。**只读探索转任何文件写改（含仅补测试归 Case 2/3、治理修复与归档校准）必先 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack`。**
 
 - **第四步：认领与 PR 前文档同步**——**谁改代码谁认领（`Case >= 2` 校 `claimedAt`）并负责 `finalize`/`verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）/`submit --agent <id>`**（禁协调/审查者代提，仅 `single-session + --human-approved` 豁免）；同名作者拦截 `BLOCKED_AUTHOR_IS_IMPLEMENTER`；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危；PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对归档，`1:N` PRD 走四态），`submit` 零写回跟踪文件。
 

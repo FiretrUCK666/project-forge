@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: README 清爽重排与 AGENTS 意图路由补强
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: null
@@ -11,7 +11,7 @@ owner: coordinator
 previous_owners: [impl-readme-routing]
 plan_mode: autonomous
 approved: false
-done_at: null
+done_at: 2026-11-22
 task_id: ux-readme-and-routing
 planned_at: 02ad60126a0c19ded45673a22f61110d58fd623c
 related_prd: null

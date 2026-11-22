@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-22T04:47:30.383Z",
+  "installedAt": "2026-11-22T04:56:52.778Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "df3a7701f27ade86a614dd94a631af848589a1d3139da05c00be5e87f12743c8"
     },
     "dev-edit/scripts/edit-gate.mjs": {
-      "sha256": "f08a21bc58f352ac98347761e7135364bce5adea8862d6ae205e1941c5501e60"
+      "sha256": "276bd97587c593522656a9789a17e22bfc0fd13ed8b78da02f5fa4fca03e9e3f"
     },
     "dev-explore/SKILL.md": {
       "sha256": "337318baf1982f902353be6732146056ace46b2dedbf59530f7a0cbf30680a5c"

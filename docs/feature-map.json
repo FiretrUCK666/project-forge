@@ -318,6 +318,7 @@
         "kit/skills/lib/pending-decisions.mjs",
         "kit/skills/lib/criteria-lock.mjs",
         "kit/skills/lib/critique-rounds.mjs",
+        "kit/skills/lib/critique-store.mjs",
         "kit/skills/lib/doc-facts.mjs",
         "kit/skills/lib/doc-frontmatter.mjs",
         "kit/skills/lib/doc-renumber.mjs",
@@ -377,6 +378,7 @@
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/injections-data-w4-harness.mjs",
         "scripts/dev/fixtures-trace-sync.mjs",
+        "scripts/dev/fixtures-gates-retro-routing.mjs",
         "scripts/dev/injections-data-trace-sync.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs"
@@ -516,6 +518,7 @@
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/injections-data-w4-harness.mjs",
         "scripts/dev/fixtures-trace-sync.mjs",
+        "scripts/dev/fixtures-gates-retro-routing.mjs",
         "scripts/dev/injections-data-trace-sync.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",

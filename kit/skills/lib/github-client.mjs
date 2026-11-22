@@ -268,6 +268,28 @@ export function createGitHubClient({
       return makeMcpDelegate('close_issue', { repo, number: num })
     },
 
+    async updateIssueBody(arg1, maybeNumber, maybeBody) {
+      const cfg = (arg1 && typeof arg1 === 'object')
+        ? { repo: arg1.repo ?? defaultRepo, number: arg1.number ?? arg1.issue, body: arg1.body }
+        : { repo: arg1 ?? defaultRepo, number: maybeNumber, body: maybeBody }
+      const num = Number(cfg.number)
+      if (!cfg.repo || !Number.isInteger(num) || num <= 0 || cfg.body === undefined || cfg.body === null) {
+        return { ok: false, error: 'missing-repo-number-or-body' }
+      }
+      const normalizedBody = String(cfg.body).replace(/\r\n/g, '\n')
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const res = tier === 'gh-cli'
+          ? await withUtf8TempFile('pf-issue-patch', JSON.stringify({ body: normalizedBody }), (tmp) => (
+              callGh(['api', `repos/${cfg.repo}/issues/${num}`, '-X', 'PATCH', '--input', tmp])
+            ))
+          : await callHttps('PATCH', `/repos/${cfg.repo}/issues/${num}`, { body: normalizedBody })
+        if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message ?? 'update-issue-body-failed' }
+        const parsed = tier === 'node-https-token' ? res.data : (() => { try { return JSON.parse(res.stdout) } catch { return null } })()
+        return { ok: true, number: parsed?.number ?? num, body: parsed?.body ?? normalizedBody }
+      }
+      return makeMcpDelegate('update_issue', { repo: cfg.repo, number: num, body: normalizedBody })
+    },
+
     async getPr(repo, number) {
       if (tier === 'gh-cli') {
         const res = await callGh(['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRefOid,baseRefOid,headRepository,headRepositoryOwner,mergedAt,mergeCommit,author,labels'])

@@ -136,9 +136,9 @@ export function buildClaimComments({
   }
 }
 
-/** 渲染 `flow.mjs submit`（首次提审 / PR 创建同步 Issue / 返工更新）结构化多行评论。 */
+/** 渲染 `flow.mjs submit`（首次提审 / 同轮 HEAD 更新 / 返工更新）结构化多行评论。 */
 export function buildSubmitComments({
-  isRework = false, round = 1, shortHead = 'HEAD', actorDisplay = '', branch,
+  isRework = false, isHeadUpdate = false, round = 1, shortHead = 'HEAD', actorDisplay = '', branch,
   verifiedCmd, prNumber = null, prUrl = null, linkedIssues = [], recentRebuts = '',
 } = {}) {
   const cleanActor = String(actorDisplay ?? '').trim()
@@ -162,6 +162,28 @@ export function buildSubmitComments({
       `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
       ...(recentRebuts ? [`- **反驳与说明**：${recentRebuts}`] : []),
       `- **下一步**：等待 Round ${round} 独立审查复核。`,
+    ].join('\n')
+    return { prCommentBody, issueCommentBodyFor }
+  }
+  if (!isRework && isHeadUpdate) {
+    const heading = `### 提交更新（Round ${round} · HEAD 更新 @ \`${shortHead}\`）`
+    const prCommentBody = [
+      heading,
+      '',
+      ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
+      `- **分支**：\`${branch}\`（HEAD \`${shortHead}\`${prNumber ? ` · PR #${prNumber}` : ''}）`,
+      `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
+      ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
+      `- **下一步**：请独立审查上下文按最新 HEAD \`${shortHead}\` 复核 Round ${round}。`,
+    ].join('\n')
+    const issueCommentBodyFor = (iss) => [
+      heading,
+      '',
+      ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
+      `- **分支 / PR**：\`${branch}\`${prNumber ? ` · #${prNumber}` : ''}${prUrl ? ` (${prUrl})` : ''}`,
+      `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
+      ...(iss ? [`- **关联**：Fixes #${iss}`] : []),
+      `- **下一步**：等待 Round ${round} 独立审查复核（同轮 HEAD 已更新）。`,
     ].join('\n')
     return { prCommentBody, issueCommentBodyFor }
   }
@@ -346,4 +368,50 @@ export function buildIntakeDecisionComments({
     delegatedPayload,
     summaryLine: `${refLabel}: ${decision}${reason ? ` (${reason})` : ''}`,
   }
+}
+
+/** 渲染 `flow.mjs close` / `flow.mjs issue close` 的结构化关单/归并评论（含 `pf-state` 锚点）。 */
+export function buildIssueCloseComment({
+  issueNumber = null,
+  reason = '',
+  intoIssue = null,
+  taskId = null,
+  actorDisplay = '',
+  account = null,
+  verifiedPlatformLogin = false,
+  agent = null,
+  supportsMention = false,
+  capabilities = null,
+  statePayload = null,
+} = {}) {
+  const num = Number(issueNumber)
+  const issueLabel = Number.isInteger(num) && num > 0 ? `#${num}` : '工单'
+  const intoNum = Number(intoIssue)
+  const hasInto = Number.isInteger(intoNum) && intoNum > 0
+  const cleanReason = String(reason ?? '').trim()
+  const cleanTask = taskId ? String(taskId).trim() : ''
+  const cleanActor = String(actorDisplay ?? '').trim() || formatAttribution({
+    account, verifiedPlatformLogin: Boolean(verifiedPlatformLogin), agent, supportsMention, capabilities,
+  })
+  const payload = (statePayload && typeof statePayload === 'object') ? statePayload : {
+    kind: 'issue-close',
+    action: hasInto ? 'consolidate' : 'close',
+    ...(Number.isInteger(num) && num > 0 ? { issue: num } : {}),
+    ...(hasInto ? { into: intoNum } : {}),
+    ...(cleanTask ? { taskId: cleanTask } : {}),
+    ...(cleanReason ? { reason: cleanReason } : {}),
+    ...(agent ? { agent: String(agent).trim() } : {}),
+  }
+  const stateTag = `<!-- pf-state:${JSON.stringify(payload)} -->`
+  const heading = hasInto ? `### 工单归并关闭（${issueLabel} -> #${intoNum}）` : `### 工单结构化关闭（${issueLabel}）`
+  const bodyWithoutTag = [
+    heading,
+    '',
+    ...(cleanActor ? [`- **操作人**：${cleanActor}`] : []),
+    ...(cleanTask ? [`- **关联任务**：\`${cleanTask}\``] : []),
+    ...(hasInto ? [`- **归并目标**：#${intoNum}`] : []),
+    `- **关闭原因**：${cleanReason || '已完成处理并关闭'}`,
+    `- **下一步**：${hasInto ? `后续追踪与讨论统一收口至 #${intoNum}。` : '如需重新开启可补充复现事实并重开本工单。'}`,
+  ].join('\n')
+  return { commentBody: `${bodyWithoutTag}\n\n${stateTag}`, bodyWithoutTag, stateTag, statePayload: payload }
 }

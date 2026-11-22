@@ -85,6 +85,21 @@ function parseIssueArg(rawIssue) {
   return nums[0]
 }
 
+function resolveDocTaskId(repoRoot, file, explicitTask = null) {
+  if (explicitTask && String(explicitTask).trim()) return String(explicitTask).trim()
+  if (!file) return null
+  const raw = readTextSafe(resolve(repoRoot, file))
+  if (!raw) return null
+  const tid = parseDocFrontmatter(raw)?.data?.task_id
+  return tid && String(tid).trim() ? String(tid).trim() : null
+}
+
+function safeSyncPlan(payload) {
+  return syncPlanPhaseToBackend(payload).catch((err) => ({
+    ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err),
+  }))
+}
+
 /**
  * 校验 `--plan-mode`：显式给了就必须是合法枚举，没给则返回 null 交给下游按门型/档位推导。
  *
@@ -247,11 +262,11 @@ async function main(argv) {
         multiSpec: Boolean(opts['multi-spec']),
         caseType: opts.case !== undefined ? Number(opts.case) : null,
       })
-      res.planSync = await syncPlanPhaseToBackend({
+      res.planSync = await safeSyncPlan({
         repoRoot: res.writeRoot ?? repoRoot, mainRoot, gitDir: roots.gitDir,
-        phase: 'init', file: res.file, taskId: res.taskId ?? opts.task ?? null,
+        phase: 'init', file: res.file, files: res.files, taskId: res.taskId ?? opts.task ?? null,
         issueNumber: res.issue ?? null, summary: `初始化 ${res.kind.toUpperCase()}: ${opts.title}`,
-      }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
+      })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`已生成 ${res.kind.toUpperCase()}：${res.files.join(', ')}（Planned at: ${res.plannedAt}${res.worktreePath ? `, worktree=${res.worktreePath}` : ''}）\n`)
@@ -265,6 +280,14 @@ async function main(argv) {
       const res = clarifyDoc({
         repoRoot, file: opts.file, question: opts.question ?? '',
         decision: opts.decision, by: opts.by ?? 'user', explicitBy: opts.by, criterion: opts.criterion ?? '',
+      })
+      res.planSync = await safeSyncPlan({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: 'clarify', file: res.file, actor: opts.by ?? 'user',
+        reason: opts.question ? `${opts.question} -> ${opts.decision}` : opts.decision,
+        summary: res.entry + (res.addedCriterion ? `（新增 ${res.addedCriterion.id}）` : ''),
+        taskId: resolveDocTaskId(repoRoot, res.file, opts.task ?? null),
+        issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else process.stdout.write(`已写入澄清记录到 ${res.file}：${res.entry}${res.addedCriterion ? `（新增 ${res.addedCriterion.id}）` : ''}\n`)
@@ -305,6 +328,23 @@ async function main(argv) {
         }
         if (opts.task) {
           await updateTaskLedger(mainRoot, sanitizeTaskId(opts.task), { milestone: opts.milestone })
+        }
+      }
+      if (opts.issue !== undefined && res.issue) {
+        const linkedFiles = [...new Set([
+          res.byKind?.prd, res.byKind?.spec, res.byKind?.todo,
+          ...(res.updated ?? []).map((u) => (typeof u === 'string' ? u : u?.file)),
+          ...((res.renamed ?? []).map((r) => r.to)),
+        ].filter((p) => typeof p === 'string' && p.trim()))]
+        const primaryFile = res.byKind?.spec ?? res.byKind?.todo ?? res.byKind?.prd ?? linkedFiles[0] ?? target
+        if (linkedFiles.length > 0) {
+          res.planSync = await safeSyncPlan({
+            repoRoot, mainRoot, gitDir: roots.gitDir,
+            phase: 'plan-backfill', file: primaryFile, files: linkedFiles,
+            taskId: resolveDocTaskId(repoRoot, primaryFile, opts.task ?? null),
+            issueNumber: res.issue,
+            reason: `后绑定 Issue #${res.issue}，回补既有规划状态摘要`,
+          })
         }
       }
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
@@ -476,6 +516,14 @@ async function main(argv) {
         by: opts.by ?? opts.reviewer ?? 'human-maintainer',
         taskId: opts.task ?? null,
       })
+      res.planSync = await safeSyncPlan({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: 'critique-continue', file: res.file, sha: res.sha,
+        actor: res.continued?.by, reason: res.continued?.reason,
+        summary: `停损后继续规划复核：${res.continued?.reason ?? ''}`,
+        taskId: resolveDocTaskId(repoRoot, res.file, opts.task ?? null),
+        issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
+      })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`${res.status}: ${res.file}（sha=${res.sha}, reason=${res.continued.reason}, unlockApprove=false）\n`)
@@ -491,6 +539,14 @@ async function main(argv) {
         file: opts.file, humanApproved: Boolean(opts['human-approved']),
         reason: opts.reason ?? '', by: opts.by ?? opts.reviewer ?? 'human-maintainer',
         taskId: opts.task ?? null,
+      })
+      res.planSync = await safeSyncPlan({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: 'critique-override', file: res.file, sha: res.sha,
+        actor: res.override?.by, reason: res.override?.reason,
+        summary: `人类裁决解锁规划批准：${res.override?.reason ?? ''}`,
+        taskId: resolveDocTaskId(repoRoot, res.file, opts.task ?? null),
+        issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
@@ -565,6 +621,19 @@ async function main(argv) {
       const oldSpec = opts._[0] ?? opts.file
       const newSpec = opts.by
       const res = supersedeSpec({ repoRoot, oldSpecPath: oldSpec, newSpecPath: newSpec })
+      const superFiles = [res.oldSpec, res.newSpec].filter(Boolean)
+      const superTaskId = resolveDocTaskId(repoRoot, res.newSpec, opts.task ?? null)
+        ?? resolveDocTaskId(repoRoot, res.oldSpec, null)
+      const superIssue = resolveDocIssueNumber(repoRoot, res.newSpec, opts.issue ?? null)
+        ?? resolveDocIssueNumber(repoRoot, res.oldSpec, null)
+      res.planSync = await safeSyncPlan({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: 'supersede', file: res.oldSpec, files: superFiles,
+        reason: `被 ${res.newSpec} 取代`,
+        summary: `旧规范 \`${res.oldSpec}\` 已标记为 \`superseded\`，由 \`${res.newSpec}\` 接替`,
+        taskId: superTaskId,
+        issueNumber: superIssue,
+      })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else process.stdout.write(`已标记取代关系：${res.oldSpec} -> superseded（by ${res.newSpec}）\n`)
       return 0

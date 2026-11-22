@@ -186,6 +186,9 @@ export class GitHubBackend {
     const norm = normalizeIssueArgs(arg, maybeNumber)
     return this._call('getIssue', [norm.repo ?? this.targetRepo, norm.number])
   }
+  updateIssueBody({ repo, number, body } = {}) {
+    return this._call('updateIssueBody', [{ repo: repo ?? this.targetRepo, number, body }])
+  }
   listIssues({ repo, state = 'open', perPage = 30 } = {}) {
     return this._call('listIssues', [{ repo: repo ?? this.targetRepo, state, perPage }], { ok: false, issues: [], skipped: true, reason: 'client-unsupported' })
   }

@@ -757,7 +757,7 @@ export async function handleSubmit(opts, roots) {
   const isRework = reworkState.isRework
   if (hasExistingPr) {
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
-    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
+    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework, isHeadUpdate: !isRework && hasExistingPr, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
     const reuseAction = isRework ? 'rework-submitted' : 'submitted-existing-pr'
     commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })

@@ -402,6 +402,7 @@ export {
 export {
   buildClaimComments,
   buildIntakeDecisionComments,
+  buildIssueCloseComment,
   buildMergeComments,
   buildReviewComments,
   buildSubmitComments,

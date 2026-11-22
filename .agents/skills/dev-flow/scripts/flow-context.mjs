@@ -12,6 +12,7 @@ import { gitDiffNameStatusZ, gitRunBuffer, gitStatusPorcelainZ, posixPath, readT
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { NON_API_CLIENT_TIERS } from '../../lib/github-client.mjs'
 import { getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
+import { syncPlanPhaseToBackend } from '../../lib/plan-sync.mjs'
 import { githubRepoFull, probeGitHubEnv } from '../../lib/platform.mjs'
 
 /** 将远端读取失败归一为可追踪的稳定错误码（`no-api-channel` / `not-found` / `forbidden` 等）。 */
@@ -365,10 +366,34 @@ export function buildTargetRepoContext(role, remoteUrls, declaredRepo, topology 
   return { originFull, originLower, upstreamFull, upstreamLower, targetRepo, pushRemote }
 }
 
+function collectPreBindDocIssues(workRoot, docPaths) {
+  const existingIssues = new Set()
+  let hasAnyDoc = false
+  for (const rel of docPaths) {
+    if (!rel) continue
+    const abs = join(workRoot, rel)
+    if (!existsSync(abs)) continue
+    hasAnyDoc = true
+    const fnIss = Number(parseDocFilename(rel)?.issue)
+    if (Number.isInteger(fnIss) && fnIss > 0) existingIssues.add(fnIss)
+    const raw = readTextSafe(abs)
+    const fmIss = Number(raw ? parseDocFrontmatter(raw)?.data?.issue : NaN)
+    if (Number.isInteger(fmIss) && fmIss > 0) existingIssues.add(fmIss)
+  }
+  return { hasAnyDoc, existingIssues }
+}
+
 export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
   const seed = ledger.specFile ?? ledger.todoFile ?? ledger.prdFile ?? ledger.slug
   if (!seed) return null
   try {
+    const preDocs = [ledger.prdFile, ledger.specFile, ledger.todoFile].filter(Boolean)
+    const { hasAnyDoc, existingIssues } = collectPreBindDocIssues(workRoot, preDocs)
+    const newlySet = new Set((overrides.newlyBoundIssues ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0))
+    const postHocIssues = hasAnyDoc
+      ? (ledger.linkedIssues ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0 && (!existingIssues.has(n) || newlySet.has(n)))
+      : []
+
     const res = await syncDocsLifecycle(workRoot, {
       slugOrPath: seed,
       issue: ledger.linkedIssues?.[0],
@@ -379,6 +404,32 @@ export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
     if (res.byKind?.prd) ledger.prdFile = res.byKind.prd
     if (res.byKind?.spec) ledger.specFile = res.byKind.spec
     if (res.byKind?.todo) ledger.todoFile = res.byKind.todo
+
+    const postFiles = [ledger.prdFile, ledger.specFile, ledger.todoFile].filter(Boolean)
+    if (postHocIssues.length > 0 && postFiles.length > 0 && !overrides.skipPlanBackfill) {
+      const syncRes = await syncPlanPhaseToBackend({
+        repoRoot: workRoot,
+        mainRoot: overrides.mainRoot ?? workRoot,
+        gitDir: overrides.gitDir ?? null,
+        phase: 'plan-backfill',
+        file: ledger.specFile ?? ledger.todoFile ?? ledger.prdFile,
+        files: postFiles,
+        taskId: ledger.taskId ?? null,
+        issueNumbers: postHocIssues,
+        role: ledger.role,
+        providerId: ledger.providerId,
+        reason: `后绑定 Issue ${postHocIssues.map((n) => `#${n}`).join(', ')}，回补既有规划状态摘要`,
+        ...(overrides._ghClient ? { _ghClient: overrides._ghClient } : {}),
+        ...(overrides._ghProbe ? { _ghProbe: overrides._ghProbe } : {}),
+      }).catch(() => null)
+      if (syncRes?.syncKey && (syncRes.synced || syncRes.notApplicable)) {
+        ledger.planSyncKeys = [...new Set([...(ledger.planSyncKeys ?? []), syncRes.syncKey])]
+      }
+      if (Array.isArray(syncRes?.syncFailures) && syncRes.syncFailures.length > 0) {
+        ledger.syncFailures = [...(ledger.syncFailures ?? []), ...syncRes.syncFailures]
+      }
+      res.planSync = syncRes
+    }
     return res
   } catch {
     return null

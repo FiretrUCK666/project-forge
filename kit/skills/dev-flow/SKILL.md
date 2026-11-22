@@ -57,6 +57,7 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" next [--task <id>] [--probe-auth
 node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR/Milestone URL...] [--probe-auth]
 node ".agents/skills/dev-flow/scripts/flow.mjs" intake (--pr <M> | --issue <N>) [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" issue <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]
+node ".agents/skills/dev-flow/scripts/flow.mjs" close --issue <N> [--into <targetIssue>] --reason "<原因>" [--task <id>] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--issue <N>] [--task <id>] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>] [--all] [--json]
 

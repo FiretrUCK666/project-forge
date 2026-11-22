@@ -6,10 +6,11 @@
 
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { printNextStep } from '../../lib/cli.mjs'
+import { buildIssueCloseComment, formatAttribution } from '../../lib/doc-comments.mjs'
 import { slugify } from '../../lib/docs.mjs'
 import { formatWorkTitle } from '../../lib/escalation.mjs'
 import { hydrateIssueBody } from '../../lib/issue-template-hydrate.mjs'
-import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { resolveTaskContext, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { closeLocalIssue, getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
 import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv, resolveIdentityLayers } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -62,6 +63,102 @@ function buildBackendForIssue({ role, providerId, targetRepo, ghProbe, clientOve
     mainRoot,
     gitDir,
   })
+}
+
+async function closeIssuesStructured({
+  opts, roots, state, issueNums, reason = '', intoIssue = null, taskId = null, postWhenNoReason = false,
+}) {
+  const role = state.identity.role
+  const providerId = state.identity.providerId ?? 'none'
+  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && providerId === 'github' && Boolean(targetRepo)
+  const ghProbe = useRemoteGh
+    ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} })))
+    : null
+  const backend = buildBackendForIssue({
+    role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+  })
+  const idLayers = resolveIdentityLayers({
+    ghLogin: ghProbe?.env?.trackB?.login,
+    ghTier: ghProbe?.env?.trackB?.tier,
+    gitName: state.gitIdentity?.name,
+    explicitAgent: opts.agent,
+  })
+  const actorDisplay = formatAttribution({ ...idLayers, capabilities: backend.capabilities })
+  const closed = []
+
+  for (const num of issueNums) {
+    let commentRes = null
+    let rendered = null
+    if (reason || postWhenNoReason) {
+      rendered = buildIssueCloseComment({
+        issueNumber: num, reason, intoIssue, taskId, actorDisplay,
+        account: idLayers.account, verifiedPlatformLogin: idLayers.verifiedPlatformLogin,
+        agent: idLayers.agent, capabilities: backend.capabilities,
+      })
+      commentRes = await backend.postComment({
+        taskId: taskId ?? undefined,
+        repo: targetRepo,
+        number: num,
+        body: rendered.bodyWithoutTag,
+        statePayload: rendered.statePayload,
+      })
+    }
+    const closeRes = await backend.closeIssue({
+      repo: targetRepo,
+      number: num,
+      reason,
+      ...(intoIssue ? { migratedTo: intoIssue } : {}),
+    })
+    if (closeRes?.delegated) {
+      return { delegated: true, role, number: num, closeRes, commentRes, rendered }
+    }
+    if (!closeRes?.ok) throw new Error(`关闭工单 #${num} 失败：${closeRes?.error ?? 'unknown'}`)
+    closed.push({
+      number: num,
+      close: closeRes,
+      ...(commentRes ? { comment: commentRes } : {}),
+      ...(rendered ? { statePayload: rendered.statePayload, commentBody: rendered.commentBody } : {}),
+    })
+  }
+  return { delegated: false, role, closed }
+}
+
+/** 执行 `flow.mjs close --issue <N> [--into <targetIssue>] --reason "<原因>" [--task <id>] [--json]`。 */
+export async function handleClose(opts, roots) {
+  if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
+  const issueNums = parseIssueNumbers([opts.issue, opts.issues, ...(Array.isArray(opts._) ? opts._ : [])])
+  if (issueNums.length === 0) throw new Error('close 需要传入 --issue <N>')
+  const reason = String(opts.reason ?? opts.note ?? '').trim()
+  if (!reason) throw new Error('close 需要传入 --reason "<原因>"')
+
+  let intoIssue = null
+  if (opts.into !== undefined) {
+    const intoNums = parseIssueNumbers(opts.into, { strict: true })
+    if (intoNums.length !== 1) throw new Error(`--into 需要 1 个正整数目标 Issue 编号，收到：${opts.into}`)
+    if (issueNums.includes(intoNums[0])) throw new Error(`--into 不能指向待关闭的同一个工单 #${intoNums[0]}`)
+    intoIssue = intoNums[0]
+  }
+  const taskId = opts.task ? sanitizeTaskId(opts.task) : null
+  const state = await inspectWorkspace(roots.mainRoot, {
+    roots, lightStart: true, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe,
+  })
+  const out = await closeIssuesStructured({
+    opts, roots, state, issueNums, reason, intoIssue, taskId, postWhenNoReason: true,
+  })
+  if (out.delegated) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CLOSE_ISSUE_DELEGATED', ...out.closeRes }, null, 2)}\n`)
+    else process.stdout.write(`无直连 GitHub 凭据，已生成关闭工单 #${out.number} 代理载荷：${JSON.stringify(out.closeRes.jsonPayload)}\n`)
+    return { exitCode: EXIT.HUMAN }
+  }
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify({ ok: true, role: out.role, into: intoIssue, reason, taskId, closed: out.closed }, null, 2)}\n`)
+  } else {
+    for (const item of out.closed) {
+      process.stdout.write(`工单 #${item.number} 已结构化关闭${intoIssue ? `（归并至 #${intoIssue}）` : ''}${item.close.alreadyClosed ? '（原本已关闭，幂等跳过）' : ''}。\n`)
+    }
+  }
+  return { exitCode: EXIT.OK }
 }
 
 /** `flow.mjs start --create-issue` 共享建单逻辑（同时打通 `maintainer` / `local-only` / `generic-git`）。 */
@@ -258,22 +355,17 @@ export async function handleIssue(opts, roots) {
   if (action === 'close') {
     const num = resolveIssueNum()
     const reason = String(opts.reason ?? opts.body ?? opts.note ?? '').trim()
-    const ghProbe = useRemoteGh
-      ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} })))
-      : null
-    const backend = buildBackendForIssue({
-      role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+    const intoNum = opts.into !== undefined ? parseIssueNumbers(opts.into, { strict: true })[0] ?? null : null
+    const taskId = opts.task ? sanitizeTaskId(opts.task) : null
+    const out = await closeIssuesStructured({
+      opts, roots, state, issueNums: [num], reason, intoIssue: intoNum, taskId, postWhenNoReason: false,
     })
-    if (reason) {
-      await backend.postComment({
-        repo: targetRepo,
-        number: num,
-        body: `关闭工单：${reason}`,
-        statePayload: { action: 'close', issue: num, reason },
-      })
+    if (out.delegated) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CLOSE_ISSUE_DELEGATED', ...out.closeRes }, null, 2)}\n`)
+      else process.stdout.write(`无直连 GitHub 凭据，已生成关闭工单 #${num} 代理载荷：${JSON.stringify(out.closeRes.jsonPayload)}\n`)
+      return { exitCode: EXIT.HUMAN }
     }
-    const res = await backend.closeIssue({ repo: targetRepo, number: num, reason })
-    if (!res.ok && !res.delegated) throw new Error(`关闭工单 #${num} 失败：${res.error ?? 'unknown'}`)
+    const res = out.closed[0].close
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, number: num, close: res }, null, 2)}\n`)
     else process.stdout.write(`工单 #${num} 已关闭${res.alreadyClosed ? '（原本已关闭，幂等跳过）' : ''}。\n`)
     return { exitCode: EXIT.OK }

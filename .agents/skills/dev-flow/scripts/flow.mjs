@@ -18,7 +18,7 @@ import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
-const SUBCOMMANDS = ['inspect', 'next', 'explore', 'intake', 'start', 'issue', 'milestone', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
+const SUBCOMMANDS = ['inspect', 'next', 'explore', 'intake', 'start', 'issue', 'close', 'milestone', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
 
 /**
  * 由脚本确定性生成、不接受调用方整段替换的参数归属。
@@ -42,6 +42,7 @@ function printHelp() {
     '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
+    '  close     --issue <N> [--into <targetIssue>] --reason "<原因>" [--task <id>] [--json]',
     '  milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--title "<标题>"] [--description "<描述>"] [--due <ISO>] [--issue <N>] [--pr <N>] [--task <id>] [--state open|closed|all] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
@@ -78,13 +79,13 @@ async function main(argv) {
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
         'agent', 'actor', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'comment', 'state',
-        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus', 'by',
+        'labels', 'method', 'reason', 'into', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus', 'by',
         'milestone', 'due', 'due-on', 'description',
         'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
         'visual-blocked-reason', 'host-mode', 'reviewer-id', 'preview-hash',
       ],
       multiFlags: ['rebut', 'allow-outbound', 'artifact'],
-      usageHint: 'flow.mjs <inspect|next|explore|intake|start|issue|milestone|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
+      usageHint: 'flow.mjs <inspect|next|explore|intake|start|issue|close|milestone|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
     })
   } catch (err) {
     process.stderr.write(`flow 错误：${err.message}\n`)
@@ -174,6 +175,10 @@ async function main(argv) {
     if (sub === 'issue') {
       const { handleIssue } = await import('./flow-issues.mjs')
       return (await handleIssue(opts, roots)).exitCode
+    }
+    if (sub === 'close') {
+      const { handleClose } = await import('./flow-issues.mjs')
+      return (await handleClose(opts, roots)).exitCode
     }
     if (sub === 'milestone') {
       const { handleMilestone } = await import('./flow-issues.mjs')

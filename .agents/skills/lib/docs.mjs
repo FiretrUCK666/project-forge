@@ -762,6 +762,7 @@ export async function archiveCompletedDocsGroup(repoRoot, {
 
 export {
   buildArchivedDocPatch,
+  buildIssueCloseComment,
   buildMergeComments,
   buildReviewComments,
   buildStandardDocContent,

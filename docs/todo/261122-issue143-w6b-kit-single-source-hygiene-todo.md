@@ -9,7 +9,7 @@ pr: null
 branch: docs/w6-universal-architecture-plan
 owner: plan-w6
 plan_mode: interactive
-approved: false
+approved: true
 done_at: null
 task_id: w6b-kit-single-source-hygiene
 planned_at: 836e964ca5bb77e4ce14c1848e280bb15a1e3b9b

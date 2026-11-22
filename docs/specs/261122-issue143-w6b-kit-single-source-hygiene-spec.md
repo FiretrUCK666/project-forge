@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Slice 6B：kit 单源化、去自用泄漏与门禁精度升级
-status: draft
+status: approved
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
@@ -10,84 +10,15 @@ pr: null
 branch: docs/w6-universal-architecture-plan
 owner: plan-w6
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-w6-r2, round=1, sha=91e834312638, summary=Round 2 independent critique PASS (#599))"
 related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
 related_todo: ../todo/261122-issue143-w6b-kit-single-source-hygiene-todo.md
+high_risk_paths: [kit/, AGENTS.md]
 task_id: w6b-kit-single-source-hygiene
-depends_on:
-  - w6a-survey-handoff-core
-scope_files:
-  - kit/skills/lib/subcommand-meta.mjs
-  - kit/skills/lib/doc-verify.mjs
-  - kit/skills/lib/doc-facts.mjs
-  - kit/skills/lib/doc-facts-commands.mjs
-  - kit/skills/lib/intake-triage.mjs
-  - kit/skills/lib/evidence-substance.mjs
-  - kit/skills/lib/no-changelog-voice.mjs
-  - kit/skills/lib/static-gates.mjs
-  - kit/skills/lib/static-gates-comment-hygiene.mjs
-  - kit/skills/lib/feature-map.mjs
-  - kit/skills/lib/tdd-parity.mjs
-  - kit/skills/lib/gate-truth.mjs
-  - kit/skills/lib/profile.mjs
-  - kit/skills/dev-explore/scripts/repo-map.mjs
-  - kit/skills/dev-explore/scripts/repo-map-helpers.mjs
-  - kit/skills/dev-plan/scripts/triage-rules.mjs
-  - kit/skills/dev-plan/scripts/doc-plan.mjs
-  - kit/skills/dev-edit/scripts/edit-gate.mjs
-  - kit/skills/dev-govern/SKILL.md
-  - kit/skills/dev-govern/scripts/govern-audit.mjs
-  - kit/skills/dev-govern/scripts/govern-checks.mjs
-  - kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs
-  - kit/skills/dev-govern/scripts/govern-docs.mjs
-  - kit/skills/dev-govern/scripts/govern-evergreen.mjs
-  - kit/skills/dev-govern/scripts/govern-tests.mjs
-  - kit/skills/dev-verify-tools/scripts/verify-tools.mjs
-  - kit/skills/dev-iterate/scripts/iterate.mjs
-  - kit/skills/dev-review/scripts/review-gates.mjs
-  - .agents/skills/lib/subcommand-meta.mjs
-  - .agents/skills/lib/doc-verify.mjs
-  - .agents/skills/lib/doc-facts.mjs
-  - .agents/skills/lib/doc-facts-commands.mjs
-  - .agents/skills/lib/intake-triage.mjs
-  - .agents/skills/lib/evidence-substance.mjs
-  - .agents/skills/lib/no-changelog-voice.mjs
-  - .agents/skills/lib/static-gates.mjs
-  - .agents/skills/lib/static-gates-comment-hygiene.mjs
-  - .agents/skills/lib/feature-map.mjs
-  - .agents/skills/lib/tdd-parity.mjs
-  - .agents/skills/lib/gate-truth.mjs
-  - .agents/skills/lib/profile.mjs
-  - .agents/skills/dev-explore/scripts/repo-map.mjs
-  - .agents/skills/dev-explore/scripts/repo-map-helpers.mjs
-  - .agents/skills/dev-plan/scripts/triage-rules.mjs
-  - .agents/skills/dev-plan/scripts/doc-plan.mjs
-  - .agents/skills/dev-edit/scripts/edit-gate.mjs
-  - .agents/skills/dev-govern/SKILL.md
-  - .agents/skills/dev-govern/scripts/govern-audit.mjs
-  - .agents/skills/dev-govern/scripts/govern-checks.mjs
-  - .agents/skills/dev-govern/scripts/govern-checks-hygiene.mjs
-  - .agents/skills/dev-govern/scripts/govern-docs.mjs
-  - .agents/skills/dev-govern/scripts/govern-evergreen.mjs
-  - .agents/skills/dev-govern/scripts/govern-tests.mjs
-  - .agents/skills/dev-verify-tools/scripts/verify-tools.mjs
-  - .agents/skills/dev-iterate/scripts/iterate.mjs
-  - .agents/skills/dev-review/scripts/review-gates.mjs
-  - .agents/skills/.pf-manifest.json
-  - scripts/dev/subcommand-parity.mjs
-  - scripts/dev/preflight-suite.mjs
-  - references/plugin-ecosystems.md
-  - .github/changelog-voice-baseline.json
-  - docs/TDD.md
-  - README.md
-  - README.en.md
-  - scripts/dev/fixtures-w6b-kit-hygiene.mjs
-  - scripts/dev/injections-data-w6b.mjs
-high_risk_paths:
-  - kit/
-  - AGENTS.md
+depends_on: [w6a-survey-handoff-core]
+scope_files: [kit/skills/lib/subcommand-meta.mjs, kit/skills/lib/doc-verify.mjs, kit/skills/lib/doc-facts.mjs, kit/skills/lib/doc-facts-commands.mjs, kit/skills/lib/intake-triage.mjs, kit/skills/lib/evidence-substance.mjs, kit/skills/lib/no-changelog-voice.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/static-gates-comment-hygiene.mjs, kit/skills/lib/feature-map.mjs, kit/skills/lib/tdd-parity.mjs, kit/skills/lib/gate-truth.mjs, kit/skills/lib/profile.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-explore/scripts/repo-map-helpers.mjs, kit/skills/dev-plan/scripts/triage-rules.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-edit/scripts/edit-gate.mjs, kit/skills/dev-govern/SKILL.md, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-govern/scripts/govern-checks.mjs, kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs, kit/skills/dev-govern/scripts/govern-docs.mjs, kit/skills/dev-govern/scripts/govern-evergreen.mjs, kit/skills/dev-govern/scripts/govern-tests.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-iterate/scripts/iterate.mjs, kit/skills/dev-review/scripts/review-gates.mjs, .agents/skills/lib/subcommand-meta.mjs, .agents/skills/lib/doc-verify.mjs, .agents/skills/lib/doc-facts.mjs, .agents/skills/lib/doc-facts-commands.mjs, .agents/skills/lib/intake-triage.mjs, .agents/skills/lib/evidence-substance.mjs, .agents/skills/lib/no-changelog-voice.mjs, .agents/skills/lib/static-gates.mjs, .agents/skills/lib/static-gates-comment-hygiene.mjs, .agents/skills/lib/feature-map.mjs, .agents/skills/lib/tdd-parity.mjs, .agents/skills/lib/gate-truth.mjs, .agents/skills/lib/profile.mjs, .agents/skills/dev-explore/scripts/repo-map.mjs, .agents/skills/dev-explore/scripts/repo-map-helpers.mjs, .agents/skills/dev-plan/scripts/triage-rules.mjs, .agents/skills/dev-plan/scripts/doc-plan.mjs, .agents/skills/dev-edit/scripts/edit-gate.mjs, .agents/skills/dev-govern/SKILL.md, .agents/skills/dev-govern/scripts/govern-audit.mjs, .agents/skills/dev-govern/scripts/govern-checks.mjs, .agents/skills/dev-govern/scripts/govern-checks-hygiene.mjs, .agents/skills/dev-govern/scripts/govern-docs.mjs, .agents/skills/dev-govern/scripts/govern-evergreen.mjs, .agents/skills/dev-govern/scripts/govern-tests.mjs, .agents/skills/dev-verify-tools/scripts/verify-tools.mjs, .agents/skills/dev-iterate/scripts/iterate.mjs, .agents/skills/dev-review/scripts/review-gates.mjs, .agents/skills/.pf-manifest.json, scripts/dev/subcommand-parity.mjs, scripts/dev/preflight-suite.mjs, references/plugin-ecosystems.md, .github/changelog-voice-baseline.json, docs/TDD.md, README.md, README.en.md, scripts/dev/fixtures-w6b-kit-hygiene.mjs, scripts/dev/injections-data-w6b.mjs]
 ---
 
 # Slice 6B：kit 单源化、去自用泄漏与门禁精度升级 — 功能设计规范（SPEC）
@@ -167,7 +98,7 @@ flowchart LR
 5. **提高 `feature-map` / `repo-map` / `static-gates` / `dev-govern` 精度与模块拆分**：
    - `kit/skills/lib/feature-map.mjs`：`prefillFeatureMapFromRepoMap` 匹配测试文件时不再使用裸 `t.toLowerCase().includes(stem.toLowerCase())`，改为**同生态边界 + 完整文件名/路径段词边界**匹配（例如 `.ts/.tsx` 源码只关联同生态 JS/TS 测试，绝不把 `App.tsx` 误绑到 `apply_test.go`），同时过滤 `dist/`、`.github/workflows/`、`*.test.*`、`.agents/` 作为功能入口。
    - `kit/skills/dev-explore/scripts/repo-map.mjs`（761 行）：拆出辅助解析/流程构造至 `kit/skills/dev-explore/scripts/repo-map-helpers.mjs`(new)；扫描与入口发现过滤 `dist/`、`.github/workflows/*.yml`、`.agents/` 与测试文件。
-   - `kit/skills/lib/static-gates.mjs`：直接收窄 `UI_VISUAL_EXT_RE` 正则（使用 `^` 锚定负向前瞻排除 `TEST_FILE_RE` 与 `FIXTURE_FILE_RE` 测试/夹具路径）并额外导出 `isUiVisualFile(fileRel)`（由 `shared.mjs` / 新代码复用），使全仓 6 处既有调用点（`review-gates.mjs:286`、`workflow-policy.mjs:174`、`review-locks.mjs:46,546`、`flow-lifecycle.mjs:326,602`、`flow-merge.mjs:143`）全部天然免疫测试文件触发且无需跨切片改写 6C 文件；`TEST_CASE_RE` 收窄避免匹配正则方法调用如 `re.test(file)`（要求 `test` 前不为 `.` 成员访问，即 `(?<![.\w$])`）。
+   - `kit/skills/lib/static-gates.mjs`：直接收窄 `UI_VISUAL_EXT_RE` 正则（使用 `^` 锚定负向前瞻排除 `TEST_FILE_RE` 与 `FIXTURE_FILE_RE` 测试/夹具路径）并额外导出 `isUiVisualFile(fileRel)`（供新代码从 `static-gates.mjs` 直接导入复用），使全仓 6 处既有调用点（`review-gates.mjs:286`、`workflow-policy.mjs:174`、`review-locks.mjs:46,546`、`flow-lifecycle.mjs:326,602`、`flow-merge.mjs:143`）全部天然免疫测试文件触发且无需跨切片改写 6C 文件；`TEST_CASE_RE` 收窄避免匹配正则方法调用如 `re.test(file)`（要求 `test` 前不为 `.` 成员访问，即 `(?<![.\w$])`）。
    - `kit/skills/dev-govern/scripts/govern-audit.mjs`：`--save-baseline --quiet` 组合时不再因 `opts.quiet` 跳过 `tests` 与 `perf` 类别，确保保存基线全量客观完整；`reconcile` 默认联动调用 `verify-tools` 过时与完整性核查（复用 `feature-map.mjs` / `verify-tools-audit.mjs` 检查工具过期并输出告警）。
    - `kit/skills/dev-govern/scripts/govern-docs.mjs`：Markdown 死链与常规文档检查跳过译文目录 `docs/{lang}/`（标准 BCP-47 双/四字母译文目录）避免误报相对锚点或翻译对照差异。
    - `kit/skills/dev-govern/scripts/govern-evergreen.mjs`：解析反引号/Markdown 路径时识别 VitePress 根路由（如 `/guide/...` 映射到 `docs/guide/...` 或配置 `srcDir`）及子包相对路径（相对于当前常青文档所在子包目录解析），减少 monorepo 文档误报。

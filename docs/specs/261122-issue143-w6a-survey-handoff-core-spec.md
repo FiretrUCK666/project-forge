@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Slice 6A：通用 S1 勘察、多生态发现与长青交棒合同
-status: draft
+status: approved
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
@@ -10,50 +10,15 @@ pr: null
 branch: docs/w6-universal-architecture-plan
 owner: plan-w6
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-w6-r2, round=1, sha=715dd7b85555, summary=Round 2 independent critique PASS (#599))"
 related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
 related_todo: ../todo/261122-issue143-w6a-survey-handoff-core-todo.md
+high_risk_paths: [scripts/lib/, templates/, kit/]
 task_id: w6a-survey-handoff-core
 depends_on: []
-scope_files:
-  - scripts/survey.mjs
-  - scripts/backup.mjs
-  - scripts/handoff.mjs
-  - scripts/review.mjs
-  - scripts/compose-agents.mjs
-  - scripts/equip.mjs
-  - scripts/lib/protocol.mjs
-  - scripts/lib/text.mjs
-  - scripts/lib/render.mjs
-  - scripts/lib/survey-docs.mjs
-  - scripts/lib/survey-gap-rules.mjs
-  - scripts/lib/survey-ecosystem.mjs
-  - scripts/lib/survey-workspace.mjs
-  - scripts/lib/survey-workspace-secrets.mjs
-  - scripts/lib/agents-defaults.mjs
-  - scripts/lib/equip-bootstrap.mjs
-  - scripts/lib/compose-agents-helpers.mjs
-  - templates/agents-project.md
-  - kit/skills/lib/credential-scan.mjs
-  - kit/skills/lib/git-core.mjs
-  - kit/skills/lib/profile-sniffer.mjs
-  - kit/skills/lib/profile-sniffer-packages.mjs
-  - .agents/skills/lib/credential-scan.mjs
-  - .agents/skills/lib/git-core.mjs
-  - .agents/skills/lib/profile-sniffer.mjs
-  - .agents/skills/lib/profile-sniffer-packages.mjs
-  - .agents/skills/.pf-manifest.json
-  - AGENTS.md
-  - scripts/dev/cli-parity.mjs
-  - scripts/dev/fixtures-w6a-survey-handoff.mjs
-  - scripts/dev/fixtures-flow-parallel.mjs
-  - scripts/dev/injections-data-w6a.mjs
-high_risk_paths:
-  - scripts/lib/
-  - templates/
-  - kit/
+scope_files: [scripts/survey.mjs, scripts/backup.mjs, scripts/handoff.mjs, scripts/review.mjs, scripts/compose-agents.mjs, scripts/equip.mjs, scripts/lib/protocol.mjs, scripts/lib/text.mjs, scripts/lib/render.mjs, scripts/lib/survey-docs.mjs, scripts/lib/survey-gap-rules.mjs, scripts/lib/survey-ecosystem.mjs, scripts/lib/survey-workspace.mjs, scripts/lib/survey-workspace-secrets.mjs, scripts/lib/agents-defaults.mjs, scripts/lib/equip-bootstrap.mjs, scripts/lib/compose-agents-helpers.mjs, templates/agents-project.md, kit/skills/lib/credential-scan.mjs, kit/skills/lib/git-core.mjs, kit/skills/lib/profile-sniffer.mjs, kit/skills/lib/profile-sniffer-packages.mjs, .agents/skills/lib/credential-scan.mjs, .agents/skills/lib/git-core.mjs, .agents/skills/lib/profile-sniffer.mjs, .agents/skills/lib/profile-sniffer-packages.mjs, .agents/skills/.pf-manifest.json, AGENTS.md, scripts/dev/cli-parity.mjs, scripts/dev/fixtures-w6a-survey-handoff.mjs, scripts/dev/fixtures-flow-parallel.mjs, scripts/dev/injections-data-w6a.mjs]
 ---
 
 # Slice 6A：通用 S1 勘察、多生态发现与长青交棒合同 — 功能设计规范（SPEC）

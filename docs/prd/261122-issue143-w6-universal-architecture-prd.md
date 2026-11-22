@@ -1,14 +1,14 @@
 ---
 kind: prd
 title: Wave 6 去补丁通用架构重构
-status: draft
+status: active
 created: 2026-11-22
 updated: 2026-11-22
 issue: 143
 pr: null
 owner: plan-w6
 plan_mode: interactive
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-w6-r2, round=1, sha=72b9389bfaec, summary=Round 2 independent critique PASS (#599))"
 related_spec: null
 related_todo: null
 multi_spec: true

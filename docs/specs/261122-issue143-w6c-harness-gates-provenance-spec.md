@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Slice 6C：跨仓隔离、并发实证豁免与角色溯源防绕过
-status: draft
+status: approved
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
@@ -10,80 +10,15 @@ pr: null
 branch: docs/w6-universal-architecture-plan
 owner: plan-w6
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-w6-r2, round=1, sha=2912481b85f3, summary=Round 2 independent critique PASS (#599))"
 related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
 related_todo: ../todo/261122-issue143-w6c-harness-gates-provenance-todo.md
+high_risk_paths: [kit/]
 task_id: w6c-harness-gates-provenance
-depends_on:
-  - w6a-survey-handoff-core
-  - w6b-kit-single-source-hygiene
-scope_files:
-  - kit/skills/dev-flow/scripts/flow.mjs
-  - kit/skills/dev-flow/scripts/flow-issues.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-start-provenance.mjs
-  - kit/skills/dev-flow/scripts/flow-merge.mjs
-  - kit/skills/dev-flow/scripts/flow-merge-claim.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs
-  - kit/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - kit/skills/dev-flow/scripts/worktree-deps.mjs
-  - kit/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - kit/skills/dev-review/scripts/review-pack.mjs
-  - kit/skills/dev-review/scripts/review-empirical.mjs
-  - kit/skills/dev-review/scripts/review-empirical-state.mjs
-  - kit/skills/dev-review/scripts/review-locks.mjs
-  - kit/skills/lib/cli.mjs
-  - kit/skills/lib/exit-codes.mjs
-  - kit/skills/lib/ledger.mjs
-  - kit/skills/lib/docs.mjs
-  - kit/skills/lib/doc-approval.mjs
-  - kit/skills/lib/harness-context.mjs
-  - kit/skills/lib/workflow-policy.mjs
-  - kit/skills/lib/workflow-policy-next.mjs
-  - kit/skills/lib/escalation.mjs
-  - kit/skills/lib/issue-template-hydrate.mjs
-  - kit/skills/lib/pr-template-hydrate.mjs
-  - kit/skills/lib/handoff-package.mjs
-  - .agents/skills/dev-flow/scripts/flow.mjs
-  - .agents/skills/dev-flow/scripts/flow-issues.mjs
-  - .agents/skills/dev-flow/scripts/flow-inspect.mjs
-  - .agents/skills/dev-flow/scripts/flow-start-provenance.mjs
-  - .agents/skills/dev-flow/scripts/flow-merge.mjs
-  - .agents/skills/dev-flow/scripts/flow-merge-claim.mjs
-  - .agents/skills/dev-flow/scripts/flow-lifecycle.mjs
-  - .agents/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
-  - .agents/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs
-  - .agents/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs
-  - .agents/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - .agents/skills/dev-flow/scripts/worktree-deps.mjs
-  - .agents/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - .agents/skills/dev-review/scripts/review-pack.mjs
-  - .agents/skills/dev-review/scripts/review-empirical.mjs
-  - .agents/skills/dev-review/scripts/review-empirical-state.mjs
-  - .agents/skills/dev-review/scripts/review-locks.mjs
-  - .agents/skills/lib/cli.mjs
-  - .agents/skills/lib/exit-codes.mjs
-  - .agents/skills/lib/ledger.mjs
-  - .agents/skills/lib/docs.mjs
-  - .agents/skills/lib/doc-approval.mjs
-  - .agents/skills/lib/harness-context.mjs
-  - .agents/skills/lib/workflow-policy.mjs
-  - .agents/skills/lib/workflow-policy-next.mjs
-  - .agents/skills/lib/escalation.mjs
-  - .agents/skills/lib/issue-template-hydrate.mjs
-  - .agents/skills/lib/pr-template-hydrate.mjs
-  - .agents/skills/lib/handoff-package.mjs
-  - .agents/skills/.pf-manifest.json
-  - docs/feature-map.json
-  - scripts/dev/fixtures-w6c-harness-gates.mjs
-  - scripts/dev/injections-data-w6c.mjs
-high_risk_paths:
-  - kit/
+depends_on: [w6a-survey-handoff-core, w6b-kit-single-source-hygiene]
+scope_files: [kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/flow-issues.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-start-provenance.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-flow/scripts/flow-merge-claim.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-flow/scripts/worktree-deps.mjs, kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-review/scripts/review-empirical-state.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/lib/cli.mjs, kit/skills/lib/exit-codes.mjs, kit/skills/lib/ledger.mjs, kit/skills/lib/docs.mjs, kit/skills/lib/doc-approval.mjs, kit/skills/lib/harness-context.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/lib/escalation.mjs, kit/skills/lib/issue-template-hydrate.mjs, kit/skills/lib/pr-template-hydrate.mjs, kit/skills/lib/handoff-package.mjs, .agents/skills/dev-flow/scripts/flow.mjs, .agents/skills/dev-flow/scripts/flow-issues.mjs, .agents/skills/dev-flow/scripts/flow-inspect.mjs, .agents/skills/dev-flow/scripts/flow-start-provenance.mjs, .agents/skills/dev-flow/scripts/flow-merge.mjs, .agents/skills/dev-flow/scripts/flow-merge-claim.mjs, .agents/skills/dev-flow/scripts/flow-lifecycle.mjs, .agents/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, .agents/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, .agents/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, .agents/skills/dev-flow/scripts/flow-start-helpers.mjs, .agents/skills/dev-flow/scripts/worktree-deps.mjs, .agents/skills/dev-plan/scripts/doc-plan-ops.mjs, .agents/skills/dev-review/scripts/review-pack.mjs, .agents/skills/dev-review/scripts/review-empirical.mjs, .agents/skills/dev-review/scripts/review-empirical-state.mjs, .agents/skills/dev-review/scripts/review-locks.mjs, .agents/skills/lib/cli.mjs, .agents/skills/lib/exit-codes.mjs, .agents/skills/lib/ledger.mjs, .agents/skills/lib/docs.mjs, .agents/skills/lib/doc-approval.mjs, .agents/skills/lib/harness-context.mjs, .agents/skills/lib/workflow-policy.mjs, .agents/skills/lib/workflow-policy-next.mjs, .agents/skills/lib/escalation.mjs, .agents/skills/lib/issue-template-hydrate.mjs, .agents/skills/lib/pr-template-hydrate.mjs, .agents/skills/lib/handoff-package.mjs, .agents/skills/.pf-manifest.json, docs/feature-map.json, scripts/dev/fixtures-w6c-harness-gates.mjs, scripts/dev/injections-data-w6c.mjs]
 ---
 
 # Slice 6C：跨仓隔离、并发实证豁免与角色溯源防绕过 — 功能设计规范（SPEC）

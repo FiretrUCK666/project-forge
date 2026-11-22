@@ -86,8 +86,7 @@ flowchart LR
 
 1. **补齐 `docs/feature-map.json` 四类结构缺口**：
    - **22+ 功能域 `docAnchor` 全量填充**：为每个 `feature` 写入精确有效的 `docs/TDD.md` 对应章节锚点（如 `docs/TDD.md#2-系统架构全景与模块边界`，并经 `govern-audit.mjs reconcile` 与 Markdown 锚点核对有效）。
-   - **补齐局部覆盖空白**：为 `skill` 功能域补充 `verificationTools`（对应 `preflight-suite-checks` / `review.mjs` 技能清单校验）；为 `check` 与 `release` 功能域补充真实存在的 `testRefs`（如 `.github/workflows/check.yml`、`scripts/dev/preflight.mjs`、`scripts/dev/e2e-zip-harness.mjs` 等）。
-   - **补齐新增模块映射**：将 PR #128/`platform-registry.mjs`、PR #129/`assets/readme/*.svg` 相关条目及 `w4a-harness-core` 新增共享内核模块全部准确映射入对应 `features[].modules` 与 `businessFlows`。
+   - **补齐局部覆盖空白与新增模块映射**：为 `skill` 功能域补充 `verificationTools`（对应 `preflight-suite-checks` / `review.mjs` 技能清单校验）；为 `check` 与 `release` 功能域补充真实存在的 `testRefs`（如 `.github/workflows/check.yml`、`scripts/dev/preflight.mjs`、`scripts/dev/e2e-zip-harness.mjs` 等）；将 `w4a-harness-core` 新增共享内核模块（`harness-context.mjs`、`session-state.mjs`、`gate-enforcement.mjs`）及 `assets/readme/*.svg` 相关条目全部准确映射入对应 `features[].modules` 与 `businessFlows`。
 2. **对齐 `AGENTS.md` CI 校验命令**：
    - 同步 `AGENTS.md`「构建与验证」受管区间与 `.github/workflows/check.yml` 实际执行指令（包括 `node scripts/dev/verify-injections.mjs --jobs 4` 与 `preflight.mjs --package`），消除 `node scripts/review.mjs .` 的命令脱节提示，同时保持 `AGENTS.md < 24576B`。
 3. **验证基准重建**：
@@ -114,7 +113,7 @@ flowchart LR
 <!-- section: acceptance -->
 <!-- criteria:start -->
 - [ ] C6: `docs/TDD.md` 经升级版 `dev-govern` 与 `dev-explore` 核实后完成全景刷新：补齐 L1–L4 全量真实模块路径与统计（含 `w4a-harness-core` 新增原语），图 1/图 4/图 5 均反映最新闭环且通过 Mermaid `16/12` 宽度校验，通过 `doc-plan.mjs audit .`、`tdd-structure` 与 `tdd-parity` 全绿。
-- [ ] C7: `docs/feature-map.json` 全量功能域 `docAnchor` 非空且锚点真实可达，`skill` 补齐 `verificationTools`，`check`/`release` 补齐 `testRefs`，PR #128/#129/`w4a` 模块全映射；`AGENTS.md` 消除 `review.mjs .` 校验命令脱节且 `< 24576B`；最终实跑 `verify-tools.mjs audit .` 返回 `Status: OK | StaleTools: 0 | BlindSpots: 0 | Zombies: 0`，`govern-audit.mjs reconcile . --json` 返回 `unmappedSourceModules: []`、`missingEntryPaths: []` 且 `govern-audit.mjs audit . --strict` 与 `preflight.mjs` 全绿。
+- [ ] C7: `docs/feature-map.json` 全量功能域 `docAnchor` 非空且锚点真实可达，`skill` 补齐 `verificationTools`，`check`/`release` 补齐 `testRefs`，`w4a-harness-core` 新增原语与 `assets/readme/*.svg` 均全映射；`AGENTS.md` 消除 `review.mjs .` 校验命令脱节且 `< 24576B`；最终实跑 `verify-tools.mjs audit .` 返回 `Status: OK | StaleTools: 0 | BlindSpots: 0 | Zombies: 0`，`govern-audit.mjs reconcile . --json` 返回 `unmappedSourceModules: []`、`missingEntryPaths: []` 且 `govern-audit.mjs audit . --strict` 与 `preflight.mjs` 全绿。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

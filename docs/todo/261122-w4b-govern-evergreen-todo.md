@@ -44,7 +44,7 @@ related_spec: ../specs/261122-w4b-govern-evergreen-spec.md
 ## 验收标准与执行清单
 
 - [ ] C6: 实跑新版 `repo-map.mjs` 与 `govern-audit.mjs reconcile` 后刷新 `docs/TDD.md`（补全全部 L1–L4 模块清单、升级图 1/4/5 与 Harness 四原语及 per-worktree 状态隔离说明），通过 `doc-plan.mjs audit .`、`tdd-structure` 与 `tdd-parity`。
-- [ ] C7: 刷新 `docs/feature-map.json`（补全全量 `docAnchor`、`skill` `verificationTools`、`check`/`release` `testRefs` 与 PR #128/#129/`w4a` 模块）及 `AGENTS.md` CI 校验命令（`< 24576B`），达到 `verify-tools.mjs audit .` `Status: OK | StaleTools: 0`、`govern-audit.mjs reconcile .` 零漂移与 `review.mjs .` 零脱节。
+- [ ] C7: 刷新 `docs/feature-map.json`（补全全量 `docAnchor`、`skill` `verificationTools`、`check`/`release` `testRefs` 与 `w4a` 新增原语）及 `AGENTS.md` CI 校验命令（`< 24576B`），达到 `verify-tools.mjs audit .` `Status: OK | StaleTools: 0`、`govern-audit.mjs reconcile .` 零漂移与 `review.mjs .` 零脱节。
 
 ## 执行步骤
 

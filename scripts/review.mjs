@@ -179,6 +179,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   if (sec.trackedWhere.length > 0) {
     add(finding('missing', 'secrets', 'secrets.tracked',
       `凭据形状的东西已经进了版本库：${sec.trackedWhere.join('、')}——改文件不管用，要轮换凭据并把历史处理掉`, {
+        decision: 'secrets-are-placeholders',
         ref: { file: 'references/version-control.md', section: '凭据门控' },
       }))
   }
@@ -450,7 +451,8 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   }
 
   // ── 持续集成与发布 ────────────────────────────────────────────────
-  if (facts.docs.workflowFacts.usesPullRequestTarget && facts.docs.workflowFacts.checkoutsPrHead) {
+  if ((facts.docs.workflowFacts.unsafePullRequestTargetWorkflows?.length ?? 0) > 0
+    || (facts.docs.workflowFacts.usesPullRequestTarget && facts.docs.workflowFacts.checkoutsPrHead)) {
     add(finding('missing', 'ci', 'ci.pwn-request',
       '工作流同时用了 `pull_request_target` 并检出提案那边的代码——这等于让任意陌生人拿你的密钥跑他的代码。'
       + '改成「无特权工作流跑检查 + 有特权工作流只消费产物」，或把触发器换成 `pull_request`', {

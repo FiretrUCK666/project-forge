@@ -10,7 +10,7 @@
 
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import { survey } from './survey.mjs'
 import { recordStepStateSafe } from '../kit/skills/lib/session-state.mjs'
@@ -24,37 +24,37 @@ import { renderTemplate, TemplateError } from './lib/template.mjs'
 import {
   collectMissingSections,
   driftRegions,
-  filterIntentRouting,
   findMissingIntentRoutingSkills,
+  filterIntentRouting,
   handWrittenCoverage,
   headingLines,
-  missingRegionsOf,
   refreshRegions,
   regionBodySha,
   sectionAlreadyPresent,
   validateDevProfileRegion,
 } from './lib/agents-sections.mjs'
+import {
+  formatOversizeBreakdown,
+  inspectAgentsFile,
+  maybePreWriteBackup,
+  readManifestSafe,
+  reportAgentsStatus,
+  resolveAgentsFileTarget,
+  volatileValues,
+  writeManifestRegions,
+} from './lib/compose-agents-helpers.mjs'
 
-const { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
+const { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, markerRegions, parseMarkers, stripMarkers } = protocol
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const TEMPLATE_PATH = join(SKILL_ROOT, 'templates', 'agents-project.md')
 
-async function maybePreWriteBackup(root, existingText, noBackup) {
-  if (noBackup || !String(existingText ?? '').trim()) return null
-  const backupScript = join(HERE, 'backup.mjs')
-  if (!existsSync(backupScript)) return null
-  const mod = await import(pathToFileURL(backupScript).href)
-  if (typeof mod?.ensurePreWriteBackup !== 'function') return null
-  return await mod.ensurePreWriteBackup(root, { label: 'compose-agents' })
-}
-
-function checkAgentsBytes(text) {
+function checkAgentsBytes(text, fileName = 'AGENTS.md') {
   const raw = String(text ?? '').replace(/\r\n/g, '\n')
   const bytes = Buffer.byteLength(raw, 'utf8')
-  const { regions } = markerRegions(raw, 'AGENTS.md')
+  const { regions } = markerRegions(raw, fileName)
   const lines = raw.split('\n')
   let managedBytes = 0
   for (const r of regions) {
@@ -69,67 +69,6 @@ function checkAgentsBytes(text) {
     oversize: bytes > AGENTS_MAX_BYTES,
     warn: bytes >= AGENTS_WARN_BYTES && bytes <= AGENTS_MAX_BYTES,
   }
-}
-
-function formatOversizeBreakdown(sizeInfo) {
-  return `total=${sizeInfo.bytes}B（受管区 managed=${sizeInfo.managedBytes}B + 自定义/正文 custom=${sizeInfo.customBytes}B，上限 ${AGENTS_MAX_BYTES}B / 30KB）；建议将长篇子模块规范外置到 <subdir>/AGENTS.md 或 docs/TDD.md`
-}
-
-function readManifestSafe(root) {
-  const manifestPath = join(root, PF_MANIFEST_REL)
-  if (!existsSync(manifestPath)) return null
-  const raw = readTextSafe(manifestPath)
-  if (raw === undefined) return { path: manifestPath, raw: '', data: {}, invalid: true }
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { path: manifestPath, raw, data: {}, invalid: true }
-    }
-    return { path: manifestPath, raw, data: parsed, invalid: false }
-  } catch {
-    return { path: manifestPath, raw, data: {}, invalid: true }
-  }
-}
-
-function writeManifestRegions(root, agentsText, protectedIds = [], removedIds = []) {
-  const manifest = readManifestSafe(root)
-  if (!manifest || manifest.invalid) return false
-  const prevRegions = manifest.data.agentsRegions && typeof manifest.data.agentsRegions === 'object'
-    ? manifest.data.agentsRegions
-    : {}
-  const protectedSet = new Set(protectedIds)
-  const lines = String(agentsText ?? '').replace(/\r\n/g, '\n').split('\n')
-  const { regions, broken } = markerRegions(agentsText, 'AGENTS.md')
-  if (broken.length > 0) return false
-
-  const nextRegions = {}
-  const presentIds = new Set()
-  for (const region of regions) {
-    presentIds.add(region.id)
-    if (protectedSet.has(region.id) && prevRegions[region.id]?.sha256) {
-      nextRegions[region.id] = prevRegions[region.id]
-    } else {
-      const bodyLines = lines.slice(region.start + 1, region.end)
-      nextRegions[region.id] = { sha256: regionBodySha(bodyLines) }
-    }
-  }
-
-  const prevRemoved = Array.isArray(manifest.data.removedAgentsRegions) ? manifest.data.removedAgentsRegions : []
-  const nextRemoved = [...new Set([...prevRemoved, ...removedIds])]
-    .filter((id) => typeof id === 'string' && id && !presentIds.has(id))
-    .sort()
-
-  const nextData = {
-    ...manifest.data,
-    agentsRegions: nextRegions,
-    ...(manifest.data.schemaVersion >= 2 || nextRemoved.length > 0 || Array.isArray(manifest.data.removedAgentsRegions)
-      ? { removedAgentsRegions: nextRemoved }
-      : {}),
-  }
-  const nextRaw = `${JSON.stringify(nextData, null, 2)}\n`
-  if (nextRaw === manifest.raw.replace(/\r\n/g, '\n')) return false
-  writeAtomic(manifest.path, nextRaw)
-  return true
 }
 
 export { buildVars }
@@ -177,82 +116,8 @@ export function renderAgentsTemplate(facts, templateText, root, { manifest, kitD
   return filterIntentRouting(rendered, excludedSkillsFor(facts, resolvedManifest, targetRoot, { kitDir }))
 }
 
-function volatileValues(facts) {
-  const detected = facts.conventions?.defaultBranch
-  const values = [...LIKELY_DEFAULT_BRANCHES]
-  if (typeof detected === 'string' && detected.length >= 2 && !values.includes(detected)) {
-    values.push(detected)
-  }
-  return values
-}
-
 function clearTempsBeside(agentsPath, { dryRun = false } = {}) {
   return clearStaleTemps(agentsPath, { dryRun })
-}
-
-function inspect(agentsPath, rendered, removedRegions = null) {
-  const text = readTextSafe(agentsPath)
-  if (text === undefined) {
-    return {
-      state: 'unreadable', fills: [], regions: [], broken: [], missingRegions: [], customized: [],
-    }
-  }
-  const markers = parseMarkers(text, 'AGENTS.md')
-  const fills = markers.filter((m) => m.kind === 'fill')
-  const regions = markerRegions(text, 'AGENTS.md')
-  const present = new Set(regions.regions.map((r) => r.id))
-  const customized = regions.regions.filter((r) => r.customized).map((r) => r.id)
-  return {
-    state: fills.length > 0 ? 'has-fills' : 'ok',
-    fills,
-    regions: regions.regions,
-    broken: regions.broken,
-    customized,
-    missingRegions: missingRegionsOf(present, rendered, text, removedRegions),
-    text,
-  }
-}
-
-function report(agentsPath, info, { verbose = false } = {}) {
-  const name = 'AGENTS.md'
-  if (info.state === 'unreadable') {
-    process.stdout.write(`${name} 读不出来（不是 UTF-8 文本？）。这不是「没有」，是「有但读不懂」——先看清它是什么。\n`)
-    return
-  }
-  if (info.broken && info.broken.length > 0) {
-    process.stdout.write(`${name} 的标记没成对：${info.broken.join('、')}。半对标记意味着文件被手工改坏了，不动它，先看清缺的是哪个 end。\n`)
-    return
-  }
-  if (info.regions.length === 0) {
-    process.stdout.write(`${name} 里没有任何 <!-- project-forge: begin … --> 标记。\n`
-      + '这通常意味着它**是手写的**。按规矩不动它——手写的契约可能比模板更贴合这个项目。\n')
-    const additions = collectMissingSections(renderedCache, info.text ?? '')
-    if (additions.length > 0) {
-      process.stdout.write(`\n模板里的这几节它还没有：共 ${additions.length} 段\n`
-        + '要补的话加 `--upgrade`：只**追加**缺的节，每节带自己的标记，已有的字一个不动。\n')
-    }
-    return
-  }
-  process.stdout.write(`${name}：${info.regions.length} 段受管内容（${info.regions.map((r) => r.id).join('、')}）\n`)
-  if (info.customized && info.customized.length > 0) {
-    process.stdout.write(`${info.customized.length} 段已由你接管、脚本不再改动：${info.customized.join('、')}`
-      + '（标记里带 `customized`；想交回去就删掉那个词）\n')
-  }
-  if (info.missingRegions.length > 0) {
-    process.stdout.write(`还有 ${info.missingRegions.length} 节该有却没有：${info.missingRegions.join('、')}\n`
-      + '（模板里的条件现在为真，所以这一节该在。跑一次不带参数就会补上，已有内容不动。）\n')
-  }
-  if (info.fills.length > 0) {
-    process.stdout.write(`还有 ${info.fills.length} 处要人填：\n`)
-    for (const fill of info.fills) {
-      process.stdout.write(`  - 第 ${fill.line} 行：${fill.what}\n`)
-    }
-    if (verbose) {
-      process.stdout.write('\n填完之后把那一整行标记删掉——留着它，看起来就像「这里已经填过了」。\n')
-    }
-  } else {
-    process.stdout.write('没有未填的占位。\n')
-  }
 }
 
 let renderedCache = ''
@@ -322,26 +187,32 @@ async function main(argv) {
     process.stderr.write(`目标目录不存在：${root}\n`)
     return 2
   }
-  const agentsPath = join(root, 'AGENTS.md')
+  const targetInfo = resolveAgentsFileTarget(root)
+  if (targetInfo.dangling || targetInfo.outsideRepo) {
+    process.stderr.write(`${targetInfo.error}\n`)
+    return 2
+  }
+  const agentsPath = targetInfo.writePath
+  const agentsName = targetInfo.fileName
   const template = readFileSync(TEMPLATE_PATH, 'utf8').replace(/\r\n/g, '\n')
   const manifest = readManifestSafe(root)
 
-  if (!existsSync(agentsPath)) {
+  if (!targetInfo.exists) {
     if (mode === 'status' || mode === 'check') {
-      process.stdout.write('AGENTS.md 还没有。\n')
+      process.stdout.write(`${agentsName} 还没有。\n`)
       return mode === 'check' ? 1 : 0
     }
     if (mode === 'clean' || mode === 'upgrade') {
-      process.stdout.write('没有 AGENTS.md，无从清理或追加。要生成就跑一次不带参数。\n')
+      process.stdout.write(`没有 ${agentsName}，无从清理或追加。要生成就跑一次不带参数。\n`)
       return 0
     }
-    return await generate(root, agentsPath, template, { manifest })
+    return await generate(root, agentsPath, template, { manifest, fileName: agentsName })
   }
 
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
 
   if (mode === 'clean') {
-    const cleaned = stripMarkers(existing, 'AGENTS.md')
+    const cleaned = stripMarkers(existing, agentsName)
     if (cleaned !== existing) await maybePreWriteBackup(root, existing, noBackup)
     const temps = clearTempsBeside(agentsPath)
     if (temps.removed.length > 0) {
@@ -371,11 +242,11 @@ async function main(argv) {
     ? new Set()
     : new Set(!manifest?.invalid && Array.isArray(manifest?.data?.removedAgentsRegions) ? manifest.data.removedAgentsRegions : [])
 
-  const info = inspect(agentsPath, rendered, removedSet)
+  const info = inspectAgentsFile(agentsPath, rendered, removedSet, agentsName)
 
   if (adoptCustom && mode === 'default') {
     if (info.broken && info.broken.length > 0) {
-      process.stderr.write(`AGENTS.md 的标记没成对，无法采用定制：${info.broken.join('、')}\n`)
+      process.stderr.write(`${agentsName} 的标记没成对，无法采用定制：${info.broken.join('、')}\n`)
       return 1
     }
     const baselineRegions = manifest && !manifest.invalid ? (manifest.data.agentsRegions ?? {}) : {}
@@ -410,15 +281,15 @@ async function main(argv) {
 
   if (mode === 'check') {
     if (info.state === 'unreadable') {
-      process.stderr.write('AGENTS.md 读不出来（不是 UTF-8 文本？）\n')
+      process.stderr.write(`${agentsName} 读不出来（不是 UTF-8 文本？）\n`)
       return 1
     }
-    const sizeInfo = checkAgentsBytes(info.text)
+    const sizeInfo = checkAgentsBytes(info.text, agentsName)
     if (sizeInfo.warn) {
-      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B），接近上限 ${AGENTS_MAX_BYTES} 字节（预警线 ${AGENTS_WARN_BYTES} 字节）。\n`)
+      process.stderr.write(`[警告] ${agentsName} 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B），接近上限 ${AGENTS_MAX_BYTES} 字节（预警线 ${AGENTS_WARN_BYTES} 字节）。\n`)
     }
     if (info.broken && info.broken.length > 0) {
-      process.stderr.write(`AGENTS.md 的标记没成对：${info.broken.join('、')}\n`)
+      process.stderr.write(`${agentsName} 的标记没成对：${info.broken.join('、')}\n`)
       return 1
     }
     const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
@@ -428,12 +299,12 @@ async function main(argv) {
         const why = []
         if (coverage.chars < 400) why.push(`正文只有 ${coverage.chars} 个字符`)
         if (coverage.missing.length > 0) why.push(`缺这几类内容：${coverage.missing.join('、')}`)
-        process.stderr.write(`AGENTS.md 是手写的，但它还不算一份契约：${why.join('；')}\n`
+        process.stderr.write(`${agentsName} 是手写的，但它还不算一份契约：${why.join('；')}\n`
           + '  加 `--upgrade` 会追加缺的节，原有内容一个字节不动。\n')
         return 1
       }
       if (sizeInfo.oversize && !allowOversizeBypass) {
-        process.stderr.write(`AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
+        process.stderr.write(`${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
         return 1
       }
       if (sizeInfo.oversize && allowOversizeBypass) {
@@ -442,12 +313,12 @@ async function main(argv) {
       const missingHandSkills = findMissingIntentRoutingSkills(root, info.text)
       if (missingHandSkills.length > 0) {
         process.stderr.write(
-          `AGENTS.md 意图路由引用了磁盘上不存在的技能文件：${missingHandSkills.map((x) => x.rel).join('、')}\n`
+          `${agentsName} 意图路由引用了磁盘上不存在的技能文件：${missingHandSkills.map((x) => x.rel).join('、')}\n`
           + '  请先运行 equip.mjs --restore <skill> 恢复技能目录，或移除失效引用。\n',
         )
         return 1
       }
-      process.stdout.write('AGENTS.md 是手写的（没有受管标记）——不判格式，只核对过它答了'
+      process.stdout.write(`${agentsName} 是手写的（没有受管标记）——不判格式，只核对过它答了`
         + '「这是什么项目 / 怎么构建验证 / 改动的边界」这三件事。\n')
       return 0
     }
@@ -456,22 +327,22 @@ async function main(argv) {
       if (allowOversizeBypass) {
         process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
       } else {
-        process.stderr.write(`AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
+        process.stderr.write(`${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
         bad = true
       }
     }
     if (info.fills.length > 0) {
-      process.stderr.write(`AGENTS.md 还有 ${info.fills.length} 处未填的占位\n`)
+      process.stderr.write(`${agentsName} 还有 ${info.fills.length} 处未填的占位\n`)
       for (const fill of info.fills) process.stderr.write(`  第 ${fill.line} 行：${fill.what}\n`)
       bad = true
     }
     if (info.missingRegions.length > 0) {
-      process.stderr.write(`AGENTS.md 缺 ${info.missingRegions.length} 节（条件为真却没有）：${info.missingRegions.join('、')}\n`)
+      process.stderr.write(`${agentsName} 缺 ${info.missingRegions.length} 节（条件为真却没有）：${info.missingRegions.join('、')}\n`)
       bad = true
     }
     const drifted = driftRegions(existing, rendered, volatileValues(facts))
     if (drifted.length > 0) {
-      process.stderr.write(`AGENTS.md 有 ${drifted.length} 段与模板不一致：${drifted.join('、')}\n`
+      process.stderr.write(`${agentsName} 有 ${drifted.length} 段与模板不一致：${drifted.join('、')}\n`
         + '  这几段的内容完全由项目事实决定，本该与模板渲染结果逐字相同。跑一次不带参数就会刷新。\n')
       const baselineRegions = manifest && !manifest.invalid ? manifest.data.agentsRegions : null
       if (baselineRegions) {
@@ -491,18 +362,18 @@ async function main(argv) {
     const missingRoutingSkills = findMissingIntentRoutingSkills(root, existing)
     if (missingRoutingSkills.length > 0) {
       process.stderr.write(
-        `AGENTS.md 意图路由引用了磁盘上不存在的技能文件：${missingRoutingSkills.map((x) => x.rel).join('、')}\n`
+        `${agentsName} 意图路由引用了磁盘上不存在的技能文件：${missingRoutingSkills.map((x) => x.rel).join('、')}\n`
         + '  请先运行 equip.mjs --restore <skill> 恢复技能目录，或重跑 compose-agents.mjs 同步意图路由。\n',
       )
       bad = true
     }
     const dpCheck = validateDevProfileRegion(existing)
     if (!dpCheck.ok) {
-      process.stderr.write(`AGENTS.md Dev Profile 校验失败：${dpCheck.reason}\n`)
+      process.stderr.write(`${agentsName} Dev Profile 校验失败：${dpCheck.reason}\n`)
       bad = true
     }
     if (bad) return 1
-    process.stdout.write('AGENTS.md：标记成对、没有未填占位、该有的节都在、内容与模板一致。\n')
+    process.stdout.write(`${agentsName}：标记成对、没有未填占位、该有的节都在、内容与模板一致。\n`)
     return 0
   }
 
@@ -517,16 +388,16 @@ async function main(argv) {
       return 0
     }
     const nextText = `${existing.trimEnd()}\n\n${additions.join('\n\n')}\n`
-    const sizeInfo = checkAgentsBytes(nextText)
+    const sizeInfo = checkAgentsBytes(nextText, agentsName)
     const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
     if (sizeInfo.oversize && !allowOversizeBypass) {
-      process.stderr.write(`追加后 AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
+      process.stderr.write(`追加后 ${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
     }
     if (sizeInfo.oversize && allowOversizeBypass) {
       process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
     } else if (sizeInfo.warn) {
-      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）接近上限 ${AGENTS_MAX_BYTES} 字节。\n`)
+      process.stderr.write(`[警告] ${agentsName} 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）接近上限 ${AGENTS_MAX_BYTES} 字节。\n`)
     }
     await maybePreWriteBackup(root, existing, noBackup)
     writeAtomic(agentsPath, nextText)
@@ -553,16 +424,16 @@ async function main(argv) {
 
     const refreshed = refreshRegions(existing, rendered, volatileValues(facts), baselineRegions, removedSet)
     const nextText = refreshed.changed ? refreshed.text : existing
-    const sizeInfo = checkAgentsBytes(nextText)
+    const sizeInfo = checkAgentsBytes(nextText, agentsName)
     const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
     if (sizeInfo.oversize && !allowOversizeBypass) {
-      process.stderr.write(`刷新后 AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
+      process.stderr.write(`刷新后 ${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
     }
     if (sizeInfo.oversize && allowOversizeBypass) {
       process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
     } else if (sizeInfo.warn) {
-      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
+      process.stderr.write(`[警告] ${agentsName} 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
     }
     if (refreshed.changed) {
       await maybePreWriteBackup(root, existing, noBackup)
@@ -589,7 +460,7 @@ async function main(argv) {
       const convergedBaseline = convergedManifest && !convergedManifest.invalid ? (convergedManifest.data.agentsRegions ?? {}) : null
       const convergedRefresh = refreshRegions(nextText, convergedRendered, volatileValues(convergedFacts), convergedBaseline, removedSet)
       if (convergedRefresh.changed) {
-        const convergedSize = checkAgentsBytes(convergedRefresh.text)
+        const convergedSize = checkAgentsBytes(convergedRefresh.text, agentsName)
         if (!convergedSize.oversize || (allowCustomOversize && convergedSize.managedBytes <= AGENTS_MAX_BYTES && convergedSize.customBytes > 0)) {
           writeAtomic(agentsPath, convergedRefresh.text)
           writeManifestRegions(
@@ -603,12 +474,12 @@ async function main(argv) {
         }
       }
     }
-    report(agentsPath, inspect(agentsPath, rendered, removedSet), { verbose })
+    reportAgentsStatus(agentsName, inspectAgentsFile(agentsPath, rendered, removedSet, agentsName), renderedCache, { verbose })
     recordStepStateSafe(root, { step: 'S4', ok: true, summary: 'agents-refreshed' })
     return 0
   }
 
-  report(agentsPath, info, { verbose })
+  reportAgentsStatus(agentsName, info, renderedCache, { verbose })
   recordStepStateSafe(root, { step: 'S4', ok: true, summary: 'agents-checked' })
   return 0
 }
@@ -617,7 +488,7 @@ async function factsOf(root) {
   return survey(root)
 }
 
-async function generate(root, agentsPath, template, { manifest } = {}) {
+async function generate(root, agentsPath, template, { manifest, fileName = 'AGENTS.md' } = {}) {
   let content
   try {
     const facts = await factsOf(root)
@@ -626,13 +497,13 @@ async function generate(root, agentsPath, template, { manifest } = {}) {
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
   }
-  const sizeInfo = checkAgentsBytes(content)
+  const sizeInfo = checkAgentsBytes(content, fileName)
   if (sizeInfo.oversize) {
-    process.stderr.write(`生成的 AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
+    process.stderr.write(`生成的 ${fileName} 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
     return 1
   }
   if (sizeInfo.warn) {
-    process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
+    process.stderr.write(`[警告] ${fileName} 体积 ${sizeInfo.bytes} 字节已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
   }
   mkdirSync(dirname(agentsPath), { recursive: true })
   writeAtomic(agentsPath, content)
@@ -641,16 +512,16 @@ async function generate(root, agentsPath, template, { manifest } = {}) {
   const convergedManifest = readManifestSafe(root)
   const convergedContent = renderAgentsTemplate(convergedFacts, template, root, { manifest: convergedManifest })
   if (convergedContent !== content) {
-    const convergedSize = checkAgentsBytes(convergedContent)
+    const convergedSize = checkAgentsBytes(convergedContent, fileName)
     if (!convergedSize.oversize) {
       content = convergedContent
       writeAtomic(agentsPath, content)
       writeManifestRegions(root, content)
     }
   }
-  const fills = parseMarkers(content, 'AGENTS.md').filter((m) => m.kind === 'fill')
+  const fills = parseMarkers(content, fileName).filter((m) => m.kind === 'fill')
   recordStepStateSafe(root, { step: 'S4', ok: true, summary: 'agents-generated' })
-  process.stdout.write('已生成 AGENTS.md（按勘察到的事实填了一部分）。\n')
+  process.stdout.write(`已生成 ${fileName}（按勘察到的事实填了一部分）。\n`)
   if (fills.length > 0) {
     process.stdout.write(`还有 ${fills.length} 处要你读完代码后填：\n`)
     for (const fill of fills) process.stdout.write(`  - 第 ${fill.line} 行：${fill.what}\n`)
@@ -664,12 +535,25 @@ export async function contractHealth(root, { facts: precomputedFacts } = {}) {
   const facts = precomputedFacts ?? await factsOf(root)
   const manifest = readManifestSafe(root)
   const rendered = renderAgentsTemplate(facts, template, root, { manifest })
-  const agentsPath = join(root, 'AGENTS.md')
+  const targetInfo = resolveAgentsFileTarget(root)
+  if (targetInfo.dangling || targetInfo.outsideRepo) {
+    return {
+      broken: [targetInfo.error],
+      missing: [],
+      drifted: [],
+      customized: [],
+      handWritten: false,
+      bytes: 0,
+      oversize: false,
+    }
+  }
+  const agentsPath = targetInfo.writePath ?? targetInfo.entryPath
+  const agentsName = targetInfo.fileName
   const removedSet = new Set(!manifest?.invalid && Array.isArray(manifest?.data?.removedAgentsRegions)
     ? manifest.data.removedAgentsRegions : [])
-  const info = inspect(agentsPath, rendered, removedSet)
+  const info = inspectAgentsFile(agentsPath, rendered, removedSet, agentsName)
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
-  const { bytes, oversize } = checkAgentsBytes(existing)
+  const { bytes, oversize } = checkAgentsBytes(existing, agentsName)
   return {
     broken: info.broken ?? [],
     missing: info.regions.length === 0 ? [] : info.missingRegions ?? [],

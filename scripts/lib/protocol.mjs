@@ -173,7 +173,7 @@ export function parseMarkers(text, file) {
  *
  * 用于 `--clean`：围栏之外、又不是行内举例的标记行**全部**去掉——`generated`、`fill`、
  * `begin`、`end` 一视同仁。这么做是因为 `--clean` 的承诺是「把痕迹清干净」：
- * 留下孤零零的 begin/end 等于把「这里曾经被脚本管过」写进用户文件，
+ * 留下孤零零的 begin/end 等于把「受脚本托管的配对标记」写进用户文件，
  * 而配对关系已经随命令一起消失了。**配对判断不在这一步**——那是 compose 的事，
  * 它比这里更清楚该留下哪一段正文。
  *
@@ -384,8 +384,8 @@ export const TEMPLATE_VARS = Object.freeze([
   'WORK_DIR',
   'COMMIT_STYLE_HINT',
   'README_LIST',
+  'SUBDIR_AGENTS_POINTER',
   'WORKSPACE_PACKAGES',
-  'CONVENTIONS_HINT',
   'KIT_ROUTING_ROWS',
   'CUSTOM_SKILLS_BLOCK',
   'PROFILE_QUICK_TEST',

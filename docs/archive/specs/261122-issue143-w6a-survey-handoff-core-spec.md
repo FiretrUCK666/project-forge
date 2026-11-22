@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: Slice 6A：通用 S1 勘察、多生态发现与长青交棒合同
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
 issue: 143
 pr: null
-branch: docs/w6-universal-architecture-plan
-owner: plan-w6
+branch: feat/w6a-survey-handoff-core
+owner: impl-w6a
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-w6-r2, round=1, sha=715dd7b85555, summary=Round 2 independent critique PASS (#599))"
-related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
+related_prd: ../../prd/261122-issue143-w6-universal-architecture-prd.md
 related_todo: ../todo/261122-issue143-w6a-survey-handoff-core-todo.md
 high_risk_paths: [scripts/lib/, templates/, kit/]
 task_id: w6a-survey-handoff-core
@@ -33,7 +33,7 @@ scope_files: [scripts/survey.mjs, scripts/backup.mjs, scripts/handoff.mjs, scrip
 | 分支 / Issue / PR | 见 Frontmatter `branch` / #143 / 未关联 |
 | 负责人 / 内审状态 | plan-w6 / `pending` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | `docs/prd/261122-issue143-w6-universal-architecture-prd.md` / `docs/todo/261122-issue143-w6a-survey-handoff-core-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261122-issue143-w6-universal-architecture-prd.md` / `docs/archive/todo/261122-issue143-w6a-survey-handoff-core-todo.md` |
 
 - **变更一句话**：将 S1 只读勘察、多生态与工作区发现、Linter 隔离、大容量备份读取、交棒净度校验、凭据正文扫描及受管 `AGENTS.md` 模板体积与保真能力重构为通用结构化实现，彻底消除跨文件/跨生态误报与 AI 指导语泄漏。
 
@@ -151,12 +151,12 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `scripts/lib/survey-docs.mjs`、`scripts/lib/survey-gap-rules.mjs` 与 `scripts/review.mjs` 按工作流文件+job 粒度结构化判定 `pull_request_target` 与不安全 PR checkout，豁免 `pull_request.number` 与 `# zizmor: ignore[dangerous-triggers]`；补齐 `uv publish`、`dotnet ... publish`、`jsr publish`、`vp pack` 与 `simple-git-hooks` / `.git/hooks/*` 检测（由 `node scripts/dev/fixtures.mjs --domain w6a-survey-handoff` 实证）。
-- [ ] C2: `scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs`、`scripts/lib/agents-defaults.mjs` 与 `kit/skills/lib/git-core.mjs` 支持 `.slnx`、`jsr.json` / `deno.json`、`pnpm-workspace.yaml` 继承、`!` 负向 glob 与 `hasManifest` 边界（消除 80 子包爆炸、`Benchmarks` 误选 `dotnet test`、`*.csproj` 覆盖 `MinVer`）；`equip.mjs` / `survey.mjs` 探测根 Linter/Formatter 输出 `.agents/` 忽略隔离方案；`survey()` 严格零写入（取消误写 `session-state.json`）。
-- [ ] C3: `scripts/backup.mjs` 取消 512KB `index.json` 读取截断上限（支持任意体积与精简条目元数据）；`scripts/handoff.mjs` `--verify` 对锁文件（`*-lock.*`、`*.lock`）、大数据非工程文件及有意软链不计入 `truncated` 退出码 `3`，区分持续 `--upgrade` 受管态（通过）与 `--strict-clean`（要求剥离），并在 `scripts/dev/cli-parity.mjs` 的 `HAND_ROLLED_SPECS` 登记 `--strict-clean`。
-- [ ] C4: `kit/skills/lib/credential-scan.mjs`、`scripts/lib/survey-workspace.mjs` 与 `scripts/review.mjs` 识别 `${...}` 动态 PEM 模板字面量、扫描 `.env*` 测试夹具正文、为 `secrets.tracked` 与 `secrets.exposed` 统一接入 `decision: 'secrets-are-placeholders'`，且 `git.output-dirs` 跳过全部受 Git 跟踪或 `.gitignore` `!` 显式放行的目录。
-- [ ] C5: `templates/agents-project.md`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/equip-bootstrap.mjs` 与 `scripts/compose-agents.mjs` 精简受管模板骨架（落盘空骨架 `< 16KB`，14KB 存量 `AGENTS.md` 可无损 `--upgrade`），彻底消除 `CONVENTIONS_HINT` / `暂未追加...` / `目录结尾带 /...` 等 AI 指导语泄漏并保留既有小写 `agents.md` / 软链指向；同步运行 `node scripts/compose-agents.mjs .` 对齐本仓 `AGENTS.md`（保留 `preflight-suite.mjs` 与 `preflight-contract-rules.mjs` 必检契约及 7 步结构）；全部新增/修改 `.mjs` 文件严格 `<= 800` 行。
-- [ ] C6: Slice 6A 正反双向夹具（`scripts/dev/fixtures-w6a-survey-handoff.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6a.mjs`(new)）且 `.agents/skills/`（含 `.agents/skills/.pf-manifest.json`）同步一致，`node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs --jobs 6` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿。
+- [x] C1: `scripts/lib/survey-docs.mjs`、`scripts/lib/survey-gap-rules.mjs` 与 `scripts/review.mjs` 按工作流文件+job 粒度结构化判定 `pull_request_target` 与不安全 PR checkout，豁免 `pull_request.number` 与 `# zizmor: ignore[dangerous-triggers]`；补齐 `uv publish`、`dotnet ... publish`、`jsr publish`、`vp pack` 与 `simple-git-hooks` / `.git/hooks/*` 检测（由 `node scripts/dev/fixtures.mjs --domain w6a-survey-handoff` 实证）。
+- [x] C2: `scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs`、`scripts/lib/agents-defaults.mjs` 与 `kit/skills/lib/git-core.mjs` 支持 `.slnx`、`jsr.json` / `deno.json`、`pnpm-workspace.yaml` 继承、`!` 负向 glob 与 `hasManifest` 边界（消除 80 子包爆炸、`Benchmarks` 误选 `dotnet test`、`*.csproj` 覆盖 `MinVer`）；`equip.mjs` / `survey.mjs` 探测根 Linter/Formatter 输出 `.agents/` 忽略隔离方案；`survey()` 严格零写入（取消误写 `session-state.json`）。
+- [x] C3: `scripts/backup.mjs` 取消 512KB `index.json` 读取截断上限（支持任意体积与精简条目元数据）；`scripts/handoff.mjs` `--verify` 对锁文件（`*-lock.*`、`*.lock`）、大数据非工程文件及有意软链不计入 `truncated` 退出码 `3`，区分持续 `--upgrade` 受管态（通过）与 `--strict-clean`（要求剥离），并在 `scripts/dev/cli-parity.mjs` 的 `HAND_ROLLED_SPECS` 登记 `--strict-clean`。
+- [x] C4: `kit/skills/lib/credential-scan.mjs`、`scripts/lib/survey-workspace.mjs` 与 `scripts/review.mjs` 识别 `${...}` 动态 PEM 模板字面量、扫描 `.env*` 测试夹具正文、为 `secrets.tracked` 与 `secrets.exposed` 统一接入 `decision: 'secrets-are-placeholders'`，且 `git.output-dirs` 跳过全部受 Git 跟踪或 `.gitignore` `!` 显式放行的目录。
+- [x] C5: `templates/agents-project.md`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/equip-bootstrap.mjs` 与 `scripts/compose-agents.mjs` 精简受管模板骨架（落盘空骨架 `< 16KB`，14KB 存量 `AGENTS.md` 可无损 `--upgrade`），彻底消除 `CONVENTIONS_HINT` / `暂未追加...` / `目录结尾带 /...` 等 AI 指导语泄漏并保留既有小写 `agents.md` / 软链指向；同步运行 `node scripts/compose-agents.mjs .` 对齐本仓 `AGENTS.md`（保留 `preflight-suite.mjs` 与 `preflight-contract-rules.mjs` 必检契约及 7 步结构）；全部新增/修改 `.mjs` 文件严格 `<= 800` 行。
+- [x] C6: Slice 6A 正反双向夹具（`scripts/dev/fixtures-w6a-survey-handoff.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6a.mjs`(new)）且 `.agents/skills/`（含 `.agents/skills/.pf-manifest.json`）同步一致，`node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs --jobs 6` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -172,6 +172,6 @@ flowchart LR
 
 > 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
 
-- **实际落地摘要**：待实施后填写
-- **与草案的差异**：待实施后填写
-- **关联同步文件**：待实施后填写
+- **实际落地摘要**：按 Slice 6A C1–C6 完成 job 级 `pull_request_target` 结构化分析、`.slnx`/Deno/JSR/`pnpm-workspace.yaml` `!` glob/根 Linter 探测、`survey()` 严格零写入、`backup.mjs` 无 512KB 上限 `index.json` 读取、`handoff.mjs --verify` 锁文件/大资产/有意软链豁免与 `--strict-clean`、动态 `${...}` PEM 与 `.env*` 扫描及 `secrets-are-placeholders` 统一消解、`templates/agents-project.md` 瘦身（空骨架 13186B）与小写/软链 `agents.md` 保真，并拆分 3 个超限风险子模块（`profile-sniffer-packages.mjs`、`survey-workspace-secrets.mjs`、`compose-agents-helpers.mjs`）。
+- **与草案的差异**：经 `@coordinator`（#606/#611）授权，在不修改已审批 `scope_files` 的前提下同步更新 `scripts/dev/fixtures-w4-harness.mjs`、`scripts/dev/fixtures-contracts.mjs` 与 `scripts/dev/fixtures-core.mjs` 中与 6A Spec 契约变更直接冲突的 3 处旧夹具断言。
+- **关联同步文件**：`AGENTS.md`（经 `compose-agents.mjs .` 同步）、`.agents/skills/` 与 `.agents/skills/.pf-manifest.json`（经 `equip.mjs .` 同步）、`scripts/dev/cli-parity.mjs`、`scripts/dev/fixtures-w6a-survey-handoff.mjs`、`scripts/dev/injections-data-w6a.mjs`。

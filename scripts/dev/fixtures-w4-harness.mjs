@@ -401,7 +401,7 @@ export function registerW4HarnessCases(cases) {
     }
   }])
 
-  cases.push(['[C2] 治理脚本 S1-S4 记录与 compose-agents --check 占位拦截', async () => {
+  cases.push(['[C2] survey 零写入与 compose-agents --check 占位拦截', async () => {
     const dir = tmpProject({
       'package.json': '{"name":"demo","scripts":{"test":"node -e \\"process.exit(0)\\""}}\n',
       'src/index.mjs': 'export const x = 1\n',
@@ -412,7 +412,7 @@ export function registerW4HarnessCases(cases) {
       if (sv.status !== 0) return `survey 失败：${sv.stderr || sv.stdout}`
       const ss = await import('../../kit/skills/lib/session-state.mjs')
       const st1 = ss.readSessionState(dir)
-      if (!st1?.steps?.S1?.ok) return `survey 后应记录 S1：${JSON.stringify(st1)}`
+      if (st1?.steps?.S1) return `survey() 不得写入 session-state.json（S1 零写）：${JSON.stringify(st1)}`
 
       // 占位符 AGENTS.md 应被 compose-agents --check 拦截
       writeFileSync(join(dir, 'AGENTS.md'), [

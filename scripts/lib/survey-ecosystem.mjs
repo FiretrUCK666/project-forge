@@ -7,11 +7,15 @@ import { basename, join } from 'node:path'
 
 import {
   discoverWorkspacePackages,
+  hasDotnetMinVer,
+  isDotnetTestProject,
   parseYamlWorkspaceGlobs,
+  readDenoOrJsrManifest,
+  resolveNodePackageManager,
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
 } from '../../kit/skills/lib/profile-sniffer.mjs'
-import { BROAD_CODE_EXT_RE, COMMON_OUTPUT_DIRS, matchGlob } from '../../kit/skills/lib/git-core.mjs'
+import { BROAD_CODE_EXT_RE, COMMON_OUTPUT_DIRS, matchGlobList } from '../../kit/skills/lib/git-core.mjs'
 import { summarizeSkillDescription } from '../../kit/skills/lib/skill-discovery.mjs'
 import { classifyCommandText, COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
@@ -114,10 +118,14 @@ export const ECOSYSTEMS = [
       if (pkg.private === true) s.private = true
       const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
       if (repo) s.declaredRepo = normalizeDeclaredRepo(repo)
-      s.packageManager = existsSync(join(root, 'pnpm-lock.yaml')) ? 'pnpm'
-        : existsSync(join(root, 'yarn.lock')) ? 'yarn'
-          : (existsSync(join(root, 'bun.lockb')) || existsSync(join(root, 'bun.lock'))) ? 'bun'
-            : 'npm'
+      s.packageManager = s._inheritedPackageManager
+        && !existsSync(join(root, 'pnpm-lock.yaml'))
+        && !existsSync(join(root, 'yarn.lock'))
+        && !existsSync(join(root, 'bun.lock'))
+        && !existsSync(join(root, 'bun.lockb'))
+        && !existsSync(join(root, 'package-lock.json'))
+        ? s._inheritedPackageManager
+        : resolveNodePackageManager(root, pkg)
       const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
       s.packageScripts = [...new Set([...(s.packageScripts ?? []), ...Object.keys(scripts)])]
       const runPrefix = s.packageManager === 'npm' ? 'npm run' : s.packageManager
@@ -271,13 +279,37 @@ export const ECOSYSTEMS = [
     },
   },
   {
+    kind: 'deno',
+    manifest: (root) => readDenoOrJsrManifest(root)?.primaryManifest ?? 'deno.json',
+    detect: (root) => Boolean(readDenoOrJsrManifest(root)),
+    read: (root, s) => {
+      const info = readDenoOrJsrManifest(root)
+      if (!info) return
+      for (const mf of info.manifests) if (!s.manifests.includes(mf)) s.manifests.push(mf)
+      if (info.name) s.projectName = info.name.replace(/^@[^/]+\//, '')
+      if (info.version && !s.declaredVersion) s.declaredVersion = info.version
+      if (info.exports !== undefined) s.exports = info.exports
+      if (info.publishable) { s.publishable = true; s.private = false }
+      const tasks = info.tasks ?? {}
+      if (tasks.test) s.commands.test ??= 'deno task test'
+      else if (hasSuffix(root, '_test.ts') || hasSuffix(root, '.test.ts')) s.commands.test ??= 'deno test'
+      if (tasks.check) s.commands.verify ??= 'deno task check'
+      if (tasks.lint) s.commands.lint ??= 'deno task lint'
+      if (tasks.build) s.commands.build ??= 'deno task build'
+    },
+  },
+  {
     kind: 'dotnet',
-    manifest: () => '*.csproj',
-    detect: (root) => hasSuffix(root, '.csproj') || hasSuffix(root, '.sln'),
+    manifest: (root) => findSuffix(root, '.slnx') || findSuffix(root, '.sln') || '*.csproj',
+    detect: (root) => hasSuffix(root, '.csproj') || hasSuffix(root, '.fsproj') || hasSuffix(root, '.vbproj')
+      || hasSuffix(root, '.sln') || hasSuffix(root, '.slnx'),
     read: (root, s) => {
       s.commands.build ??= 'dotnet build'
-      if (hasSuffix(root, 'Tests.csproj') || hasSuffix(root, '.Tests.csproj')) {
+      if (isDotnetTestProject(root, s._dirRel ?? '')) {
         s.commands.test ??= 'dotnet test'
+      }
+      if (hasDotnetMinVer(root, s._repoRoot ?? root)) {
+        s.versionSource = 'MinVer (Git tag)'
       }
     },
   },
@@ -440,12 +472,16 @@ function scanSubdirectories(root, s, fileRelList = null) {
     const full = join(root, dir)
     if (!existsSync(full)) continue
     const sub = newEcosystemState()
+    sub._inheritedPackageManager = s.packageManager
+    sub._repoRoot = root
+    sub._dirRel = dir
     scanEcosystemAt(full, sub, { name: dir })
     if (sub.kinds.length === 0) continue
     for (const kind of sub.kinds) if (!s.kinds.includes(kind)) s.kinds.push(kind)
     for (const name of sub.manifests) if (!s.manifests.includes(name)) s.manifests.push(name)
     if (sub.publishable) s.publishable = true
     if (sub.private) s.private = true
+    if (sub.versionSource && !s.versionSource) s.versionSource = sub.versionSource
     if (Array.isArray(sub.packageScripts)) {
       s.packageScripts = [...new Set([...(s.packageScripts ?? []), ...sub.packageScripts])]
     }
@@ -469,21 +505,11 @@ function scanSubdirectories(root, s, fileRelList = null) {
 
 function newEcosystemState() {
   return {
-    projectName: undefined,
-    kinds: [],
-    manifests: [],
-    commands: {},
-    commandsByEcosystem: {},
-    runtimeRequirements: [],
-    publishable: false,
-    private: false,
-    registryFree: false,
-    declaredVersion: undefined,
-    declaredRepo: undefined,
-    packageManager: undefined,
-    packageScripts: undefined,
-    skillMeta: undefined,
-    subdirs: [],
+    projectName: undefined, kinds: [], manifests: [], commands: {}, commandsByEcosystem: {},
+    runtimeRequirements: [], publishable: false, private: false, registryFree: false,
+    declaredVersion: undefined, versionSource: undefined, exports: undefined,
+    declaredRepo: undefined, packageManager: undefined, packageScripts: undefined,
+    skillMeta: undefined, subdirs: [],
   }
 }
 
@@ -520,35 +546,23 @@ export function detectEcosystem(root, fileRelList = null) {
     if (!s.kinds.includes(hint.kind)) s.kinds.push(hint.kind)
     if (!s.manifests.includes(hint.marker)) s.manifests.push(hint.marker)
   }
-
   const skill = detectSkillKind(root)
   if (skill) {
     s.kinds.push('skill')
     s.skillMeta = skill.skillMeta
     if (!s.manifests.includes(skill.skillMeta.entry)) s.manifests.push(skill.skillMeta.entry)
     if (skill.skillMeta.version && !s.declaredVersion) s.declaredVersion = skill.skillMeta.version
-    if (skill.skillMeta.source && !s.declaredRepo) {
-      s.declaredRepo = normalizeDeclaredRepo(skill.skillMeta.source)
-    }
+    if (skill.skillMeta.source && !s.declaredRepo) s.declaredRepo = normalizeDeclaredRepo(skill.skillMeta.source)
     s.registryFree = true
   }
-
+  delete s._inheritedPackageManager
+  delete s._repoRoot
+  delete s._dirRel
   return s
 }
 
-/**
- * 从 CI 配置里读命令——**与语言无关**。
- *
- * 生态清单只认识十几种清单文件。一份 Haskell、OCaml、Zig、Nim 或者自研 DSL 的仓库，
- * 生态识别会返回 `unknown`，命令探测也就跟着空手而归。可那份仓库的 CI 里明明写着
- * `stack test`、`make check`。命令一直是有的，只是没人去读它。
- *
- * 这里读的是「人已经在跑的命令」：CI 的 `run:` 块、Makefile、justfile。它不猜语言，
- * 也不按生态惯例编——写进 CI 的命令是被真实执行过的，比任何清单推断都可靠。
- */
+/** 从 CI 配置与任务文件读取语言无关命令。 */
 const COMMAND_KINDS = [
-  // 测试要排在 build 前面：`dune runtest`、`zig build test`、`cargo build --tests`
-  // 这类命令里都带 build，先按 build 判就把测试命令整个吞掉了。
   { key: 'test', re: /\b(?:test|tests|runtest|spec|specs|check|verify|validate|preflight|pytest|unittest|vitest|jest|mocha|rspec|ctest|phpunit)\b/i },
   { key: 'lint', re: /\b(?:lint|clippy|rubocop|eslint|flake8|pylint|ruff|mypy|pyright|biome|format|fmt|hlint|vet)\b/i },
   { key: 'build', re: /\b(?:build|compile|bundle|package|make|assemble)\b/i },
@@ -626,8 +640,13 @@ export function detectTaskEntriesDetailed(root, preRunners = null) {
 }
 
 const WORKSPACE_MANIFEST_NAMES = new Set([
-  'package.json', 'Cargo.toml', 'pyproject.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'composer.json', 'Gemfile',
+  'package.json', 'deno.json', 'deno.jsonc', 'jsr.json', 'jsr.jsonc',
+  'Cargo.toml', 'pyproject.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'composer.json', 'Gemfile',
 ])
+
+function isWorkspaceManifestFile(name) {
+  return WORKSPACE_MANIFEST_NAMES.has(name) || /\.(?:csproj|fsproj|vbproj|sln|slnx)$/i.test(name)
+}
 
 function collectWorkspaceDeclaredGlobs(root) {
   const globs = [...parseYamlWorkspaceGlobs(root)]
@@ -635,7 +654,7 @@ function collectWorkspaceDeclaredGlobs(root) {
   if (Array.isArray(lerna?.packages)) {
     for (const p of lerna.packages) {
       const clean = String(p ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
-      if (clean && !clean.startsWith('!')) globs.push(clean)
+      if (clean) globs.push(clean)
     }
   }
   const cargo = readTextSafe(join(root, 'Cargo.toml')) ?? ''
@@ -644,7 +663,7 @@ function collectWorkspaceDeclaredGlobs(root) {
   if (memMatch) {
     for (const m of memMatch[1].matchAll(/["']([^"']+)["']/g)) {
       const clean = m[1].trim().replace(/\\/g, '/').replace(/\/+$/, '')
-      if (clean && !clean.startsWith('!')) globs.push(clean)
+      if (clean) globs.push(clean)
     }
   }
   const goWork = readTextSafe(join(root, 'go.work')) ?? ''
@@ -674,7 +693,7 @@ function listWorkspaceCandidateDirs(root, relFiles = null) {
       const dirRel = rel.slice(0, slash)
       const base = rel.slice(slash + 1)
       if (isVendoredOrEmbeddedPackageDir(dirRel) || dirRel.split('/').some((seg) => SKIP_DIRS.has(seg) || seg === '.git' || seg === '.worktrees' || seg === 'fixtures')) continue
-      addDir(dirRel, WORKSPACE_MANIFEST_NAMES.has(base))
+      addDir(dirRel, isWorkspaceManifestFile(base))
       const parts = dirRel.split('/')
       for (let i = 1; i < parts.length; i += 1) addDir(parts.slice(0, i).join('/'), false)
     }
@@ -684,7 +703,7 @@ function listWorkspaceCandidateDirs(root, relFiles = null) {
     if (depth > 5) return
     let entries = []
     try { entries = readdirSync(absDir, { withFileTypes: true }) } catch { return }
-    const hasManifest = entries.some((e) => e.isFile() && WORKSPACE_MANIFEST_NAMES.has(e.name))
+    const hasManifest = entries.some((e) => e.isFile() && isWorkspaceManifestFile(e.name))
     if (relPrefix) addDir(relPrefix, hasManifest)
     for (const entry of entries) {
       if (!entry.isDirectory() || isMacMetadataName(entry.name) || entry.isSymbolicLink()) continue
@@ -704,6 +723,7 @@ export function detectWorkspace(root, relFiles = null) {
   const declared = existsSync(join(root, 'pnpm-workspace.yaml'))
     || existsSync(join(root, 'lerna.json'))
     || Boolean(readJsonSafe(join(root, 'package.json'))?.workspaces)
+    || Boolean(readDenoOrJsrManifest(root)?.workspace)
     || (/^\s*\[workspace\]/m.test(cargo))
     || existsSync(join(root, 'go.work'))
   const packages = []
@@ -711,24 +731,17 @@ export function detectWorkspace(root, relFiles = null) {
     const patterns = declaredGlobs.length > 0 ? declaredGlobs : ['packages/*', 'apps/*', 'crates/*', 'workspaces/*']
     const candidateDirs = listWorkspaceCandidateDirs(root, relFiles)
     for (const [dirRel, hasManifest] of candidateDirs.entries()) {
-      if (isVendoredOrEmbeddedPackageDir(dirRel)) continue
-      const matched = patterns.some((pat) => {
-        if (pat.endsWith('/**')) {
-          const base = pat.slice(0, -3)
-          return (dirRel === base || dirRel.startsWith(`${base}/`)) && hasManifest
-        }
-        return matchGlob(dirRel, pat)
-      })
-      if (matched) packages.push(dirRel)
+      if (!hasManifest || isVendoredOrEmbeddedPackageDir(dirRel)) continue
+      if (matchGlobList(dirRel, patterns)) packages.push(dirRel)
     }
-    if (packages.length === 0) {
+    if (packages.length === 0 && declaredGlobs.length === 0) {
       for (const dir of ['packages', 'apps', 'crates', 'workspaces']) {
         const p = join(root, dir)
         if (!existsSync(p)) continue
         try {
           for (const entry of readdirSync(p, { withFileTypes: true })) {
             if (isMacMetadataName(entry.name)) continue
-            if (entry.isDirectory()) packages.push(`${dir}/${entry.name}`)
+            if (entry.isDirectory() && candidateDirs.get(`${dir}/${entry.name}`)) packages.push(`${dir}/${entry.name}`)
           }
         } catch { /* 读不到 */ }
       }

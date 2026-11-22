@@ -376,11 +376,12 @@ cases.push(['既有 AI 约定文件按文件展开、报告里点名、fill 提�
     if (!/既有 AI 规则文件/.test(md)) return 'Markdown 报告里没提别的 AI 约定文件'
     if (!md.includes('.cursor/rules/a.mdc')) return '报告里没列出具体文件'
 
-    // fill 提示里也要列出来，AI 才有机会去合流。
+    // 模板不泄漏 CONVENTIONS_HINT 指导提示语（CLAUDE.md / .changeset/ 等已在上方 survey.mjs --markdown 报告点名）。
     await runNode('compose-agents.mjs', [dir])
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    if (!agents.includes('CLAUDE.md')) return 'fill 提示里没列出现有的约定文件'
-    if (!agents.includes('.changeset/')) return 'fill 提示里没列出发版工具链'
+    if (agents.includes('CONVENTIONS_HINT') || agents.includes('逐条读一遍')) {
+      return 'AGENTS.md 仍泄漏 CONVENTIONS_HINT 指导语'
+    }
 
     // 反面：一个干净的目录不该凭空多出这两项。
     const clean = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { existsSync, readdirSync, readlinkSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { flushAndExit, isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.mjs'
+import { isInsideDir } from '../kit/skills/lib/git-core.mjs'
 import { scanLines } from './lib/markdown.mjs'
 import { processAlive } from './lib/fs-atomic.mjs'
 import { VERIFY_EXIT } from '../kit/skills/lib/exit-codes.mjs'
@@ -89,9 +90,61 @@ function isSkillOwnPath(rel) {
   return p.startsWith('templates/') || p.startsWith('references/') || p === 'SKILL.md'
 }
 
+const LOCKFILE_NAMES = new Set([
+  'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
+  'deno.lock', 'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum',
+  'gradle.lockfile', 'packages.lock.json', 'Gemfile.lock', 'composer.lock', 'flake.lock',
+  'Package.resolved', 'mix.lock', 'Podfile.lock', 'pubspec.lock', 'pdm.lock', 'rye.lock', 'pixi.lock',
+])
+
+function isLockfileName(name) {
+  return LOCKFILE_NAMES.has(name) || /(?:^|-)lock\.[^/]+$|\.lock$/i.test(name)
+}
+
+function isNonEngineeringLargeAsset(rel) {
+  const norm = String(rel ?? '').replace(/\\/g, '/')
+  if (/\.(?:svg|map|min\.[^/]+|geojson|topojson|sarif|har|jsonl|ndjson|snap)$/i.test(norm)) return true
+  if (/(?:^|\/)(?:assets|static|public|data|locales|i18n|fixtures|testdata|__snapshots__|snapshots|schemas)(?:\/|$)/i.test(norm)
+    && /\.(?:json|txt|ya?ml)$/i.test(norm)) {
+    return true
+  }
+  return /\.json$/i.test(norm) && !/(?:^|\/)\.pf-manifest\.json$/i.test(norm)
+}
+
+function isIntentionalSymlink(fullPath, canonRoot) {
+  try {
+    const rawTarget = readlinkSync(fullPath).replace(/\\/g, '/')
+    const baseName = basename(fullPath).toLowerCase()
+    const targetBase = basename(rawTarget).toLowerCase()
+    const isDepOrAgentTarget = /(?:^|\/)(?:node_modules|\.pnpm|\.venv|vendor|third_party|\.agents)(?:\/|$)/.test(rawTarget)
+      || /(?:^|\/)\.[^/]+\/skills(?:\/|$)/.test(rawTarget)
+    const isContractSymlink = baseName === 'agents.md' || targetBase === 'agents.md'
+      || baseName === 'skill.md' || targetBase === 'skill.md'
+    if (!isDepOrAgentTarget && !isContractSymlink) return false
+    if (/(?:^|\/)(?:node_modules|\.pnpm|\.venv|vendor|third_party|\.agents)(?:\/|$)/.test(rawTarget)) {
+      return true
+    }
+    const realTarget = realpathSync(fullPath)
+    return isInsideDir(realTarget, canonRoot)
+  } catch {
+    return false
+  }
+}
+
 function walk(root) {
+  const canonRoot = (() => { try { return realpathSync(root) } catch { return resolve(root) } })()
   const out = []
-  const state = { truncated: false, unreadable: 0, skippedLarge: 0, skippedVendoredLarge: 0, depthLimited: 0, symlinks: 0 }
+  const state = {
+    truncated: false,
+    unreadable: 0,
+    skippedLarge: 0,
+    skippedVendoredLarge: 0,
+    skippedLockfiles: 0,
+    skippedLargeAssets: 0,
+    skippedSymlinks: 0,
+    depthLimited: 0,
+    symlinks: 0,
+  }
   const go = (dir, depth) => {
     if (depth > MAX_DEPTH) { state.depthLimited += 1; state.truncated = true; return }
     if (out.length > MAX_FILES) { state.truncated = true; return }
@@ -101,17 +154,25 @@ function walk(root) {
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { state.unreadable += 1; state.truncated = true; return }
     for (const entry of entries) {
       if (isMacOsMetadata(entry.name) || SKIP_DIRS.has(entry.name)) continue
-      // 合法依赖目录与 .worktrees 已在上方跳过；其余未识别符号链接不跟入并记为未扫全。
-      if (entry.isSymbolicLink()) { state.symlinks += 1; state.truncated = true; continue }
       const full = join(dir, entry.name)
+      // 合法/有意符号链接（指向仓内或依赖目录）豁免不计入 truncated；悬空或越界软链仍标未扫全。
+      if (entry.isSymbolicLink()) {
+        state.symlinks += 1
+        if (isIntentionalSymlink(full, canonRoot)) state.skippedSymlinks += 1
+        else state.truncated = true
+        continue
+      }
       if (entry.isDirectory()) {
         go(full, depth + 1)
-      } else if (entry.isFile() && (SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) {
+      } else if (entry.isFile()) {
+        if (isLockfileName(entry.name)) { state.skippedLockfiles += 1; continue }
+        if (!(SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) continue
         const rel = relative(root, full).split(sep).join('/')
         let size = 0
         try { size = statSync(full).size } catch { state.unreadable += 1; state.truncated = true; continue }
         if (size > MAX_BYTES) {
           if (isVendoredRel(rel)) state.skippedVendoredLarge += 1
+          else if (isNonEngineeringLargeAsset(rel)) state.skippedLargeAssets += 1
           else { state.skippedLarge += 1; state.truncated = true }
           continue
         }
@@ -130,7 +191,7 @@ function walk(root) {
  * 一个大到扫不完的项目，报出来的是「没找到」，而不是「没有」——把这两句混同，
  * 等于用一句假话给一次不可逆动作背书。
  */
-export function scan(targetDir) {
+export function scan(targetDir, { strictClean = false } = {}) {
   const root = resolve(targetDir)
   if (!existsSync(root)) throw new Error(`目标目录不存在：${root}`)
 
@@ -255,18 +316,28 @@ export function scan(targetDir) {
     }
   }
 
-  const total = markers.length + placeholders.length + legacyMarkers.length
+  const managedActive = Boolean(!strictClean && kitManifest?.valid)
+  const managedMarkers = managedActive
+    ? markers.filter((m) => /^agents\.md$/i.test(m.file) && (m.kind === 'begin' || m.kind === 'end'))
+    : []
+  const blockingMarkers = managedActive
+    ? markers.filter((m) => !(/^agents\.md$/i.test(m.file) && (m.kind === 'begin' || m.kind === 'end')))
+    : markers
+  const total = blockingMarkers.length + placeholders.length + legacyMarkers.length
     + legacyPaths.length + danglingPointers.length + deletableTemps.length
 
   return {
     target: { path: root },
     markers,
+    managedMarkers,
     placeholders,
     legacyMarkers,
     legacyPaths,
     danglingPointers,
     staleTemps,
     ...(kitManifest ? { kitManifest } : {}),
+    strictClean: Boolean(strictClean),
+    managedMode: managedActive,
     total,
     clean: total === 0,
     selfScan,
@@ -306,6 +377,9 @@ export function toText(result) {
       const km = result.kitManifest
       lines.push('')
       lines.push(`已保留 \`.agents/skills/\` 本地研发套件（清单 \`${km.path}\` v${km.schemaVersion ?? 1}，不计入残留痕迹）。`)
+      if ((result.managedMarkers?.length ?? 0) > 0) {
+        lines.push(`已保留持续 \`--upgrade\` 受管态 \`AGENTS.md\` 区间标记（${result.managedMarkers.length} 处；如需彻底剥离请传 \`--strict-clean\`）。`)
+      }
       if (km.customSkills.length > 0) {
         lines.push(`检测到项目自定义技能（已完整保留）：${km.customSkills.join('、')}`)
       }
@@ -407,16 +481,18 @@ function main(argv) {
   let target = process.cwd()
   let asJson = false
   let verify = false
+  let strictClean = false
 
   for (const arg of argv) {
     if (arg === '--help' || arg === '-h') {
       process.stdout.write([
         '用法：node scripts/handoff.mjs [项目目录] [选项]',
         '',
-        '  --scan     列出本 skill 留下的痕迹（默认）',
-        `  --verify   判「已经干净」：干净 ${VERIFY_EXIT.clean} / 有痕迹 ${VERIFY_EXIT.dirty}`
+        '  --scan          列出本 skill 留下的痕迹（默认）',
+        `  --verify        判「已经干净」：干净 ${VERIFY_EXIT.clean} / 有痕迹 ${VERIFY_EXIT.dirty}`
           + ` / 没扫全 ${VERIFY_EXIT.truncated} / 不适用（skill 自己的仓库）${VERIFY_EXIT.notApplicable}`,
-        '  --json     输出机器可读结果',
+        '  --strict-clean  即使存在有效 .pf-manifest.json 也要求剥离全部受管标记',
+        '  --json          输出机器可读结果',
         '',
         `只读：不删任何东西。退出码 ${VERIFY_EXIT.truncated} 是「这一趟没扫完」、`
           + `${VERIFY_EXIT.notApplicable} 是「这一趟不适用」，都不是干净。`,
@@ -425,6 +501,7 @@ function main(argv) {
     }
     if (arg === '--verify') verify = true
     else if (arg === '--scan') { /* 默认模式，显式写出来是为了让人知道有这个动作 */ }
+    else if (arg === '--strict-clean') strictClean = true
     else if (arg === '--json') asJson = true
     else if (!arg.startsWith('-')) target = arg
     else {
@@ -434,7 +511,7 @@ function main(argv) {
   }
 
   try {
-    const result = scan(target)
+    const result = scan(target, { strictClean })
     if (asJson) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     } else if (verify) {

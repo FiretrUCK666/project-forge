@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-22T08:02:39.491Z",
+  "installedAt": "2026-11-22T12:05:41.381Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "df3a7701f27ade86a614dd94a631af848589a1d3139da05c00be5e87f12743c8"
@@ -181,7 +181,7 @@
       "sha256": "bd67c6ff761219e13fd8d6773cdafb2732083794c460ebed52166aca29f1adea"
     },
     "lib/credential-scan.mjs": {
-      "sha256": "72ff2c718fb8a15f006b2e14535fa1009cb78ea9350033e59ec28bf4b806cb08"
+      "sha256": "91e7c4d005e479c55f07b2f8a280d35a2b0fdf55cc310063db20d85bbc56a06f"
     },
     "lib/criteria-lock.mjs": {
       "sha256": "8ccfedeba1932a419d58ff83fb5ef8f86e338b02039d10f0f8f946fb0f46c1c9"
@@ -259,7 +259,7 @@
       "sha256": "a7c0365094bfacc1b260b6a65c878547cf485015eedae5a4293afaa3196579c6"
     },
     "lib/git-core.mjs": {
-      "sha256": "446001ef5f4cf226e2c445ee5d89388f66e575c397e0e9f93d03a222c5589dde"
+      "sha256": "01dd28e08d0496107c97a37952bc91ea4a03c9b185f5b0b254ecfb6af2eb47bf"
     },
     "lib/git-fast-objects.mjs": {
       "sha256": "d2c45946deb99f6a4c1045dd96bd34562fa499c799b0bf66b3811d84175b3451"
@@ -336,8 +336,11 @@
     "lib/pr-template-hydrate.mjs": {
       "sha256": "0ee1e306c61470235f549a8e50e48fa761490f06e75749808b3da41f899d4597"
     },
+    "lib/profile-sniffer-packages.mjs": {
+      "sha256": "94b32bfa2b9428177f8f0a95404ed55ccf7bf14f2b3b8d6082665c7d18142aef"
+    },
     "lib/profile-sniffer.mjs": {
-      "sha256": "eee65f4d59cbd89094dcfb73c5d142b0d9e457412addb95b4b54ad5ce8c89a08"
+      "sha256": "65a325b374e86633a7349adfea5517ca14690f9c0104d224a2e16dacad40bcba"
     },
     "lib/profile.mjs": {
       "sha256": "4d9f0a8471d8196e661abb92046e2eb4de915ec472e2b4a917a98bcdd9a6a426"
@@ -436,10 +439,10 @@
   "pendingConflicts": {},
   "agentsRegions": {
     "意图路由": {
-      "sha256": "0e83017f4839559bf9bced39299b632dc620a119782b501ecf6655bfc3cca365"
+      "sha256": "59a30729723579c8d3e5472b3ac2dd8ce1122bb31a34da62f41a8c4552197765"
     },
     "行事总纲": {
-      "sha256": "2a520918d644d4fd5cd1db6d16276cbc5f689b3a1f5890bb040b6ef477c01291"
+      "sha256": "9c6bdcf80f4bcb3ff1fcea54a5681be88743fbd65574a2ca6b791cfa693eba11"
     },
     "项目定位": {
       "sha256": "a10dae3b061bb1df152c456f3587e95e37d53d51f6b927fd03f1619ae4a273db"
@@ -448,7 +451,7 @@
       "sha256": "1ba8ca6aa3082f3e00e0d7e3af9835387400a12430f2bb90d3cd95ffc75ceb2b"
     },
     "上下文阅读护栏": {
-      "sha256": "92260dce8ea2dc6950586396a1709abcc2861f8f85a7c702c790d8ff44b27073"
+      "sha256": "cd1c949d4ead24d7f642bcaf9dd72b906b2d053da9dec741c00f2845b0e78f17"
     },
     "探索策略": {
       "sha256": "7bf55b89a2c61988899e64419ef5bfc4b2066cf29139beb2a1c8205debecfa91"
@@ -457,19 +460,19 @@
       "sha256": "578b725cbb0627ac7eb0409f7e6554e01905f0cde1e14043b192452aefedbf57"
     },
     "构建与验证": {
-      "sha256": "f9a945cd3a536637065a469d2cd52097eac9ab153ed067510dbd9b90c33bb0eb"
+      "sha256": "3bcf181f8e59847ca0ac4898914ef555b218da1d0ac446fd4592b18d90aa9deb"
     },
     "修改守则": {
-      "sha256": "3e57d9bf05f995a818265b66f1d48ab97774a0877f2460fd1ba7d19aa4ea7cda"
+      "sha256": "0688e09368d90fd53ec04e5b68a2acd806238b65847e875416581e07de28388e"
     },
     "修改守则补充": {
       "sha256": "b1d816bc3b3737ecd81fad0854859c68ffd108c059e6273230a71aca7bbb8201"
     },
     "版本与发布": {
-      "sha256": "0099a497650c4d356f9d29a6feb5374c86656fd04101ee51f5ca4c7ba8b9f868"
+      "sha256": "48ec6ae86d3266d90e285a808dc61a679c95b9b3c4d95f764dfb75a6830538b7"
     },
     "日常协作与风险分流": {
-      "sha256": "ac543f645f6deefa1e630e6370108d0414b20458158bcee8ff52160d12523b00"
+      "sha256": "a5f2e1ab7ee3e864501fa6ae205d59a8491b5f43eb6b3bbe378f70d50af9ccb5"
     },
     "高风险路径": {
       "sha256": "dbbdcc6e8b3c8c2b87e4695c98c628a57c0e4c8c6f4cfb6297ab1176d2492cc9"

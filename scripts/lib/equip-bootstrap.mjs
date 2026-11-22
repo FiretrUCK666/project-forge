@@ -241,7 +241,7 @@ function hydrateInitialAgentsDefaults(rendered, { displayName, stack }) {
       '本项目当前为通用初始化基线，尚无构建与测试命令（真实源码与清单就位后替换为实际构建/测试命令）。',
     )
     .replace(/<!-- project-forge: fill 构建与验证命令：[^\n]*-->\n*/g, '')
-    .replace(/<!-- project-forge: fill 项目特有红线：[^\n]*-->/g, '- 暂未追加额外项目特有红线（需要时直接在本节增补并删除本句）。')
+    .replace(/<!-- project-forge: fill 项目特有红线：[^\n]*-->/g, '')
     .replace(
       /<!-- project-forge: fill 高风险路径：[^\n]*-->/g,
       '- `AGENTS.md`：项目核心工程契约\n- `docs/TDD.md`：架构设计基线',
@@ -255,8 +255,10 @@ function hydrateInitialAgentsDefaults(rendered, { displayName, stack }) {
 }
 
 export async function generateInitialBootstrappedAgents(root, { stack = 'universal', name, noBackup = false } = {}) {
-  const agentsPath = join(root, 'AGENTS.md')
-  if (existsSync(agentsPath)) return { created: false, skipped: true }
+  const { resolveAgentsFileTarget } = await import('./compose-agents-helpers.mjs')
+  const targetInfo = resolveAgentsFileTarget(root)
+  if (targetInfo.exists || targetInfo.dangling || targetInfo.outsideRepo) return { created: false, skipped: true }
+  const agentsPath = targetInfo.writePath
   const { survey } = await import('../survey.mjs')
   const { renderAgentsTemplate } = await import('../compose-agents.mjs')
   const { markerRegions } = await import('./protocol.mjs')

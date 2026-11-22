@@ -29,13 +29,16 @@ import {
 } from './lib/survey-questions.mjs'
 import {
   detectGitHooksState,
-  judgeRole,
-  runSurveyCli,
-  summarizeTddAndSymbolCoverage,
 } from './lib/survey-docs.mjs'
 import { readDecisionMap } from '../kit/skills/lib/profile.mjs'
-import { recordStepStateSafe } from '../kit/skills/lib/session-state.mjs'
+import { detectOptionalNativeCheckers } from '../kit/skills/lib/profile-sniffer.mjs'
+import { resolveDocRequirements } from '../kit/skills/lib/doc-requirements.mjs'
+import { detectTddShapes, tddDropSections } from '../kit/skills/lib/tdd-shape.mjs'
+import { CODE_EXT_RE } from '../kit/skills/lib/git-core.mjs'
+import { isSymbolCandidatePath, summarizeSymbolCoverage } from '../kit/skills/lib/symbol-index.mjs'
 import {
+  classifyWorkspaceIdentity,
+  detectGitModeMarkers,
   getHostingProvider,
   resolveWorkspaceIdentity,
 } from './lib/platform/index.mjs'
@@ -219,7 +222,7 @@ export function computeArtifactPlan(facts) {
     ? (git.providerId === 'github' || Boolean(git.topology?.providerIds?.includes('github')))
     : (typeof git.remote === 'string' && /github\.com/i.test(git.remote))
   if (wf.hasCheck) {
-    items.push(wf.usesPullRequestTarget && wf.checkoutsPrHead
+    items.push((wf.unsafePullRequestTargetWorkflows?.length ?? 0) > 0 || (wf.usesPullRequestTarget && wf.checkoutsPrHead)
       ? { id: 'ci-check', artifact: '.github/workflows/check.yml', status: '已有检查流（含高危 pull_request_target）', action: 'calibrate', detail: '保留既有流水线结构，立即解除 pull_request_target 检出外部提案代码的高危组合' }
       : { id: 'ci-check', artifact: '.github/workflows/check.yml', status: `已存在（${(wf.checkWorkflows?.length ? wf.checkWorkflows : docs.workflows ?? []).join('、')}）`, action: 'preserve', detail: '保留现有 CI 检查工作流，仅在命令失真时最小校准' })
   } else if (hasDecision(facts, 'no-ci')) {
@@ -511,6 +514,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       private: ecosystem.private,
       registryFree: ecosystem.registryFree,
       declaredVersion: ecosystem.declaredVersion,
+      ...(ecosystem.versionSource ? { versionSource: ecosystem.versionSource } : {}),
+      ...(ecosystem.exports !== undefined ? { exports: ecosystem.exports } : {}),
       declaredRepo: ecosystem.declaredRepo,
       skillMeta: ecosystem.skillMeta,
       subdirs: ecosystem.subdirs,
@@ -521,7 +526,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     ...(universal.detectionEvidence?.length > 0 ? { detectionEvidence: universal.detectionEvidence } : {}),
     conventions,
     workspace,
-    artifacts,
+    artifacts: { ...artifacts, nativeCheckers: detectOptionalNativeCheckers(root) },
     localSkills,
     kit,
     docs,
@@ -574,10 +579,89 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   delete gitFacts._hasGit
   delete gitFacts._ignoredTracked
   delete gitFacts._statusIgnored
-  if (existsSync(join(root, '.git'))) {
-    recordStepStateSafe(root, { step: 'S1', ok: true, summary: `survey:${facts.scale.codeFiles}files` })
-  }
   return facts
+}
+
+function summarizeTddAndSymbolCoverage(root, rawWs, facts) {
+  const shapePaths = (rawWs.files ?? []).map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
+  const tddShape = detectTddShapes({
+    paths: shapePaths,
+    kinds: facts.ecosystem?.kinds ?? [],
+    runtimeRequirements: facts.artifacts?.runtimeRequirements ?? [],
+    codeFiles: facts.scale?.codeFiles ?? 0,
+  })
+  const tddReq = resolveDocRequirements(root, 'tdd')
+  const tddReqIds = new Set(tddReq.sections.map((s) => s.id))
+  const tddShapeSummary = {
+    enabled: [...tddShape.enabled],
+    reasons: tddShape.reasons,
+    dropSections: [...tddDropSections(tddShape, { omit: tddReq.omit, required: tddReqIds })],
+    filePaths: shapePaths,
+    topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
+  }
+  const symbolCoverage = summarizeSymbolCoverage(
+    (rawWs.files ?? [])
+      .map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
+      .filter((rel) => !protocol.isToolOwnedPath(rel)
+        && (CODE_EXT_RE.test(rel) || isSymbolCandidatePath(rel))),
+  )
+  return { tddShape: tddShapeSummary, symbolCoverage }
+}
+
+/** 角色决定「能做到哪一步」：`local-only` / `contributor-fork` / `clone-readonly` / `maintainer` / `undetermined`。 */
+function judgeRole(gitFacts, declaredRepo, opts = {}) {
+  const markers = opts.cwd ? detectGitModeMarkers(opts.cwd) : { localMode: false, forkMode: false, standaloneMode: false }
+  return classifyWorkspaceIdentity({
+    gitFacts,
+    declaredRepo,
+    probeApi: opts.probeApi,
+    localIdentity: opts.localIdentity,
+    localMode: typeof opts.localMode === 'boolean' ? opts.localMode : markers.localMode,
+    forkMode: typeof opts.forkMode === 'boolean' ? opts.forkMode : markers.forkMode,
+    standaloneMode: typeof opts.standaloneMode === 'boolean' ? opts.standaloneMode : markers.standaloneMode,
+    sshHostMap: opts.sshHostMap,
+  })
+}
+
+async function runSurveyCli(argv, surveyFn) {
+  let target = process.cwd()
+  let format = 'json'
+  let probeAuth = false
+  let verifyToken = false
+  for (const arg of argv) {
+    if (arg === '--help' || arg === '-h') {
+      process.stdout.write([
+        '用法：node scripts/survey.mjs [目标目录] [选项]',
+        '',
+        '  --markdown      输出给人读的报告（默认输出 JSON）',
+        '  --probe-auth    额外问一次凭据助手与 SSH/gh 状态（无远端亦可探测）',
+        '  --verify-token  配合 --probe-auth 对本地 Token 发一次轻量验活请求',
+        '',
+        '只读：不写任何文件。',
+      ].join('\n') + '\n')
+      return 0
+    }
+    if (arg === '--markdown' || arg === '--md') format = 'markdown'
+    else if (arg === '--json') format = 'json'
+    else if (arg === '--probe-auth') probeAuth = true
+    else if (arg === '--verify-token') { probeAuth = true; verifyToken = true }
+    else if (!arg.startsWith('-')) target = arg
+    else {
+      process.stderr.write(`未知选项：${arg}（用 --help 看用法）\n`)
+      return 2
+    }
+  }
+  try {
+    const facts = await surveyFn(target, { probeAuth, verifyToken })
+    const out = format === 'markdown'
+      ? (await import('./lib/render.mjs')).toMarkdown(facts)
+      : `${JSON.stringify(facts, null, 2)}\n`
+    process.stdout.write(out)
+    return 0
+  } catch (err) {
+    process.stderr.write(`勘察失败：${err instanceof Error ? err.message : String(err)}\n`)
+    return 2
+  }
 }
 
 const main = (argv) => runSurveyCli(argv, survey)

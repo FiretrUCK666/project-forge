@@ -409,7 +409,7 @@ cases.push(['profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非vendor深�
   } finally { rmTree(dir) }
 }])
 
-cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、equip 二次编辑再采用与 doc-plan 防自审(I64)/自定模板', async () => {
+cases.push(['零教学泄漏(CONVENTIONS_HINT 清除)、maskVolatile(I65)、--adopt-custom/oversize、equip 二次编辑再采用与 doc-plan 防自审(I64)/自定模板', async () => {
   const { maskVolatile } = await import('../lib/agents-sections.mjs')
   if (maskVolatile('node main.mjs domain maintainer git switch main', ['main']) !== 'node main.mjs domain maintainer git switch \u0000VOLATILE\u0000') {
     return 'maskVolatile 词边界失效：破坏了 main.mjs/domain/maintainer 标识符'
@@ -430,9 +430,11 @@ cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、eq
       .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填完。')
       .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none')
     writeFileSync(join(dir, 'AGENTS.md'), agents)
-    if (!agents.includes('CLAUDE.md')) return 'CONVENTIONS_HINT 多行提示未正确注入'
-    const brokenInit = await runNode('compose-agents.mjs', [dir, '--check'])
-    if (brokenInit.status !== 0) return `带 CONVENTIONS_HINT 填完后 --check 应为 0：${brokenInit.stderr}`
+    for (const leak of ['CONVENTIONS_HINT', '逐条读一遍', '合完问用户', '暂未追加', '目录结尾带']) {
+      if (agents.includes(leak)) return `AGENTS.md 仍残留教学泄漏文本：${leak}`
+    }
+    const cleanInit = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (cleanInit.status !== 0) return `清除教学泄漏填完后 --check 应为 0：${cleanInit.stderr}`
 
     agents = agents.replace('**提交纪律**：', '**提交纪律（定制规则）**：')
     writeFileSync(join(dir, 'AGENTS.md'), agents)

@@ -82,8 +82,9 @@ export const GAP_RULES = [
   },
   {
     id: 'secrets.tracked',
-    when: (f) => f.risks.secretFiles.some((x) => x.status === 'tracked')
-      || f.risks.secretContent.some((c) => c.status === 'tracked'),
+    when: (f) => !(f.decisions && 'secrets-are-placeholders' in f.decisions)
+      && (f.risks.secretFiles.some((x) => x.status === 'tracked')
+        || f.risks.secretContent.some((c) => c.status === 'tracked')),
     text: (f) => {
       const where = [
         ...f.risks.secretFiles.filter((x) => x.status === 'tracked').map((x) => x.file),
@@ -95,7 +96,8 @@ export const GAP_RULES = [
   },
   {
     id: 'secrets.exposed',
-    when: (f) => f.risks.secretFiles.some((x) => x.status === 'exposed'),
+    when: (f) => !(f.decisions && 'secrets-are-placeholders' in f.decisions)
+      && f.risks.secretFiles.some((x) => x.status === 'exposed'),
     text: (f) => `有未忽略的敏感文件：${f.risks.secretFiles.filter((x) => x.status === 'exposed').map((x) => x.file).join('、')}`,
     review: 'secrets.exposed',
   },
@@ -125,8 +127,8 @@ export const GAP_RULES = [
   },
   {
     id: 'ci.pull-request-target',
-    when: (f) => f.docs.workflowFacts?.usesPullRequestTarget === true
-      && f.docs.workflowFacts?.checkoutsPrHead === true,
+    when: (f) => (f.docs.workflowFacts?.unsafePullRequestTargetWorkflows?.length ?? 0) > 0
+      || (f.docs.workflowFacts?.usesPullRequestTarget === true && f.docs.workflowFacts?.checkoutsPrHead === true),
     text: '工作流用了 `pull_request_target` 又检出了提案那边的代码 —— 这等于让任意陌生人拿你的密钥跑他的代码',
     review: 'ci.pwn-request',
   },

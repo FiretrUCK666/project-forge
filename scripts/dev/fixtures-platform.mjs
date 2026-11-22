@@ -225,6 +225,10 @@ cases.push(['assets/readme/*.svg 与打包边界：SVG 安全结构与 isProduct
     'assets/readme/workflow-en.svg',
     'assets/readme/architecture.svg',
     'assets/readme/architecture-en.svg',
+    'assets/readme/skills-cycle.svg',
+    'assets/readme/skills-cycle-en.svg',
+    'assets/readme/docs-layers.svg',
+    'assets/readme/docs-layers-en.svg',
   ]
   for (const relPath of expectedSvgs) {
     if (!existsSync(join(SKILL_ROOT, relPath))) return `缺少视觉 SVG 卡片：${relPath}`

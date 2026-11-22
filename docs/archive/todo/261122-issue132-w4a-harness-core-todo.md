@@ -1,19 +1,19 @@
 ---
 kind: todo
 title: "Wave 1: Harness 共享内核原语与多技能门禁收口"
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: 132
 pr: null
 branch: feat/w4a-harness-core
-owner: plan-harness
+owner: impl-w4a
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-22
 task_id: w4a-harness-core
 planned_at: b6ea3f6a2134373f8139ea581465e8024639e5c6
-related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md
+related_prd: ../../prd/261122-w4-harness-and-evergreen-prd.md
 related_spec: ../specs/261122-issue132-w4a-harness-core-spec.md
 ---
 
@@ -29,7 +29,7 @@ related_spec: ../specs/261122-issue132-w4a-harness-core-spec.md
 | 任务编号 | `w4a-harness-core` |
 | 负责人 / 审批 | `plan-harness` / `false` |
 | 规划态 | `interactive`（已通过 R3 Critique 并批准） |
-| 关联文档 | [Wave 4 总控 PRD](../prd/261122-w4-harness-and-evergreen-prd.md) · [Wave 1 SPEC](../specs/261122-issue132-w4a-harness-core-spec.md) |
+| 关联文档 | [Wave 4 总控 PRD](../../prd/261122-w4-harness-and-evergreen-prd.md) · [Wave 1 SPEC](../specs/261122-issue132-w4a-harness-core-spec.md) |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch` 与所属 SPEC `C1..C5`。
 

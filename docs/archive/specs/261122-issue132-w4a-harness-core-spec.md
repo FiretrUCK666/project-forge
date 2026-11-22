@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: "Wave 1: Harness 共享内核原语与多技能门禁收口"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
 issue: 132
 pr: null
 branch: feat/w4a-harness-core
-owner: plan-harness
+owner: impl-w4a
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-harness-r3, round=3, sha=ff9958aa270e, summary=R3 independent critique pass: 0 blockers)"
-related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md
+related_prd: ../../prd/261122-w4-harness-and-evergreen-prd.md
 related_todo: ../todo/261122-issue132-w4a-harness-core-todo.md
 high_risk_paths: [kit/, scripts/dev/preflight.mjs, templates/, AGENTS.md]
 task_id: w4a-harness-core
@@ -23,7 +23,7 @@ scope_files: ["kit/skills/**", ".agents/skills/**", scripts/survey.mjs, scripts/
 
 # Wave 1: Harness 共享内核原语与多技能门禁收口 — 功能设计规范（SPEC）
 
-> 所属总控 PRD：[Wave 4 总控 PRD](../prd/261122-w4-harness-and-evergreen-prd.md) ｜ 配对 Todo：[w4a-harness-core Todo](../todo/261122-issue132-w4a-harness-core-todo.md)
+> 所属总控 PRD：[Wave 4 总控 PRD](../../prd/261122-w4-harness-and-evergreen-prd.md) ｜ 配对 Todo：[w4a-harness-core Todo](../todo/261122-issue132-w4a-harness-core-todo.md)
 >
 > 总控认领范围：认领总控 `C1`、`C2`、`C3`、`C4`、`C5`（含前后半程全部 20 条审计缺口及 `dev-govern` / `verify-tools` 缓存与漂移引擎升级）。
 

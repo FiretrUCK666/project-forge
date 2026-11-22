@@ -122,7 +122,7 @@ PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 ### 有界优化循环与先复现
 
 <p align="center">
-  <img src="assets/readme/skills-cycle.svg" alt="八个内置技能协作循环：dev-explore 到 dev-review 主链含最多 3 轮独立内审 Critique 与代码审查返工，外环衔接 dev-govern、dev-iterate 与 dev-verify-tools 并支持缺陷回流建单" width="100%">
+  <img src="assets/readme/skills-cycle.svg" alt="八个内置技能协作循环：上层交付链依次经过 dev-explore（只读勘察）、dev-plan（澄清规划与最多 3 轮独立内审 Critique）、dev-edit（改码门禁）、dev-flow（隔离与提审）与 dev-review（独立审查合入，含最多 3 轮代码审查返工）；下层外环从 dev-review 下来依次经过 dev-govern（体检与复盘）、dev-verify-tools（验证工具与地图）与 dev-iterate（盲区压测），再由 dev-iterate 通过「PoC 复现建单」回流至 dev-plan" width="100%">
 </p>
 
 在排查测试盲区、审查问题或做代码体检时，`dev-iterate`、`dev-review` 和 `dev-govern` 共用一条规则：**先跑通最小运行复现（`PoC-first`），确认问题真实存在后再进入修复流程**；无法复现的疑点直接判定为误报，不编写无效补丁。

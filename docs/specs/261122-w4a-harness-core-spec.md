@@ -18,7 +18,7 @@ related_todo: ../todo/261122-w4a-harness-core-todo.md
 high_risk_paths: [kit/, scripts/dev/preflight.mjs, templates/, AGENTS.md]
 task_id: w4a-harness-core
 depends_on: []
-scope_files: ["kit/skills/**", ".agents/skills/**", "scripts/survey.mjs", "scripts/backup.mjs", "scripts/equip.mjs", "scripts/compose-agents.mjs", "scripts/review.mjs", "templates/agents-project.md", "references/collaboration.md", "scripts/dev/fixtures-w4-harness.mjs", "scripts/dev/injections-data-w4-harness.mjs", "scripts/dev/fixtures-plan-wave.mjs", "scripts/dev/fixtures-flow-docs.mjs", "scripts/dev/fixtures-docs.mjs", "scripts/dev/fixtures-locate-intake.mjs", "scripts/dev/fixtures-flow-defects.mjs", "scripts/dev/injections-data-flow-defects.mjs", "scripts/dev/fixtures-empirical-cycle.mjs", "scripts/dev/fixtures-flow-cleanup.mjs", "scripts/dev/fixtures-flow-state.mjs", "scripts/dev/fixtures-flow.mjs", "scripts/dev/fixtures-verify-tools.mjs", "scripts/dev/fixtures-explore.mjs", "scripts/dev/cli-parity.mjs", "scripts/dev/exit-code-parity.mjs", "scripts/dev/preflight-kernel-parity.mjs"]
+scope_files: ["kit/skills/**", ".agents/skills/**", "scripts/survey.mjs", "scripts/backup.mjs", "scripts/equip.mjs", "scripts/compose-agents.mjs", "scripts/review.mjs", "templates/agents-project.md", "AGENTS.md", "references/collaboration.md", "scripts/dev/fixtures-*.mjs", "scripts/dev/injections-data-*.mjs", "scripts/dev/cli-parity.mjs", "scripts/dev/exit-code-parity.mjs", "scripts/dev/preflight-kernel-parity.mjs"]
 ---
 
 # Wave 1: Harness 共享内核原语与多技能门禁收口 — 功能设计规范（SPEC）
@@ -57,7 +57,7 @@ flowchart LR
 | `kit/skills/lib/handoff-package.mjs` | 改造 | 泛化支持 `explore`/`plan`/`critique`/`implementer`/`reviewer` 统一回执契约 |
 | `kit/skills/lib/verify-state.mjs`、`kit/skills/dev-govern/` | 改造 | Per-Slot 缓存隔离、`reconcile` 扫 `kit/`、修复 `checkDocChurnStaleness` |
 | `kit/skills/dev-{explore,plan,edit,flow,review,iterate}/` | 改造 | 薄接线调用共享原语，修复 `flow-batch.mjs` 丢依赖 BUG，严守 `<= 800L` 与双对拍 |
-| `scripts/dev/fixtures-w4-harness.mjs` (new) 等 | 新增 / 改造 | C1–C5 正反双向夹具、既有 12 份夹具 + `I313` 升级与 `I398–I409` 故障注入 |
+| `scripts/dev/fixtures-w4-harness.mjs` (new) 等 | 新增 / 改造 | C1–C5 正反双向夹具、既有受影响夹具与注入升级，以及 `I398–I409` 故障注入 |
 
 ## 一、背景与边界声明
 
@@ -91,7 +91,7 @@ flowchart LR
    - `scripts/survey.mjs --record`、`scripts/backup.mjs`、`scripts/equip.mjs`（仅新增 `<= 5` 行调用以保持 `<= 787L`）、`scripts/compose-agents.mjs` 写入步骤指针；`compose-agents.mjs --check` 与 `scripts/review.mjs` 对核心受管区做非空/非占位内容校验。
    - `doc-plan.mjs triage` 写下分流指纹，`flow start` / `determineWorkflowPolicy` 在触及路径或契约与先前 `Case 4` 分流冲突时阻断违规降档至 `Case 2`（`BLOCKED_TRIAGE_DOWNGRADE`）。
 2. **探索、规划闭环与 `flow batch plan` 丢依赖修复**：
-   - 移除 `flow-inspect.mjs` / `flow-explore.mjs` 的 `autoPopulateExplored`；`dev-explore` 写入真实探索回执（`source: 'dev-explore'`、`reusableModules`、`slicesCount`），`plan-exit-gate.mjs` 对新创建的 `caseType >= 3` 校验探索就绪（`BLOCKED_EXPLORE_REQUIRED`，对既有旧账本缺 `explored` 字段保留向后兼容或允许 `--allow-legacy-explored`? 不——旧账本缺字段按历史已开工豁免，仅对新建未探索拦截）。
+   - 移除 `flow-inspect.mjs` / `flow-explore.mjs` 的 `autoPopulateExplored`；`dev-explore` 写入真实探索回执（`source: 'dev-explore'`、`reusableModules`、`slicesCount`），`plan-exit-gate.mjs` 对新建 `caseType >= 3` 任务校验真实探索证据（否则阻断 `BLOCKED_EXPLORE_REQUIRED`；既有旧账本缺 `explored` 字段按历史已开工状态向后兼容）。
    - `evaluatePlanExitGate`（`plan-exit-gate.mjs`）：`caseType >= 3 && !allowBootstrap && bound.length === 0` 硬阻断 `BLOCKED_PLAN_NOT_READY`（退出码 `3`）。
    - `doc-templates.mjs` / `doc-plan.mjs`：新增 `--multi-spec`；`doc-slice-graph.mjs` 与 `plan-exit-gate.mjs` 自动将「被 >= 1 份活跃子 SPEC `related_prd` 指向」的 PRD 视为总控 PRD。
    - `doc-plan-ops.mjs`：`--skip-critique-reason` 对 `Case 4`（`spec`/`prd`）仅在 `hostMode === 'single-session'` 且同时传 `--human-approved` 时放行。
@@ -140,9 +140,9 @@ flowchart LR
 | `kit/skills/lib/harness-context.mjs` (new)、`session-state.mjs` (new)、`gate-enforcement.mjs` (new) | 新增 | 收敛角色/槽位锁、会话/探索/规划闭环与零降级门禁原语 | 全部 8 个技能与 `scripts/` |
 | `kit/skills/lib/{handoff-package,verify-state,plan-exit-gate,pending-decisions,doc-substantive,doc-slice-graph,empirical-artifacts,ledger,exit-codes}.mjs` | 修改 | 泛化 5 角色交接、per-slot 缓存、退出码注册与门禁对接 | `dev-plan`/`dev-flow`/`dev-review`/`dev-verify-tools` |
 | `kit/skills/dev-{explore,plan,edit,flow,review,iterate,verify-tools,govern}/` | 修改 | 薄接线、`printHelp()` 同步、`flow-batch.mjs` 修复、`SKILL.md` <= 180L/16KB | 全部 CLI 入口与 `.agents/skills/` |
-| `scripts/{survey,backup,equip,compose-agents,review}.mjs`、`templates/agents-project.md`、`references/collaboration.md` | 修改 | S1–S4 账本（`equip.mjs` <= +5L）、话题锚点、`Case 1` 一致化 | 治理入场与 `AGENTS.md` |
+| `scripts/{survey,backup,equip,compose-agents,review}.mjs`、`templates/agents-project.md`、`AGENTS.md`、`references/collaboration.md` | 修改 | S1–S4 账本（`equip.mjs` <= +5L）、话题锚点、`compose-agents.mjs .` 同步、`Case 1` 一致化 | 治理入场与 `AGENTS.md` |
 | `scripts/dev/{fixtures-w4-harness,injections-data-w4-harness}.mjs` (new)、`scripts/dev/{cli-parity,exit-code-parity,preflight-kernel-parity}.mjs` | 新增 / 修改 | C1–C5 正反夹具、`I398–I409` 注入与双对拍同步 | `preflight`、`fixtures`、`verify-injections` |
-| 既有 12 份夹具 + `I313`：`fixtures-{plan-wave,flow-docs,docs,locate-intake,flow-defects,empirical-cycle,flow-cleanup,flow-state,flow,verify-tools,explore}.mjs`、`injections-data-flow-defects.mjs` | 修改（升级断言） | 将旧松门禁断言升级为新硬门禁正反双向断言，补 `--owner`/`--agent`/`--preview-hash`/`--artifact` | `fixtures.mjs`、`verify-injections.mjs` |
+| 受新硬锁影响的既有 `scripts/dev/fixtures-*.mjs` 与 `injections-data-*.mjs`（含 `fixtures-{plan-wave,flow-docs,docs,locate-intake,flow-defects,empirical-cycle,flow-cleanup,flow-state,flow,verify-tools,explore,flow-explore-gate,e2e-gate,review-token,onboarding,lifecycle,kernel-dedup,doc-rules,edit-pyramid,parallel-dispatch,plan-wave-slices}.mjs` 及 `injections-data-{flow-defects,edit-pyramid,empirical-cycle,flow-explore,locate-intake,workflow}.mjs`） | 修改（升级断言） | 将旧松门禁/缺 `--agent`/`--owner`/`--preview-hash`/`--artifact`/缺 `multi_spec` 用例升级为新硬门禁正反双向断言（含 `I313`） | `fixtures.mjs`、`verify-injections.mjs` |
 
 ## 五、冻结的验收标准
 
@@ -152,7 +152,7 @@ flowchart LR
 - [ ] C2: `kit/skills/lib/session-state.mjs` (new) 落地（`draft` 复用 `session-orient.mjs` 不重造扫描）、`handoff-package.mjs` 泛化 5 角色、`doc-plan init` + `flow-batch.mjs` 修复 `planned` 账本丢依赖 BUG、`S1–S4` 写步骤账本、`flow start` 移除 `autoPopulateExplored`、`plan-exit-gate` 硬阻断 `bound.length === 0`、`buildSliceGraph` 自动纳管总控 PRD、`--skip-critique-reason` 限 `single-session + --human-approved`、全扫描 `PENDING_WORDS`、去黑名单锚点检查与 `PATH_PREFIX_RE` 含 `cmd` 与 `internal`，通过正反用例。
 - [ ] C3: `kit/skills/lib/gate-enforcement.mjs` (new) 落地且 `review-pack` 默认 `enforceGates: true`、Round 2+ `unmentionedFromPrev > 0` 禁 `pass`、UI 变更必附真实 `--artifact` 或 `--visual-blocked-reason`、`verify` 启用 `edit-gate --final` 且硬拦 `do-not-edit`、`check-empirical --cmd` 追加而非覆盖、`check-fault` 验真变更、停损解锁仍校 `headSha`、`cleanup` 校验 `previewHash` 与复用 `inspectBranchMergeState` 安全删分支、`dev-govern` 轻检默认开启、`iterate-cycle` 持久化进度，通过正反用例。
 - [ ] C4: `kit/skills/lib/verify-state.mjs` 实现 `(slotKey, treeHash)` 分槽缓存；`govern-audit.mjs reconcile` 补扫 `kit/` 并报告空 `docAnchor`/`verificationTools`/`testRefs`；`govern-docs.mjs checkDocChurnStaleness` 仅由权威长青文档重置滞后计数，通过正反用例。
-- [ ] C5: 8 技能接线与 `scripts/equip.mjs .` / `scripts/compose-agents.mjs .` 同步完成；所有 `.mjs <= 800L`、`AGENTS.md < 24576B`、`SKILL.md <= 200L/16384B`；既有 12 份夹具与 `I313` 升级完成，新增 `fixtures-w4-harness.mjs` (new) 与 `I398–I409`，全仓 `preflight` / `gap-coverage` / `fixtures` / `bench --strict-budget` / `verify-injections` / `cli-parity` / `exit-code-parity` 全绿。
+- [ ] C5: 8 技能接线与 `scripts/equip.mjs .` / `scripts/compose-agents.mjs .` 同步完成；所有 `.mjs <= 800L`、`AGENTS.md < 24576B`、`SKILL.md <= 200L/16384B`；受影响既有 `fixtures-*.mjs` 与 `injections-data-*.mjs`（含 `I313`）全部升级为新硬门禁正反双向断言，新增 `fixtures-w4-harness.mjs` (new) 与 `I398–I409`，全仓 `preflight` / `gap-coverage` / `fixtures` / `bench --strict-budget` / `verify-injections` / `cli-parity` / `exit-code-parity` 全绿。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -163,9 +163,10 @@ flowchart LR
 
 ## 七、上线与兼容策略
 
-- **向后兼容与既有测试升级**：历史已落盘账本缺少 `session-state.json`、`explored` 或 `previewHash` 历史字段时保留兼容读取；对依赖旧松门禁旁路的 12 份既有夹具（`fixtures-plan-wave.mjs`、`fixtures-flow-docs.mjs`、`fixtures-docs.mjs`、`fixtures-locate-intake.mjs`、`fixtures-flow-defects.mjs`、`fixtures-empirical-cycle.mjs`、`fixtures-flow-cleanup.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow.mjs`、`fixtures-verify-tools.mjs`、`fixtures-explore.mjs`）及 `I313`，一律重构为新硬门禁正反双向断言（仅强化、绝不弱化）。
+- **向后兼容与既有测试升级**：历史已落盘账本缺少 `session-state.json`、`explored` 或 `previewHash` 历史字段时保留兼容读取；对依赖旧松门禁旁路或省略 `--agent`/`--owner`/`--preview-hash`/`--artifact` 的既有 `scripts/dev/fixtures-*.mjs` 与 `scripts/dev/injections-data-*.mjs`（包括 `fixtures-plan-wave.mjs`、`fixtures-flow-docs.mjs`、`fixtures-docs.mjs`、`fixtures-locate-intake.mjs`、`fixtures-flow-defects.mjs`、`injections-data-flow-defects.mjs` `I313`、`fixtures-empirical-cycle.mjs`、`fixtures-flow-cleanup.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow.mjs`、`fixtures-verify-tools.mjs`、`fixtures-explore.mjs`、`fixtures-flow-explore-gate.mjs`、`fixtures-e2e-gate.mjs`、`fixtures-review-token.mjs`、`fixtures-onboarding.mjs`、`fixtures-lifecycle.mjs`、`fixtures-kernel-dedup.mjs`、`fixtures-doc-rules.mjs`、`fixtures-edit-pyramid.mjs`、`fixtures-parallel-dispatch.mjs`、`fixtures-plan-wave-slices.mjs` 等），一律重构为新硬门禁正反双向断言（仅强化、绝不弱化）。
 
 ## 澄清与补充记录
 
 - 已确认（2026-11-22 · user）：按 #519 指令确立 `w4a-harness-core` 为 Wave 1，覆盖 4 个共享内核原语、8 技能薄接线、`equip.mjs .` 同步及 `I398–I409` 故障注入，且不提前改写 Wave 2 独占的 `docs/TDD.md` 与 `docs/feature-map.json`。
-- 已确认（2026-11-22 · critic-r1）：采纳 `critic-harness` R1 四项评审意见——补齐 `single-session` / `local-only` / `Case 1` 放行边界与 `cli-parity`/`exit-code-parity`、纳入 12 份既有夹具与 `I313` 升级写域、补齐 `handoff-package.mjs` 泛化及 `session-orient.mjs` 边界、纳入 `flow batch plan` 丢依赖 BUG 修复并标明紧文件行数上限防护。
+- 已确认（2026-11-22 · critic-r1）：采纳 `critic-harness` R1 四项评审意见——补齐 `single-session` / `local-only` / `Case 1` 放行边界与 `cli-parity`/`exit-code-parity`、纳入既有夹具与 `I313` 升级写域、补齐 `handoff-package.mjs` 泛化及 `session-orient.mjs` 边界、纳入 `flow batch plan` 丢依赖 BUG 修复并标明紧文件行数上限防护。
+- 已确认（2026-11-22 · critic-r2）：采纳 `critic-harness-r2` R2 两项阻断修订——以 `scripts/dev/fixtures-*.mjs` / `injections-data-*.mjs` 全量盘点并纳入 `fixtures-{flow-explore-gate,e2e-gate,review-token,onboarding,lifecycle,kernel-dedup,doc-rules,edit-pyramid,parallel-dispatch,plan-wave-slices}.mjs` 等受影响夹具与注入，将 `AGENTS.md` 纳入 `w4a` `scope_files`，并消除 L94 草稿反问措辞。

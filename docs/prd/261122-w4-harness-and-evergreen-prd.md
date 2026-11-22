@@ -78,7 +78,7 @@ flowchart LR
 
 | 波次 | 切片 `task_id` | 认领验收条款 | `depends_on` | 独占写域摘要 |
 | --- | --- | --- | --- | --- |
-| Wave 1 | `w4a-harness-core` | `C1`、`C2`、`C3`、`C4`、`C5` | `[]` | `kit/skills/**`、`.agents/skills/**`、`scripts/{survey,equip,compose-agents,review}.mjs`、`templates/agents-project.md`、`references/collaboration.md`、`scripts/dev/*` |
+| Wave 1 | `w4a-harness-core` | `C1`、`C2`、`C3`、`C4`、`C5` | `[]` | `kit/skills/**`、`.agents/skills/**`、`scripts/{survey,backup,equip,compose-agents,review}.mjs`、`templates/agents-project.md`、`AGENTS.md`、`references/collaboration.md`、`scripts/dev/*` |
 | Wave 2 | `w4b-govern-evergreen` | `C6`、`C7` | `[w4a-harness-core]` | `docs/TDD.md`、`docs/feature-map.json`、`AGENTS.md`（与 `templates/agents-project.md` CI 校验行对齐） |
 
 ### 关键设计原则（不打补丁、只收敛原语）

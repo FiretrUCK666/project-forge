@@ -45,151 +45,151 @@
   <rect width="1200" height="490" fill="url(#paper-speck)"/>
 
   <g id="connectors">
-    <line x1="290" y1="202" x2="350" y2="202" stroke="#1B1E38" stroke-width="3.5"/>
-    <circle cx="290" cy="202" r="5" fill="#1E4DD8"/>
-    <circle cx="350" cy="202" r="5" fill="#1E4DD8"/>
+    <line x1="292" y1="204" x2="348" y2="204" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="292" cy="204" r="5" fill="#1E4DD8"/>
+    <circle cx="348" cy="204" r="5" fill="#1E4DD8"/>
 
-    <line x1="570" y1="202" x2="630" y2="202" stroke="#1B1E38" stroke-width="3.5"/>
-    <circle cx="570" cy="202" r="5" fill="#1E4DD8"/>
-    <circle cx="630" cy="202" r="5" fill="#1E4DD8"/>
+    <line x1="572" y1="204" x2="628" y2="204" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="572" cy="204" r="5" fill="#1E4DD8"/>
+    <circle cx="628" cy="204" r="5" fill="#1E4DD8"/>
 
-    <line x1="850" y1="202" x2="910" y2="202" stroke="#1B1E38" stroke-width="3.5"/>
-    <circle cx="850" cy="202" r="5" fill="#1E4DD8"/>
-    <circle cx="910" cy="202" r="5" fill="#1E4DD8"/>
+    <line x1="852" y1="204" x2="908" y2="204" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="852" cy="204" r="5" fill="#1E4DD8"/>
+    <circle cx="908" cy="204" r="5" fill="#1E4DD8"/>
   </g>
 
-  <!-- Stage 1 (cx=180, [96..264]): Layered Dossier + Slim L-Square + Translucent Magnifying Loupe -->
+  <!-- Stage 1 (cx=180, [98..262], y=[106..302], cy=204): Layered Dossier + Slim L-Square + Translucent Magnifying Loupe -->
   <g id="stage-1">
     <!-- Layered Blueprint Dossier -->
-    <rect x="124" y="130" width="112" height="144" fill="#1E4DD8"/>
-    <rect x="124" y="130" width="112" height="144" fill="url(#blueprint-grid)"/>
-    <rect x="112" y="116" width="114" height="146" fill="#F5F1E8" stroke="#1E4DD8" stroke-width="2.5"/>
-    <rect x="176" y="116" width="50" height="52" fill="url(#ht-indigo)"/>
-    <line x1="128" y1="146" x2="164" y2="146" stroke="#1E4DD8" stroke-width="3"/>
-    <line x1="128" y1="164" x2="178" y2="164" stroke="#1E4DD8" stroke-width="3"/>
-    <line x1="128" y1="182" x2="204" y2="182" stroke="#1E4DD8" stroke-width="3"/>
-    <line x1="128" y1="200" x2="194" y2="200" stroke="#1E4DD8" stroke-width="3"/>
+    <rect x="126" y="138" width="114" height="164" fill="#1E4DD8"/>
+    <rect x="126" y="138" width="114" height="164" fill="url(#blueprint-grid)"/>
+    <rect x="114" y="122" width="116" height="166" fill="#F5F1E8" stroke="#1E4DD8" stroke-width="2.5"/>
+    <rect x="178" y="122" width="52" height="54" fill="url(#ht-indigo)"/>
+    <line x1="130" y1="154" x2="166" y2="154" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="130" y1="174" x2="182" y2="174" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="130" y1="194" x2="206" y2="194" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="130" y1="214" x2="196" y2="214" stroke="#1E4DD8" stroke-width="3"/>
 
     <!-- Slim Ochre Drafting L-Square + Indigo Corner Bracket -->
-    <rect x="96" y="104" width="16" height="180" fill="#DDA027"/>
-    <rect x="96" y="104" width="134" height="16" fill="#DDA027"/>
-    <rect x="96" y="104" width="28" height="28" fill="#1B1E38"/>
-    <circle cx="110" cy="118" r="3.5" fill="#F5F1E8"/>
+    <rect x="98" y="106" width="16" height="196" fill="#DDA027"/>
+    <rect x="98" y="106" width="136" height="16" fill="#DDA027"/>
+    <rect x="98" y="106" width="28" height="28" fill="#1B1E38"/>
+    <circle cx="112" cy="120" r="3.5" fill="#F5F1E8"/>
 
-    <!-- Translucent Magnifying Loupe within [96..264] -->
+    <!-- Translucent Magnifying Loupe within [98..262] -->
     <g id="loupe">
-      <line x1="232" y1="238" x2="256" y2="262" stroke="#1B1E38" stroke-width="13" stroke-linecap="round"/>
-      <line x1="244" y1="250" x2="256" y2="262" stroke="#1E4DD8" stroke-width="13" stroke-linecap="round"/>
-      <circle cx="206" cy="212" r="40" fill="#1B1E38"/>
-      <circle cx="206" cy="212" r="34" fill="#1E4DD8"/>
-      <circle cx="206" cy="212" r="26" fill="#F5F1E8"/>
-      <circle cx="206" cy="212" r="26" fill="#DDA027" fill-opacity="0.72"/>
-      <path d="M 188 202 A 19 19 0 0 1 218 194" fill="none" stroke="#F5F1E8" stroke-width="3.5" stroke-linecap="round"/>
+      <line x1="232" y1="254" x2="255.5" y2="277.5" stroke="#1B1E38" stroke-width="13" stroke-linecap="round"/>
+      <line x1="244" y1="266" x2="255.5" y2="277.5" stroke="#1E4DD8" stroke-width="13" stroke-linecap="round"/>
+      <circle cx="206" cy="228" r="40" fill="#1B1E38"/>
+      <circle cx="206" cy="228" r="34" fill="#1E4DD8"/>
+      <circle cx="206" cy="228" r="26" fill="#F5F1E8"/>
+      <circle cx="206" cy="228" r="26" fill="#DDA027" fill-opacity="0.72"/>
+      <path d="M 188 218 A 19 19 0 0 1 218 210" fill="none" stroke="#F5F1E8" stroke-width="3.5" stroke-linecap="round"/>
     </g>
   </g>
 
-  <!-- Stage 2 (cx=460, [376..544]): Calibration Grid + Checkmark -->
+  <!-- Stage 2 (cx=460, [378..542], y=[106..302], cy=204): Calibration Grid + Checkmark -->
   <g id="stage-2">
-    <!-- Outer bi-color ruler frame (168x168 centered at 460,202) -->
-    <rect x="376" y="118" width="168" height="168" fill="#1E4DD8"/>
-    <polygon points="460,118 544,118 544,286 460,286" fill="#DDA027"/>
+    <!-- Outer bi-color ruler frame (164x196 centered at 460,204) -->
+    <rect x="378" y="106" width="164" height="196" fill="#1E4DD8"/>
+    <polygon points="460,106 542,106 542,302 460,302" fill="#DDA027"/>
     <!-- Inner 4x4 grid backing -->
-    <rect x="398" y="140" width="124" height="124" fill="#F5F1E8"/>
-    <line x1="429" y1="140" x2="429" y2="264" stroke="#DDA027" stroke-width="3"/>
-    <line x1="460" y1="140" x2="460" y2="264" stroke="#1E4DD8" stroke-width="3"/>
-    <line x1="491" y1="140" x2="491" y2="264" stroke="#DDA027" stroke-width="3"/>
-    <line x1="398" y1="171" x2="522" y2="171" stroke="#1E4DD8" stroke-width="3"/>
-    <line x1="398" y1="202" x2="522" y2="202" stroke="#DDA027" stroke-width="3"/>
-    <line x1="398" y1="233" x2="522" y2="233" stroke="#DDA027" stroke-width="3"/>
-    <rect x="376" y="130" width="13" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="142" width="8" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="154" width="13" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="166" width="8" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="178" width="13" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="190" width="8" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="202" width="13" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="214" width="8" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="226" width="13" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="238" width="8" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="250" width="13" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="262" width="8" height="2.2" fill="#F5F1E8"/>
-    <rect x="376" y="274" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="400" y="128" width="120" height="152" fill="#F5F1E8"/>
+    <line x1="430" y1="128" x2="430" y2="280" stroke="#DDA027" stroke-width="3"/>
+    <line x1="460" y1="128" x2="460" y2="280" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="490" y1="128" x2="490" y2="280" stroke="#DDA027" stroke-width="3"/>
+    <line x1="400" y1="166" x2="520" y2="166" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="400" y1="204" x2="520" y2="204" stroke="#DDA027" stroke-width="3"/>
+    <line x1="400" y1="242" x2="520" y2="242" stroke="#DDA027" stroke-width="3"/>
+    <rect x="378" y="120" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="132" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="144" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="156" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="168" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="180" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="192" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="204" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="216" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="228" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="240" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="252" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="264" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="276" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="288" width="13" height="2.2" fill="#F5F1E8"/>
     <!-- Bold Two-Tone Vermilion + Deep Indigo Checkmark -->
-    <polygon points="416,204 432,188 458,214 442,230" fill="#D93829"/>
-    <polygon points="442,230 524,146 540,162 458,246" fill="#1B1E38"/>
-    <polygon points="442,230 460,212 474,226 458,246" fill="#B8421B"/>
+    <polygon points="414,206 430,190 456,216 440,232" fill="#D93829"/>
+    <polygon points="440,232 522,148 538,164 456,248" fill="#1B1E38"/>
+    <polygon points="440,232 458,214 472,228 456,248" fill="#B8421B"/>
   </g>
 
-  <!-- Stage 3 (cx=740, [663..817]): Split Vermilion/Ochre Zipper Archive Capsule + Dashed Safety Rollback Arc -->
+  <!-- Stage 3 (cx=740, [658..822], y=[106..302], cy=204): Split Vermilion/Ochre Zipper Archive Capsule + Dashed Safety Rollback Arc -->
   <g id="stage-3">
     <!-- Overhead Dashed Safety Return Arc -->
-    <path d="M 847 106 C 813 42, 661 42, 623 118" fill="none" stroke="#D93829" stroke-width="3" stroke-dasharray="10 7"/>
-    <polygon points="617,127 631,116 618,110" fill="#D93829"/>
+    <path d="M 832 106 C 804 52, 676 52, 648 112" fill="none" stroke="#D93829" stroke-width="3" stroke-dasharray="10 7"/>
+    <polygon points="642,122 656,112 643,106" fill="#D93829"/>
 
     <!-- Split Capsule Body (rx=44) -->
     <clipPath id="capsule-clip">
-      <rect x="663" y="96" width="154" height="214" rx="44"/>
+      <rect x="658" y="106" width="164" height="196" rx="44"/>
     </clipPath>
     <g clip-path="url(#capsule-clip)">
-      <rect x="663" y="96" width="77" height="214" fill="#D93829"/>
-      <rect x="740" y="96" width="77" height="214" fill="#DDA027"/>
-      <rect x="663" y="218" width="77" height="92" fill="url(#ht-indigo)"/>
-      <rect x="663" y="96" width="154" height="28" fill="#1B1E38" fill-opacity="0.12"/>
+      <rect x="658" y="106" width="82" height="196" fill="#D93829"/>
+      <rect x="740" y="106" width="82" height="196" fill="#DDA027"/>
+      <rect x="658" y="218" width="82" height="84" fill="url(#ht-indigo)"/>
+      <rect x="658" y="106" width="164" height="26" fill="#1B1E38" fill-opacity="0.12"/>
     </g>
     <!-- Curved open upper zipper track + central teeth -->
-    <path d="M 663 134 L 711 134 Q 735 134 740 152" fill="none" stroke="#1B1E38" stroke-width="7"/>
-    <path d="M 817 134 L 769 134 Q 745 134 740 152" fill="none" stroke="#1B1E38" stroke-width="7"/>
-    <rect x="728" y="136" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="142" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="149" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="155" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="162" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="168" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="175" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="181" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="188" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="194" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="201" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="207" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="214" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="220" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="227" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="233" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="240" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="246" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="253" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="259" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="266" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="272" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="279" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="285" width="11" height="6" fill="#1B1E38"/>
-    <rect x="728" y="292" width="11" height="6" fill="#1B1E38"/>
-    <rect x="741" y="298" width="11" height="6" fill="#1B1E38"/>
+    <path d="M 658 140 L 710 140 Q 735 140 740 158" fill="none" stroke="#1B1E38" stroke-width="7"/>
+    <path d="M 822 140 L 770 140 Q 745 140 740 158" fill="none" stroke="#1B1E38" stroke-width="7"/>
+    <rect x="728" y="144" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="150" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="157" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="163" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="170" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="176" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="183" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="189" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="196" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="202" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="209" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="215" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="222" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="228" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="235" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="241" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="248" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="254" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="261" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="267" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="274" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="280" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="287" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="293" width="11" height="6" fill="#1B1E38"/>
     <!-- Sculpted Zipper Pull -->
-    <rect x="729" y="142" width="22" height="22" rx="4" fill="#1B1E38"/>
-    <rect x="731" y="156" width="18" height="32" rx="5" fill="#DDA027" stroke="#1B1E38" stroke-width="3"/>
-    <rect x="737" y="168" width="6" height="12" rx="2" fill="#1B1E38"/>
+    <rect x="729" y="148" width="22" height="22" rx="4" fill="#1B1E38"/>
+    <rect x="731" y="162" width="18" height="32" rx="5" fill="#DDA027" stroke="#1B1E38" stroke-width="3"/>
+    <rect x="737" y="174" width="6" height="12" rx="2" fill="#1B1E38"/>
   </g>
 
-  <!-- Stage 4 (cx=1020, [938..1104]): Cobalt Tabbed Folio + Plumb-Bob + Rosette Wax Seal -->
+  <!-- Stage 4 (cx=1020, [938..1102], y=[106..302], cy=204): Cobalt Tabbed Folio + Plumb-Bob + Rosette Wax Seal -->
   <g id="stage-4">
     <!-- Folio Tabs and Main Cover -->
-    <rect x="1086" y="120" width="18" height="44" rx="4" fill="#1E4DD8"/>
-    <rect x="1086" y="176" width="18" height="44" rx="4" fill="#153499"/>
-    <rect x="938" y="100" width="150" height="202" rx="6" fill="#1E4DD8"/>
-    <rect x="938" y="100" width="22" height="202" rx="3" fill="url(#ht-indigo-dense)"/>
-    <rect x="946" y="106" width="124" height="6" fill="#F5F1E8"/>
-    <rect x="946" y="290" width="124" height="6" fill="#F5F1E8"/>
+    <rect x="1084" y="126" width="18" height="44" rx="4" fill="#1E4DD8"/>
+    <rect x="1084" y="182" width="18" height="44" rx="4" fill="#153499"/>
+    <rect x="938" y="106" width="146" height="196" rx="6" fill="#1E4DD8"/>
+    <rect x="938" y="106" width="22" height="196" rx="3" fill="url(#ht-indigo-dense)"/>
+    <rect x="946" y="112" width="122" height="6" fill="#F5F1E8"/>
+    <rect x="946" y="290" width="122" height="6" fill="#F5F1E8"/>
 
     <!-- Plumb-Bob Hanging from Top Cord -->
-    <line x1="994" y1="68" x2="994" y2="122" stroke="#1B1E38" stroke-width="4"/>
-    <circle cx="994" cy="130" r="12" fill="#DDA027"/>
-    <polygon points="994,140 966,174 994,258" fill="#DDA027"/>
-    <polygon points="994,140 1022,174 994,258" fill="#1B1E38"/>
-    <line x1="966" y1="174" x2="1022" y2="174" stroke="#1E4DD8" stroke-width="2.5"/>
+    <line x1="992" y1="74" x2="992" y2="126" stroke="#1B1E38" stroke-width="4"/>
+    <circle cx="992" cy="134" r="12" fill="#DDA027"/>
+    <polygon points="992,144 964,178 992,262" fill="#DDA027"/>
+    <polygon points="992,144 1020,178 992,262" fill="#1B1E38"/>
+    <line x1="964" y1="178" x2="1020" y2="178" stroke="#1E4DD8" stroke-width="2.5"/>
 
     <!-- Scalloped Vermilion Rosette Wax Seal -->
-    <g transform="translate(1050, 244)">
+    <g transform="translate(1046, 246)">
       <circle cx="0" cy="-24" r="9" fill="#D93829"/>
       <circle cx="17" cy="-17" r="9" fill="#D93829"/>
       <circle cx="24" cy="0" r="9" fill="#D93829"/>

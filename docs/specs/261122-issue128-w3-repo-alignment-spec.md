@@ -182,13 +182,13 @@ flowchart LR
 
 <!-- section: acceptance -->
 <!-- criteria:start -->
-- [ ] C1: 修复模板水合与门禁矛盾（`templates/agents-project.md:113` 与 `equip-bootstrap.mjs` 正则一致、`templates/ci-release.yml` 与 `equip-ci.mjs` 水合与裸标签适配、`templates/ci-check.yml` 按生态水合避免失效 `setup-node@v4`、`docs-tdd.md` 去除误标 `optional`/删 `build` 矛盾并改 `security` 为二级标题、`docs-prd.md`/`docs-spec.md`/`doc-plan.mjs:169` 修正字段与 `quick-test: none` 兜底），通过 `node scripts/dev/preflight.mjs`。
-- [ ] C2: 清除全仓隐性 GitHub 默认（`scripts/review.mjs` 按平台能力对 `collab.*` 与 `release.absent` 分流并保持 `local-only` 的 `ci.absent` 契约、`registry.mjs` 无远端返回 `none` 全 `false` 能力表、`ledger.mjs`/`task-backend.mjs`/`flow-*`/`review-sync.mjs` 清除 `?? 'github'`、`workflow-policy-next.mjs`/`govern-*`/`equip-bootstrap.mjs`/`profile.mjs`/`static-gates.mjs` 清除写死提示），通过 `local-only` / `generic-git` / `github` 三态正反用例。
-- [ ] C3: 双端平台注册表与共享原语彻底收敛至 `kit/skills/lib/`（拆分 `platform-registry.mjs` (new) 保持 `platform.mjs <= 800L`，统一 8 键能力/`.trim().toLowerCase()`/`file://`，收敛 `canonicalPath`/`samePath`/`posixPath`/`isMainModule`/`writeAtomic`/`VERIFY_EXIT`/`LIKELY_DEFAULT_BRANCHES`/`summarizeSkillDescription`/`DEFAULT_KIT_SKILLS_DIR`/`parseRemoteUrlHost`/`githubRepoPath` 及 `kit/` 内部重复常量，`SKILL_INTERNAL_RE` 补 `equip-ci.mjs`，`cli-parity.mjs` 扩至 12 入口并统一 `doc-locate.mjs`/`repo-map.mjs`/`govern-retro.mjs`/`flow-intake.mjs` 的 `printHelp()`），并通过 `node scripts/dev/preflight-kernel-parity.mjs`。
-- [ ] C4: 全量对齐 `templates/`、`.github/` 与根目录（`templates/readme.md`/`agents-project.md`/`contributing.md`/`releasing.md`/`pull-request-template.md`/`issue-*.md`/`githooks-pre-push.sh`、`.github/ISSUE_TEMPLATE/*` 与 `issue-template-hydrate.mjs` 缺字段不留裸列表/空标题且 `feature_request.md` 补 `kit/`、`.github/workflows/check.yml`、`CONTRIBUTING.md`、`RELEASING.md`、`.gitignore`），通过 `checkTemplates` 与 `checkOwnInstances` 且不修改 `README.md`/`README.en.md`/`assets/readme/*.svg`。
-- [ ] C5: 全量对齐 `references/`（10 份）、8 份 `kit/skills/*/SKILL.md`、`SKILL.md`（`<= 200L / 16384B`）、`AGENTS.md`（`< 24576B`）、`docs/TDD.md` 与 `docs/feature-map.json`，跑通 `node scripts/equip.mjs . --check` 与 `node scripts/compose-agents.mjs . --check`。
-- [ ] C6: 清理全仓 7 处 `manifest v2 -> v3`、漂移硬编码计数（含 `preflight-suite-checks.mjs` 动态 SVG 统计）、`bench.mjs` `Wave 4`、`survey-plan.mjs` 历史快照与夹具文件头阶段立碑注释（完整保留 `DOC_REGRESSION_ANCHOR_LOST`/`M0-M5` 等回归向量）。
-- [ ] C7: 在 `scripts/dev/fixtures-repo-alignment.mjs` (new) 与 `scripts/dev/injections-data-repo-alignment.mjs` (new) 落盘 C1–C6 正反双向断言与 `I386–I397` 故障注入，全部 `.mjs <= 800L` 且通过 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`review.mjs .`、`govern-audit.mjs audit .`、`git archive` 包清单检查与 `verify-injections.mjs --only I386`..`I397`（及全量门禁）。
+- [x] C1: 修复模板水合与门禁矛盾（`templates/agents-project.md:113` 与 `equip-bootstrap.mjs` 正则一致、`templates/ci-release.yml` 与 `equip-ci.mjs` 水合与裸标签适配、`templates/ci-check.yml` 按生态水合避免失效 `setup-node@v4`、`docs-tdd.md` 去除误标 `optional`/删 `build` 矛盾并改 `security` 为二级标题、`docs-prd.md`/`docs-spec.md`/`doc-plan.mjs:169` 修正字段与 `quick-test: none` 兜底），通过 `node scripts/dev/preflight.mjs`。
+- [x] C2: 清除全仓隐性 GitHub 默认（`scripts/review.mjs` 按平台能力对 `collab.*` 与 `release.absent` 分流并保持 `local-only` 的 `ci.absent` 契约、`registry.mjs` 无远端返回 `none` 全 `false` 能力表、`ledger.mjs`/`task-backend.mjs`/`flow-*`/`review-sync.mjs` 清除 `?? 'github'`、`workflow-policy-next.mjs`/`govern-*`/`equip-bootstrap.mjs`/`profile.mjs`/`static-gates.mjs` 清除写死提示），通过 `local-only` / `generic-git` / `github` 三态正反用例。
+- [x] C3: 双端平台注册表与共享原语彻底收敛至 `kit/skills/lib/`（拆分 `platform-registry.mjs` (new) 保持 `platform.mjs <= 800L`，统一 8 键能力/`.trim().toLowerCase()`/`file://`，收敛 `canonicalPath`/`samePath`/`posixPath`/`isMainModule`/`writeAtomic`/`VERIFY_EXIT`/`LIKELY_DEFAULT_BRANCHES`/`summarizeSkillDescription`/`DEFAULT_KIT_SKILLS_DIR`/`parseRemoteUrlHost`/`githubRepoPath` 及 `kit/` 内部重复常量，`SKILL_INTERNAL_RE` 补 `equip-ci.mjs`，`cli-parity.mjs` 扩至 12 入口并统一 `doc-locate.mjs`/`repo-map.mjs`/`govern-retro.mjs`/`flow-intake.mjs` 的 `printHelp()`），并通过 `node scripts/dev/preflight-kernel-parity.mjs`。
+- [x] C4: 全量对齐 `templates/`、`.github/` 与根目录（`templates/readme.md`/`agents-project.md`/`contributing.md`/`releasing.md`/`pull-request-template.md`/`issue-*.md`/`githooks-pre-push.sh`、`.github/ISSUE_TEMPLATE/*` 与 `issue-template-hydrate.mjs` 缺字段不留裸列表/空标题且 `feature_request.md` 补 `kit/`、`.github/workflows/check.yml`、`CONTRIBUTING.md`、`RELEASING.md`、`.gitignore`），通过 `checkTemplates` 与 `checkOwnInstances` 且不修改 `README.md`/`README.en.md`/`assets/readme/*.svg`。
+- [x] C5: 全量对齐 `references/`（10 份）、8 份 `kit/skills/*/SKILL.md`、`SKILL.md`（`<= 200L / 16384B`）、`AGENTS.md`（`< 24576B`）、`docs/TDD.md` 与 `docs/feature-map.json`，跑通 `node scripts/equip.mjs . --check` 与 `node scripts/compose-agents.mjs . --check`。
+- [x] C6: 清理全仓 7 处 `manifest v2 -> v3`、漂移硬编码计数（含 `preflight-suite-checks.mjs` 动态 SVG 统计）、`bench.mjs` `Wave 4`、`survey-plan.mjs` 历史快照与夹具文件头阶段立碑注释（完整保留 `DOC_REGRESSION_ANCHOR_LOST`/`M0-M5` 等回归向量）。
+- [x] C7: 在 `scripts/dev/fixtures-repo-alignment.mjs` (new) 与 `scripts/dev/injections-data-repo-alignment.mjs` (new) 落盘 C1–C6 正反双向断言与 `I386–I397` 故障注入，全部 `.mjs <= 800L` 且通过 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`review.mjs .`、`govern-audit.mjs audit .`、`git archive` 包清单检查与 `verify-injections.mjs --only I386`..`I397`（及全量门禁）。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -209,6 +209,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：待实现阶段填写。
-- **与草案的差异**：待实现阶段填写。
-- **关联同步文件**：待实现阶段填写。
+- **实际落地摘要**：已完整实施 C1–C7（修复模板水合与生态适配、清除全仓 `generic-git`/`local-only` 隐性 GitHub 默认、拆分 `kit/skills/lib/platform-registry.mjs` 并收敛 29 项跨层原语与 12 入口 `cli-parity`、同步 `templates/`/`.github/`/10 份 `references/`/8 份技能 `SKILL.md`/`docs/TDD.md`/`docs/feature-map.json`、清理 `manifest v2` 与漂移计数及夹具头立碑注释、补齐 `fixtures-repo-alignment.mjs` 与 `I386–I397` 故障注入）。
+- **与草案的差异**：同步修正了 `kit/skills/dev-plan/scripts/doc-audit-helpers.mjs` 对行内反引号代码的占位误报（保持 `PLACEHOLDER_TEXT_RE` 语义并免误伤规格文本），并扩充 `equip-ci.mjs` `--dry-run --json` 返回 `content` 供确定性水合校验。
+- **关联同步文件**：已执行 `node scripts/equip.mjs .` 同步 `.agents/skills/`，执行 `node scripts/compose-agents.mjs .` 刷新 `AGENTS.md`（`22883B < 24576B`），并已并入 `origin/main`（`2c99d70c`）且保持 `README.md`/`README.en.md`/`assets/readme/*.svg` 零改动。

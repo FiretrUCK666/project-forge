@@ -11,7 +11,7 @@ import { join, resolve } from 'node:path'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { execSafe, execShellCommand, gitDiffNameStatusZ, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { enforceSlotBoundary, resolveHostMode, resolveNonEmptyActor } from '../../lib/harness-context.mjs'
-import { hasExploredEvidence, rememberPreviousImplementer } from '../../lib/ledger.mjs'
+import { hasExploredEvidence, rememberPreviousImplementer, verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import {
   loadForgeHooksConfig, resolveStageHookCommands, scanExtensionSlotHazards,
 } from '../../lib/overlay.mjs'
@@ -23,14 +23,42 @@ import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i
 
 /** 强制校验 submit/lifecycle 的 `--agent` 权属与认领者匹配，禁止协调者/审查者代提交。 */
-export function assertSubmitOwnership(ledger, opts = {}) {
+export function assertSubmitOwnership(ledger, opts = {}, { mainRoot = null, docRoot = null } = {}) {
   const rawExplicitAgent = String(opts.agent ?? '').trim()
   const hostMode = resolveHostMode(opts)
   const humanApproved = Boolean(opts['human-approved'])
+  const checkProvenanceForSubmit = (actorToCheck) => {
+    const rootForMain = mainRoot ?? opts._mainRoot ?? null
+    if (!rootForMain) return null
+    const docRels = [ledger?.specFile, ledger?.archivedSpecFile, ledger?.todoFile, ledger?.archivedTodoFile, ledger?.prdFile, ledger?.archivedPrdFile].filter(Boolean)
+    if (docRels.length === 0) return null
+    const rootForDocs = docRoot ?? opts._implRoot ?? rootForMain
+    const effDocRoot = docRels.some((r) => existsSync(resolve(rootForDocs, r))) ? rootForDocs : rootForMain
+    const provRes = verifyPlanningProvenance({
+      mainRoot: rootForMain,
+      docRoot: effDocRoot,
+      docRels,
+      taskId: ledger?.taskId ?? null,
+      ledger,
+      implementerId: actorToCheck,
+      hostMode,
+      humanApproved,
+      isGit: existsSync(resolve(rootForMain, '.git')),
+    })
+    return provRes.blocked
+      ? { ok: false, code: provRes.code, exitCode: provRes.exitCode ?? EXIT.FACT, message: provRes.reason }
+      : null
+  }
   if (!rawExplicitAgent || /^(?:null|undefined|unknown|none|<[^>]+>)$/i.test(rawExplicitAgent)) {
-    if (opts.requireAgent === false) return { ok: true }
+    if (opts.requireAgent === false) {
+      const provErr = checkProvenanceForSubmit(null)
+      return provErr ?? { ok: true }
+    }
     const waived = resolveNonEmptyActor([], { role: 'submit', hostMode, humanApproved, allowSingleSessionWaive: true })
-    if (waived.ok) return { ok: true, waived: true, actor: waived.actor }
+    if (waived.ok) {
+      const provErr = checkProvenanceForSubmit(waived.actor)
+      return provErr ?? { ok: true, waived: true, actor: waived.actor }
+    }
     return {
       ok: false,
       code: 'BLOCKED_MISSING_ACTOR',
@@ -58,6 +86,8 @@ export function assertSubmitOwnership(ledger, opts = {}) {
       }
     }
     // 覆写之前先记账：历史集合是自审判定的唯一依据，不记就等于没换过人。
+    const provErr = checkProvenanceForSubmit(rawExplicitAgent)
+    if (provErr) return provErr
     const superseded = rememberPreviousImplementer(ledger, rawExplicitAgent)
     ledger.previousImplementers = superseded
     ledger.agent = rawExplicitAgent
@@ -96,6 +126,8 @@ export function assertSubmitOwnership(ledger, opts = {}) {
       }
     }
   }
+  const provErr = checkProvenanceForSubmit(rawExplicitAgent)
+  if (provErr) return provErr
   return { ok: true }
 }
 

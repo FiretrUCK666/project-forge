@@ -4,12 +4,16 @@
  * doc-code parity checker, and 6-lock convergence ledger recorder.
  *
  * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
+ *
+ * 子命令：
+ *   pack | record | override | check-empirical | check-fault
  */
 
 import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
+import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { gitRun, isMainModule, posixPath, readTextSafe, resolveRepoRoots } from '../../lib/git.mjs'
@@ -41,13 +45,14 @@ import {
   evaluatePrIntakeGuard, isExternalPrTaskLedger, resolvePrForReviewPack,
 } from './review-pr.mjs'
 
-const SUBCOMMANDS = ['pack', 'record', 'override', 'check-empirical', 'check-fault']
+const SUBCOMMANDS = subcommandNamesFor('review-pack')
 
 function printHelp() {
   process.stdout.write([
     '用法：node review-pack.mjs [pack|record|override|check-empirical|check-fault] [dir] [options]',
     '',
     'Modes:',
+    '  pack                          Build context-isolated review pack (default mode)',
     '  --local                       Review working tree + staged uncommitted changes',
     '  --staged                      Review staged changes only',
     '  --base <ref>                  Review HEAD against <ref> (base...HEAD)',
@@ -335,7 +340,7 @@ async function main(argv = process.argv.slice(2)) {
         'reason', 'e2e-evidence', 'visual-evidence', 'visual-blocked-reason', 'agent', 'evidence',
       ],
       multiFlags: ['cmd', 'artifact', 'must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
-      usageHint: 'review-pack.mjs [pack|record|override|check-empirical|check-fault] [dir] [options]',
+      usageHint: `review-pack.mjs [${SUBCOMMANDS.join('|')}] [dir] [options]`,
     })
     validatePackCliArgs(cli, SUBCOMMANDS)
   } catch (err) {
@@ -516,7 +521,7 @@ async function main(argv = process.argv.slice(2)) {
       reviewRoot, mainRoot, headSha, diff, statusEntries: dirtyEntries,
     })
     const empiricalRequirements = computeEmpiricalRequirements({
-      diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext,
+      diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext, repoRoot: reviewRoot,
     })
     const evalGateArgs = {
       gitDir: roots.gitDir, mode, task, round, prNo, baseRef, reviewRoot, mainRoot, headSha,
@@ -533,20 +538,24 @@ async function main(argv = process.argv.slice(2)) {
         && empiricalGate.missingSteps.every((s) => s === 'visual-check' || s === 'e2e-observation')
       const blockCode = empiricalGate.dirtyFaultResidue
         ? 'BLOCKED_DIRTY_FAULT_RESIDUE'
-        : (empiricalGate.shallowE2eEvidence
-            ? 'BLOCKED_SHALLOW_E2E_EVIDENCE'
-            : (empiricalGate.artifactBlock
-                ? empiricalGate.artifactBlock.code
-                : (onlyVisualMissing ? 'BLOCKED_VISUAL_EVIDENCE_REQUIRED' : 'BLOCKED_EMPIRICAL_FIRST')))
+        : (empiricalGate.staticDocBlock
+            ? empiricalGate.staticDocBlock.code
+            : (empiricalGate.shallowE2eEvidence
+                ? 'BLOCKED_SHALLOW_E2E_EVIDENCE'
+                : (empiricalGate.artifactBlock
+                    ? empiricalGate.artifactBlock.code
+                    : (onlyVisualMissing ? 'BLOCKED_VISUAL_EVIDENCE_REQUIRED' : 'BLOCKED_EMPIRICAL_FIRST'))))
       const msg = blockCode === 'BLOCKED_DIRTY_FAULT_RESIDUE'
         ? 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作位存在未还原复绿的故障注入残留，禁止输出 --include-diff。'
-        : (blockCode === 'BLOCKED_SHALLOW_E2E_EVIDENCE'
-            ? `${empiricalGate.shallowE2eEvidence.code}: ${empiricalGate.shallowE2eEvidence.reason}`
-            : (empiricalGate.artifactBlock
-                ? empiricalGate.artifactBlock.reason
-                : (onlyVisualMissing && empiricalGate.visualBlock
-                    ? empiricalGate.visualBlock.reason
-                    : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的业务流实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`)))
+        : (blockCode === 'BLOCKED_STATIC_DOC_CHECK_FAILED'
+            ? empiricalGate.staticDocBlock.reason
+            : (blockCode === 'BLOCKED_SHALLOW_E2E_EVIDENCE'
+                ? `${empiricalGate.shallowE2eEvidence.code}: ${empiricalGate.shallowE2eEvidence.reason}`
+                : (empiricalGate.artifactBlock
+                    ? empiricalGate.artifactBlock.reason
+                    : (onlyVisualMissing && empiricalGate.visualBlock
+                        ? empiricalGate.visualBlock.reason
+                        : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的业务流实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`))))
       const payload = {
         status: blockCode, code: blockCode, exitCode: EXIT.FACT, mode, round, headSha,
         diffScope, workspaceFingerprint, missingSteps: empiricalGate.missingSteps,

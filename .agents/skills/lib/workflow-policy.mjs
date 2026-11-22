@@ -14,7 +14,7 @@ import { evaluateStoredVisualEvidence, precheckVisualAndArtifacts } from './empi
 import { validateE2eEvidenceText } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
-import { isProfileExplicitNone, resolveTierCommand } from './profile.mjs'
+import { discoverWorkspacePackages, isProfileExplicitNone, resolveTierCommand } from './profile.mjs'
 import { GATE_WORKFLOW_FILE_RE, CODE_EXT_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
 import {
   evaluateNextState,
@@ -475,4 +475,165 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
     }
   }
   return { ok: true, code: null, exitCode: EXIT.OK }
+}
+
+const PURE_DOC_ASSET_RE = /^(?:docs\/|README|CHANGELOG|LICENSE|\.gitignore)|\.(?:md|mdx|txt|png|jpg|jpeg|svg|webp)$/i
+
+function inferFileStack(relFile) {
+  const f = posixPath(String(relFile ?? '')).replace(/^\.\//, '')
+  const low = f.toLowerCase()
+  const base = basename(low)
+  if (!f || PURE_DOC_ASSET_RE.test(f)) return 'doc'
+  if (/\.(?:mjs|cjs|js|jsx|ts|tsx|mts|cts|vue|svelte|astro)$/.test(low)
+    || /^(?:package(?:-lock)?\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|yarn\.lock|bun\.lockb?|tsconfig(?:\.[^.]+)?\.json|vite\.config\.[^/]+|vitest\.config\.[^/]+)$/.test(base)) {
+    return 'node'
+  }
+  if (/\.(?:py|pyi|pyx)$/.test(low) || /^(?:pyproject\.toml|setup\.py|setup\.cfg|pipfile|uv\.lock|poetry\.lock)$/.test(base) || /^requirements.*\.txt$/.test(base)) {
+    return 'python'
+  }
+  if (/\.rs$/.test(low) || base === 'cargo.toml' || base === 'cargo.lock') return 'rust'
+  if (/\.go$/.test(low) || base === 'go.mod' || base === 'go.sum' || base === 'go.work') return 'go'
+  if (/\.(?:java|kt|kts|groovy|scala)$/.test(low) || base === 'pom.xml' || /^build\.gradle(?:\.kts)?$/.test(base)) return 'java'
+  if (/\.rb$/.test(low) || base === 'gemfile' || base === 'rakefile') return 'ruby'
+  if (/\.(?:cs|fs|vb)$/.test(low) || /\.(?:csproj|fsproj|sln)$/.test(base)) return 'dotnet'
+  if (/\.php$/.test(low) || base === 'composer.json' || base === 'composer.lock') return 'php'
+  if (/\.dart$/.test(low) || base === 'pubspec.yaml') return 'dart'
+  if (/\.swift$/.test(low) || base === 'package.swift') return 'swift'
+  if (/\.(?:ex|exs)$/.test(low) || base === 'mix.exs') return 'elixir'
+  if (/\.(?:c|cc|cpp|cxx|h|hpp)$/.test(low) || base === 'cmakelists.txt') return 'cpp'
+  return 'shared'
+}
+
+export function inferCommandStack(cmd) {
+  const s = String(cmd ?? '').trim()
+  if (!s) return null
+  if (/\b(?:pnpm|npm|yarn|bun|npx|node|vitest|jest|mocha|eslint|oxlint|tsc|vite)\b/i.test(s)) return 'node'
+  if (/\b(?:pytest|python3?|pip3?|uv|poetry|ruff|mypy|flake8|unittest)\b/i.test(s)) return 'python'
+  if (/\b(?:cargo|rustc|clippy|rustfmt)\b/i.test(s)) return 'rust'
+  if (/\b(?:go\s+(?:test|build|vet|run|mod)|golangci-lint)\b/i.test(s)) return 'go'
+  if (/\b(?:mvn|mvnw|gradle|gradlew|javac|java)\b/i.test(s)) return 'java'
+  if (/\b(?:bundle|rake|rspec|rubocop|ruby)\b/i.test(s)) return 'ruby'
+  if (/\bdotnet\b/i.test(s)) return 'dotnet'
+  if (/\b(?:composer|phpunit|php)\b/i.test(s)) return 'php'
+  if (/\b(?:dart|flutter)\b/i.test(s)) return 'dart'
+  if (/\bswift\b/i.test(s)) return 'swift'
+  if (/\bmix\b/i.test(s)) return 'elixir'
+  if (/\b(?:cmake|ctest|meson|ninja|clang|gcc|g\+\+)\b/i.test(s)) return 'cpp'
+  return null
+}
+
+function mapEcosystemToStack(eco) {
+  const e = String(eco ?? '').toLowerCase()
+  if (e === 'node' || e === 'deno' || e === 'js' || e === 'ts') return 'node'
+  if (e === 'python' || e === 'rust' || e === 'go' || e === 'java' || e === 'ruby'
+    || e === 'dotnet' || e === 'php' || e === 'dart' || e === 'swift' || e === 'elixir' || e === 'cpp') {
+    return e
+  }
+  return null
+}
+
+/**
+ * 多语言 / 多子包仓库单栈局部变更验证作用域分析：
+ * 当变更文件全部落在单一语言栈（且无跨栈/构建/CI 共享文件改动）时，返回受波及栈与包集合，
+ * 过滤掉未改动语言栈的验证命令，避免局部前端改动因缺失未改栈运行时（如 `go`/`cargo`）而误阻塞。
+ */
+export function resolveScopedVerificationGate({ repoRoot = null, changedFiles = [], packages = null, profile = null } = {}) {
+  const normFiles = [...new Set((Array.isArray(changedFiles) ? changedFiles : []).map((f) => posixPath(String(f ?? '')).replace(/^\.\//, '')).filter(Boolean))]
+  const rawPkgs = Array.isArray(packages)
+    ? packages
+    : (repoRoot ? (discoverWorkspacePackages(repoRoot)?.packages ?? []) : [])
+  const runtimeStacks = new Set()
+  let hasCrossStackSharedTrigger = false
+
+  for (const f of normFiles) {
+    const st = inferFileStack(f)
+    if (st === 'doc') continue
+    if (st === 'shared') { hasCrossStackSharedTrigger = true; continue }
+    runtimeStacks.add(st)
+  }
+
+  const affectedPackages = []
+  for (const f of normFiles) {
+    if (inferFileStack(f) === 'doc') continue
+    const matches = rawPkgs
+      .filter((p) => {
+        const dir = posixPath(String(p?.dir ?? '')).replace(/^\.\//, '').replace(/\/+$/, '')
+        return !dir || f.startsWith(`${dir}/`) || f === dir
+      })
+      .sort((a, b) => String(b?.dir ?? '').length - String(a?.dir ?? '').length)
+    const hit = matches[0]
+    if (hit) {
+      const dir = posixPath(String(hit.dir ?? '')).replace(/^\.\//, '').replace(/\/+$/, '')
+      if (!affectedPackages.some((x) => x.dir === dir && x.ecosystem === hit.ecosystem)) {
+        affectedPackages.push({ dir, name: hit.name ?? (dir || 'root'), ecosystem: hit.ecosystem ?? null })
+      }
+    }
+  }
+
+  const repoStacks = new Set()
+  for (const p of rawPkgs) {
+    const st = mapEcosystemToStack(p?.ecosystem)
+    if (st) repoStacks.add(st)
+  }
+  if (profile && typeof profile === 'object') {
+    for (const key of ['quick-test', 'smoke-verify', 'full-test', 'merge-gate']) {
+      for (const raw of profile[key] ?? []) {
+        for (const seg of String(raw ?? '').split(/\s*&&\s*/)) {
+          const cs = inferCommandStack(seg)
+          if (cs) repoStacks.add(cs)
+        }
+      }
+    }
+  }
+
+  const singleStackScoped = !hasCrossStackSharedTrigger && runtimeStacks.size === 1 && (repoStacks.size > 1 || (rawPkgs.length > 1 && affectedPackages.length > 0 && affectedPackages.length < rawPkgs.length))
+  const affectedStacks = [...runtimeStacks]
+  const affectedPkgDirs = new Set(affectedPackages.map((p) => p.dir).filter(Boolean))
+
+  const filterCommands = (commands = []) => {
+    const kept = []
+    const skipped = []
+    if (!singleStackScoped) {
+      return { kept: [...commands], skipped }
+    }
+    for (const rawCmd of commands) {
+      const clean = String(rawCmd ?? '').trim()
+      if (!clean) continue
+      const segments = clean.includes('&&') ? clean.split(/\s*&&\s*/).map((s) => s.trim()).filter(Boolean) : [clean]
+      const segKept = []
+      let anySkipped = false
+      for (const seg of segments) {
+        const cs = inferCommandStack(seg)
+        if (cs && !runtimeStacks.has(cs)) {
+          skipped.push({ cmd: seg, stack: cs, reason: `unaffected-stack:${cs}` })
+          anySkipped = true
+          continue
+        }
+        if (affectedPkgDirs.size > 0 && rawPkgs.length > 1) {
+          const subDirHint = /(?:--filter\s+['"]?([^\s'"]+)|--prefix\s+['"]?([^\s'"]+)|-C\s+['"]?([^\s'"]+)|\bcd\s+([^\s&;]+))/.exec(seg)
+          const hinted = (subDirHint?.[1] || subDirHint?.[2] || subDirHint?.[3] || subDirHint?.[4] || '').replace(/^\.\//, '').replace(/\/+$/, '')
+          const matchesPkg = !hinted || affectedPackages.some((p) => p.dir === hinted || p.name === hinted || p.dir.endsWith(`/${hinted}`))
+          if (!matchesPkg) {
+            skipped.push({ cmd: seg, stack: cs ?? affectedStacks[0], reason: `unaffected-package:${hinted}` })
+            anySkipped = true
+            continue
+          }
+        }
+        segKept.push(seg)
+      }
+      if (segKept.length > 0) {
+        kept.push(anySkipped ? segKept.join(' && ') : clean)
+      }
+    }
+    return { kept, skipped }
+  }
+
+  return {
+    scoped: singleStackScoped,
+    affectedStacks,
+    repoStacks: [...repoStacks],
+    affectedPackages,
+    hasCrossStackSharedTrigger,
+    filterCommands,
+  }
 }

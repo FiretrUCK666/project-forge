@@ -665,7 +665,10 @@ export async function handleStart(opts, roots) {
     if (gateRes.blocked) return { exitCode: gateRes.exitCode }
   }
 
-  const authCheck = checkStartAuthorSeparation(roots.mainRoot, [initialSpec, initialTodo, initialPrd], implementerId, opts)
+  const explicitStartImpl = opts.agent ?? opts.implementer ?? null
+  const authCheck = checkStartAuthorSeparation(roots.mainRoot, [initialSpec, initialTodo, initialPrd], explicitStartImpl, {
+    ...opts, mainRoot: roots.mainRoot, taskId, caseType,
+  })
   if (authCheck.blocked) {
     return emitBlockedStart(opts, authCheck)
   }

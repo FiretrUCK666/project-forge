@@ -381,8 +381,8 @@ export function registerFlowTruthCases(cases) {
     // 判据零：句中提及不算声明位置。
     const declared = extractDeclared(entry)
     if (!declared.found) return '流程入口的帮助函数体没被截出来'
-    if (declared.flags.includes('body-file')) {
-      return '句中提及的 --body-file 被当成了声明位置——那是别的命令的参数，算进来反向差集全是假红灯'
+    if (declared.flags.includes('ignore-scripts')) {
+      return '句中提及的 --ignore-scripts 被当成了声明位置——那是别的命令的参数，算进来反向差集全是假红灯'
     }
     // 正例：行首声明与方括号分组都能认出来。
     if (!declared.flags.includes('task')) return '行首声明的 --task 没被认出来'

@@ -475,8 +475,9 @@ export const INJECTIONS_CORE = [
   },
   {
     id: 'I48',
-    what: '禁用 flow-merge.mjs claim 对已被他人认领 Issue 的互斥阻断检查',
-    file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
+    what: '禁用 flow-merge-claim.mjs claim 对已被他人认领 Issue 的互斥阻断检查',
+    file: 'kit/skills/dev-flow/scripts/flow-merge-claim.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-merge-claim.mjs'],
     from: '        if (!isTakeover) {',
     to: '        if (false && !isTakeover) {',
     expect: '他人重复 claim 未阻断',

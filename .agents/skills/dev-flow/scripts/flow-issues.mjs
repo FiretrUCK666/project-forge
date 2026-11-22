@@ -4,8 +4,11 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），远端写操作统一先经 `probeForWrite` 探测通道。
  */
 
+import { existsSync, readFileSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
+
 import { EXIT } from '../../lib/exit-codes.mjs'
-import { printNextStep } from '../../lib/cli.mjs'
+import { assertNoAsciiControlChars, printNextStep, validateCrossRepoTarget } from '../../lib/cli.mjs'
 import { buildIssueCloseComment, formatAttribution } from '../../lib/doc-comments.mjs'
 import { slugify } from '../../lib/docs.mjs'
 import { formatWorkTitle } from '../../lib/escalation.mjs'
@@ -16,6 +19,41 @@ import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv,
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext } from './flow-context.mjs'
 import { inspectWorkspace } from './flow-inspect.mjs'
+
+function resolveExplicitBodyText(mainRoot, opts = {}, fallback = undefined) {
+  const fileArg = opts['body-file'] ?? opts.bodyFile
+  if (fileArg !== undefined && fileArg !== null && String(fileArg).trim() !== '') {
+    const abs = isAbsolute(String(fileArg)) ? String(fileArg) : resolve(mainRoot, String(fileArg))
+    if (!existsSync(abs)) throw new Error(`--body-file 指定的文件不存在：${abs}`)
+    const raw = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
+    return assertNoAsciiControlChars(raw, '--body-file')
+  }
+  const raw = opts.body ?? fallback
+  if (raw !== undefined && raw !== null) {
+    assertNoAsciiControlChars(String(raw), '--body')
+  }
+  return raw
+}
+
+async function assertNoCrossRepoIssueRef(roots, opts = {}) {
+  const res = await validateCrossRepoTarget({
+    cwd: roots.mainRoot,
+    targetDir: roots.mainRoot,
+    explicitDir: opts.dir ? resolve(String(opts.dir)) : roots.mainRoot,
+    argv: [
+      ...(Array.isArray(opts._) ? opts._ : []),
+      opts.issue, opts.issues, opts.pr, opts['external-pr'], opts.milestone, opts.into,
+    ].filter(Boolean).map(String),
+    scriptPath: null,
+    checkUrls: true,
+  })
+  if (!res.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: res.code, reason: res.reason, urlRepo: res.urlRepo ?? null }, null, 2)}\n`)
+    process.stderr.write(`${res.reason}\n`)
+    return res
+  }
+  return null
+}
 
 async function resolveMilestoneId(backend, targetRepo, rawMilestone) {
   if (rawMilestone === null || rawMilestone === undefined || String(rawMilestone).trim() === '') return null
@@ -127,6 +165,8 @@ async function closeIssuesStructured({
 /** 执行 `flow.mjs close --issue <N> [--into <targetIssue>] --reason "<原因>" [--task <id>] [--json]`。 */
 export async function handleClose(opts, roots) {
   if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
+  const crossErr = await assertNoCrossRepoIssueRef(roots, opts)
+  if (crossErr) return { exitCode: crossErr.exitCode, blocked: true, code: crossErr.code }
   const issueNums = parseIssueNumbers([opts.issue, opts.issues, ...(Array.isArray(opts._) ? opts._ : [])])
   if (issueNums.length === 0) throw new Error('close 需要传入 --issue <N>')
   const reason = String(opts.reason ?? opts.note ?? '').trim()
@@ -188,12 +228,13 @@ export async function createIssueForStart({
   })
   const rawTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
   const issueTitle = formatWorkTitle(rawTitle, caseType)
+  const rawExplicitBody = resolveExplicitBodyText(roots.mainRoot, opts)
   const docRefs = [opts.spec, opts.todo, opts.prd].filter(Boolean).map((p) => `\`${p}\``).join('、')
   const issueBody = hydrateIssueBody(
     roots.mainRoot,
     caseType === 2 ? 'bug' : 'feature',
     {
-      rawBody: opts.body,
+      rawBody: rawExplicitBody,
       title: rawTitle,
       caseType,
       taskId: opts.task ?? slugify(opts.slug ?? rawTitle),
@@ -231,6 +272,8 @@ export async function createIssueForStart({
 /** 执行 `flow.mjs issue <create|list|view|comment|close|migrate>`。 */
 export async function handleIssue(opts, roots) {
   if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
+  const crossErr = await assertNoCrossRepoIssueRef(roots, opts)
+  if (crossErr) return { exitCode: crossErr.exitCode, blocked: true, code: crossErr.code }
   const pos = Array.isArray(opts._) ? opts._ : []
   const action = String(opts.action ?? pos[0] ?? 'list').trim().toLowerCase()
   const state = await inspectWorkspace(roots.mainRoot, {
@@ -262,11 +305,12 @@ export async function handleIssue(opts, roots) {
     const createCase = opts.case !== undefined ? Number(opts.case) : undefined
     const createLabels = parseCsvList(opts.labels)
     const issueKind = createCase === 2 || createLabels.some((l) => /bug|fix|defect/i.test(l)) ? 'bug' : 'feature'
+    const explicitBody = resolveExplicitBodyText(roots.mainRoot, opts)
     const body = hydrateIssueBody(roots.mainRoot, issueKind, {
-      rawBody: opts.body,
+      rawBody: explicitBody,
       title: rawTitle,
       caseType: createCase,
-      summary: opts.body ? undefined : `创建工单「${rawTitle}」。`,
+      summary: explicitBody ? undefined : `创建工单「${rawTitle}」。`,
     }).trim()
     const res = await backend.createIssue({
       repo: targetRepo,
@@ -331,8 +375,8 @@ export async function handleIssue(opts, roots) {
 
   if (action === 'comment') {
     const num = resolveIssueNum()
-    const body = String(opts.body ?? opts.comment ?? opts.note ?? pos[2] ?? '').trim()
-    if (!body) throw new Error('issue comment 需要传入 --body "<内容>"')
+    const body = String(resolveExplicitBodyText(roots.mainRoot, opts, opts.comment ?? opts.note ?? pos[2]) ?? '').trim()
+    if (!body) throw new Error('issue comment 需要传入 --body "<内容>" 或 --body-file <路径>')
     const ghProbe = useRemoteGh
       ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} })))
       : null
@@ -454,6 +498,8 @@ export async function handleIssue(opts, roots) {
 /** 按需执行 `flow.mjs milestone <create|list|assign|close>`（支持 GitHub / generic-git / local-only）。 */
 export async function handleMilestone(opts, roots) {
   if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
+  const crossErr = await assertNoCrossRepoIssueRef(roots, opts)
+  if (crossErr) return { exitCode: crossErr.exitCode, blocked: true, code: crossErr.code }
   const pos = Array.isArray(opts._) ? opts._ : []
   const action = String(opts.action ?? pos[0] ?? 'list').trim().toLowerCase()
   const state = await inspectWorkspace(roots.mainRoot, {

@@ -237,13 +237,22 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
       return `离线 record 阻塞或缺少规范 delegatedPayloads：status=${offlineRec.status}, out=${offlineRec.stdout}, err=${offlineRec.stderr}`
     }
 
-    // 传代理标识（如 coordinator-hydrogen-xhigh）认领时必须保留双层归属且绝不发出假 @coordinator-* mention
-    const sanitizeClaim = await handleClaim({
+    // C18 强校：多代理 Case >= 2 下协调者代号（coordinator-*）禁止直接认领实施，必须报 BLOCKED_MISSING_ACTOR
+    const blockedCoordClaim = await handleClaim({
       task: 'gw-feat', agent: 'coordinator-hydrogen-xhigh', takeover: true, reason: '调度代号纠偏', json: true,
       _ghClient: client, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'real-alice' } }, client },
     }, roots)
+    if (blockedCoordClaim.exitCode === 0) {
+      return 'C18 门禁失守：multi-agent Case 3 下 coordinator-hydrogen-xhigh 未被阻断 claim'
+    }
+
+    // 传非 GitHub 登录名的合法实施代理标识（如 impl-hydrogen-xhigh）认领时必须保留双层归属且绝不发出假 @impl-* mention
+    const sanitizeClaim = await handleClaim({
+      task: 'gw-feat', agent: 'impl-hydrogen-xhigh', takeover: true, reason: '实施代理交接', json: true,
+      _ghClient: client, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'real-alice' } }, client },
+    }, roots)
     const sanitizeBody = commentsByNum.get(77)?.at(-1)?.body ?? ''
-    if (sanitizeClaim.exitCode !== 0 || !sanitizeBody.includes('@real-alice') || sanitizeBody.includes('@coordinator-hydrogen-xhigh') || !sanitizeBody.includes('`coordinator-hydrogen-xhigh`')) {
+    if (sanitizeClaim.exitCode !== 0 || !sanitizeBody.includes('@real-alice') || sanitizeBody.includes('@impl-hydrogen-xhigh') || !sanitizeBody.includes('`impl-hydrogen-xhigh`')) {
       return `handleClaim 双层归属或防假 @mention 异常：${sanitizeBody}`
     }
     return true

@@ -19,6 +19,8 @@ import {
   getCachedRangeDiffCommits, isAncestorLinearFast, parseRawAndUnifiedDiff,
   resolveGitDirFast, setCachedRangeDiffCommits,
 } from '../../lib/git-fast.mjs'
+import { resolveHostMode } from '../../lib/harness-context.mjs'
+import { verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence } from '../../lib/workflow-policy.mjs'
@@ -588,6 +590,28 @@ export async function evaluatePassBlockers({
         })
         if (gw.length > 0) blockers.push(`--enforce-gates: 检测到未授权的门禁弱化改动（${gw.map((h) => h.file).join(', ')}）`)
       }
+    }
+  }
+
+  if (mainRoot && ledger) {
+    const provRels = [ledger.specFile, ledger.archivedSpecFile, ledger.todoFile, ledger.archivedTodoFile, ledger.prdFile, ledger.archivedPrdFile].filter(Boolean)
+    if (provRels.length > 0) {
+      const provRoot = targetRoot && provRels.some((r) => existsSync(resolve(targetRoot, r))) ? targetRoot : mainRoot
+      const implActor = (ledger.claimedBy && ledger.claimedBy !== 'local-agent' ? ledger.claimedBy : null)
+        ?? (ledger.agent && ledger.agent !== 'local-agent' ? ledger.agent : null)
+        ?? (ledger.implementerId && ledger.implementerId !== 'local-agent' ? ledger.implementerId : null)
+      const provCheck = verifyPlanningProvenance({
+        mainRoot,
+        docRoot: provRoot,
+        docRels: provRels,
+        taskId,
+        ledger,
+        implementerId: implActor,
+        hostMode: resolveHostMode(opts),
+        humanApproved,
+        isGit: existsSync(resolve(mainRoot, '.git')),
+      })
+      if (provCheck.blocked) blockers.push(provCheck.reason)
     }
   }
 

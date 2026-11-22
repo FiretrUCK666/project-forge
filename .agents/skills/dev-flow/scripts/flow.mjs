@@ -3,22 +3,24 @@
  * flow.mjs —— Git 协同流转状态机总入口（零记忆自动推断 --task，按子命令按需加载减少启动耗时）。
  *
  * 子命令：
- *   inspect | next | start | claim | release | finalize | verify | submit | rework | sync | merge | cleanup | status | abort | batch
+ *   inspect | next | explore | intake | start | issue | close | milestone | claim | release | finalize | verify | submit | rework | sync | merge | cleanup | status | abort | batch
  */
 
 import { basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { flushAndExit, hasSkillSupport, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, hasSkillSupport, parseStandardCli, printNextStep, validateCrossRepoTarget } from '../../lib/cli.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import { detectGateWeakening } from '../../lib/static-gates.mjs'
+import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { buildInspectNextSteps } from '../../lib/workflow-policy.mjs'
 import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
-const SUBCOMMANDS = ['inspect', 'next', 'explore', 'intake', 'start', 'issue', 'close', 'milestone', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
+const SUBCOMMANDS = subcommandNamesFor('flow')
 
 /**
  * 由脚本确定性生成、不接受调用方整段替换的参数归属。
@@ -41,7 +43,7 @@ function printHelp() {
     '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
     '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
-    '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
+    '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>" | --body-file <路径>] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
     '  close     --issue <N> [--into <targetIssue>] --reason "<原因>" [--task <id>] [--json]',
     '  milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--title "<标题>"] [--description "<描述>"] [--due <ISO>] [--issue <N>] [--pr <N>] [--task <id>] [--state open|closed|all] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
@@ -78,14 +80,14 @@ async function main(argv) {
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
-        'agent', 'actor', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'comment', 'state',
+        'agent', 'actor', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'body-file', 'comment', 'state',
         'labels', 'method', 'reason', 'into', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus', 'by',
         'milestone', 'due', 'due-on', 'description',
         'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
         'visual-blocked-reason', 'host-mode', 'reviewer-id', 'preview-hash',
       ],
       multiFlags: ['rebut', 'allow-outbound', 'artifact'],
-      usageHint: 'flow.mjs <inspect|next|explore|intake|start|issue|close|milestone|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
+      usageHint: `flow.mjs <${SUBCOMMANDS.join('|')}>`,
     })
   } catch (err) {
     process.stderr.write(`flow 错误：${err.message}\n`)
@@ -93,15 +95,33 @@ async function main(argv) {
   }
   const { sub, opts } = cli
   if (cli.help) { printHelp(); return 0 }
+  const crossRepoCheck = await validateCrossRepoTarget({
+    cwd: process.cwd(),
+    targetDir: cli.targetDir,
+    explicitDir: cli.explicitDir,
+    argv: [
+      ...(Array.isArray(opts._) ? opts._ : []),
+      opts.issue, opts.issues, opts.pr, opts['external-pr'], opts.milestone,
+    ].filter(Boolean).map(String),
+    scriptPath: fileURLToPath(import.meta.url),
+    checkUrls: sub !== 'inspect',
+  })
+  if (!crossRepoCheck.ok) {
+    if (cli.json) {
+      process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: crossRepoCheck.code, reason: crossRepoCheck.reason, expectedRoot: crossRepoCheck.expectedRoot ?? null, actualRoot: crossRepoCheck.actualRoot ?? null, urlRepo: crossRepoCheck.urlRepo ?? null }, null, 2)}\n`)
+    }
+    process.stderr.write(`${crossRepoCheck.reason}\n`)
+    return crossRepoCheck.exitCode
+  }
 
   // 按子命令收窄：提审与返工分支的正文由脚本生成，不接受调用方传入。
-  if (GENERATED_BODY_SUBCOMMANDS.has(sub) && (opts.body !== undefined || opts.comment !== undefined || opts.note !== undefined)) {
+  if (GENERATED_BODY_SUBCOMMANDS.has(sub) && (opts.body !== undefined || opts['body-file'] !== undefined || opts.comment !== undefined || opts.note !== undefined)) {
     process.stderr.write('BLOCKED_GENERATED_BODY_HAS_SINGLE_PRODUCER: submit/rework 的提案正文由账本、模板与实证记录确定性生成，'
       + '不接受 --body / --comment / --note。想改正文里的事实，就去改账本与实证记录本身；'
       + '想改标题，用 --title。\n')
     return EXIT.USAGE
   }
-  if (!CONTENT_BODY_SUBCOMMANDS.has(sub) && !GENERATED_BODY_SUBCOMMANDS.has(sub) && opts.body !== undefined) {
+  if (!CONTENT_BODY_SUBCOMMANDS.has(sub) && !GENERATED_BODY_SUBCOMMANDS.has(sub) && (opts.body !== undefined || opts['body-file'] !== undefined)) {
     process.stderr.write(`BLOCKED_BODY_PARAM_ON_${String(sub ?? 'unknown').toUpperCase()}: 子命令 ${sub} 不写正文，不接受 --body。\n`)
     return EXIT.USAGE
   }

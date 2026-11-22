@@ -7,7 +7,7 @@ created: 2026-11-22
 updated: 2026-11-22
 issue: 143
 pr: null
-branch: docs/w6-universal-architecture-plan
+branch: feat/w6c-harness-gates-provenance
 owner: plan-w6
 plan_mode: interactive
 approved: true
@@ -152,12 +152,12 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C13: `kit/skills/lib/cli.mjs`、`kit/skills/lib/exit-codes.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` 与 `kit/skills/dev-flow/scripts/flow-issues.mjs` 实现跨仓工作目录不匹配 fail-closed 拦截（`exit-codes.mjs` 登记 `BLOCKED_CROSS_REPO_CWD_MISMATCH`）；`flow.mjs` 与 `review-pack.mjs` 接入 `SUBCOMMAND_META` 单源并对齐文件头，6/6 脚本通过 `subcommand-parity.mjs`。
-- [ ] C14: `kit/skills/lib/issue-template-hydrate.mjs` 与 `kit/skills/lib/pr-template-hydrate.mjs` 兼容 `**Bold**` 提示模板且零 section 命中时完整保留 `--body`；`flow.mjs finalize` 同步归档 `SPEC` 正文状态表与 YAML `status: implemented`。
-- [ ] C15: `kit/skills/dev-review/scripts/review-empirical.mjs`、`review-pack.mjs` 与 `kit/skills/lib/escalation.mjs` 对 `low` 风险纯文档变更豁免强制 runtime `check-empirical` / `faultRequired` / `--include-diff` 阻塞，且 `escalation.mjs` 按错误签名去重不重复建单。
-- [ ] C16: `kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `kit/skills/dev-review/scripts/review-empirical-state.mjs` 扩展 `isEquivalentConcurrentCommand` 识别 `--maxWorkers` / `--workers` / `--bail` / `--config.verify-deps-before-run=false`；为多语言仓单栈局部变更提供子包/单栈作用域验证识别并在 `collectDevProfileEmpiricalCmds` 接入过滤（未改栈缺失环境不误阻塞）。
-- [ ] C17: `kit/skills/dev-flow/scripts/worktree-deps.mjs` 与 `docs/feature-map.json` 修复独立 `mount` 更新 `mountedDepsByWorktree`、为 `pnpm` junction 透传 `npm_config_verify_deps_before_run=false` 并给出 Vite `fs.allow` 引导，基于 6B 在 `edit-gate.mjs` 落地的 `--base` 与游离 `HEAD` 支持修复 `verify-edit-gate` 在游离 review 槽执行兼容性；拆小 `flow-lifecycle.mjs`（798 行）、`flow-merge.mjs`（793 行）、`flow-inspect.mjs`（792 行）使全部 `.mjs` `<= 800` 行。
-- [ ] C18: 强化规划/实施/审查真实角色溯源校验：由 `doc-plan init/link`（`doc-plan-ops.mjs` / `docs.mjs` / `doc-approval.mjs` / `ledger.mjs`）写入仓外 `.git/project-forge-flow/` `planningProvenance` 基线，在 `start`/`claim`/`submit` 拦截未经 `doc-plan link` 直改 Todo `owner:` 的篡改（在 `exit-codes.mjs` 登记 `BLOCKED_PROVENANCE_TAMPERED`）与历史规划作者重叠（`BLOCKED_AUTHOR_IS_IMPLEMENTER`），不按 Git commit author 误杀本地隔离实施代理并诚实界定 `handoff-package.mjs` 证明边界；Slice 6C 新增正反双向夹具（`scripts/dev/fixtures-w6c-harness-gates.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6c.mjs`(new)），执行 `node scripts/equip.mjs .` 后全量门禁全绿。
+- [x] C13: `kit/skills/lib/cli.mjs`、`kit/skills/lib/exit-codes.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` 与 `kit/skills/dev-flow/scripts/flow-issues.mjs` 实现跨仓工作目录不匹配 fail-closed 拦截（`exit-codes.mjs` 登记 `BLOCKED_CROSS_REPO_CWD_MISMATCH`）；`flow.mjs` 与 `review-pack.mjs` 接入 `SUBCOMMAND_META` 单源并对齐文件头，6/6 脚本通过 `subcommand-parity.mjs`。
+- [x] C14: `kit/skills/lib/issue-template-hydrate.mjs` 与 `kit/skills/lib/pr-template-hydrate.mjs` 兼容 `**Bold**` 提示模板且零 section 命中时完整保留 `--body`；`flow.mjs finalize` 同步归档 `SPEC` 正文状态表与 YAML `status: implemented`。
+- [x] C15: `kit/skills/dev-review/scripts/review-empirical.mjs`、`review-pack.mjs` 与 `kit/skills/lib/escalation.mjs` 对 `low` 风险纯文档变更豁免强制 runtime `check-empirical` / `faultRequired` / `--include-diff` 阻塞，且 `escalation.mjs` 按错误签名去重不重复建单。
+- [x] C16: `kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `kit/skills/dev-review/scripts/review-empirical-state.mjs` 扩展 `isEquivalentConcurrentCommand` 识别 `--maxWorkers` / `--workers` / `--bail` / `--config.verify-deps-before-run=false`；为多语言仓单栈局部变更提供子包/单栈作用域验证识别并在 `collectDevProfileEmpiricalCmds` 接入过滤（未改栈缺失环境不误阻塞）。
+- [x] C17: `kit/skills/dev-flow/scripts/worktree-deps.mjs` 与 `docs/feature-map.json` 修复独立 `mount` 更新 `mountedDepsByWorktree`、为 `pnpm` junction 透传 `npm_config_verify_deps_before_run=false` 并给出 Vite `fs.allow` 引导，基于 6B 在 `edit-gate.mjs` 落地的 `--base` 与游离 `HEAD` 支持修复 `verify-edit-gate` 在游离 review 槽执行兼容性；拆小 `flow-lifecycle.mjs`（798 行）、`flow-merge.mjs`（793 行）、`flow-inspect.mjs`（792 行）使全部 `.mjs` `<= 800` 行。
+- [x] C18: 强化规划/实施/审查真实角色溯源校验：由 `doc-plan init/link`（`doc-plan-ops.mjs` / `docs.mjs` / `doc-approval.mjs` / `ledger.mjs`）写入仓外 `.git/project-forge-flow/` `planningProvenance` 基线，在 `start`/`claim`/`submit` 拦截未经 `doc-plan link` 直改 Todo `owner:` 的篡改（在 `exit-codes.mjs` 登记 `BLOCKED_PROVENANCE_TAMPERED`）与历史规划作者重叠（`BLOCKED_AUTHOR_IS_IMPLEMENTER`），不按 Git commit author 误杀本地隔离实施代理并诚实界定 `handoff-package.mjs` 证明边界；Slice 6C 新增正反双向夹具（`scripts/dev/fixtures-w6c-harness-gates.mjs`(new)）与故障注入（`scripts/dev/injections-data-w6c.mjs`(new)），执行 `node scripts/equip.mjs .` 后全量门禁全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -172,6 +172,10 @@ flowchart LR
 ## 实现说明
 
 > 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
+
+- **实际落地摘要**：完成 Slice 6C `C13..C18` 及并入同域模块的三项系统性根治（根治 A：`workflow-policy-next.mjs` 从 `buildSliceGraph` 回填 `depends_on` / `scope_files` 且 `doc-slice-graph.mjs` 对空写域活跃任务强制 `conservativeSerial: true`；根治 B：`flow-merge-claim.mjs` `evaluateMasterIssueCloseGuard` 在 `main` 尚有未完兄弟切片时禁止关闭 `multi_spec: true` 总控 Issue；根治 C：`cli.mjs` 与文本/模板/评论入口统一拦截非法 ASCII C0 控制字符 `BLOCKED_ASCII_CONTROL_CHAR`）；并拆分 `flow-lifecycle-finalize.mjs`、`flow-start-provenance.mjs` 与 `flow-merge-claim.mjs` 使全部 `.mjs` 严守 `<= 800` 行。
+- **与草案的差异**：经 `@coordinator` 授权，同步更新 5 处范围外旧测试/注入锚点以对齐 6C 新契约（`scripts/dev/fixtures-review-empirical.mjs:408-421`、`scripts/dev/fixtures-flow.mjs:240-256`、`scripts/dev/fixtures-flow-truth.mjs:384`、`scripts/dev/injections-data-core.mjs` `I48`、`scripts/dev/injections-data-repo-alignment.mjs` `I395`），并在 `exit-codes.mjs` 增补 `BLOCKED_ASCII_CONTROL_CHAR` 退出码登记。
+- **关联同步文件**：`.agents/skills/` 与 `.agents/skills/.pf-manifest.json`（经 `node scripts/equip.mjs .` 同步）、`docs/feature-map.json`、`scripts/dev/subcommand-parity.mjs`、`scripts/dev/fixtures-w6c-harness-gates.mjs`、`scripts/dev/injections-data-w6c.mjs`。
 
 - **实际落地摘要**：待实施后填写
 - **与草案的差异**：待实施后填写

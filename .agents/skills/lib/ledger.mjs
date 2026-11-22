@@ -10,10 +10,17 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
 import {
+  readPlanningProvenanceIndex,
+  recordPlanningProvenanceCore,
+  verifyPlanningProvenance,
+} from './doc-approval.mjs'
+import {
   canonicalPath, gitRun, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots, samePath, withFileLock, withFileLockSync, writeJsonAtomic,
 } from './git.mjs'
 import { hasDotGitInAncestors, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
 import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
+
+export { readPlanningProvenanceIndex, verifyPlanningProvenance }
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
 const OPEN_TASK_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
@@ -599,4 +606,17 @@ export function deriveReworkState(ledger) {
     tokenConsumed: consumed,
     reason: isRework ? `账本 Round ${lastRoundNum} 结论为 ${verdict} 且该轮审查令牌已消费` : '账本里没有已消费令牌的退回轮次',
   }
+}
+
+export function recordPlanningProvenance(mainRoot, opts = {}) {
+  const res = recordPlanningProvenanceCore(mainRoot, opts)
+  const cleanTaskId = opts?.taskId ? sanitizeTaskId(opts.taskId) : null
+  if (res.changed && cleanTaskId && res.entry) {
+    const lockPath = join(resolveLedgerLockDir(mainRoot), `ledger-${cleanTaskId}.lock`)
+    withFileLockSync(lockPath, () => {
+      const ledger = readTaskLedger(mainRoot, cleanTaskId)
+      if (ledger) writeTaskLedgerUnlocked(mainRoot, { ...ledger, planningProvenance: res.entry })
+    })
+  }
+  return res
 }

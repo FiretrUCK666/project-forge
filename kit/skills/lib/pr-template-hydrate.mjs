@@ -7,6 +7,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { assertNoAsciiControlChars } from './cli.mjs'
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { evaluateObservationSubstance, formatArtifactEvidenceLines } from './empirical-artifacts.mjs'
 import { formatWorkTitle } from './escalation.mjs'
@@ -248,8 +249,26 @@ function buildVisualEvidenceView({ evidence, ledger, visualFilesChanged = [], vi
   return view
 }
 
+function parseSectionHeaderLine(line) {
+  const s = String(line ?? '')
+  const h = /^(#{2,3})\s+(.+?)\s*$/.exec(s)
+  if (h) return { kind: 'heading', level: h[1].length, title: h[2] }
+  const b = /^\*\*([^*]+?)\*\*\s*(?:[:：]\s*)?$/.exec(s.trim())
+  if (b) return { kind: 'bold', level: 4, title: b[1] }
+  return null
+}
+
+function endsCurrentSection(outerHdr, nextHdr) {
+  if (!nextHdr) return false
+  if (outerHdr.kind === 'bold') return true
+  return nextHdr.kind === 'heading' && nextHdr.level <= outerHdr.level
+}
+
 function matchHeadingCandidates(rawTitle, headingCandidates) {
-  const clean = String(rawTitle ?? '').replace(/^(?:\d+[.)、]\s*|[一二三四五六七八九十]+[、.)]\s*)/, '').trim()
+  const clean = String(rawTitle ?? '')
+    .replace(/^(?:\d+[.)、]\s*|[一二三四五六七八九十]+[、.)]\s*)/, '')
+    .replace(/[:：]\s*$/, '')
+    .trim()
   const low = clean.toLowerCase()
   return headingCandidates.some((cand) => (cand instanceof RegExp ? cand.test(clean) : String(cand).trim().toLowerCase() === low))
 }
@@ -260,13 +279,13 @@ export function replaceSectionIfPresent(md, headingCandidates, newBody) {
   for (let i = 0; i < lines.length; i += 1) {
     if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
     if (inFence) continue
-    const m = /^##\s+(.+?)\s*$/.exec(lines[i])
-    if (!m || !matchHeadingCandidates(m[1], headingCandidates)) continue
+    const hdr = parseSectionHeaderLine(lines[i])
+    if (!hdr || !matchHeadingCandidates(hdr.title, headingCandidates)) continue
     let end = lines.length
     let innerFence = false
     for (let j = i + 1; j < lines.length; j += 1) {
       if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
-      if (!innerFence && /^##\s+/.test(lines[j])) { end = j; break }
+      if (!innerFence && endsCurrentSection(hdr, parseSectionHeaderLine(lines[j]))) { end = j; break }
     }
     const replacement = [lines[i], '', ...String(newBody ?? '').split('\n'), '']
     const nextLines = [...lines.slice(0, i), ...replacement, ...lines.slice(end)]
@@ -281,13 +300,13 @@ export function removeSectionIfPresent(md, headingCandidates) {
   for (let i = 0; i < lines.length; i += 1) {
     if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
     if (inFence) continue
-    const m = /^##\s+(.+?)\s*$/.exec(lines[i])
-    if (!m || !matchHeadingCandidates(m[1], headingCandidates)) continue
+    const hdr = parseSectionHeaderLine(lines[i])
+    if (!hdr || !matchHeadingCandidates(hdr.title, headingCandidates)) continue
     let end = lines.length
     let innerFence = false
     for (let j = i + 1; j < lines.length; j += 1) {
       if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
-      if (!innerFence && /^##\s+/.test(lines[j])) { end = j; break }
+      if (!innerFence && endsCurrentSection(hdr, parseSectionHeaderLine(lines[j]))) { end = j; break }
     }
     const nextLines = [...lines.slice(0, i), ...lines.slice(end)]
     return { matched: true, text: nextLines.join('\n') }
@@ -296,28 +315,14 @@ export function removeSectionIfPresent(md, headingCandidates) {
 }
 
 function removeSectionByHeading(md, headingTitle) {
-  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
-  const target = String(headingTitle).trim()
-  const out = []
-  let inFence = false
-  let skipping = false
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]
-    if (/^\s*(?:```|~~~)/.test(line)) {
-      inFence = !inFence
-      if (!skipping) out.push(line)
-      continue
-    }
-    if (!inFence) {
-      const m = /^##\s+(.+?)\s*$/.exec(line)
-      if (m) {
-        if (m[1] === target) { skipping = true; continue }
-        skipping = false
-      }
-    }
-    if (!skipping) out.push(line)
+  let cur = md
+  const target = [String(headingTitle).trim()]
+  while (true) {
+    const r = removeSectionIfPresent(cur, target)
+    if (!r.matched) break
+    cur = r.text
   }
-  return out.join('\n')
+  return cur
 }
 
 function updateChecklistByEvidence(md, { verifyPassed, finalized, hasNoSecrets }) {
@@ -343,7 +348,9 @@ export function hydratePrTemplateBody({
   visualVerifiedOnHead = false,
   currentHead = '',
   changedFiles = [],
+  rawBody = '',
 } = {}) {
+  if (rawBody) assertNoAsciiControlChars(String(rawBody), 'PR rawBody')
   const shortHead = String(currentHead ?? '').slice(0, 7) || 'unknown'
   const fixesLine = (ledger?.linkedIssues ?? []).map((n) => `Fixes #${n}`).join('\n') || '无（独立变更任务）'
   const docLinks = [ledger?.specFile, ledger?.todoFile, ledger?.prdFile].filter(Boolean)
@@ -424,7 +431,26 @@ export function hydratePrTemplateBody({
     [['回滚方式', '回滚点', /^(?:rollback|revert\s+plan)$/i], rollbackText],
     [['合并授权', /^(?:merge\s+authority|approval)$/i], mergeAuthText],
   ]
-  for (const [headings, content] of sectionUpdates) body = replaceSectionIfPresent(body, headings, content).text
+  let matchedCount = 0
+  for (const [headings, content] of sectionUpdates) {
+    const r = replaceSectionIfPresent(body, headings, content)
+    body = r.text
+    if (r.matched) matchedCount += 1
+  }
+  const cleanRawBody = String(rawBody ?? '').trim()
+  if (matchedCount === 0) {
+    const fallbackAppend = [
+      `## ${PR_SECTION_TITLES.summary}`, '', summaryText,
+      '', `## ${PR_SECTION_TITLES.issues}`, '', fixesLine,
+      '', `## ${PR_SECTION_TITLES.verify}`, '', verifyText,
+      ...(cleanRawBody ? ['', cleanRawBody] : []),
+    ].join('\n')
+    body = `${body.trimEnd()}\n\n${fallbackAppend}`
+  } else if (cleanRawBody && !body.includes(cleanRawBody)) {
+    body = `${body.trimEnd()}\n\n${cleanRawBody}`
+  }
   body = updateChecklistByEvidence(body, { verifyPassed, finalized: Boolean(ledger?.finalized), hasNoSecrets: verifyPassed })
-  return `${body.replace(/\n{3,}/g, '\n\n').trimEnd()}\n\n${pfTag}\n`
+  const rendered = `${body.replace(/\n{3,}/g, '\n\n').trimEnd()}\n\n${pfTag}\n`
+  assertNoAsciiControlChars(rendered, 'PR 模板渲染正文')
+  return rendered
 }

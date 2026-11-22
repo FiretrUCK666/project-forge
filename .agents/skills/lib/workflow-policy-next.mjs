@@ -6,15 +6,21 @@
  */
 
 import { EXIT } from './exit-codes.mjs'
-import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from './doc-slice-graph.mjs'
+import { buildMultiTaskWavePlan, buildSliceGraph, scanUnstartedReadySlices } from './doc-slice-graph.mjs'
+import { posixPath } from './git-core.mjs'
 import { nextReviewRound } from './ledger.mjs'
 
 const CLOSED_STATUSES = new Set(['submitted', 'local-ready', 'awaiting-upstream-merge', 'merged', 'aborted'])
+const TERMINAL_SPEC_STATUSES = new Set(['implemented', 'done', 'superseded', 'dropped', 'archived'])
 
-/** 剥离合法并发参数（`--jobs N` / `--jobs=N` / `-j N`），避免并发跑测试被误判为门禁弱化或自定义旁路。 */
+/** 剥离合法并发参数（`--jobs` / `-j` / `--maxWorkers` / `--workers` / `--bail` / `--config.verify-deps-before-run`）。 */
 export function normalizeConcurrentVerifyCommand(cmd) {
   return String(cmd ?? '')
-    .replace(/(?:^|\s)(?:--jobs(?:=\s*\d+|\s+\d+)|-j(?:\s*\d+)?)(?=\s|$)/g, ' ')
+    .replace(/(?:^|\s)(?:--jobs(?:=\S+|\s+\d+)|-j(?:\s*\d+)?)(?=\s|$)/g, ' ')
+    .replace(/(?:^|\s)--(?:maxWorkers|max-workers|workers)(?:=\S+|\s+\S+)(?=\s|$)/gi, ' ')
+    .replace(/(?:^|\s)--bail(?:=(?:true|false|\d+))?(?=\s|$)/g, ' ')
+    .replace(/(?:^|\s)--(?:config\.)?verify-deps-before-run(?:=\S+|\s+\S+)?(?=\s|$)/g, ' ')
+    .replace(/(?:^|\s)--no-verify-deps-before-run(?=\s|$)/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -73,6 +79,54 @@ export function validateReviewRecordClosure({ ledger, lastRound, policy, hasDevR
   return { ok: true, code: null }
 }
 
+function enrichActiveTasksFromSliceSpecs(activeTasks = [], repoRoot = null) {
+  if (!Array.isArray(activeTasks) || activeTasks.length === 0) return []
+  const byTaskId = new Map()
+  const bySpecRel = new Map()
+  const multiSpecKeys = new Set()
+  const multiSpecRels = new Set()
+  if (repoRoot) {
+    try {
+      const graph = buildSliceGraph(repoRoot)
+      for (const s of graph.slices ?? []) {
+        if (s.kind !== 'spec') continue
+        const isMasterContainer = s.data?.multi_spec === true
+        if (isMasterContainer) {
+          if (s.key) multiSpecKeys.add(s.key)
+          if (s.rel) multiSpecRels.add(posixPath(s.rel))
+          continue
+        }
+        if (s.key) byTaskId.set(s.key, s)
+        if (s.rel) bySpecRel.set(posixPath(s.rel), s)
+      }
+    } catch { /* ignore slice graph read fallback */ }
+  }
+  const enriched = []
+  for (const t of activeTasks) {
+    if (!t || !t.taskId) continue
+    const specNorm = t.specFile ? posixPath(t.specFile) : ''
+    if (multiSpecKeys.has(t.taskId) || (specNorm && multiSpecRels.has(specNorm))) continue
+    const specSlice = byTaskId.get(t.taskId) ?? (specNorm ? bySpecRel.get(specNorm) : null)
+    if (specSlice && TERMINAL_SPEC_STATUSES.has(String(specSlice.status ?? '').toLowerCase())) continue
+    const mergedDeps = [...new Set([
+      ...(Array.isArray(t.dependsOn) ? t.dependsOn.map(String) : []),
+      ...(Array.isArray(specSlice?.dependsOn) ? specSlice.dependsOn.map(String) : []),
+      ...(Array.isArray(specSlice?.deps) ? specSlice.deps.map(String) : []),
+    ])]
+    const mergedFiles = [...new Set([
+      ...(Array.isArray(t.files) ? t.files : []),
+      ...(Array.isArray(t.scopeFiles) ? t.scopeFiles : []),
+      ...(Array.isArray(specSlice?.scopeFiles) ? specSlice.scopeFiles : []),
+    ].filter(Boolean))]
+    enriched.push({
+      ...t,
+      ...(mergedDeps.length > 0 ? { dependsOn: mergedDeps } : {}),
+      ...(mergedFiles.length > 0 ? { files: mergedFiles, scopeFiles: mergedFiles } : {}),
+    })
+  }
+  return enriched
+}
+
 /** 评估唯一活跃任务或集合状态并给出单一入口下一步路由与精简上下文。 */
 export function evaluateNextState({
   activeTasks = [],
@@ -84,7 +138,8 @@ export function evaluateNextState({
 } = {}) {
   if (!selectedTask) {
     const readySlices = repoRoot ? scanUnstartedReadySlices(repoRoot, allLedgers) : []
-    if (activeTasks.length === 0) {
+    const enrichedActive = enrichActiveTasksFromSliceSpecs(activeTasks, repoRoot)
+    if (enrichedActive.length === 0) {
       const wavePlan = readySlices.length > 0 ? buildMultiTaskWavePlan(readySlices) : null
       const parallelDispatch = Boolean(wavePlan?.parallelDispatch)
       const firstReady = wavePlan?.order?.[0] ?? null
@@ -118,7 +173,9 @@ export function evaluateNextState({
         candidates: [],
       }
     }
-    const combined = [...activeTasks, ...readySlices]
+    const activeIds = new Set(enrichedActive.map((t) => t.taskId))
+    const dedupReady = readySlices.filter((s) => !activeIds.has(s.taskId))
+    const combined = [...enrichedActive, ...dedupReady]
     const wavePlan = buildMultiTaskWavePlan(combined, multiTaskFiles)
     const parallelDispatch = Boolean(wavePlan.parallelDispatch)
     const waveSummary = wavePlan.waves

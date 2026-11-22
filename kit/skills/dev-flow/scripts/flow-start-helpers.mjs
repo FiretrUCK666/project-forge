@@ -5,38 +5,31 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 
-import { collectOwnerHistory } from '../../lib/doc-approval.mjs'
-import { parseDocFrontmatter } from '../../lib/docs.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
-import { gitStatusPorcelainZ, readTextSafe } from '../../lib/git.mjs'
+import { gitStatusPorcelainZ } from '../../lib/git.mjs'
 import {
-  checkAuthorIsNotImplementer,
   enforceSlotBoundary,
   isValidActorName,
   resolveHostMode,
 } from '../../lib/harness-context.mjs'
 import { recordMountedDepsInLedger } from '../../lib/ledger.mjs'
+import { validateStartProvenanceAndRole } from './flow-start-provenance.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
 
 export function checkStartAuthorSeparation(rootDir, docRels = [], implementerId, opts = {}) {
-  const hostMode = resolveHostMode(opts)
-  const humanApproved = Boolean(opts['human-approved'])
-  for (const docRel of docRels) {
-    if (!docRel) continue
-    const abs = join(rootDir, docRel)
-    if (!existsSync(abs)) continue
-    const fm = parseDocFrontmatter(readTextSafe(abs) ?? '')
-    const owners = collectOwnerHistory(fm.data)
-    if (owners.length === 0) continue
-    const res = checkAuthorIsNotImplementer(owners, implementerId, {
-      hostMode,
-      humanApproved,
-      file: docRel,
-    })
-    if (!res.ok) return { blocked: true, ...res }
-  }
+  const res = validateStartProvenanceAndRole({
+    mainRoot: opts.mainRoot ?? rootDir,
+    docRoot: rootDir,
+    docRels,
+    taskId: opts.taskId ?? null,
+    ledger: opts.ledger ?? null,
+    caseType: opts.caseType ?? 3,
+    explicitImplementer: implementerId,
+    opts,
+  })
+  if (res.blocked) return { blocked: true, ...res }
   return { blocked: false }
 }
 
@@ -98,12 +91,17 @@ export async function promotePlanningToStarted({
   })
   if (gateRes.blocked) return { blocked: true, exitCode: gateRes.exitCode }
 
-  const candidateImpl = opts.agent ?? opts.implementer ?? existing.implementerId ?? existing.claimedBy ?? existing.agent
+  const candidateImpl = opts.agent ?? opts.implementer
+    ?? (existing.implementerId && existing.implementerId !== 'local-agent' ? existing.implementerId : null)
+    ?? existing.claimedBy
+    ?? existing.agent
+  const authRes = checkStartAuthorSeparation(gateRoot, [existing.specFile, existing.todoFile, existing.prdFile], candidateImpl, {
+    ...opts, mainRoot: roots.mainRoot, taskId, ledger: existing, caseType: nextCase,
+  })
+  if (authRes.blocked) {
+    return { blocked: true, ...emitBlockedStart(opts, authRes) }
+  }
   if (isValidActorName(candidateImpl)) {
-    const authRes = checkStartAuthorSeparation(gateRoot, [existing.specFile, existing.todoFile, existing.prdFile], candidateImpl, opts)
-    if (authRes.blocked) {
-      return { blocked: true, ...emitBlockedStart(opts, authRes) }
-    }
     existing.implementerId = String(candidateImpl).trim()
     existing.agent = String(candidateImpl).trim()
   }

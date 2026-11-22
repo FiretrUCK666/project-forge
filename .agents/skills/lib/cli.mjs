@@ -5,9 +5,57 @@
  */
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
+import { EXIT } from './exit-codes.mjs'
+import { canonicalPath, posixPath, readTextSafe, samePath } from './git-core.mjs'
+import { resolveRepoRoots } from './git-worktree-env.mjs'
+import { parseFlowInputs } from './github-parse.mjs'
+import { normalizeGitHubRepo } from './platform-probe.mjs'
 import { discoverKitSkills } from './skill-discovery.mjs'
+
+export const ASCII_C0_CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/
+
+const TEXT_CONTENT_FLAGS = Object.freeze([
+  'body', 'summary', 'reason', 'comment', 'note', 'rationale', 'title',
+  'description', 'e2e-evidence', 'visual-evidence', 'visual-blocked-reason',
+  'evidence', 'decision', 'question', 'rebut', 'must-fix', 'should-fix',
+  'finding', 'findings',
+])
+
+export function findAsciiControlChar(value) {
+  const str = String(value ?? '')
+  const m = ASCII_C0_CONTROL_RE.exec(str)
+  if (!m) return null
+  const codePoint = m[0].codePointAt(0)
+  const hex = `0x${codePoint.toString(16).padStart(2, '0')}`
+  const caret = codePoint < 32 ? `^${String.fromCharCode(64 + codePoint)}` : hex
+  const prefix = str.slice(0, m.index)
+  const line = prefix.split('\n').length
+  const start = Math.max(0, m.index - 16)
+  const end = Math.min(str.length, m.index + 16)
+  const preview = str.slice(start, end).replace(ASCII_C0_CONTROL_RE, (ch) => `<0x${ch.codePointAt(0).toString(16).padStart(2, '0')}>`)
+  return { index: m.index, codePoint, hex, caret, line, preview }
+}
+
+export function validateNoAsciiControlChars(value, fieldLabel = '文本内容') {
+  const hit = findAsciiControlChar(value)
+  if (!hit) return { ok: true, hit: null }
+  const reason = `BLOCKED_ASCII_CONTROL_CHAR: ${fieldLabel} 包含非法 ASCII C0 控制字符 ${hit.hex} (${hit.caret}，第 ${hit.line} 行，片段 "${hit.preview}")，常见于 Windows pwsh 双引号字符串内反引号 Markdown 被转义（如 \`a->\\x07）；请改用单引号 here-string (@'...'@) 或 Node/工具写入 UTF-8 文件后经 file 参数（如 body-file / rationale-file）传入。`
+  return { ok: false, code: 'BLOCKED_ASCII_CONTROL_CHAR', exitCode: EXIT.USAGE, reason, hit }
+}
+
+export function assertNoAsciiControlChars(value, fieldLabel = '文本内容') {
+  const res = validateNoAsciiControlChars(value, fieldLabel)
+  if (!res.ok) {
+    const err = new Error(res.reason)
+    err.code = res.code
+    err.exitCode = res.exitCode
+    err.hit = res.hit
+    throw err
+  }
+  return value
+}
 
 export function getKnownKitSkills(kitDir) {
   return Object.freeze(discoverKitSkills(kitDir).map((s) => s.dirName))
@@ -153,6 +201,19 @@ export function parseStandardCli(argv = [], schema = {}) {
     } catch { /* 保持 process.cwd() */ }
   }
 
+  const textFlags = new Set([...TEXT_CONTENT_FLAGS, ...(schema.textFlags ?? [])])
+  for (const flagKey of textFlags) {
+    const rawVal = opts[flagKey]
+    if (rawVal === undefined || rawVal === null) continue
+    if (Array.isArray(rawVal)) {
+      for (let idx = 0; idx < rawVal.length; idx += 1) {
+        assertNoAsciiControlChars(rawVal[idx], `--${flagKey}[${idx}]`)
+      }
+    } else if (typeof rawVal === 'string') {
+      assertNoAsciiControlChars(rawVal, `--${flagKey}`)
+    }
+  }
+
   return {
     sub,
     opts,
@@ -160,9 +221,118 @@ export function parseStandardCli(argv = [], schema = {}) {
     positionals: opts._,
     _: opts._,
     targetDir,
+    explicitDir: (opts.dir !== undefined && String(opts.dir).trim() !== '') ? resolve(String(opts.dir)) : null,
     help: Boolean(opts.help),
     json: Boolean(opts.json),
   }
+}
+
+function resolveInstalledSkillsHostRoot(scriptPath) {
+  if (!scriptPath) return null
+  const abs = resolve(String(scriptPath))
+  const norm = posixPath(abs)
+  const m = /^(.*?)\/\.agents\/skills(?:\/|$)/.exec(norm)
+  if (!m) return null
+  const prefix = m[1] || '/'
+  return resolve(prefix)
+}
+
+function collectKnownRemoteRepos(roots) {
+  const repos = new Set()
+  const cfgDir = roots?.gitCommonDir ?? roots?.gitDir
+  if (!roots?.isGit || !cfgDir) return repos
+  const configText = readTextSafe(join(cfgDir, 'config')) ?? ''
+  for (const m of configText.matchAll(/^\s*url\s*=\s*(.+?)\s*$/gm)) {
+    const slug = normalizeGitHubRepo(m[1])
+    if (slug) repos.add(slug.toLowerCase())
+  }
+  if (roots.mainRoot) {
+    const pkgText = readTextSafe(join(roots.mainRoot, 'package.json'))
+    if (pkgText) {
+      try {
+        const pkg = JSON.parse(pkgText)
+        const repoField = typeof pkg?.repository === 'string' ? pkg.repository : pkg?.repository?.url
+        const slug = normalizeGitHubRepo(repoField)
+        if (slug) repos.add(slug.toLowerCase())
+      } catch { /* ignore invalid package.json */ }
+    }
+  }
+  return repos
+}
+
+function collectUrlReposFromInputs({ urlRepo, urlRepos, argv = [] }) {
+  const found = new Set()
+  for (const item of [urlRepo, ...(Array.isArray(urlRepos) ? urlRepos : [])]) {
+    const clean = normalizeGitHubRepo(item) ?? (typeof item === 'string' && /^[^/\s]+\/[^/\s]+$/.test(item.trim()) ? item.trim() : null)
+    if (clean) found.add(clean)
+  }
+  const parsed = parseFlowInputs(Array.isArray(argv) ? argv : [])
+  for (const ref of [...parsed.issues, ...parsed.prs, ...parsed.milestones]) {
+    if (ref?.repo) found.add(ref.repo)
+  }
+  return [...found]
+}
+
+/**
+ * 校验 CLI 当前工作目录（cwd）、脚本所在 `.agents/skills` 宿主仓与显式平台 URL 所属仓是否一致。
+ * 未显式传 `--dir`/`--repo` 时，一旦出现跨仓错位立即 fail-closed 返回 `BLOCKED_CROSS_REPO_CWD_MISMATCH`（exit 3）。
+ */
+export async function validateCrossRepoTarget({
+  cwd = process.cwd(),
+  targetDir = null,
+  argv = [],
+  explicitDir = null,
+  scriptPath = process.argv[1] ?? null,
+  urlRepo = null,
+  urlRepos = null,
+  checkUrls = true,
+} = {}) {
+  const hasExplicitDir = Boolean(explicitDir && String(explicitDir).trim() !== '')
+  const cwdRoots = await resolveRepoRoots(cwd)
+
+  if (!hasExplicitDir) {
+    const hostDir = resolveInstalledSkillsHostRoot(scriptPath)
+    if (hostDir) {
+      const hostRoots = await resolveRepoRoots(hostDir)
+      const expectedRoot = hostRoots.isGit ? canonicalPath(hostRoots.mainRoot) : canonicalPath(hostDir)
+      const actualRoot = cwdRoots.isGit ? canonicalPath(cwdRoots.mainRoot) : null
+      if (!actualRoot || !samePath(actualRoot, expectedRoot)) {
+        return {
+          ok: false,
+          blocked: true,
+          code: 'BLOCKED_CROSS_REPO_CWD_MISMATCH',
+          exitCode: EXIT.FACT,
+          expectedRoot,
+          actualRoot: actualRoot ?? canonicalPath(cwd),
+          reason: `BLOCKED_CROSS_REPO_CWD_MISMATCH: 脚本宿主仓为 ${expectedRoot}，但当前工作目录 ${canonicalPath(cwd)} ${actualRoot ? `指向另一 Git 仓 ${actualRoot}` : '不在该 Git 仓内'}；请切入目标仓执行或显式传入 --dir "${expectedRoot}"。`,
+        }
+      }
+    }
+  }
+
+  if (checkUrls) {
+    const targetRoot = hasExplicitDir ? resolve(String(explicitDir)) : (targetDir ? resolve(String(targetDir)) : cwd)
+    const targetRoots = await resolveRepoRoots(targetRoot)
+    const knownRepos = collectKnownRemoteRepos(targetRoots)
+    if (knownRepos.size > 0) {
+      const referenced = collectUrlReposFromInputs({ urlRepo, urlRepos, argv })
+      const mismatch = referenced.find((r) => !knownRepos.has(r.toLowerCase()))
+      if (mismatch) {
+        return {
+          ok: false,
+          blocked: true,
+          code: 'BLOCKED_CROSS_REPO_CWD_MISMATCH',
+          exitCode: EXIT.FACT,
+          urlRepo: mismatch,
+          knownRepos: [...knownRepos],
+          targetRoot: canonicalPath(targetRoots.mainRoot || targetRoot),
+          reason: `BLOCKED_CROSS_REPO_CWD_MISMATCH: 目标引用指向远程仓库 ${mismatch}，与当前目标仓 ${canonicalPath(targetRoots.mainRoot || targetRoot)} 的远端（${[...knownRepos].join(', ')}）不匹配；请切入 ${mismatch} 对应仓库或显式传入 --dir <targetRepo>。`,
+        }
+      }
+    }
+  }
+
+  return { ok: true, blocked: false, exitCode: EXIT.OK }
 }
 
 /**

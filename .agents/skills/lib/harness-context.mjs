@@ -130,6 +130,13 @@ export function enforceSlotBoundary({
   return { ok: true, inPlace: false }
 }
 
+export const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i
+
+export function isNonImplRoleActor(actor) {
+  const clean = String(actor ?? '').trim()
+  return Boolean(clean && NON_IMPL_ROLE_RE.test(clean.toLowerCase()))
+}
+
 /**
  * 校验规划作者与实际实施者分离（`author !== implementer`）。
  * 仅在 `single-session` 且经人类显式确认（`--human-approved`）时允许单人自建自改。

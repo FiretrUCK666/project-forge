@@ -86,8 +86,8 @@ export const INJECTIONS_REPO_ALIGNMENT = [
     what: 'issue-template-hydrate.mjs: 空 repro 跳过 removeSectionIfPresent 留下裸 1.2.3.',
     file: 'kit/skills/lib/issue-template-hydrate.mjs',
     alsoDropIn: ['.agents/skills/lib/issue-template-hydrate.mjs'],
-    from: '  md = sec.repro\n    ? replaceSectionIfPresent(md, reproCandidates, sec.repro).text\n    : removeSectionIfPresent(md, reproCandidates).text',
-    to: '  if (sec.repro) md = replaceSectionIfPresent(md, reproCandidates, sec.repro).text',
+    from: '  if (sec.repro) applyReplace(reproCandidates, sec.repro)\n  else md = removeSectionIfPresent(md, reproCandidates).text',
+    to: '  if (sec.repro) applyReplace(reproCandidates, sec.repro)',
     expect: 'C4：issue-template-hydrate 剥离空节与裸列表且 feature_request.md 含 kit/',
   },
   {

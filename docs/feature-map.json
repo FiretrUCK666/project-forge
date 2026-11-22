@@ -407,7 +407,7 @@
         {
           "id": "verify-edit-gate",
           "kind": "command",
-          "command": "node .agents/skills/dev-edit/scripts/edit-gate.mjs --mode standalone --changed --json",
+          "command": "node .agents/skills/dev-edit/scripts/edit-gate.mjs --mode standalone --changed --base main --json",
           "scriptPath": null,
           "riskLevel": "high",
           "triggerHints": [

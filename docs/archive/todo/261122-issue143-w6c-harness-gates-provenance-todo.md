@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: Slice 6C：跨仓隔离、并发实证豁免与角色溯源防绕过
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: 143
@@ -10,7 +10,7 @@ branch: feat/w6c-harness-gates-provenance
 owner: plan-w6
 plan_mode: interactive
 approved: true
-done_at: null
+done_at: 2026-11-22
 task_id: w6c-harness-gates-provenance
 planned_at: 836e964ca5bb77e4ce14c1848e280bb15a1e3b9b
 related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
@@ -29,7 +29,7 @@ related_spec: ../specs/261122-issue143-w6c-harness-gates-provenance-spec.md
 | 任务编号 | `w6c-harness-gates-provenance` |
 | 负责人 / 审批 | plan-w6 / `false` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | #143 / 未关联 / `docs/specs/261122-issue143-w6c-harness-gates-provenance-spec.md` |
+| 关联 Issue / PR / SPEC | #143 / 未关联 / `docs/archive/specs/261122-issue143-w6c-harness-gates-provenance-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 

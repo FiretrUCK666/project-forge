@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: Wave 6 去补丁通用架构重构
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: 143
@@ -78,7 +78,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `w6a-survey-handoff-core` | `docs/specs/261122-issue143-w6a-survey-handoff-core-spec.md` | `[]` | `C1` - `C6` | `scripts/` + `templates/` + `credential-scan.mjs` + `git-core.mjs` + `profile-sniffer*.mjs` + `scripts/dev/cli-parity.mjs` + `AGENTS.md` |
 | `w6b-kit-single-source-hygiene` | `docs/specs/261122-issue143-w6b-kit-single-source-hygiene-spec.md` | `[w6a-survey-handoff-core]` | `C7` - `C12`, `C19` | `kit/skills/lib/{subcommand-meta,doc-*,intake-triage,evidence-substance,no-changelog-voice,static-gates*,feature-map,tdd-parity,gate-truth,profile}.mjs` + `dev-explore/dev-plan/dev-edit/dev-govern/dev-verify-tools/dev-iterate` + `review-gates.mjs` + `scripts/dev/subcommand-parity.mjs`(new) + `docs/TDD.md` + `README*.md` |
-| `w6c-harness-gates-provenance` | `docs/specs/261122-issue143-w6c-harness-gates-provenance-spec.md` | `[w6a-survey-handoff-core, w6b-kit-single-source-hygiene]` | `C13` - `C18` | `kit/skills/dev-flow/` + `kit/skills/dev-review/{review-pack,review-empirical*,review-locks}.mjs` + `kit/skills/dev-plan/scripts/doc-plan-ops.mjs` + `kit/skills/lib/{cli,exit-codes,ledger,docs,doc-approval,harness-context,workflow-policy*,escalation,*-template-hydrate,handoff-package}.mjs` + `docs/feature-map.json` |
+| `w6c-harness-gates-provenance` | `docs/archive/specs/261122-issue143-w6c-harness-gates-provenance-spec.md` | `[w6a-survey-handoff-core, w6b-kit-single-source-hygiene]` | `C13` - `C18` | `kit/skills/dev-flow/` + `kit/skills/dev-review/{review-pack,review-empirical*,review-locks}.mjs` + `kit/skills/dev-plan/scripts/doc-plan-ops.mjs` + `kit/skills/lib/{cli,exit-codes,ledger,docs,doc-approval,harness-context,workflow-policy*,escalation,*-template-hydrate,handoff-package}.mjs` + `docs/feature-map.json` |
 
 ## 四、复用既有模块
 

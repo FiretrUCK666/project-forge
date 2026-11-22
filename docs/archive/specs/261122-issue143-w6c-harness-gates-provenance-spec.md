@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Slice 6C：跨仓隔离、并发实证豁免与角色溯源防绕过
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
@@ -11,7 +11,7 @@ branch: feat/w6c-harness-gates-provenance
 owner: plan-w6
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-w6-r2, round=1, sha=2912481b85f3, summary=Round 2 independent critique PASS (#599))"
 related_prd: ../prd/261122-issue143-w6-universal-architecture-prd.md
 related_todo: ../todo/261122-issue143-w6c-harness-gates-provenance-todo.md
@@ -27,13 +27,13 @@ scope_files: [kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-22` / `2026-11-22` |
 | 分支 / Issue / PR | 见 Frontmatter `branch` / #143 / 未关联 |
-| 负责人 / 内审状态 | plan-w6 / `pending` |
+| 负责人 / 内审状态 | plan-w6 / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | `docs/prd/261122-issue143-w6-universal-architecture-prd.md` / `docs/todo/261122-issue143-w6c-harness-gates-provenance-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261122-issue143-w6-universal-architecture-prd.md` / `docs/archive/todo/261122-issue143-w6c-harness-gates-provenance-todo.md` |
 
 - **变更一句话**：加固跨仓 CWD 错位 fail-closed 拦截、无损水合与 SPEC 状态同步、`low` 风险纯文档实证豁免、多语言单栈/并发验证识别、`pnpm` junction/`fs.allow`/游离槽位兼容性，以及防同会话伪造 `--owner` 的真实角色溯源校验。
 

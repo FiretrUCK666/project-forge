@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
+import { formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { checkMermaidLabelWidth, isSharedMasterPrd } from '../../lib/docs.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
@@ -637,6 +638,7 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
   }
 
   if (pack.reviewContext) lines.push(...formatReviewContextLines(pack.reviewContext))
+  else if (pack.contextBrief) lines.push(...formatContextBriefLines(pack.contextBrief))
 
   lines.push('', '--- Doc-Code Parity Gate ---')
   if (pack.parity.triggers.length === 0 && pack.parity.todoIssues.length === 0 && (pack.parity.mermaidViolations?.length ?? 0) === 0) {

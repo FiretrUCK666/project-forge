@@ -2,48 +2,11 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { buildContextBrief, extractDocPaths } from './context-brief.mjs'
 import { extractCriteria } from './criteria-lock.mjs'
 import { readTextSafe } from './git.mjs'
-import { locateTopSlicesForPaths } from './doc-locator.mjs'
-import { parseDocFrontmatter, parseDocFilename } from './docs.mjs'
-import { matchFeatureMapForPaths } from './feature-map.mjs'
+import { parseDocFrontmatter } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
-import { discoverEvergreenDocs } from './profile.mjs'
-
-/**
- * 从「影响路径」一类表述里抽出反引号包住的相对路径。
- *
- * 两种写法都要认：小节形态（`## 影响路径` 带一列）与行内条目形态
- * （`- **影响路径**：a、b、c`）。短文档常用后者——判据关心的是「说没说」，
- * 不是「用了哪种排版」。只认小节会让一整类文档的影响路径静默变成空。
- *
- * 抽出来的还得是**能改的东西**：`kit/**` 是通配、`node scripts/equip.mjs .` 是命令、
- * `.agents/skills/` 是产物目录——把它们列进「能改哪里」只会让子代理以为可以乱动。
- */
-function extractPaths(text) {
-  const body = String(text ?? '').replace(/\r\n/g, '\n')
-  const parts = []
-
-  const section = /^##[^\n]*(?:影响路径|影响范围|涉及文件|改动路径)[^\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/m.exec(body)?.[1]
-  if (section) parts.push(section)
-
-  const inline = /^-\s*\*\*(?:影响路径|影响范围|涉及文件|改动路径)\*\*\s*[:：]\s*(.+)$/gm
-  for (const m of body.matchAll(inline)) parts.push(m[1])
-
-  const found = []
-  for (const part of parts) {
-    for (const m of part.matchAll(/`([^`\n]+)`/g)) {
-      const rel = m[1].trim()
-      if (!/[/\\]/.test(rel)) continue
-      if (/^(?:TODO|TBD)$/i.test(rel)) continue
-      if (/[*?{}]/.test(rel)) continue                      // 通配不是可改的具体文件
-      if (/\s/.test(rel)) continue                          // 带空格的几乎都是命令
-      if (/^(?:\.agents|node_modules|dist|build)\//.test(rel)) continue  // 产物目录，改源码才对
-      found.push(rel)
-    }
-  }
-  return [...new Set(found)]
-}
 
 /**
  * 抽出「设计方案 / 契约变更」整节正文。
@@ -247,7 +210,7 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   ].map((s) => String(s ?? '').trim()).filter(Boolean)
   const criteria = specText ? extractCriteria(specText) : extractCriteria(todoText)
   const sourceDoc = specText ? specRel : (todoText ? todoRel : null)
-  const paths = [...new Set([...fmScopeFiles, ...extractPaths(specText), ...extractPaths(todoText)])]
+  const paths = [...new Set([...fmScopeFiles, ...extractDocPaths(specText), ...extractDocPaths(todoText)])]
   // 去重要按「说了同一件事」判，不是按字符串相等：
   // SPEC 写「不引入第三方解析器（零依赖是不变量）；不做 LSP 级语义分析」，
   // Todo 写「第三方解析器、LSP 级语义分析」——字面不同，内容重复。
@@ -269,7 +232,7 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     nonGoals.push(g)
   }
 
-  // 结合变更路径与验收关键词抽取相关度 Top-3 文档切片，替代全文塞入。
+  // 结合变更路径与验收关键词经单源 context-brief 抽取常青目录、Top-3 文档切片与 feature-map 上下文。
   const wtCandidate = mainRoot && ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null
   const locateRoot = wtCandidate && existsSync(wtCandidate) ? wtCandidate : mainRoot
   const keywords = [
@@ -277,50 +240,25 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     parseDocFrontmatter(specText || todoText)?.data?.title,
     ...criteria.slice(0, 6).map((c) => c.text),
   ].filter(Boolean)
-  let relatedSlices = []
-  try {
-    if (locateRoot) {
-      const ev = discoverEvergreenDocs(locateRoot)
-      const priorityFiles = (ev?.markdownDocs ?? []).map((d) => d.path)
-      relatedSlices = locateTopSlicesForPaths(locateRoot, {
-        paths,
-        keywords,
-        excludeFiles: [specRel, todoRel].filter(Boolean),
-        priorityFiles,
-        limit: 3,
-        budgetLines: 48,
-      }).map((s) => ({
-        absPath: s.absPath,
-        relPath: s.relPath,
-        kind: s.kind,
-        section: s.section,
-        startLine: s.startLine,
-        endLine: s.endLine,
-        score: s.score,
-        summary: s.summary,
-        locateCommand: s.locateCommand,
-      }))
-    }
-  } catch {
-    relatedSlices = []
-  }
-
-  let featureMapContext = { exists: false, corrupt: false, warning: null, matchedFeatures: [], businessFlows: [], verificationTools: [], testRefs: [] }
-  try {
-    if (locateRoot) {
-      const fm = matchFeatureMapForPaths(locateRoot, paths, keywords)
-      featureMapContext = {
-        exists: Boolean(fm.exists),
-        corrupt: Boolean(fm.corrupt),
-        warning: fm.warning ?? null,
-        matchedFeatures: (fm.matchedFeatures ?? []).map((f) => ({ id: f.id, name: f.name, matchedBy: f.matchedBy })),
-        businessFlows: fm.businessFlows ?? [],
-        verificationTools: (fm.verificationTools ?? []).map((t) => ({ id: t.id, kind: t.kind, command: t.command, riskLevel: t.riskLevel })),
-        testRefs: fm.testRefs ?? [],
-      }
-    }
-  } catch {
-    // Fail-Soft on read-only handoff context assembly
+  const contextBrief = buildContextBrief(locateRoot, {
+    paths,
+    keywords,
+    excludeFiles: [specRel, todoRel].filter(Boolean),
+    limit: 3,
+    budgetLines: 48,
+  })
+  const evergreenToc = contextBrief.evergreenToc
+  const otherEvergreenDocs = contextBrief.otherEvergreenDocs
+  const totalEvergreenDocs = contextBrief.totalEvergreenDocs
+  const relatedSlices = contextBrief.relatedSlices
+  const featureMapContext = {
+    exists: contextBrief.featureMap.exists,
+    corrupt: contextBrief.featureMap.corrupt,
+    warning: contextBrief.featureMap.warning,
+    matchedFeatures: contextBrief.featureMap.matchedFeatures.map((f) => ({ id: f.id, name: f.name, matchedBy: f.matchedBy })),
+    businessFlows: contextBrief.featureMap.businessFlows,
+    verificationTools: contextBrief.featureMap.verificationTools.map((t) => ({ id: t.id, kind: t.kind, command: t.command, riskLevel: t.riskLevel })),
+    testRefs: contextBrief.featureMap.testRefs,
   }
 
   // 验收命令从 AGENTS.md 的 Dev Profile 读，不在这里编。
@@ -399,6 +337,20 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     lines.push("")
     lines.push(design)
     lines.push("")
+  }
+
+  if (evergreenToc.length > 0 || otherEvergreenDocs.length > 0) {
+    lines.push('## 常青文档章节目录（Evergreen TOC）')
+    lines.push('')
+    for (const doc of evergreenToc) {
+      const hStr = doc.headings.length > 0 ? doc.headings.map((h) => `${h.title}(L${h.line})`).join(' | ') : '(无二级标题)'
+      lines.push(`- \`${doc.path}\` [${doc.source}]: ${hStr}`)
+      lines.push(`  - 定位命令：\`${doc.locateCommand}\``)
+    }
+    if (otherEvergreenDocs.length > 0) {
+      lines.push(`- 其余常青文档（共 ${totalEvergreenDocs} 份）：${otherEvergreenDocs.map((p) => `\`${p}\``).join('、')}（运行 \`node .agents/skills/dev-explore/scripts/doc-locate.mjs --file <path>\`）`)
+    }
+    lines.push('')
   }
 
   if (relatedSlices.length > 0) {
@@ -648,7 +600,11 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
       nonGoals,
       design,
       relatedSlices,
+      evergreenToc,
+      otherEvergreenDocs,
+      totalEvergreenDocs,
       featureMapContext,
+      contextBrief,
       explored: ledger?.explored ?? null,
       reworkFeedback,
       receiptTemplate,

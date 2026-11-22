@@ -439,7 +439,7 @@ export const INJECTIONS_WORKFLOW = [
   {
     id: 'I105',
     what: '影响路径只认小节形态（行内写法整类静默变空）',
-    file: 'kit/skills/lib/handoff-package.mjs',
+    file: 'kit/skills/lib/context-brief.mjs',
     from: "  const inline = /^-\\s*\\*\\*(?:影响路径|影响范围|涉及文件|改动路径)\\*\\*\\s*[:：]\\s*(.+)$/gm",
     to: '  const inline = /(?:NEVER_MATCH_XYZ)/g',
     expect: '交接包必须带设计方案',

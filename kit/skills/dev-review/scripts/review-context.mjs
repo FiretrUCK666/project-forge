@@ -8,6 +8,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
+import { buildContextBrief, formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { resolveExecutable } from '../../lib/exec.mjs'
 import {
   FEATURE_MAP_REL, detectScratchSolidificationHints, evaluateToolStaleness,
@@ -293,11 +294,27 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
     }
   }
 
+  const contextBrief = buildContextBrief(reviewRoot, {
+    paths: changedFiles,
+    keywords: [],
+    excludeFiles: [task?.specFile, task?.todoFile, task?.prdFile].filter(Boolean),
+    profile: effectiveProfile,
+  })
+  const evergreenContext = {
+    evergreenToc: contextBrief.evergreenToc,
+    otherEvergreenDocs: contextBrief.otherEvergreenDocs,
+    totalEvergreenDocs: contextBrief.totalEvergreenDocs,
+    relatedSlices: contextBrief.relatedSlices,
+    featureMap: contextBrief.featureMap,
+  }
+
   return {
     featureMapSource,
     warnings,
     changedFilesCount: changedFiles.length,
     runtimeFilesCount: runtimeChanged.length,
+    evergreenContext,
+    contextBrief,
     matchedFeatures: matchedFeatures.map((f) => ({
       id: f.id,
       name: f.name,
@@ -355,5 +372,12 @@ export function formatReviewContextLines(rc) {
   }
   for (const item of rc.empiricalTaskOrder.actionItems) lines.push(`  * ${item}`)
   for (const h of rc.solidificationHints ?? []) lines.push(`  - [${h.code}] ${h.suggestion}`)
+  const brief = rc.evergreenContext ?? rc.contextBrief
+  if (brief) {
+    lines.push(...formatContextBriefLines(brief, {
+      title: '  Evergreen Docs & Context Brief:',
+      includeFeatureMap: (rc.affectedBusinessFlows?.length ?? 0) === 0,
+    }))
+  }
   return lines
 }

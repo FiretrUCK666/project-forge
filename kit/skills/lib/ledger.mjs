@@ -136,17 +136,35 @@ export function normalizeExploredEvidence(raw) {
   if (!at || !tier || !Number.isFinite(symNum) || symNum < 0) return null
   const by = typeof raw.by === 'string' && raw.by.trim() ? raw.by.trim() : undefined
   const source = typeof raw.source === 'string' && raw.source.trim() ? raw.source.trim() : undefined
+  const evRaw = raw.evergreenDocsCount
+  const evergreenDocsCount = evRaw !== undefined && evRaw !== null && Number.isFinite(Number(evRaw)) && Number(evRaw) >= 0
+    ? Math.floor(Number(evRaw))
+    : undefined
+  const fmRaw = raw.featureMapCount
+  const featureMapCount = fmRaw !== undefined && fmRaw !== null && Number.isFinite(Number(fmRaw)) && Number(fmRaw) >= 0
+    ? Math.floor(Number(fmRaw))
+    : undefined
   return {
     at,
     tier,
     symbolCount: Math.floor(symNum),
     ...(by ? { by } : {}),
     ...(source ? { source } : {}),
+    ...(evergreenDocsCount !== undefined ? { evergreenDocsCount } : {}),
+    ...(featureMapCount !== undefined ? { featureMapCount } : {}),
   }
 }
 
-export function createExploredEvidence({ at = new Date().toISOString(), tier = 'direct-read', symbolCount = 0, by, source = 'repo-map' } = {}) {
-  return normalizeExploredEvidence({ at, tier, symbolCount, by, source })
+export function createExploredEvidence({
+  at = new Date().toISOString(),
+  tier = 'direct-read',
+  symbolCount = 0,
+  by,
+  source = 'repo-map',
+  evergreenDocsCount,
+  featureMapCount,
+} = {}) {
+  return normalizeExploredEvidence({ at, tier, symbolCount, by, source, evergreenDocsCount, featureMapCount })
 }
 
 export function hasExploredEvidence(ledger) {

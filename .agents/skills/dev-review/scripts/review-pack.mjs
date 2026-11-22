@@ -639,6 +639,7 @@ async function main(argv = process.argv.slice(2)) {
       structuralGate,
       doorAssessment,
       reviewContext,
+      contextBrief: reviewContext?.contextBrief ?? null,
       empiricalGate,
       untrustedWarnings,
       untrustedAdvisories,

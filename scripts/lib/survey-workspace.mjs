@@ -11,7 +11,7 @@ import { prepareExecInvocation, resolveExecutable } from '../../kit/skills/lib/e
 import { hasDotGitInAncestors, readHeadFast, readLooseCommitLogFast } from '../../kit/skills/lib/git-fast.mjs'
 import { inspectSurveyStatusFast } from '../../kit/skills/lib/git-status-fast.mjs'
 import {
-  SAFE_ENV_RE, SECRET_FILE_RE, isNpmrcFile, isSensitiveSecretFile,
+  SAFE_ENV_RE, SECRET_CONTENT_PATTERNS, SECRET_FILE_RE, isNpmrcFile, isSensitiveSecretFile,
 } from '../../kit/skills/lib/credential-scan.mjs'
 
 import {
@@ -52,16 +52,6 @@ import {
 export { detectConventions, detectDocs } from './survey-docs.mjs'
 
 const { LIKELY_DEFAULT_BRANCHES } = protocol
-
-const SECRET_CONTENT_PATTERNS = [
-  { label: 'GitHub 令牌', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b/ },
-  { label: 'GitHub 细粒度令牌', re: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/ },
-  { label: 'npm 令牌', re: /\bnpm_[A-Za-z0-9]{36}\b/ },
-  { label: 'PyPI 令牌', re: /\bpypi-[A-Za-z0-9_-]{50,}\b/ },
-  { label: 'API 密钥', re: /\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b/ },
-  { label: 'AWS 访问密钥', re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { label: '私钥块', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/ },
-]
 
 export function runCmd(cmd, args, opts = {}) {
   return new Promise((done) => {
@@ -443,7 +433,7 @@ function processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii = true) {
         for (const pat of SECRET_CONTENT_PATTERNS) {
           if (pat.re.test(line)) {
             if (!rec.textSecrets) rec.textSecrets = []
-            rec.textSecrets.push({ file: rec.rel, line: i + 1, kind: pat.label })
+            rec.textSecrets.push({ file: rec.rel, line: i + 1, kind: pat.zhLabel ?? pat.label })
           }
         }
       }

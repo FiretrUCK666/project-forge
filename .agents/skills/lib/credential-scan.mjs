@@ -18,7 +18,7 @@ export const SECRET_CONTENT_PATTERNS = Object.freeze([
   { label: 'PyPI token', zhLabel: 'PyPI 令牌', re: /\bpypi-[A-Za-z0-9_-]{50,}\b/ },
   { label: 'AWS access key', zhLabel: 'AWS 访问密钥', re: /\bAKIA[0-9A-Z]{16}\b/ },
   { label: 'API key sk-*', zhLabel: 'API 密钥', re: /\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b/ },
-  { label: 'PEM private key block', zhLabel: '私钥块', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{16,}/ },
+  { label: 'PEM private key block', zhLabel: '私钥块', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |[A-Z ]*)?PRIVATE KEY-----/ },
 ])
 
 export function isNpmrcFile(fileName) {

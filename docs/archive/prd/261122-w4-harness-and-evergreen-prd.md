@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: Wave 4 Harness 内核加固与长青文档更新总控
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: null
@@ -28,7 +28,7 @@ multi_spec: true
 | 关联 Issue / PR | 未关联 / 未关联 |
 | 提出方 / 负责人 | `@coordinator` (#519) / `plan-harness` |
 | 规划态 | `interactive`（架构拆分、门型与两波依赖边界已由 #519 指令逐项拍板清零） |
-| 关联设计 / 任务单 | [Wave 1 SPEC](../specs/261122-w4a-harness-core-spec.md) · [Wave 2 SPEC](../specs/261122-w4b-govern-evergreen-spec.md) |
+| 关联设计 / 任务单 | [Wave 1 SPEC](../archive/specs/261122-issue132-w4a-harness-core-spec.md) · [Wave 2 SPEC](../specs/261122-issue134-w4b-govern-evergreen-spec.md) |
 
 - **目标读者**：Wave 1 / Wave 2 实施者、独立 Critique / Code Reviewer 与项目维护者
 
@@ -106,13 +106,13 @@ flowchart LR
 
 <!-- section: acceptance -->
 <!-- criteria:start -->
-- [ ] C1: 统一 `Actor / HostMode / Slot` 边界锁（`kit/skills/lib/harness-context.mjs` (new)）：消除 `owner: null`、`flow start` 升格漏检、`submit` 省略 `--agent` 放行、未认领提审、`Case 1` 工作区口径冲突与 `mainRoot` 脏态漏拦，同时支持 `single-session` 显式人类确认通道。
-- [ ] C2: 统一会话状态指针与探索/规划就绪态闭环机（`kit/skills/lib/session-state.mjs` (new)）：持久化 `S1–S4` 治理步与 `triage` 指纹，移除 `autoPopulateExplored` 伪造，封堵 `bound.length === 0` 放行、PRD 漏 `multi_spec`、`--skip-critique-reason` 无授权跳过、待拍板漏节、无关键字空话、`cmd` 与 `internal` 前缀漏匹配及压缩后 `draft` 盲视。
-- [ ] C3: 统一零降级实证与双门六锁核心（`kit/skills/lib/gate-enforcement.mjs` (new)）：默认启用 `enforceGates`、Round 2+ 禁漏未闭合阻塞项 `pass`、UI 变更禁用纯文本绕过 `--artifact`、`verify` 启用 `edit-gate --final` 且硬拦 `do-not-edit`、`check-empirical --cmd` 追加而非覆盖、有意义 `check-fault`、停损解锁仍校 `headSha`、`cleanup` 消费 `previewHash` 且依 `isMergedBranch()` 安全删分支、默认启用轻量治理与有状态 `iterate-cycle`。
-- [ ] C4: Per-Worktree `verify-tools` 缓存与 `dev-govern` 长青漂移引擎（`kit/skills/lib/verify-state.mjs`、`kit/skills/dev-govern/`）：按 `(slotKey, treeHash)` 隔离验证缓存消除跨 worktree 污染；`govern-audit.mjs reconcile` 补扫 `kit/`、校验 `docAnchor` 与工具/测试覆盖；`govern-docs.mjs checkDocChurnStaleness` 仅由权威长青文档重置滞后计数。
-- [ ] C5: Wave 1 全量接线、套件同步与双向证伪实证：8 技能与顶层脚本完成薄接线并运行 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`，全部 `.mjs <= 800` 行、`AGENTS.md < 24576B`、`SKILL.md <= 200L`，补齐 `scripts/dev/fixtures-w4-harness.mjs` (new) 与 `scripts/dev/injections-data-w4-harness.mjs` (new)（`I398+`），全仓 `preflight` / `fixtures` / `bench --strict-budget` / `verify-injections` / `cli-parity` / `exit-code-parity` 全绿。
-- [ ] C6: Wave 2 全景更新 `docs/TDD.md`：在 `w4a-harness-core` 合入后运行升级版 `dev-govern` 与 `dev-explore`，补全 L1–L4 全部 `kit/skills/lib/*.mjs` 与新增模块清单，升级 Mermaid 架构全景（图 1）、8 技能流转（图 4，补 `iterate` 正流回流与 `govern` 出边）与双态波次闭环（图 5），补充 Harness 四原语与 Per-Worktree 状态隔离说明，`tdd-structure` 与 `tdd-parity` 全绿。
-- [ ] C7: Wave 2 全量刷新 `docs/feature-map.json` 与 `AGENTS.md` 校验命令：补齐全部功能域 `docAnchor`、`skill` 验证工具、`check`/`release` 测试引用与 PR #128/#129/`w4a` 新增模块，对齐 `AGENTS.md` 与 `.github/workflows/check.yml` 命令清单，达到 `verify-tools audit .` `Status: OK | StaleTools: 0`、`govern-audit.mjs reconcile .` 零漂移与 `scripts/review.mjs .` 零命令脱节。
+- [x] C1: 统一 `Actor / HostMode / Slot` 边界锁（`kit/skills/lib/harness-context.mjs` (new)）：消除 `owner: null`、`flow start` 升格漏检、`submit` 省略 `--agent` 放行、未认领提审、`Case 1` 工作区口径冲突与 `mainRoot` 脏态漏拦，同时支持 `single-session` 显式人类确认通道。
+- [x] C2: 统一会话状态指针与探索/规划就绪态闭环机（`kit/skills/lib/session-state.mjs` (new)）：持久化 `S1–S4` 治理步与 `triage` 指纹，移除 `autoPopulateExplored` 伪造，封堵 `bound.length === 0` 放行、PRD 漏 `multi_spec`、`--skip-critique-reason` 无授权跳过、待拍板漏节、无关键字空话、`cmd` 与 `internal` 前缀漏匹配及压缩后 `draft` 盲视。
+- [x] C3: 统一零降级实证与双门六锁核心（`kit/skills/lib/gate-enforcement.mjs` (new)）：默认启用 `enforceGates`、Round 2+ 禁漏未闭合阻塞项 `pass`、UI 变更禁用纯文本绕过 `--artifact`、`verify` 启用 `edit-gate --final` 且硬拦 `do-not-edit`、`check-empirical --cmd` 追加而非覆盖、有意义 `check-fault`、停损解锁仍校 `headSha`、`cleanup` 消费 `previewHash` 且依 `isMergedBranch()` 安全删分支、默认启用轻量治理与有状态 `iterate-cycle`。
+- [x] C4: Per-Worktree `verify-tools` 缓存与 `dev-govern` 长青漂移引擎（`kit/skills/lib/verify-state.mjs`、`kit/skills/dev-govern/`）：按 `(slotKey, treeHash)` 隔离验证缓存消除跨 worktree 污染；`govern-audit.mjs reconcile` 补扫 `kit/`、校验 `docAnchor` 与工具/测试覆盖；`govern-docs.mjs checkDocChurnStaleness` 仅由权威长青文档重置滞后计数。
+- [x] C5: Wave 1 全量接线、套件同步与双向证伪实证：8 技能与顶层脚本完成薄接线并运行 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`，全部 `.mjs <= 800` 行、`AGENTS.md < 24576B`、`SKILL.md <= 200L`，补齐 `scripts/dev/fixtures-w4-harness.mjs` (new) 与 `scripts/dev/injections-data-w4-harness.mjs` (new)（`I398+`），全仓 `preflight` / `fixtures` / `bench --strict-budget` / `verify-injections` / `cli-parity` / `exit-code-parity` 全绿。
+- [x] C6: Wave 2 全景更新 `docs/TDD.md`：在 `w4a-harness-core` 合入后运行升级版 `dev-govern` 与 `dev-explore`，补全 L1–L4 全部 `kit/skills/lib/*.mjs` 与新增模块清单，升级 Mermaid 架构全景（图 1）、8 技能流转（图 4，补 `iterate` 正流回流与 `govern` 出边）与双态波次闭环（图 5），补充 Harness 四原语与 Per-Worktree 状态隔离说明，`tdd-structure` 与 `tdd-parity` 全绿。
+- [x] C7: Wave 2 全量刷新 `docs/feature-map.json` 与 `AGENTS.md` 校验命令：补齐全部功能域 `docAnchor`、`skill` 验证工具、`check`/`release` 测试引用与 PR #128/#129/`w4a` 新增模块，对齐 `AGENTS.md` 与 `.github/workflows/check.yml` 命令清单，达到 `verify-tools audit .` `Status: OK | StaleTools: 0`、`govern-audit.mjs reconcile .` 零漂移与 `scripts/review.mjs .` 零命令脱节。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

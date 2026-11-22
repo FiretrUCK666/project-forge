@@ -39,7 +39,8 @@
         "kit/skills/lib/profile.mjs",
         "kit/skills/lib/git-fast.mjs",
         "kit/skills/lib/git-status-fast.mjs",
-        "kit/skills/lib/git-fast-objects.mjs"
+        "kit/skills/lib/git-fast-objects.mjs",
+        "kit/skills/lib/session-state.mjs"
       ],
       "businessFlows": [
         "只读扫描目标仓生态、Git 拓扑与文档现状并输出 JSON/Markdown",
@@ -67,7 +68,12 @@
         "scripts/dev/fixtures-git-fast.mjs",
         "scripts/dev/fixtures-platform.mjs",
         "docs/archive/specs/261117-issue49-survey-honesty-spec.md",
-        "docs/archive/specs/261118-issue74-b4a-heterogeneous-survey-spec.md"
+        "docs/archive/specs/261118-issue74-b4a-heterogeneous-survey-spec.md",
+        "scripts/dev/fixtures-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4",
+        "docs/TDD.md#4-身份判定平台注册表与传输通道"
       ]
     },
     {
@@ -93,7 +99,8 @@
         "kit/skills/lib/skill-discovery.mjs",
         "kit/skills/lib/tool-owned.mjs",
         "kit/skills/lib/overlay.mjs",
-        "scripts/backup.mjs"
+        "scripts/backup.mjs",
+        "kit/skills/lib/session-state.mjs"
       ],
       "businessFlows": [
         "将 8 套 kit/skills 幂等装配到 .agents/skills 并校验字节一致与扩展槽豁免",
@@ -123,6 +130,9 @@
         "scripts/dev/fixtures-iterate-evolution.mjs",
         "scripts/dev/fixtures-skills-hooks.mjs",
         "scripts/dev/fixtures-core.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#v3-账本三方融合abi-回滚与跨代自更新"
       ]
     },
     {
@@ -137,7 +147,8 @@
         "scripts/lib/agents-sections.mjs",
         "scripts/lib/markdown.mjs",
         "kit/skills/lib/command-lex.mjs",
-        "scripts/lib/template.mjs"
+        "scripts/lib/template.mjs",
+        "kit/skills/lib/session-state.mjs"
       ],
       "businessFlows": [
         "从 templates/agents-project.md 渲染受管区间并保留手写段落",
@@ -162,6 +173,9 @@
         "scripts/dev/fixtures-contracts.mjs",
         "scripts/dev/fixtures-engine-hardening.mjs",
         "scripts/dev/fixtures-doc-fill.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#7-三层常青文档与工作区安全"
       ]
     },
     {
@@ -182,11 +196,23 @@
         "scripts/lib/update-net.mjs",
         "scripts/lib/update-ops.mjs",
         "kit/skills/lib/no-changelog-voice.mjs",
-        "scripts/lib/claims.mjs"
+        "scripts/lib/claims.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "assets/readme/hero.svg",
+        "assets/readme/hero-en.svg",
+        "assets/readme/architecture.svg",
+        "assets/readme/architecture-en.svg",
+        "assets/readme/docs-layers.svg",
+        "assets/readme/docs-layers-en.svg",
+        "assets/readme/skills-cycle.svg",
+        "assets/readme/skills-cycle-en.svg",
+        "assets/readme/workflow.svg",
+        "assets/readme/workflow-en.svg"
       ],
       "businessFlows": [
         "核对交付体检缺口与契约声明回查",
-        "扫描标记残留与交棒净度退出码"
+        "扫描标记残留与交棒净度退出码",
+        "同步双语 README 目录与浅深色自适应 SVG 图解 (assets/readme/*.svg)"
       ],
       "verificationTools": [
         {
@@ -210,7 +236,13 @@
         "scripts/dev/fixtures-review-contracts.mjs",
         "docs/archive/specs/261117-issue52-review-independence-spec.md",
         "docs/archive/specs/261118-issue57-review-empirical-gate-spec.md",
-        "docs/archive/specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md"
+        "docs/archive/specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md",
+        "scripts/dev/fixtures-repo-alignment.mjs",
+        "scripts/dev/injections-data-repo-alignment.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#模块与目录职责",
+        "docs/TDD.md#7-三层常青文档与工作区安全"
       ]
     },
     {
@@ -228,7 +260,8 @@
         "kit/skills/lib/markdown-scan.mjs",
         "kit/skills/lib/session-orient.mjs",
         "kit/skills/lib/shared.mjs",
-        "kit/skills/lib/symbol-index.mjs"
+        "kit/skills/lib/symbol-index.mjs",
+        "kit/skills/dev-explore/SKILL.md"
       ],
       "businessFlows": [
         "枚举全仓多生态包清单、CI 步骤、可复用模块并增量预填 feature-map",
@@ -251,7 +284,12 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-explore.mjs",
-        "scripts/dev/fixtures-locate-intake.mjs"
+        "scripts/dev/fixtures-locate-intake.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转",
+        "docs/TDD.md#八个技能分工与确定性阻断点"
       ]
     },
     {
@@ -288,17 +326,26 @@
         "kit/skills/lib/tdd-scaffold.mjs",
         "kit/skills/lib/tdd-shape.mjs",
         "kit/skills/lib/tdd-structure.mjs",
-        "kit/skills/dev-plan/scripts/doc-audit-repo.mjs"
+        "kit/skills/dev-plan/scripts/doc-audit-repo.mjs",
+        "kit/skills/dev-plan/SKILL.md",
+        "kit/skills/lib/harness-context.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/doc-approval.mjs",
+        "kit/skills/templates/docs-prd.md",
+        "kit/skills/templates/docs-spec.md",
+        "kit/skills/templates/docs-tdd.md",
+        "kit/skills/templates/docs-todo.md"
       ],
       "businessFlows": [
         "按 Case 1-5 分流生成 PRD/SPEC/Todo 与冻结 C1..Cn",
-        "执行独立内审、不可自审、全历史换人与 3 轮停损校验"
+        "执行独立内审、不可自审、全历史换人与 3 轮停损校验",
+        "按四层单源模板生成 PRD/SPEC/Todo/TDD 并守护 S1-S4 分流防降档与不可自审边界"
       ],
       "verificationTools": [
         {
           "id": "verify-doc-plan-audit",
           "kind": "command",
-          "command": "node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .",
+          "command": "node scripts/dev/fixtures.mjs --domain doc-rules",
           "scriptPath": null,
           "riskLevel": "medium",
           "triggerHints": [
@@ -318,7 +365,13 @@
         "scripts/dev/fixtures-plan-wave-slices.mjs",
         "scripts/dev/fixtures-doc-depth.mjs",
         "scripts/dev/fixtures-doc-shapes.mjs",
-        "scripts/dev/fixtures-docs.mjs"
+        "scripts/dev/fixtures-docs.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
+        "docs/TDD.md#7-三层常青文档与工作区安全"
       ]
     },
     {
@@ -332,7 +385,8 @@
         "kit/skills/lib/static-gates.mjs",
         "kit/skills/lib/static-gates-comment-hygiene.mjs",
         "kit/skills/lib/static-gates-lexer.mjs",
-        "kit/skills/lib/git-core.mjs"
+        "kit/skills/lib/git-core.mjs",
+        "kit/skills/dev-edit/SKILL.md"
       ],
       "businessFlows": [
         "改前核对 do-not-edit、紧文件预警与相邻复用符号",
@@ -354,7 +408,11 @@
         }
       ],
       "testRefs": [
-        "scripts/dev/fixtures-edit-pyramid.mjs"
+        "scripts/dev/fixtures-edit-pyramid.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#八个技能分工与确定性阻断点"
       ]
     },
     {
@@ -396,12 +454,18 @@
         "kit/skills/lib/task-graph.mjs",
         "kit/skills/lib/workflow-helpers.mjs",
         "kit/skills/lib/workflow-policy-next.mjs",
-        "kit/skills/dev-flow/scripts/flow-batch.mjs"
+        "kit/skills/dev-flow/scripts/flow-batch.mjs",
+        "kit/skills/dev-flow/SKILL.md",
+        "kit/skills/dev-flow/scripts/flow-start-helpers.mjs",
+        "kit/skills/lib/harness-context.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/gate-enforcement.mjs"
       ],
       "businessFlows": [
         "双轴身份探测、全局 intake 分诊与 Worktree 隔离启动",
         "归档锁 finalize、分层 verify、submit 提审、试合 merge 与销毁 scratch 清理",
-        "按切片依赖拓扑排波次并为就绪切片生成交接包"
+        "按切片依赖拓扑排波次并为就绪切片生成交接包",
+        "校验 Actor/HostMode/Slot 隔离边界、previewHash 安全删分支及波次调度闭环"
       ],
       "verificationTools": [
         {
@@ -433,7 +497,13 @@
         "scripts/dev/fixtures-flow-parallel.mjs",
         "scripts/dev/fixtures-flow-docs.mjs",
         "docs/archive/specs/261120-issue113-flow-truth-spec.md",
-        "docs/archive/specs/261120-issue116-w25-flow-defects-spec.md"
+        "docs/archive/specs/261120-issue116-w25-flow-defects-spec.md",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转",
+        "docs/TDD.md#worktree-隔离per-slot-状态隔离与七步收尾"
       ]
     },
     {
@@ -446,12 +516,14 @@
         "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
         "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs",
         "kit/skills/lib/feature-map.mjs",
-        "kit/skills/lib/verify-state.mjs"
+        "kit/skills/lib/verify-state.mjs",
+        "kit/skills/dev-verify-tools/SKILL.md"
       ],
       "businessFlows": [
         "仓外 scratch 试制探针并通过 edit-gate 与实跑后沉淀注册 docs/feature-map.json",
         "按变更文件反查复用工具并基于 symbol-index 与 Git 树哈希执行低/中/高风险过时处置",
-        "审计僵尸引用、高风险盲区与跨 >=2 PR 临时脚本固化提示并安全清理"
+        "审计僵尸引用、高风险盲区与跨 >=2 PR 临时脚本固化提示并安全清理",
+        "按 (slotKey, moduleTreeHash, symbolHash) 隔离每槽位 cache.json 验证缓存"
       ],
       "verificationTools": [
         {
@@ -469,7 +541,13 @@
         }
       ],
       "testRefs": [
-        "scripts/dev/fixtures-verify-tools.mjs"
+        "scripts/dev/fixtures-verify-tools.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#7-三层常青文档与工作区安全",
+        "docs/TDD.md#worktree-隔离per-slot-状态隔离与七步收尾"
       ]
     },
     {
@@ -490,12 +568,16 @@
         "kit/skills/dev-review/scripts/review-pr.mjs",
         "kit/skills/dev-review/scripts/review-sync.mjs",
         "kit/skills/lib/verdict.mjs",
-        "kit/skills/lib/review-comment-render.mjs"
+        "kit/skills/lib/review-comment-render.mjs",
+        "kit/skills/dev-review/SKILL.md",
+        "kit/skills/lib/gate-enforcement.mjs",
+        "kit/skills/lib/harness-context.mjs"
       ],
       "businessFlows": [
         "按变更文件装配受波及 businessFlows、依赖逆邻域与运行时能力切片",
         "无论有无预设工具均强制先业务流实证与故障注入再解锁 --include-diff",
-        "校验 --e2e-evidence 实质内容并执行六锁防死循环审查记账"
+        "校验 --e2e-evidence 实质内容并执行六锁防死循环审查记账",
+        "默认 enforceGates=true、校验可执行故障注入并阻断 Round 2+ 未闭合项放行"
       ],
       "verificationTools": [
         {
@@ -519,7 +601,13 @@
         "scripts/dev/fixtures-attribution-routing.mjs",
         "scripts/dev/fixtures-empirical-cycle.mjs",
         "scripts/dev/fixtures-review-contracts.mjs",
-        "scripts/dev/fixtures-review-govern.mjs"
+        "scripts/dev/fixtures-review-govern.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转",
+        "docs/TDD.md#支柱二工具无关结构化实证与界面防敷衍"
       ]
     },
     {
@@ -541,11 +629,13 @@
         "kit/skills/dev-govern/scripts/release-prep-lib.mjs",
         "kit/skills/lib/escalation.mjs",
         "kit/skills/lib/issue-template-hydrate.mjs",
-        "kit/skills/lib/signals.mjs"
+        "kit/skills/lib/signals.mjs",
+        "kit/skills/dev-govern/SKILL.md"
       ],
       "businessFlows": [
         "增量审计全仓卫生、测试分层元数据与文档同步",
-        "聚合 signals.jsonl 复发指纹按严格三层倒金字塔升格"
+        "聚合 signals.jsonl 复发指纹按严格三层倒金字塔升格",
+        "reconcile 扫描 kit/ 与 feature-map 锚点覆盖并由权威长青文档重置滞后计数"
       ],
       "verificationTools": [
         {
@@ -567,7 +657,13 @@
         "scripts/dev/fixtures-edit-pyramid.mjs",
         "scripts/dev/fixtures-iterate-evolution.mjs",
         "scripts/dev/fixtures-escalation-stoploss.mjs",
-        "scripts/dev/fixtures-kernel-dedup.mjs"
+        "scripts/dev/fixtures-kernel-dedup.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱三先最小运行复现poc-first与整类根治tier-1--tier-2",
+        "docs/TDD.md#7-三层常青文档与工作区安全"
       ]
     },
     {
@@ -579,7 +675,8 @@
       "modules": [
         "kit/skills/dev-iterate/scripts/iterate.mjs",
         "kit/skills/dev-iterate/scripts/iterate-cycle.mjs",
-        "kit/skills/lib/test-inventory.mjs"
+        "kit/skills/lib/test-inventory.mjs",
+        "kit/skills/dev-iterate/SKILL.md"
       ],
       "businessFlows": [
         "自动交叉比对 feature-map 盲区/signals 热点/近期变更或按 --focus 定向生成原生测试",
@@ -605,7 +702,11 @@
       "testRefs": [
         "scripts/dev/fixtures-iterate-evolution.mjs",
         "scripts/dev/fixtures-empirical-cycle.mjs",
-        "docs/archive/specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md"
+        "docs/archive/specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md",
+        "scripts/dev/fixtures-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"
       ]
     },
     {
@@ -648,7 +749,12 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures.mjs",
-        "scripts/dev/verify-injections.mjs"
+        "scripts/dev/verify-injections.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#全链路自证与门禁矩阵"
       ]
     },
     {
@@ -682,6 +788,9 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-flow-truth.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#关键不变量"
       ]
     },
     {
@@ -713,6 +822,9 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-flow-truth.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#关键不变量"
       ]
     },
     {
@@ -746,6 +858,10 @@
       "testRefs": [
         "scripts/dev/fixtures-flow-truth.mjs",
         "scripts/dev/injections-data-flow-truth.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#关键不变量",
+        "docs/TDD.md#支柱二工具无关结构化实证与界面防敷衍"
       ]
     },
     {
@@ -778,6 +894,9 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-flow-truth.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#全链路自证与门禁矩阵"
       ]
     },
     {
@@ -807,6 +926,9 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-equip.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"
       ]
     },
     {
@@ -821,10 +943,28 @@
       "businessFlows": [
         "[cli] CLI:SKILL.md (SKILL.md)"
       ],
-      "verificationTools": [],
+      "verificationTools": [
+        {
+          "id": "verify-skill-manifest",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "SKILL.md",
+            "skill",
+            "路由",
+            "门控"
+          ]
+        }
+      ],
       "testRefs": [
         "docs/archive/specs/261116-issue43-v7-m5-align-skills-docs-bootstrap-spec.md",
-        "docs/archive/specs/261118-issue71-b1-skill-discovery-spec.md"
+        "docs/archive/specs/261118-issue71-b1-skill-discovery-spec.md",
+        "scripts/dev/fixtures-repo-alignment.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#2-系统架构全景与模块边界"
       ]
     },
     {
@@ -853,6 +993,9 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-core.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#2-系统架构全景与模块边界"
       ]
     },
     {
@@ -880,7 +1023,16 @@
           ]
         }
       ],
-      "testRefs": []
+      "testRefs": [
+        ".github/workflows/check.yml",
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/e2e-zip-harness.mjs",
+        "scripts/dev/fixtures.mjs",
+        "scripts/dev/verify-injections.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#全链路自证与门禁矩阵"
+      ]
     },
     {
       "id": "release",
@@ -907,7 +1059,15 @@
           ]
         }
       ],
-      "testRefs": []
+      "testRefs": [
+        ".github/workflows/release.yml",
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/e2e-zip-harness.mjs",
+        "scripts/dev/evidence.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#8-核心不变量安全红线与门禁体系"
+      ]
     }
   ]
 }

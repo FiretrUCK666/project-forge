@@ -10,7 +10,7 @@ AI 新会话先读本文件，确认定位、边界、命令与协作流程。**
 | 用户自然语言意图 | 加载本地 Skill | 先跑引擎脚本（按需传参） |
 | --- | --- | --- |
 {{KIT_ROUTING_ROWS}}
-| 首次规范化接管 / 升级工具包 / 交棒退场 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
+| 首次规范化接管 / 规范项目 / 初始化 / 标准化配置 / 升级规范与本地技能 / 交棒清理 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: if has-custom-skills -->
 
 ### 项目自有技能（自动识别，与上方研发流并存）

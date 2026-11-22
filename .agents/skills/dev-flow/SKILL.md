@@ -6,7 +6,7 @@ description: |
   触发词：修 bug、推代码、提 PR、开 PR、合并收尾、清 worktree、处理 Issue、
   收到 Issue、收到 PR、fix bug、create PR、merge PR、cleanup worktree。
 metadata:
-  intent: 已定案开工 / 明确局部修缺陷 / 查任务状态 / 启动隔离工作位
+  intent: 已定案开工 / 修 bug / 改错别字 / 接着做 / 查任务状态 / 启动隔离工作位
   script: "`node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect`"
   order: 30
   fallback: 用原生 git switch -c <branch> 隔离改动并运行项目本地测试验证后再提交（未装配 dev-flow 技能）
@@ -16,7 +16,7 @@ metadata:
       intent_local: 归档文档 / 验证并提交至特性分支
       script: "`node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit`"
     - order: 45
-      intent: 审查者合并 PR / 确认后清理 Worktree
+      intent: 审查者合并 PR / 清理分支 / 确认后清理 Worktree
       intent_local: 本地试合并入主干与确认后清理 Worktree
       script: "`node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup`"
     - order: 46

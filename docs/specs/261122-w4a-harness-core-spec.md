@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Wave 1: Harness 共享内核原语与多技能门禁收口"
-status: draft
+status: approved
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
@@ -10,15 +10,15 @@ pr: null
 branch: feat/w4a-harness-core
 owner: plan-harness
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-harness-r3, round=3, sha=ff9958aa270e, summary=R3 independent critique pass: 0 blockers)"
 related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md
 related_todo: ../todo/261122-w4a-harness-core-todo.md
 high_risk_paths: [kit/, scripts/dev/preflight.mjs, templates/, AGENTS.md]
 task_id: w4a-harness-core
 depends_on: []
-scope_files: ["kit/skills/**", ".agents/skills/**", "scripts/survey.mjs", "scripts/backup.mjs", "scripts/equip.mjs", "scripts/compose-agents.mjs", "scripts/review.mjs", "templates/agents-project.md", "AGENTS.md", "references/collaboration.md", "scripts/dev/fixtures-*.mjs", "scripts/dev/injections-data-*.mjs", "scripts/dev/cli-parity.mjs", "scripts/dev/exit-code-parity.mjs", "scripts/dev/preflight-kernel-parity.mjs"]
+scope_files: ["kit/skills/**", ".agents/skills/**", scripts/survey.mjs, scripts/backup.mjs, scripts/equip.mjs, scripts/compose-agents.mjs, scripts/review.mjs, templates/agents-project.md, AGENTS.md, references/collaboration.md, "scripts/dev/fixtures-*.mjs", "scripts/dev/injections-data-*.mjs", scripts/dev/cli-parity.mjs, scripts/dev/exit-code-parity.mjs, scripts/dev/preflight-kernel-parity.mjs]
 ---
 
 # Wave 1: Harness 共享内核原语与多技能门禁收口 — 功能设计规范（SPEC）

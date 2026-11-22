@@ -28,7 +28,7 @@ related_spec: ../specs/261122-w4a-harness-core-spec.md
 | 分支 / 基线 | `feat/w4a-harness-core` @ `b6ea3f6` |
 | 任务编号 | `w4a-harness-core` |
 | 负责人 / 审批 | `plan-harness` / `false` |
-| 规划态 | `interactive`（已吸纳 Critique R1 修订意见，待 R2 复审后批准开工） |
+| 规划态 | `interactive`（已通过 R3 Critique 并批准） |
 | 关联文档 | [Wave 4 总控 PRD](../prd/261122-w4-harness-and-evergreen-prd.md) · [Wave 1 SPEC](../specs/261122-w4a-harness-core-spec.md) |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch` 与所属 SPEC `C1..C5`。

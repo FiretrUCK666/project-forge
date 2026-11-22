@@ -1,14 +1,14 @@
 ---
 kind: prd
 title: Wave 4 Harness 内核加固与长青文档更新总控
-status: draft
+status: active
 created: 2026-11-22
 updated: 2026-11-22
 issue: null
 pr: null
 owner: plan-harness
 plan_mode: interactive
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-harness-r3, round=3, sha=ca3c9d02f894, summary=R3 independent critique pass: 0 blockers)"
 related_spec: null
 related_todo: null
 multi_spec: true

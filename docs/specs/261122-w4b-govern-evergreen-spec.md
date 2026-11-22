@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Wave 2: 基于升级工具的长青文档系统与功能地图刷新"
-status: draft
+status: approved
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
@@ -10,15 +10,15 @@ pr: null
 branch: feat/w4b-govern-evergreen
 owner: plan-harness
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-harness-r3, round=3, sha=4c429a59f9ce, summary=R3 independent critique pass: 0 blockers)"
 related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md
 related_todo: ../todo/261122-w4b-govern-evergreen-todo.md
 high_risk_paths: [AGENTS.md, templates/]
 task_id: w4b-govern-evergreen
 depends_on: [w4a-harness-core]
-scope_files: ["docs/TDD.md", "docs/feature-map.json", "AGENTS.md", "templates/agents-project.md"]
+scope_files: [docs/TDD.md, docs/feature-map.json, AGENTS.md, templates/agents-project.md]
 ---
 
 # Wave 2: 基于升级工具的长青文档系统与功能地图刷新 — 功能设计规范（SPEC）

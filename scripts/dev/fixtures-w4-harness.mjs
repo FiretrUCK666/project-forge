@@ -321,12 +321,13 @@ export function registerW4HarnessCases(cases) {
 
       // 即使 PRD 没有 multi_spec: true，只要被切片 spec 的 related_prd 引用，也应被 buildSliceGraph 自动识别为总控 PRD
       writeFileSync(join(dir, prdFile), prdText.replace(/multi_spec:\s*true\n?/, ''), 'utf8')
+      const relatedPrdRel = `../prd/${prdFile.split('/').pop()}`
       writeValidSpec(dir, 'docs/specs/261122-slice-a-spec.md', {
-        relatedPrd: '../prd/261122-master-x-prd.md',
+        relatedPrd: relatedPrdRel,
         extraFm: 'depends_on: []\nscope_files: src/a.mjs',
       })
       writeValidSpec(dir, 'docs/specs/261122-slice-b-spec.md', {
-        relatedPrd: '../prd/261122-master-x-prd.md',
+        relatedPrd: relatedPrdRel,
         extraFm: 'depends_on: slice-a\nscope_files: src/b.mjs',
       })
       const { buildSliceGraph } = await import('../../kit/skills/lib/doc-slice-graph.mjs')

@@ -12,7 +12,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { checkMermaidLabelWidth } from './docs.mjs'
 import { evaluateStoredVisualEvidence, precheckVisualAndArtifacts } from './empirical-artifacts.mjs'
 import { validateE2eEvidenceText } from './feature-map.mjs'
-import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
+import { posixPath, readJsonSafe, readTextSafe, unescapeGitPath, writeJsonAtomic } from './git.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, resolveTierCommand } from './profile.mjs'
 import { GATE_WORKFLOW_FILE_RE, CODE_EXT_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
@@ -229,11 +229,97 @@ function decodeUriSafe(raw) {
 }
 
 /**
+ * 解析 unified diff 中各文件的新增/修改行号集合（1-based）：
+ * 返回 Map<relPath, Set<number> | null>；`null` 表示新建全文件（`--- /dev/null`），`diffText` 非字符串时返回 `null`。
+ */
+export function parseUnifiedDiffChangedLines(diffText) {
+  if (typeof diffText !== 'string') return null
+  const lines = diffText.replace(/\r\n/g, '\n').split('\n')
+  const map = new Map()
+  let currentFile = null
+  let isNewFile = false
+  let inHunk = false
+  let newLine = 0
+  let hunkCount = 0
+  let hunkStart = 0
+  let sawHunkBody = false
+
+  const finalizeHunk = () => {
+    if (inHunk && currentFile && !isNewFile && !sawHunkBody && hunkCount > 0) {
+      const set = map.get(currentFile)
+      if (set instanceof Set) {
+        for (let k = 0; k < hunkCount; k += 1) set.add(hunkStart + k)
+      }
+    }
+    inHunk = false
+  }
+
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      finalizeHunk()
+      const m = /^diff --git (?:"a\/([^"]+)"|a\/(.+?)) (?:"b\/([^"]+)"|b\/(.+))$/.exec(line)
+      const rawB = m ? (m[3] !== undefined ? `"${m[3]}"` : m[4]) : null
+      currentFile = rawB ? normRel(unescapeGitPath(rawB)) : null
+      isNewFile = false
+      if (currentFile && !map.has(currentFile)) map.set(currentFile, new Set())
+      continue
+    }
+    if (line.startsWith('--- ')) {
+      finalizeHunk()
+      isNewFile = line.slice(4).trim() === '/dev/null'
+      continue
+    }
+    if (line.startsWith('+++ ')) {
+      finalizeHunk()
+      const target = line.slice(4).split('\t')[0].trim()
+      if (target === '/dev/null') {
+        currentFile = null
+        continue
+      }
+      const nextFile = target.startsWith('b/')
+        ? normRel(unescapeGitPath(target.slice(2)))
+        : (target.startsWith('"b/') ? normRel(unescapeGitPath(`"${target.slice(3)}`)) : normRel(unescapeGitPath(target)))
+      currentFile = nextFile || null
+      if (currentFile) {
+        if (isNewFile) map.set(currentFile, null)
+        else if (!map.has(currentFile)) map.set(currentFile, new Set())
+      }
+      continue
+    }
+    if (line.startsWith('@@')) {
+      finalizeHunk()
+      const hm = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line)
+      if (hm) {
+        inHunk = true
+        hunkStart = Number(hm[1])
+        hunkCount = hm[2] !== undefined ? Number(hm[2]) : 1
+        newLine = hunkStart
+        sawHunkBody = false
+      }
+      continue
+    }
+    if (!inHunk || !currentFile || line.startsWith('\\')) continue
+    sawHunkBody = true
+    const set = map.get(currentFile)
+    if (line.startsWith('+')) {
+      if (set instanceof Set) set.add(newLine)
+      newLine += 1
+    } else if (!line.startsWith('-')) {
+      newLine += 1
+    }
+  }
+  finalizeHunk()
+  return map
+}
+
+/**
  * 无远端 CI 的低风险改动独立静态必检（不引入 dev-govern）：
  * 检查改动文档中的 Markdown 相对死链（围栏感知）、Mermaid 16/12 标签与 HTML 禁止项、以及硬编码秘密与本机路径泄露。
+ * 传入 `{ diffText }` 时，对存在 diff hunks 的既有修改文件仅检查其新增/修改行；新建或未在 diffText 中的文件保持全文件检查。
  */
-export function runLowRiskDocStaticCheck(repoRoot, changedFiles = []) {
+export function runLowRiskDocStaticCheck(repoRoot, changedFiles = [], options = {}) {
   const files = [...new Set((Array.isArray(changedFiles) ? changedFiles : []).map(normRel).filter(Boolean))].sort()
+  const changedLinesByFile = parseUnifiedDiffChangedLines(options?.diffText ?? null)
   const checkedFiles = []
   const errors = []
 
@@ -252,6 +338,8 @@ export function runLowRiskDocStaticCheck(repoRoot, changedFiles = []) {
     if (text === undefined) continue
     checkedFiles.push(rel)
 
+    const diffLineEntry = changedLinesByFile?.get(rel)
+    const changedLineSet = diffLineEntry instanceof Set ? diffLineEntry : null
     const lines = text.split('\n')
     const isMd = /\.(?:md|mdx)$/i.test(rel)
     if (isMd && !rel.startsWith('templates/')) {
@@ -268,6 +356,7 @@ export function runLowRiskDocStaticCheck(repoRoot, changedFiles = []) {
           continue
         }
         if (fenceChar) continue
+        if (changedLineSet && !changedLineSet.has(i + 1)) continue
 
         const stripped = line.replace(/`+[^`\n]*`+/g, '')
         const candidates = []
@@ -294,11 +383,13 @@ export function runLowRiskDocStaticCheck(repoRoot, changedFiles = []) {
     if (isMd && !rel.startsWith('templates/') && !rel.startsWith('docs/archive/') && /```+\s*mermaid/i.test(text)) {
       const mRes = checkMermaidLabelWidth(text)
       for (const v of mRes.violations) {
+        if (changedLineSet && !changedLineSet.has(v.line)) continue
         errors.push({ type: 'mermaid', file: rel, line: v.line, message: `${rel}:${v.line} ${v.message}` })
       }
     }
 
     for (let i = 0; i < lines.length; i += 1) {
+      if (changedLineSet && !changedLineSet.has(i + 1)) continue
       const line = lines[i]
       for (const pat of SECRET_LITERALS) {
         if (pat.re.test(line)) {

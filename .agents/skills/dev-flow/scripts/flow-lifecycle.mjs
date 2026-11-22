@@ -170,7 +170,8 @@ export async function handleVerify(opts, roots) {
       gateWeakeningHits: gateHits, hasRemote: ledger.role !== 'local-only' && Boolean(remoteRes.ok && remoteRes.stdout.trim()),
       hasCiWorkflow: hasCi, visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
     })
-    return { currentHead, dirty, stStdout, changedFiles, policy }
+    const diffText = !dirty && diffNsRes?.ok && typeof diffNsRes.diffText === 'string' ? diffNsRes.diffText : undefined
+    return { currentHead, dirty, stStdout, changedFiles, policy, diffText }
   }
 
   // 证据只取人说过的原文（`--e2e-evidence` / `--visual-evidence`）。裸 `--visual-checked` 只是口头声明、
@@ -191,8 +192,8 @@ export async function handleVerify(opts, roots) {
   )
 
   if (!cmd && isExplicitNone) {
-    const { currentHead, dirty, stStdout, changedFiles, policy } = await computeVerifyPolicy()
-    const docStaticRes = policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles) : null
+    const { currentHead, dirty, stStdout, changedFiles, policy, diffText } = await computeVerifyPolicy()
+    const docStaticRes = policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles, { diffText }) : null
     const docOk = !docStaticRes || docStaticRes.ok
     const evRec = recordVerifyEvidenceForFlow({
       roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
@@ -292,7 +293,7 @@ export async function handleVerify(opts, roots) {
   const tRunStart = Date.now()
   const runRes = await execShellCommand(cmd, implRoot, { timeout: timeoutMs, env: wtEnv })
   const runDurationMs = Date.now() - tRunStart
-  const { currentHead, dirty, stStdout, changedFiles, policy } = await computeVerifyPolicy()
+  const { currentHead, dirty, stStdout, changedFiles, policy, diffText } = await computeVerifyPolicy()
   let smokeCmdUsed = mode === 'smoke' ? cmd : null
   let smokeRunRes = mode === 'smoke' ? runRes : null
   let smokeExecuted = mode === 'smoke'
@@ -316,7 +317,7 @@ export async function handleVerify(opts, roots) {
     }
   }
   const docStaticRes = runRes.ok && (!smokeRunRes || smokeRunRes.ok) && policy.staticDocCheckRequired
-    ? runLowRiskDocStaticCheck(implRoot, changedFiles)
+    ? runLowRiskDocStaticCheck(implRoot, changedFiles, { diffText })
     : null
   const execOk = runRes.ok && (!smokeRunRes || smokeRunRes.ok)
   const allOk = execOk && (!docStaticRes || docStaticRes.ok)

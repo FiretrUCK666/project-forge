@@ -526,6 +526,7 @@ async function main(argv = process.argv.slice(2)) {
     const evalGateArgs = {
       gitDir: roots.gitDir, mode, task, round, prNo, baseRef, reviewRoot, mainRoot, headSha,
       diffScope, workspaceFingerprint, dirtyEntries, requirements: empiricalRequirements, behavioralGate, opts,
+      diffText: diff?.text ?? null,
     }
     let empiricalGate = evaluateIncludeDiffGate(evalGateArgs)
 

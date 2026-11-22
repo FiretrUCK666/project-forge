@@ -4,7 +4,8 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { handleNext } from '../../kit/skills/dev-flow/scripts/flow-next.mjs'
 import { handleVerify } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'
@@ -553,7 +554,7 @@ export function registerGatesRetroRoutingCases(cases) {
   }])
 
   cases.push(['C4 正向：AGENTS 模板与 dev-iterate/dev-govern SKILL 含只读转写隔离路由规则', () => {
-    const repoRoot = join(import.meta.dirname, '..', '..')
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
     for (const rel of [
       'templates/agents-project.md',
       'kit/skills/dev-iterate/SKILL.md',

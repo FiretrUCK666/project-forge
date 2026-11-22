@@ -170,3 +170,9 @@ flowchart LR
 - 已确认（2026-11-22 · user）：按 #519 指令确立 `w4a-harness-core` 为 Wave 1，覆盖 4 个共享内核原语、8 技能薄接线、`equip.mjs .` 同步及 `I398–I409` 故障注入，且不提前改写 Wave 2 独占的 `docs/TDD.md` 与 `docs/feature-map.json`。
 - 已确认（2026-11-22 · critic-r1）：采纳 `critic-harness` R1 四项评审意见——补齐 `single-session` / `local-only` / `Case 1` 放行边界与 `cli-parity`/`exit-code-parity`、纳入既有夹具与 `I313` 升级写域、补齐 `handoff-package.mjs` 泛化及 `session-orient.mjs` 边界、纳入 `flow batch plan` 丢依赖 BUG 修复并标明紧文件行数上限防护。
 - 已确认（2026-11-22 · critic-r2）：采纳 `critic-harness-r2` R2 两项阻断修订——以 `scripts/dev/fixtures-*.mjs` / `injections-data-*.mjs` 全量盘点并纳入 `fixtures-{flow-explore-gate,e2e-gate,review-token,onboarding,lifecycle,kernel-dedup,doc-rules,edit-pyramid,parallel-dispatch,plan-wave-slices}.mjs` 等受影响夹具与注入，将 `AGENTS.md` 纳入 `w4a` `scope_files`，并消除 L94 草稿反问措辞。
+
+## 实现说明
+
+
+- 实现提交基线: dd06bc06bf26811251d2c0b3df2cdb3cfd7b753a
+- 关联任务: w4a-harness-core

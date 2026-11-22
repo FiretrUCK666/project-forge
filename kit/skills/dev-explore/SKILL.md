@@ -45,8 +45,9 @@ metadata:
 ## 脚本命令（只读）
 
 ```sh
-# 1. 文档与符号零写入按需定位（首选：返回绝对路径、startLine..endLine、摘要与复读命令）
+# 1. 文档与符号零写入按需定位（支持 --list 仅列出可索引文档与路径）
 node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --query "<关键词>" [--scope docs|src|all] [--kind prd|spec|todo|adr|doc|code] [--limit 5] [--budget-lines 220] [--json]
+node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --list [--scope docs|src|all] [--kind <kind>] [--json]
 
 # 2. 按文件与 Markdown 标题节精确切片（跳过代码围栏内 # 注释，兼容无头文档）
 node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --file "docs/TDD.md" --section "<章节名>"
@@ -54,12 +55,12 @@ node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --file "docs/TDD.md" --
 # 3. 定位源码符号定义边界（支持 --worktree 指向隔离工作树）
 node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --symbol "<符号名>" --scope src [--worktree "<path>"] --json
 
-# 4. 全景扫描（目录分布、多包清单、Dev Profile、CI 步骤、可复用模块、文档索引、Feature Map、git 热点）
-node ".agents/skills/dev-explore/scripts/repo-map.mjs" [targetDir] [--dir <path>]
+# 4. 全景扫描（支持 --task 回写探索凭据与 --write-feature-map 增量预填唯一功能地图）
+node ".agents/skills/dev-explore/scripts/repo-map.mjs" [targetDir] [--dir <path>] [--task <id>] [--write-feature-map]
 
 # 5. 聚焦子目录调用边界或输出结构化 JSON
-node ".agents/skills/dev-explore/scripts/repo-map.mjs" . --focus "<subdir>"
-node ".agents/skills/dev-explore/scripts/repo-map.mjs" . --json
+node ".agents/skills/dev-explore/scripts/repo-map.mjs" . --focus "<subdir>" [--json]
+node ".agents/skills/dev-explore/scripts/repo-map.mjs" . --write-feature-map --json
 ```
 
 ## 必须交付的探索结论模板与下游移交

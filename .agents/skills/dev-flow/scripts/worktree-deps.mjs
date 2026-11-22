@@ -630,12 +630,19 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
 
 function printHelp() {
   process.stdout.write([
-    '用法：node .agents/skills/dev-flow/scripts/worktree-deps.mjs <mount|unmount|scan|status> --main <主仓> --worktree <工作树> [--allow-outbound <路径>] [--strict] [--json]',
+    '用法：node .agents/skills/dev-flow/scripts/worktree-deps.mjs <mount|unmount|scan|status> --main <主仓> --worktree <工作树> [选项]',
     '',
     '  mount    按子包独立比对锁文件并防毒化探测，安全挂载共享依赖',
     '  unmount  全深度扫出指向外部的链接并逐个解绑（清场重挂默认档；删 worktree 请加 --strict）',
     '  scan     只报告 worktree 里的外链，不做任何修改',
     '  status   按子包与生态比对锁文件状态并输出差异',
+    '',
+    '选项：',
+    '  --main <path>             主仓库根目录',
+    '  --worktree <path>         目标 worktree 目录',
+    '  --allow-outbound <path>   显式放行待解绑外链（可重复）',
+    '  --strict                  删 worktree 前的严格外链校验档',
+    '  --json                    输出结构化 JSON',
   ].join('\n') + '\n')
 }
 

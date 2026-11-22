@@ -100,12 +100,15 @@ node scripts/equip.mjs . --check        # 核对 kit/skills 与本仓 .agents/sk
 
 ```sh
 node scripts/dev/preflight.mjs                              # 结构 + 引用 + 模板 + 自举 + 端到端冒烟
-node scripts/dev/fixtures.mjs                               # 行为断言：造临时项目实跑，正反双向
-node scripts/compose-agents.mjs . --check                   # 本仓库契约：标记成对、无未填占位、体积 <= 30KB
-node scripts/review.mjs .                                   # 交付体检，预期 0 个「缺」
-node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的目录同步
 node scripts/dev/gap-coverage.mjs                           # survey 缺口与 review 检查项 100% 配对
+node scripts/dev/fixtures.mjs                               # 行为断言：造临时项目实跑，正反双向
+node scripts/dev/bench.mjs                                  # 核心命令与快照性能基准
+node scripts/dev/e2e-zip-harness.mjs                        # 真包解压 E2E 沙盒全链路实证
+node scripts/dev/verify-injections.mjs --jobs 4             # 故障注入门禁防空转复验（并发分片）
+node scripts/compose-agents.mjs . --check                   # 本仓库契约：标记成对、无未填占位、体积 <= 30KB
 node scripts/equip.mjs . --check                            # kit/skills 与本仓 .agents/skills 字节级一致
+node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的目录同步
+node scripts/review.mjs .                                   # 交付体检，预期 0 个「缺」
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
 ```
 
@@ -158,7 +161,7 @@ node scripts/dev/verify-injections.mjs   # 逐条拆掉判据，确认对应断�
 | 层 | 位置 | 约束 |
 | --- | --- | --- |
 | 产品 | `SKILL.md`、`references/`、`templates/`、`kit/skills/`、`scripts/`（顶层与 `lib/`） | 必须对任何项目成立，**不许混进本仓库自己的方法论**，且只提 GitHub |
-| 自用 | `AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`docs/`、`.github/`、`.agents/`、`scripts/dev/` | 只服务这个仓库，由 `.gitattributes` 排除出用户包 |
+| 自用 | `AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`docs/`、`.github/`、`.agents/`、`.gitattributes`、`.gitignore`、`scripts/dev/` | 只服务这个仓库，由 `.gitattributes` 排除出用户包 |
 
 把自用的东西写进 `templates/` 是最容易犯的错：那会让每个用户的每个项目都背上一套他并不
 需要的流程。这条分界也是 `preflight` 的同构核对所依赖的前提。

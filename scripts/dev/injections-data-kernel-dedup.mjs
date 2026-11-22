@@ -1,5 +1,5 @@
 /**
- * injections-data-kernel-dedup.mjs —— PR-B (#115) C1-C6 核心去重与门禁加固故障注入集（I370-I385）。
+ * injections-data-kernel-dedup.mjs —— 内核单源去重与门禁加固故障注入集（I370-I385）。
  */
 
 export const INJECTIONS_KERNEL_DEDUP = [
@@ -23,9 +23,9 @@ export const INJECTIONS_KERNEL_DEDUP = [
   },
   {
     id: 'I372',
-    what: 'platform.mjs: registerHostingProvider 跳过适配器方法契约校验',
-    file: 'kit/skills/lib/platform.mjs',
-    alsoDropIn: ['.agents/skills/lib/platform.mjs'],
+    what: 'platform-registry.mjs: registerHostingProvider 跳过适配器方法契约校验',
+    file: 'kit/skills/lib/platform-registry.mjs',
+    alsoDropIn: ['.agents/skills/lib/platform-registry.mjs'],
     from: 'export function registerHostingProvider(provider) {\n  const id = validateHostingProvider(provider)',
     to: "export function registerHostingProvider(provider) {\n  const id = String(provider?.id ?? '').trim().toLowerCase()",
     expect: 'C2：registerHostingProvider 强校验适配器方法契约',

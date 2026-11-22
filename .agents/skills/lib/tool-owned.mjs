@@ -5,20 +5,19 @@
  * 只过滤工具自身托管的核心技能与运行库，正式放开同目录下用户自定义资产与扩展槽。
  */
 
+import { UNIFIED_SKILL_NAMES } from './skill-discovery.mjs'
+
+export const AGENTS_MAX_BYTES = 30720
+export const AGENTS_COMPACT_RECOMMENDED_BYTES = 24576
+export const AGENTS_WARN_BYTES = AGENTS_COMPACT_RECOMMENDED_BYTES
+
 /**
- * 工具严格托管的核心路径前缀（8 个内置技能、`lib/`、`templates/` 与清单账本）。
+ * 工具严格托管的核心路径前缀（动态对齐 `UNIFIED_SKILL_NAMES`、`lib/`、`templates/` 与清单账本）。
  * 用户自定义扩展（`.agents/forge-overlays/`、`.agents/extensions/`、`.agents/forge-hooks.json`
  * 及 `.agents/skills/<custom>/`）归项目自身所有，不再被误判为工具托管产物。
  */
 export const TOOL_OWNED_PREFIXES = Object.freeze([
-  '.agents/skills/dev-explore/',
-  '.agents/skills/dev-plan/',
-  '.agents/skills/dev-edit/',
-  '.agents/skills/dev-flow/',
-  '.agents/skills/dev-verify-tools/',
-  '.agents/skills/dev-review/',
-  '.agents/skills/dev-iterate/',
-  '.agents/skills/dev-govern/',
+  ...UNIFIED_SKILL_NAMES.map((name) => `.agents/skills/${name}/`),
   '.agents/skills/lib/',
   '.agents/skills/templates/',
   '.agents/skills/.pf-manifest.json',

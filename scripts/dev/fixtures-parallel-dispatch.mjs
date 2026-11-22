@@ -1,5 +1,5 @@
 /**
- * fixtures-parallel-dispatch.mjs —— Issue #120 (Phase 3A PR-A, C1–C7) 正反双向行为断言。
+ * fixtures-parallel-dispatch.mjs —— 并行波次调度、归因路由与跨端对齐正反双向行为断言。
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

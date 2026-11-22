@@ -30,7 +30,7 @@ metadata:
 | --- | --- | --- |
 | **S1 勘察** | 先更新再只读扫：`update.mjs --quiet`（1h 检查 / 15m 失败冷却、staging 校验后最后原子写 `SKILL.md`）后跑 `survey.mjs --markdown --probe-auth`（无远端亦探测本机凭据），获取 `explorationStrategy.tier` 与 `artifactPlan`；若目录空白或仅含 `README`/`LICENSE`/配置（`none` / 0 业务文件），停下问 3–4 个简明问题后走 `--bootstrap-empty` 生成通用治理基线、初始 `docs/TDD.md` 与自洽 `AGENTS.md`，**不派只读子代理**；存量或重入仓记下 `tier` 与 `shards`（含 `business-flows`）供 `S3` 前只读实跑既有测试与主入口产出 `preForgeBaseline` | `references/survey.md` |
 | **S2 定范围** | 逐项按 `facts.artifactPlan` 确定处置动作（仅按真实协作态豁免多人协作制品），落实**四类存量资产真融合**（长青文档纳单源、过期文档归档/清理、脚本/数据模型/CI 融入 Profile 与地图、既有 AI 约定语义去重）：**存量 `README`/`CONTRIBUTING`/单双 `LICENSE`/存量设计文档（`ARCHITECTURE.md`、`docs/adr/` 等）/工作流/`.agents/skills/<custom>/` 一律 `preserve` 原样融合**；缺项按 `create`/`equip`/`upgrade` 补齐，缺许可或待选发版策略（5 选 1）走 `ask-human`；跨月重入按 `reentry` 做 `calibrate`，并由 `equip.mjs` 按 v3 账本尊重 `disabledSkills`/`removedFiles` 墓碑与定制豁免 | 本文件 |
-| **S3 落盘** | **第 0 步：非空存量仓先跑 `backup.mjs create "<项目目录>" --label pre-forge` 打全仓快照**（按 `treeSha256` 去重并钉住初始基线）；进入写入前，对存量代码仓以**只读方式实跑对方既有测试与主入口**生成 `preForgeBaseline`（结合 `dev-explore` `businessFlows` 映射），再严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；跑 `equip.mjs` 统一装配 `.agents/skills/` 后，存量/重入仓依 `S1` `tier` 调 `.agents/skills/dev-explore/`（`parallel-subagents` 时按 `shards` 并行只读深挖，否则 `single-pass`）**只读取证**，由本步将 `businessFlows` 与 `preForgeBaseline` 落笔 `docs/TDD.md`（含 `## 文档信息` 表与短名 Mermaid 图）与 `prd`/`specs`/`todo`，生成/无损刷新 `AGENTS.md`（仅留薄指针保持 `<= 30KB`、建议 `< 24KB`，含 `行事总纲`、7 键 `Dev Profile` 与自有技能并存路由）；按 `HostingProvider`（`github` / `generic-git` 降级）与五态身份配远端与自动化 | 见门控表 |
+| **S3 落盘** | **第 0 步：非空存量仓先跑 `backup.mjs create "<项目目录>" --label pre-forge` 打全仓快照**（按 `treeSha256` 去重并钉住初始基线）；进入写入前，对存量代码仓以**只读方式实跑对方既有测试与主入口**生成 `preForgeBaseline`（结合 `dev-explore` `businessFlows` 映射），再严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；跑 `equip.mjs` 统一装配 `.agents/skills/` 后，存量/重入仓依 `S1` `tier` 调 `.agents/skills/dev-explore/`（`parallel-subagents` 时按 `shards` 并行只读深挖，否则 `single-pass`）**只读取证**，由本步将 `businessFlows` 与 `preForgeBaseline` 落笔 `docs/TDD.md`（含 `## 文档信息` 表与短名 Mermaid 图）、`docs/feature-map.json` 与 `prd`/`specs`/`todo`，生成/无损刷新 `AGENTS.md`（仅留薄指针保持 `<= 30KB`、建议 `< 24KB`，含 `行事总纲`、7 键 `Dev Profile` 与自有技能并存路由）；按 `HostingProvider`（`github` / `generic-git` 降级）与五态身份配远端与自动化 | 见门控表 |
 | **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check`（已登记定制文件豁免通过）+ `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记（保留 `.agents/skills/` 时不把 `.pf-manifest.json` 计为残留）；将勘察发现的原仓问题全部通过 `TaskBackend` 建本地/远端 Issue（`dev-govern audit/plan`）按正常流分步修清，无缝进入 Day-2 自迭代 | `references/handoff.md` |
 
 **S3 顺序不可逆**：`.gitattributes` 与 `.gitignore` 必须在首次提交之前落盘；文档与地址须在推送之前就绪；自动化跑的命令与 `AGENTS.md` / `README.md` 必须一致。
@@ -93,9 +93,9 @@ node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
 # S3 把 CI 骨架按勘察事实落盘或配开关 A 分支保护（--kind check|release | --protect-branch [--branch <分支>]；非 GitHub 仓安全退出 0）
 node "<本 skill 目录>/scripts/equip-ci.mjs" "<项目目录>" --kind check
-# S4 交付体检与交棒检查（--verify 四档退出码：0 干净 / 1 有痕迹 / 3 没扫全 / 4 本仓源码不适用）
+# S4 交付体检与交棒检查（--scan | --verify [--json]；四档退出码：0 干净 / 1 有痕迹 / 3 没扫全 / 4 本仓源码不适用）
 node "<本 skill 目录>/scripts/review.mjs" "<项目目录>"
-node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
+node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan [--json]
 ```
 
 **边界与汇报**：不做服务器部署/业务重构；不替选许可或伪造命令/署名；有测试命令的跑实测全绿才报「已验证」（纯文档写「只验了结构与文档一致性」）；收尾按「做了什么 -> 结果 -> 下一步（含交棒询问）」简明汇报。

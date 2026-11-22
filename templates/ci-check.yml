@@ -21,7 +21,7 @@
 #   **跨文件不能写 needs。** 那种依赖关系写成同一文件里的两个 job 更可靠；分成两个
 #   文件时只能靠事件触发，而先后顺序没有保证。
 #
-# TODO(1) 运行环境：按命中的生态只留一块（Node / Python / Rust / Go / Java），
+# TODO(1) 运行环境：按命中的生态选留对应 setup 步骤（支持 12 类生态：Node / Python / Rust / Go / Java / Ruby / PHP / .NET / C/C++ / Dart / Swift / Elixir），
 #   版本取清单声明的那个；纯文档目录把整块删掉。落盘前核对所用 Action 的最新大版本
 #   （不要照抄这里的 vN）。
 # TODO(2) 门禁命令：从 AGENTS.md 的「构建与验证」节逐条搬过来，一行一条。
@@ -30,7 +30,7 @@
 #   重新构建一次，与提交的产物逐字节一致，否则源码与产物迟早脱节。
 # TODO(4) tags 行：只在「打标签也值得跑一遍检查」时保留。
 #
-# TODO(1) 的四个生态写法，只留一个：
+# TODO(1) 的常见生态写法示例（其余生态按对应工具链安装 Action 调整），只留一个：
 #
 #     # Node
 #     - uses: actions/setup-node@v4          # 落盘前核对最新大版本
@@ -58,8 +58,13 @@
 #         distribution: 'temurin'
 #         java-version: '<清单声明的版本>'
 #
-# 跨平台矩阵（项目在多个系统上表现不一样时才开，其余情况不要开——两倍等待换不到判据）：
+# 跨平台矩阵（项目在多个系统上表现不一样时才开，其余情况不要开——两倍等待换不到判据；
+# 含 Windows 时建议设 `defaults: { run: { shell: bash } }` 并设 `timeout-minutes: 15` 防挂死）：
 #
+#     defaults:
+#       run:
+#         shell: bash
+#     timeout-minutes: 15
 #     strategy:
 #       fail-fast: false
 #       matrix:
@@ -84,6 +89,7 @@ name: check
 on:
   push:
     branches: ['**']
+    # tags: ['v*']  # TODO(4) 仅打标签也值得跑检查时取消注释
   pull_request:
     # edited 不能漏：有些项目的检查会读提案正文（比如要求填验收标准），
     # 而改正文只会触发这个事件。少了它，先开提案（红）、再补正文，检查不会重跑。

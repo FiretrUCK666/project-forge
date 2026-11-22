@@ -5,7 +5,7 @@
  * 两种模式共用同一份单项表 `BENCH_CHECKS`，严禁按远端环境变量或外部倍率开关放大预算：
  *   - 默认模式（跨 OS / Node 矩阵通用）：先跑同轮真实子进程冷启 + 文件扫描校准负载得出 `unitMs`，
  *     每项阈值 = `min(hardCapMs, round(unitMs * unitMult))`；
- *   - `--strict-budget`（本机与 Wave 4 严格门禁）：强制执行 `1x` 绝对毫秒上限 `strictBudget`。
+ *   - `--strict-budget`（本机与严格门禁）：强制执行 `1x` 绝对毫秒上限 `strictBudget`。
  */
 
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'

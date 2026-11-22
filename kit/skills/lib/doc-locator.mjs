@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
-import { COMMON_SKIP_DIRS, canonicalPath, isMacOsJunkPath, posixPath } from './git.mjs'
+import { BROAD_CODE_EXT_RE, COMMON_SKIP_DIRS, canonicalPath, isMacOsJunkPath, posixPath } from './git.mjs'
 import {
   extractHeadlessSummary, findFrontmatterEndLine, indexMarkdownSections, scanLines,
 } from './markdown-scan.mjs'
@@ -21,7 +21,7 @@ export const VALID_LOCATE_KINDS = Object.freeze(['prd', 'spec', 'todo', 'adr', '
 export const VALID_LOCATE_SCOPES = Object.freeze(['docs', 'src', 'all'])
 
 const DOC_EXT_RE = /\.(?:md|mdx|txt|rst)$/i
-const CODE_EXT_RE = /\.(?:js|mjs|cjs|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|scala|groovy|rb|php|cs|fs|c|cc|cpp|cxx|h|hpp|m|mm|swift|dart|ex|exs|erl|sh|bash|zsh|ps1|psm1|sql|lua|r|zig|nim|hs)$/i
+const CODE_EXT_RE = BROAD_CODE_EXT_RE
 const MAX_READ_BYTES = 512 * 1024
 const MAX_LINE_CHARS = 220
 

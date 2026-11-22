@@ -13,7 +13,16 @@ import {
   parseSshConfigHostMap,
   repoPath,
 } from '../text.mjs'
-import { normalizeDeclaredRepo, validateHostingProvider } from '../../../kit/skills/lib/platform.mjs'
+import { normalizeDeclaredRepo } from '../../../kit/skills/lib/platform.mjs'
+import {
+  GENERIC_GIT_PROVIDER as CORE_GENERIC_GIT_PROVIDER,
+  NONE_CAPABILITIES,
+  getHostingProvider as coreGetHostingProvider,
+  listHostingProviders,
+  normalizeGenericRepo,
+  registerHostingProvider,
+  resolveRemoteDescriptor,
+} from '../../../kit/skills/lib/platform-registry.mjs'
 import {
   GITHUB_PROVIDER,
   detectGitModeMarkers,
@@ -21,55 +30,24 @@ import {
   resolveWorkspaceIdentity as resolveGitHubWorkspaceIdentity,
 } from './github.mjs'
 
-const providers = new Map()
-
-const DEFAULT_CAPABILITIES = Object.freeze({
-  api: false,
-  pr: false,
-  issues: false,
-  releases: false,
-  labels: false,
-  milestones: false,
-  branchProtection: false,
-})
-
-/** 将通用 Git 远端地址（含多级群组路径或本地 file:// 路径）归一为仓库标识。 */
-function normalizeGenericRepo(remoteUrl) {
-  if (typeof remoteUrl !== 'string') return undefined
-  const trimmed = remoteUrl.trim()
-  if (!trimmed) return undefined
-  const basic = repoPath(trimmed)
-  if (basic) return basic
-
-  if (/^file:\/\//i.test(trimmed)) {
-    const clean = trimmed.replace(/^file:\/\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '')
-    const parts = clean.split('/').filter(Boolean)
-    return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : parts[0] || undefined
-  }
-
-  let s = trimmed.toLowerCase()
-  const hadScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(s)
-  if (hadScheme) {
-    s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/^[^@/]*@/, '').replace(/^[^/]+\//, '')
-  } else {
-    s = s.replace(/^[^@/]*@/, '')
-    if (/^[^/:]+:/.test(s)) s = s.replace(/^[^/:]+:/, '')
-    else s = s.replace(/^[^/]*\.[^/]*\//, '')
-  }
-  s = s.replace(/\.git$/, '').replace(/^\/+/, '').replace(/\/+$/, '')
-  return /^[^\s/]+(?:\/[^\s/]+)+$/.test(s) ? s : undefined
+export {
+  NONE_CAPABILITIES,
+  listHostingProviders,
+  registerHostingProvider,
+  resolveRemoteDescriptor,
 }
+
+const DEFAULT_CAPABILITIES = NONE_CAPABILITIES
 
 /** 内置兜底适配器：未匹配任何已注册托管平台时安全降级为通用 Git 全流程。 */
 export const GENERIC_GIT_PROVIDER = Object.freeze({
-  id: 'generic-git',
-  label: 'Generic Git',
-  capabilities: DEFAULT_CAPABILITIES,
+  ...CORE_GENERIC_GIT_PROVIDER,
+  capabilities: NONE_CAPABILITIES,
   matchRemote(remoteUrl) {
     return typeof remoteUrl === 'string' && remoteUrl.trim().length > 0
   },
   normalizeRepo(remoteUrl) {
-    return normalizeGenericRepo(remoteUrl)
+    return repoPath(remoteUrl) ?? normalizeGenericRepo(remoteUrl)
   },
   async probeTransport() {
     return { state: 'generic-git', reason: '通用 Git 远端：跳过特定平台传输探测' }
@@ -96,17 +74,17 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
     topology,
   } = {}) {
     if (localMode === true) {
-      return { role: 'local-only', providerId: 'generic-git', reason: '存在 .git/pf-local-mode 标记：按纯本地项目处置' }
+      return { role: 'local-only', providerId: 'none', capabilities: NONE_CAPABILITIES, reason: '存在 .git/pf-local-mode 标记：按纯本地项目处置' }
     }
     const primaryUrl = topology?.primary?.fetchUrl
       ?? gitFacts.remoteUrls?.origin
       ?? (gitFacts.remoteUrls && typeof gitFacts.remoteUrls === 'object' ? Object.values(gitFacts.remoteUrls).find(Boolean) : undefined)
       ?? gitFacts.remote
     if (gitFacts.present !== true || !primaryUrl) {
-      return { role: 'local-only', providerId: 'generic-git', reason: '还没有配置远端仓库：按纯本地工作区处置' }
+      return { role: 'local-only', providerId: 'none', capabilities: NONE_CAPABILITIES, reason: '还没有配置远端仓库：按纯本地工作区处置' }
     }
     if (forkMode === true) {
-      return { role: 'contributor-fork', providerId: 'generic-git', reason: '存在 .git/pf-fork-mode 标记：按贡献者 Fork 协作处置' }
+      return { role: 'contributor-fork', providerId: 'generic-git', capabilities: NONE_CAPABILITIES, reason: '存在 .git/pf-fork-mode 标记：按贡献者 Fork 协作处置' }
     }
     const upstreamUrl = topology?.upstream?.fetchUrl ?? gitFacts.remoteUrls?.upstream
     const primarySlug = normalizeGenericRepo(primaryUrl)
@@ -115,6 +93,7 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
       return {
         role: 'contributor-fork',
         providerId: 'generic-git',
+        capabilities: NONE_CAPABILITIES,
         reason: `存在独立 upstream（${upstreamUrl}）与 origin（${primaryUrl}），按贡献者 Fork 协作处置`,
       }
     }
@@ -123,6 +102,7 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
       return {
         role: 'contributor-fork',
         providerId: 'generic-git',
+        capabilities: NONE_CAPABILITIES,
         reason: `声明源仓库（${declaredSlug}）与 origin（${primarySlug}）不一致，按贡献者 Fork 协作处置`,
       }
     }
@@ -131,6 +111,7 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
         role: 'maintainer',
         collaborationScope: 'owner',
         providerId: 'generic-git',
+        capabilities: NONE_CAPABILITIES,
         reason: '存在 .git/pf-standalone-mode 标记：按独立个人项目维护者处置',
       }
     }
@@ -138,6 +119,7 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
       role: 'maintainer',
       collaborationScope: 'owner',
       providerId: 'generic-git',
+      capabilities: NONE_CAPABILITIES,
       reason: '未匹配特定平台适配器，已降级为通用 Git（generic-git）放行本地分支、审查与合并流程（跳过远端 REST API 自动化）',
     }
   },
@@ -150,90 +132,12 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
   },
 })
 
-/**
- * 向注册表注册一个 HostingProvider 适配器。
- * 产品层默认仅注册 `github`；测试或扩展可注册自定义适配器，但不可覆盖内置 `generic-git` 兜底。
- */
-export function registerHostingProvider(provider) {
-  const id = validateHostingProvider(provider)
-  const normalized = Object.freeze({
-    ...provider,
-    id,
-    capabilities: Object.freeze({
-      ...DEFAULT_CAPABILITIES,
-      ...(provider.capabilities && typeof provider.capabilities === 'object' ? provider.capabilities : {}),
-    }),
-  })
-  providers.set(id, normalized)
-  return normalized
-}
-
-/** 按 id 读取已注册的 HostingProvider（传入 `'generic-git'` 返回内置兜底适配器）。 */
+/** 按 id 读取已注册的 HostingProvider（传入 `'generic-git'` 返回引擎内置兜底适配器）。 */
 export function getHostingProvider(id) {
-  if (!id) return undefined
-  const key = String(id).trim().toLowerCase()
-  if (key === 'generic-git') return GENERIC_GIT_PROVIDER
-  return providers.get(key)
-}
-
-/** 列出当前注册表中的 HostingProvider；默认不含 `generic-git` 兜底。 */
-export function listHostingProviders({ includeFallback = false } = {}) {
-  const list = [...providers.values()]
-  if (includeFallback) list.push(GENERIC_GIT_PROVIDER)
-  return list
-}
-
-/** 解析单个 Git 远端地址并匹配对应的 HostingProvider（未命中则优雅降级 `generic-git`）。 */
-export function resolveRemoteDescriptor(remoteInput, opts = {}) {
-  const sshHostMap = opts.sshHostMap === false
-    ? {}
-    : (opts.sshHostMap ?? parseSshConfigHostMap(opts.sshConfig))
-
-  let name
-  let fetchUrl = ''
-  let pushUrl = ''
-  if (typeof remoteInput === 'string') {
-    fetchUrl = remoteInput.trim()
-    pushUrl = fetchUrl
-  } else if (remoteInput && typeof remoteInput === 'object') {
-    name = typeof remoteInput.name === 'string' && remoteInput.name.trim() ? remoteInput.name.trim() : undefined
-    fetchUrl = String(remoteInput.fetchUrl ?? remoteInput.url ?? remoteInput.pushUrl ?? '').trim()
-    pushUrl = String(remoteInput.pushUrl ?? remoteInput.fetchUrl ?? remoteInput.url ?? '').trim()
-  }
-
-  const probeUrl = fetchUrl || pushUrl
-  const { protocol, host: rawHost } = parseRemoteUrlHost(probeUrl)
-  const mappedHost = protocol === 'ssh' && rawHost ? lookupSshHost(sshHostMap, rawHost) : undefined
-  const resolvedHost = mappedHost ? mappedHost.toLowerCase() : rawHost
-  const sshAlias = mappedHost && rawHost && mappedHost.toLowerCase() !== rawHost ? rawHost : undefined
-
-  let matchedProvider
-  for (const provider of providers.values()) {
-    try {
-      if (provider.matchRemote(probeUrl, sshHostMap)) {
-        matchedProvider = provider
-        break
-      }
-    } catch { /* 适配器异常时安全继续回退 */ }
-  }
-
-  const provider = matchedProvider ?? GENERIC_GIT_PROVIDER
-  const repoSlug = provider.normalizeRepo(probeUrl, sshHostMap)
-  const isUpstream = Boolean(opts.isUpstream || name === 'upstream')
-
-  return {
-    ...(name ? { name } : {}),
-    fetchUrl,
-    pushUrl,
-    protocol,
-    ...(rawHost ? { rawHost } : {}),
-    ...(resolvedHost ? { resolvedHost } : {}),
-    ...(sshAlias ? { sshAlias } : {}),
-    providerId: provider.id,
-    repoSlug,
-    capabilities: provider.capabilities,
-    isUpstream,
-  }
+  const found = coreGetHostingProvider(id)
+  if (!found) return undefined
+  if (found.id === 'generic-git') return GENERIC_GIT_PROVIDER
+  return found
 }
 
 function parseRawRemotesInput(remotesInput, remotePushUrls = {}) {
@@ -347,18 +251,23 @@ export function classifyTopologyIdentity(opts = {}) {
     : (opts.sshHostMap ?? gitFacts.topology?.sshHostMap ?? parseSshConfigHostMap())
   const topology = gitFacts.topology
     ?? resolveRemotesTopology(gitFacts.remoteUrls ?? gitFacts.remote, { sshHostMap })
+  if (opts.localMode === true || topology.mode === 'none') {
+    return {
+      role: 'local-only',
+      providerId: 'none',
+      capabilities: NONE_CAPABILITIES,
+      reason: opts.localMode === true ? '存在 .git/pf-local-mode 标记：按纯本地项目处置' : '还没有配置远端仓库：按纯本地工作区处置',
+    }
+  }
   const primaryProvider = getHostingProvider(topology.primaryProviderId)
   if (!primaryProvider) {
-    if (topology.mode === 'none') {
-      return GITHUB_PROVIDER.classifyIdentity({ ...opts, sshHostMap, topology })
-    }
     return GENERIC_GIT_PROVIDER.classifyIdentity({ ...opts, sshHostMap, topology })
   }
   const result = primaryProvider.classifyIdentity({ ...opts, sshHostMap, topology })
   return {
     ...result,
     providerId: result.providerId ?? primaryProvider.id,
-    capabilities: primaryProvider.capabilities,
+    capabilities: result.role === 'local-only' ? NONE_CAPABILITIES : primaryProvider.capabilities,
   }
 }
 
@@ -389,9 +298,16 @@ export async function resolveTopologyIdentity(opts = {}) {
   const effectiveForkMode = typeof forkMode === 'boolean' ? forkMode : markers.forkMode
   const effectiveStandaloneMode = typeof standaloneMode === 'boolean' ? standaloneMode : markers.standaloneMode
 
-  const provider = topology.mode === 'none'
-    ? GITHUB_PROVIDER
-    : (getHostingProvider(topology.primaryProviderId) ?? GENERIC_GIT_PROVIDER)
+  if (effectiveLocalMode || topology.mode === 'none') {
+    return {
+      role: 'local-only',
+      providerId: 'none',
+      capabilities: NONE_CAPABILITIES,
+      reason: effectiveLocalMode ? '存在 .git/pf-local-mode 标记：按纯本地项目处置' : '还没有配置远端仓库：按纯本地工作区处置',
+    }
+  }
+
+  const provider = getHostingProvider(topology.primaryProviderId) ?? GENERIC_GIT_PROVIDER
 
   if (provider.id === 'github') {
     const res = await resolveGitHubWorkspaceIdentity({
@@ -410,8 +326,8 @@ export async function resolveTopologyIdentity(opts = {}) {
     })
     return {
       ...res,
-      providerId: topology.mode === 'none' ? undefined : 'github',
-      capabilities: provider.capabilities,
+      providerId: res.role === 'local-only' ? 'none' : (res.providerId ?? 'github'),
+      capabilities: res.role === 'local-only' ? NONE_CAPABILITIES : provider.capabilities,
     }
   }
 
@@ -428,18 +344,20 @@ export async function resolveTopologyIdentity(opts = {}) {
   })
 }
 
-/** 按注册表与多远端拓扑调度平台环境探测；无远端时仍可探测本机 GitHub 建仓凭据。 */
+/** 按注册表与多远端拓扑调度平台环境探测；无远端时仍可探测本机 GitHub 建仓凭据但工作区能力忠实报告 none。 */
 export async function probeTopologyEnv(opts = {}) {
   const effectiveHostMap = opts.sshHostMap === false
     ? {}
     : (opts.sshHostMap ?? parseSshConfigHostMap())
   const topology = opts.topology ?? resolveRemotesTopology(opts.remoteUrls, { sshHostMap: effectiveHostMap })
-  const provider = topology.mode === 'none'
-    ? GITHUB_PROVIDER
-    : (getHostingProvider(topology.primaryProviderId) ?? GENERIC_GIT_PROVIDER)
+  if (topology.mode === 'none') {
+    const res = await probeGitHubEnv({ ...opts, sshHostMap: effectiveHostMap })
+    return { ...res, providerId: 'none', capabilities: NONE_CAPABILITIES }
+  }
+  const provider = getHostingProvider(topology.primaryProviderId) ?? GENERIC_GIT_PROVIDER
   if (provider.id === 'github') {
     const res = await probeGitHubEnv({ ...opts, sshHostMap: effectiveHostMap })
-    return { ...res, providerId: topology.mode === 'none' ? undefined : 'github', capabilities: provider.capabilities }
+    return { ...res, providerId: 'github', capabilities: provider.capabilities }
   }
   const res = await provider.probeAuth({ ...opts, probeAuth: true, topology })
   return { ...res, providerId: provider.id, capabilities: provider.capabilities }

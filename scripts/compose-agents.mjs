@@ -3,7 +3,7 @@
  * compose-agents.mjs —— 生成或刷新目标项目的 AGENTS.md。
  *
  * - 统一单一紧凑契约体系，仅按项目真实属性（有无远端、是否发版、多包、多语等）条件渲染。
- * - 兼容 `.pf-manifest.json` v1/v2：按 `disabledSkills` 从意图路由过滤已禁用技能，
+ * - 兼容 `.pf-manifest.json` v1/v2/v3：按 `disabledSkills` 从意图路由过滤已禁用技能，
  *   按 `removedAgentsRegions` 跳过用户主动删除的区间，无基线时对既有非空区段默认 `protect`。
  * - `--check` / `--status` / `--clean` / `--upgrade` 保持幂等与写前仓外快照保护。
  */
@@ -33,9 +33,7 @@ import {
   sectionAlreadyPresent,
 } from './lib/agents-sections.mjs'
 
-const { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
-const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
-const AGENTS_WARN_BYTES = protocol.AGENTS_WARN_BYTES ?? 24576
+const { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 
 const HERE = dirname(fileURLToPath(import.meta.url))

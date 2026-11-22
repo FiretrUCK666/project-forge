@@ -11,7 +11,8 @@ import {
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
 } from '../../kit/skills/lib/profile-sniffer.mjs'
-import { matchGlob } from '../../kit/skills/lib/git-core.mjs'
+import { BROAD_CODE_EXT_RE, COMMON_OUTPUT_DIRS, matchGlob } from '../../kit/skills/lib/git-core.mjs'
+import { summarizeSkillDescription } from '../../kit/skills/lib/skill-discovery.mjs'
 import { classifyCommandText, COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
 import { isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
@@ -26,11 +27,9 @@ export function isVendoredOrEmbeddedPackageDir(dirRel) {
     || /(?:^|\/)vscode-web\/extensions(?:\/|$)/i.test(norm)
 }
 
-export const OUTPUT_DIRS = new Set([
-  'node_modules', '.venv', '__pycache__', 'dist', 'build', 'out', 'target', 'coverage', 'bin',
-])
+export const OUTPUT_DIRS = new Set([...COMMON_OUTPUT_DIRS, 'bin'])
 
-export const CODE_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|vue|svelte|astro|py|rs|go|java|kt|kts|scala|c|cc|cpp|h|hpp|m|mm|cs|rb|php|sh|bash|zsh|ps1|lua|r|swift|dart|ex|exs|clj|hs|erl|jl|zig|sol|sql|proto)$/i
+export const CODE_EXT = BROAD_CODE_EXT_RE
 
 export const TEXT_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|vue|svelte|astro|py|rs|go|java|kt|kts|scala|c|cc|cpp|h|hpp|m|mm|cs|rb|php|sh|bash|zsh|ps1|lua|r|swift|dart|ex|exs|clj|hs|erl|jl|zig|sol|sql|proto|md|mdx|txt|rst|ya?ml|json|toml|html|css|scss|svg)$/i
 
@@ -404,15 +403,6 @@ function extractSkillDescription(fmBody) {
     return rest.replace(/^['"]|['"]$/g, '').trim() || undefined
   }
   return undefined
-}
-
-function summarizeSkillDescription(desc) {
-  if (!desc) return undefined
-  const collapsed = String(desc).replace(/\s+/g, ' ').trim()
-  if (!collapsed) return undefined
-  const sentence = collapsed.split(/[。！？!?]|(?<=\.)\s+/)[0].trim() || collapsed
-  if (sentence.length <= 80) return sentence
-  return `${sentence.slice(0, 77).trimEnd()}...`
 }
 
 export function detectSkillKind(root) {

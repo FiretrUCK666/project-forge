@@ -81,7 +81,7 @@ flowchart LR
 产品层内部按四层单向依赖组织，共享底层原语统一收敛在 `kit/skills/lib/` 作为唯一真源，`scripts/lib/` 仅在安装期复用或做薄重导出，禁止反向被 `kit/` 引用：
 
 1. **L1 基础原语层**：`kit/skills/lib/exec.mjs`、`git-core.mjs`、`git-worktree-env.mjs`、`git.mjs`、`git-index-fast.mjs`、`git-fast-objects.mjs`、`git-fast.mjs`、`git-status-fast.mjs`、`markdown-scan.mjs`、`scripts/zip.mjs`、`scripts/backup.mjs`。提供跨平台无弹窗命令执行、Worktree 共享环境计算、`withFileLock` 并发文件锁、零子进程 Git 对象与状态解析、围栏感知 Markdown 扫描及纯内置 `node:zlib` 的 `.zip` 快照读写。
-2. **L2 环境与拓扑抽象层**：`kit/skills/lib/platform-probe.mjs`、`platform.mjs`、`github-parse.mjs`、`github-labels.mjs`、`github-client.mjs`、`local-issues.mjs`、`task-backend.mjs`、`task-backend-local.mjs`、`issue-template-hydrate.mjs`、`task-graph.mjs`、`profile-sniffer.mjs`、`profile.mjs`、`doc-locator.mjs`、`intake-triage.mjs`、`docs.mjs`、`doc-templates.mjs`。提供惰性平台探测、本地原子工单库、统一 `TaskBackend` 注册表分发、四路 Issue 模板统一水合、外部阻塞与堆叠图谱、零写入按需定位器与命令嗅探。
+2. **L2 环境与拓扑抽象层**：`kit/skills/lib/platform-probe.mjs`、`kit/skills/lib/platform-registry.mjs`、`platform.mjs`、`github-parse.mjs`、`github-labels.mjs`、`github-client.mjs`、`local-issues.mjs`、`task-backend.mjs`、`task-backend-local.mjs`、`issue-template-hydrate.mjs`、`task-graph.mjs`、`profile-sniffer.mjs`、`profile.mjs`、`doc-locator.mjs`、`intake-triage.mjs`、`docs.mjs`、`doc-templates.mjs`。提供惰性平台探测、双端统一平台注册表、本地原子工单库、统一 `TaskBackend` 注册表分发、四路 Issue 模板统一水合、外部阻塞与堆叠图谱、零写入按需定位器与命令嗅探。
 3. **L3 纯策略与状态机层**：`kit/skills/lib/workflow-policy.mjs`、`workflow-policy-next.mjs`、`plan-sync.mjs`、`plan-exit-gate.mjs`、`doc-slice-graph.mjs`、`empirical-artifacts.mjs`、`workflow-helpers.mjs`、`handoff-package.mjs`、`static-gates.mjs`、`static-gates-lexer.mjs`、`static-gates-comment-hygiene.mjs`、`ledger.mjs`、`exit-codes.mjs`、`gate-truth.mjs`、`evidence-substance.mjs`。提供三正交风险判定、单入口下一跳路由、规划退场白名单、单一三态切片依赖图、实证附件与视觉检查、瘦身交接包及词法静态门禁。
 4. **L4 CLI 入口与安装器层**：`kit/skills/*/scripts/*.mjs` 与 `scripts/*.mjs`。负责参数解析、调用 L3 决策与执行 L1/L2 副作用；首次配置、模板渲染与跨版本升级逻辑放在 `scripts/lib/`，保持 `.agents/skills/` 被复制到任意外部仓库后 100% 自包含可运行。
 
@@ -97,7 +97,7 @@ flowchart LR
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（含 `claims.mjs` 路径与脚本真实性回查）与交棒四档退出码净度扫描 |
 | `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 校验原子自更新（含 `15` 分钟失败冷却与回滚）与双语 README 目录锚点同步 |
 | `scripts/lib/` | 产品层 | 安装期与升级专用库，含 `protocol.mjs`、`template.mjs`、`render.mjs`、`claims.mjs`、`merge3.mjs`、`equip-bootstrap.mjs`、`equip-integrity.mjs`、`agents-defaults.mjs`、`agents-sections.mjs`、`survey-*.mjs` 及 `platform/` 适配器 |
-| `kit/skills/lib/` | 产品层 | 8 个内置技能共享的零依赖运行内核（60 余个单职责模块，含 `shared.mjs` 统一重导出与 `overlay.mjs` 扩展机制） |
+| `kit/skills/lib/` | 产品层 | 8 个内置技能共享的零依赖运行内核（77 个单职责模块，含 `shared.mjs` 统一重导出、`platform-registry.mjs` 平台注册表与 `overlay.mjs` 扩展机制） |
 | `kit/skills/dev-explore/` | 产品层 | 只读探索与零写入按需定位（`repo-map.mjs`、`doc-locate.mjs`） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、模板初始化、多轮澄清、账本态 Critique 与切片依赖审计（`doc-plan.mjs`、`doc-audit.mjs`） |
 | `kit/skills/dev-edit/` | 产品层 | 改前边界核对、复用查找与词法静态门禁（`edit-gate.mjs`） |
@@ -107,7 +107,7 @@ flowchart LR
 | `kit/skills/dev-govern/` | 产品层 | 只读静态体检、三层常青文档与工作树巡检、信号聚类、三层倒金字塔复盘与发版筹备（`govern-audit.mjs`、`govern-retro.mjs`） |
 | `kit/skills/dev-iterate/` | 产品层 | 盲区与热点识别、原生测试生成（过 `edit-gate`）、并发压测、缺陷升级建单与有界优化循环（`iterate.mjs`、`iterate-cycle.mjs`） |
 | `assets/readme/` | 产品层 | 双语 README 浅深色自适应 SVG 图解 |
-| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（`preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`bench.mjs`、`merge-gate.mjs` 等） |
+| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（`scripts/dev/preflight.mjs`、`scripts/dev/fixtures.mjs`、`scripts/dev/fixtures-repo-alignment.mjs`、`scripts/dev/verify-injections.mjs`、`scripts/dev/injections-data-repo-alignment.mjs`、`scripts/dev/bench.mjs`、`scripts/dev/merge-gate.mjs` 等） |
 
 ### 模块分层与禁引规则
 
@@ -320,7 +320,7 @@ flowchart LR
 
 - **规划隔离与账本态内审**：支持 `flow.mjs start --planning` 或 `doc-plan.mjs init --worktree` 在独立 worktree 中起草规划，过审后运行 `flow.mjs start` 原地平滑转入实施而无需迁移文档。多轮 Critique 记录全部存入单任务账本 `ledger.planCritique`，Frontmatter 只留单行 `plan_critique` 印记，同时去掉了单调膨胀的锚点计数棘轮，只保留核心章节非空、C 编号锁定与实质性防退化护栏。
 - **退场白名单与单一三态图**：`plan-exit-gate.mjs` 在 `flow.mjs start --case 3|4` 前置强校验，仅放行 SHA 一致的 `passed`、带理由的 `human-override` 或带实质理由的 `skipped`，否则以退出码 `3` 报 `BLOCKED_PLAN_NOT_READY`。切片规划统一收口到 `doc-slice-graph.mjs`，显式区分逻辑 `depends_on`、未完成阻断与 `serial-by-overlap`（无逻辑依赖但 `scope_files` 相交时自动排入先后子波次，不再误报冲突）。
-- **并流调度与瘦身交接包**：`flow.mjs next` 在空闲态扫描就绪规格并在 `Wave 1 >= 2` 时返回 `parallelDispatch: true`；`flow.mjs batch plan --handoff` 调用 `handoff-package.mjs` 按波次生成仅包含真实 `mustFix`/`shouldFix`、`scope_files` 与极简 `5` 行回执模板的子代理交接包，防止详报与日志撑爆主调度上下文；`flow.mjs status --all` 提供全仓活跃任务与波次的统一只读总览。
+- **并流调度与瘦身交接包**：`flow.mjs next` 在空闲态扫描就绪规格并在 `Wave 1 >= 2` 时返回 `parallelDispatch: true`；`flow.mjs batch plan --handoff` 调用 `handoff-package.mjs` 按波次生成每包 `<= 15 行`（含 `taskId`/`spec`/`todo`/真实 `mustFix`/`shouldFix`/`scope_files` 与极简 `5` 行回执模板）的子代理交接包，防止详报与日志撑爆主调度上下文；`flow.mjs status --all` 提供全仓活跃任务与波次的统一只读总览。
 
 ### 支柱二：工具无关结构化实证与界面防敷衍
 
@@ -333,7 +333,7 @@ flowchart LR
 静态告警、审查疑点或推测缺陷在拿到运行证据前只算「可疑」。`escalation.mjs`、`dev-iterate` 与 `dev-govern` 共用四步处置原则：
 1. **最小运行复现消误报**：先编写并运行一条最小可复现 PoC 命令；复现不出来即按误报处理，不写补丁、不建单。
 2. **复跑证伪与回归防护**：修复后用同一条命令复跑确认变绿，并把正反双向断言写入回归测试。
-3. **评估整类加固（Tier 1 / Tier 2）**：判断单点缺陷是否来自同类模式缺失——能用静态门禁或原生规则拦下的做 Tier 1，能用共享边界原语一次性收口的做 Tier 2。
+3. **评估整类加固（Tier 1 / Tier 2）**：判断单点缺陷是否来自同类模式缺失——能用共享边界原语或架构重构一次性收口的做 Tier 1，能用静态门禁或原生规则拦下的做 Tier 2。
 4. **结构化建单证据**：`escalation.mjs` 支持有界长度（`<= 1200` 字符）的 `reproEvidence` 与 `pocCommand` 字段，把可重放命令直接带入工单正文。
 
 ### 支柱四：有界优化循环与「只锁客观输出边界」

@@ -140,8 +140,8 @@ export function renderDocTemplate(kind, { vars = {}, dropSections = null, pruneU
   const filled = fillTemplateVars(withCriteria, restVars)
   const pruned = applySectionPolicy(filled, dropSections, { pruneUnfilled })
   // 编号与目录都要按裁剪后的集合重算：
-  // 模板里写死的「八、验收标准」在裁掉几节之后成了空档；
-  // 手写的六条目录链接在保留更多节之后成了漏项。两者都是「集合变了、派生值没跟着变」。
+  // 模板里写死的节号在裁掉几节之后成了空档；
+  // 手写的固定目录链接在保留更多节之后成了漏项。两者都是「集合变了、派生值没跟着变」。
   return rewriteToc(renumberHeadings(pruned))
 }
 

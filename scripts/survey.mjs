@@ -55,7 +55,7 @@ import {
   samePath,
 } from './lib/text.mjs'
 
-const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
+const { AGENTS_MAX_BYTES } = protocol
 
 export function computeArtifactPlan(facts) {
   const maturity = facts?.maturity ?? 'partial'
@@ -118,7 +118,7 @@ export function computeArtifactPlan(facts) {
   if (!kit.manifestExists && hasDecision(facts, 'no-kit')) {
     items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '已在取舍中豁免（no-kit）', action: 'skip', detail: 'AGENTS.md「取舍」已明确不装配本地技能套件' })
   } else if (!kit.manifestExists) {
-    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '未装配', action: 'equip', detail: `运行 equip.mjs 统一装配全部已落盘研发技能并生成 .pf-manifest.json（v2）${customNote}` })
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '未装配', action: 'equip', detail: `运行 equip.mjs 统一装配全部已落盘研发技能并生成 .pf-manifest.json（v3）${customNote}` })
   } else if (kit.corrupted || kit.drifted || kit.versionMismatch || (kit.missingFiles?.length ?? 0) > 0) {
     items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '已装配（需无损升级/修复）', action: 'upgrade', detail: `运行 equip.mjs 三态升级：未改文件升新、用户定制与删除墓碑严格保留、退役文件自净化${customNote}` })
   } else {

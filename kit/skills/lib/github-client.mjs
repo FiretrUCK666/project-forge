@@ -22,6 +22,8 @@ import {
   redactGhTokens, resolveIdentityLayers, stripPfStateTags, summarizeCommitChecks,
 } from './github-parse.mjs'
 
+export const NON_API_CLIENT_TIERS = Object.freeze(new Set(['none', 'offline', 'half-duplex', 'mcp-delegate']))
+
 export {
   DEFAULT_GITHUB_CONCURRENCY, computeWriteBackFingerprint, mapWithConcurrency,
   parseBodyRelations, parseFlowInputs, parseIssueNumbers, parseMilestoneNumber,

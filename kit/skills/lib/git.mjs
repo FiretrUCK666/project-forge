@@ -15,7 +15,7 @@ import {
   killProcessTree, resolveExecutable, withFileLock, withFileLockSync,
 } from './exec.mjs'
 import {
-  COMMON_SKIP_DIRS, DEFAULT_WALK_SKIP_DIRS, LIKELY_DEFAULT_BRANCHES,
+  BROAD_CODE_EXT_RE, CODE_EXT_RE, COMMON_OUTPUT_DIRS, COMMON_SKIP_DIRS, DEFAULT_WALK_SKIP_DIRS, LIKELY_DEFAULT_BRANCHES,
   canonicalPath, gitRun, gitRunBuffer, isInsideDir, isMacMetadataName, isMacOsJunkPath, isMainModule, posixPath,
   readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, unescapeGitPath,
   writeAtomic, writeJsonAtomic,
@@ -35,6 +35,9 @@ import {
 } from './git-worktree-env.mjs'
 
 export {
+  BROAD_CODE_EXT_RE,
+  CODE_EXT_RE,
+  COMMON_OUTPUT_DIRS,
   COMMON_SKIP_DIRS,
   DEFAULT_WALK_SKIP_DIRS,
   LIKELY_DEFAULT_BRANCHES,

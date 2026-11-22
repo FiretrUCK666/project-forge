@@ -172,7 +172,7 @@ function starterTdd({ names, summary, stack, today = localIsoDate() }) {
     `| 最近更新日期 | \`${today}\` |`,
     `| 基线依据 | \`--bootstrap-empty --stack ${stack}\` 通用治理基线 |`,
     `| 运行环境与生态栈 | ${runtimeStack} |`,
-    '| 托管平台适配范围 | GitHub（本地无远端同样完整运行） |',
+    '| 托管平台适配范围 | GitHub 双轨、generic-git 远端与 local-only 本地模式 |',
     '| 关联工程契约 | `AGENTS.md` |', '',
     '## 目标与边界', '',
     `- ${summary}`,

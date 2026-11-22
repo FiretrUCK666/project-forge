@@ -36,6 +36,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 import { checkPathClaim, collectDocClaims } from './doc-facts.mjs'
+import { CODE_EXT_RE } from './git-core.mjs'
 
 const run = promisify(execFile)
 
@@ -43,7 +44,7 @@ const run = promisify(execFile)
 const SCAN_SKIP = /^(?:node_modules|\.git|dist|build|coverage|\.worktrees|docs\/archive)\//
 
 /** 只扫这些扩展名——它们才可能「定义」一个名字。 */
-const CODE_EXT = /\.(?:mjs|js|cjs|ts|go|py|rs|java|rb|php|cs)$/
+const CODE_EXT = CODE_EXT_RE
 
 /**
  * 收集仓库里所有源码文本。

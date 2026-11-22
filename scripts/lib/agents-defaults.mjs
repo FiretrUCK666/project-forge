@@ -7,6 +7,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { DEFAULT_HIGH_RISK_PATHS } from '../../kit/skills/lib/profile.mjs'
 import * as protocol from './protocol.mjs'
 import { ECO_COMMANDS_SHOWN_PER_KIND } from './render.mjs'
 
@@ -371,7 +372,7 @@ export function buildDevProfileVars(facts, targetRoot) {
       PROFILE_SMOKE_VERIFY: 'none',
       PROFILE_MERGE_GATE: 'none',
       PROFILE_ARCH_RULES: 'none',
-      PROFILE_HIGH_RISK: hasGithub ? '.github/, AGENTS.md' : 'AGENTS.md',
+      PROFILE_HIGH_RISK: hasGithub ? DEFAULT_HIGH_RISK_PATHS.join(', ') : 'AGENTS.md, .gitattributes',
       PROFILE_DO_NOT_EDIT: 'docs/archive/',
       PROFILE_FILL_HINT: '',
     }

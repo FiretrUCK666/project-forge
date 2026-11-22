@@ -26,7 +26,7 @@ export const GLOBAL_FLAGS = Object.freeze(['help', 'json', 'dir', 'repo'])
 export const GLOBAL_FLAG_SOURCE = 'kit/skills/lib/cli.mjs'
 
 /**
- * 五个走统一解析器的入口。
+ * 走统一解析器的全部 CLI 入口。
  *
  * `scope` 是读取点的搜索范围：参数常在入口注册、在同技能的处理模块或共享库里消费。
  * 不把库纳入搜索，「入口注册、库读取」这类活参数会被判死，然后逼人加豁免。
@@ -37,6 +37,13 @@ export const ENTRY_SPECS = Object.freeze([
   { label: '治理入口', file: 'kit/skills/dev-govern/scripts/govern-audit.mjs', scope: 'kit/skills/dev-govern/scripts' },
   { label: '审查入口', file: 'kit/skills/dev-review/scripts/review-pack.mjs', scope: 'kit/skills/dev-review/scripts' },
   { label: '改码入口', file: 'kit/skills/dev-edit/scripts/edit-gate.mjs', scope: 'kit/skills/dev-edit/scripts' },
+  { label: '定位入口', file: 'kit/skills/dev-explore/scripts/doc-locate.mjs', scope: 'kit/skills/dev-explore/scripts' },
+  { label: '地图入口', file: 'kit/skills/dev-explore/scripts/repo-map.mjs', scope: 'kit/skills/dev-explore/scripts' },
+  { label: '分诊入口', file: 'kit/skills/dev-flow/scripts/flow-intake.mjs', scope: 'kit/skills/dev-flow/scripts' },
+  { label: '依赖入口', file: 'kit/skills/dev-flow/scripts/worktree-deps.mjs', scope: 'kit/skills/dev-flow/scripts' },
+  { label: '复盘入口', file: 'kit/skills/dev-govern/scripts/govern-retro.mjs', scope: 'kit/skills/dev-govern/scripts' },
+  { label: '迭代入口', file: 'kit/skills/dev-iterate/scripts/iterate.mjs', scope: 'kit/skills/dev-iterate/scripts' },
+  { label: '工具入口', file: 'kit/skills/dev-verify-tools/scripts/verify-tools.mjs', scope: 'kit/skills/dev-verify-tools/scripts' },
 ])
 
 /**
@@ -66,6 +73,13 @@ export const DARK_BASELINE = Object.freeze({
     'agent', 'criteria-status', 'escalate', 'external-pr', 'issue', 'review-token', 'reviewer-id', 'verdict',
   ]),
   '改码入口': Object.freeze([]),
+  '定位入口': Object.freeze([]),
+  '地图入口': Object.freeze([]),
+  '分诊入口': Object.freeze([]),
+  '依赖入口': Object.freeze([]),
+  '复盘入口': Object.freeze([]),
+  '迭代入口': Object.freeze([]),
+  '工具入口': Object.freeze([]),
 })
 
 /**

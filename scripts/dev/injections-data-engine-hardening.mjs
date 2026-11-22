@@ -1,5 +1,5 @@
 /**
- * injections-data-engine-hardening.mjs —— Issue #99 引擎 8 项边界修复与 handoff schemaVersion=3 故障注入复验表（I225–I239）。
+ * injections-data-engine-hardening.mjs —— 引擎边界防退化与 handoff schemaVersion=3 故障注入复验表（I225–I239）。
  *
  * 导出 `INJECTIONS_ENGINE_HARDENING` 供 `injections-data.mjs` 自动发现加载。
  */

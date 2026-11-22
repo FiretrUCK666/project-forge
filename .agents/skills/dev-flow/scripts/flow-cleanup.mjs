@@ -344,10 +344,14 @@ export async function handleStatus(opts, roots) {
     const readySlices = scanUnstartedReadySlices(roots.mainRoot, active)
     const wavePlan = buildMultiTaskWavePlan([...active, ...readySlices])
     const fastCfg = roots.isGit ? readGitConfigFast(roots.gitDir, { systemMap: false }) : null
-    const remotes = parseRemoteUrls(fastCfg?.remoteText ?? '')
+    const topo = parseRemotesTopology(fastCfg?.remoteText ?? '')
     const first = active[0] ?? null
-    const inferredRole = first?.role ?? ((remotes.origin || remotes.upstream) ? 'maintainer' : 'local-only')
-    const inferredProvider = first?.providerId ?? ((remotes.origin || remotes.upstream) ? 'github' : 'none')
+    const inferredProvider = first?.providerId ?? (topo.origin ? topo.providerId : 'none')
+    const inferredRole = first?.role ?? (topo.origin
+      ? (topo.upstream && topo.upstream.repoSlug !== topo.origin.repoSlug
+          ? 'contributor-fork'
+          : (inferredProvider === 'generic-git' ? 'generic-git' : 'maintainer'))
+      : 'local-only')
     const backend = createTaskBackend({ role: inferredRole, providerId: inferredProvider, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
     const tasks = active.map((t) => {
       const ev = evaluateNextState({ activeTasks: active, selectedTask: t, repoRoot: roots.mainRoot })

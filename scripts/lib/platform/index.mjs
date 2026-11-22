@@ -21,6 +21,7 @@ export {
 
 export {
   GENERIC_GIT_PROVIDER,
+  NONE_CAPABILITIES,
   classifyTopologyIdentity as classifyWorkspaceIdentity,
   getHostingProvider,
   listHostingProviders,

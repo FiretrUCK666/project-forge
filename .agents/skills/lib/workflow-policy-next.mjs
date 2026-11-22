@@ -231,7 +231,7 @@ export function evaluateNextState({
       ownerRole = 'human'
       blockingReasons.push('BLOCKED_REQUIRES_DEV_REVIEW')
       nextAction = '当前项目未装配 dev-review 技能，外部 PR 不可信扫描与隔离审查须先通过 project-forge 运行 equip 补齐完整技能集'
-      command = 'node scripts/equip.mjs .'
+      command = 'node "<project-forge>/scripts/equip.mjs" .'
     } else {
       ownerRole = 'reviewer'
       if (!reviewCoversHead) {
@@ -254,7 +254,10 @@ export function evaluateNextState({
     ownerRole = 'implementer'
     blockingReasons.push('ISSUE_CONTEXT_UNAVAILABLE')
     const nums = unackedIssues.join('、')
-    nextAction = `拿不到 Issue #${nums} 的正文，先取回来再动手：gh issue view <N> --repo <声明仓库> 并重跑 flow start，`
+    const fetchHint = t.providerId === 'github' && t.role !== 'local-only'
+      ? 'gh issue view <N> --repo <声明仓库> 并重跑 flow start'
+      : 'node ".agents/skills/dev-flow/scripts/flow.mjs" issue view --issue <N> 或补充正文后重跑 flow start'
+    nextAction = `拿不到 Issue #${nums} 的正文，先取回来再动手：${fetchHint}，`
       + `或显式确认凭现有信息继续：flow.mjs next --task ${t.taskId} --ack-no-issue-context --reason "<原因>"`
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${t.taskId} --ack-no-issue-context --reason "<无法读取 Issue 上下文的原因>"`
   } else if (stopLossActive) {

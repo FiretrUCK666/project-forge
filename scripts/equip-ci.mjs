@@ -242,20 +242,134 @@ export async function protectBranch(targetDir, {
   }
 }
 
+function extractRuntimeVersion(runtimeRequirements, prefixRe) {
+  for (const item of runtimeRequirements ?? []) {
+    const m = new RegExp(`^${prefixRe.source}\\s+(.+)$`, 'i').exec(String(item ?? '').trim())
+    if (!m) continue
+    const clean = m[1].trim().replace(/^[>=<~^v\s]+/, '').split(/[\s,|]/)[0]
+    if (clean) return clean
+  }
+  return ''
+}
+
+function renderEcosystemSetupSteps(facts) {
+  const kinds = Array.isArray(facts.ecosystem?.kinds) ? facts.ecosystem.kinds : []
+  const reqs = Array.isArray(facts.artifacts?.runtimeRequirements) ? facts.artifacts.runtimeRequirements : []
+  const manifests = new Set(facts.ecosystem?.manifests ?? [])
+  const steps = []
+  const seen = new Set()
+
+  for (const kind of kinds) {
+    if (seen.has(kind)) continue
+    seen.add(kind)
+    if (kind === 'node') {
+      const ver = extractRuntimeVersion(reqs, /Node/) || '20'
+      steps.push([
+        '      - name: 准备 Node 运行环境',
+        '        uses: actions/setup-node@v4',
+        '        with:',
+        `          node-version: '${ver}'`,
+      ].join('\n'))
+    } else if (kind === 'python') {
+      const ver = extractRuntimeVersion(reqs, /Python/) || '3.12'
+      steps.push([
+        '      - name: 准备 Python 运行环境',
+        '        uses: actions/setup-python@v5',
+        '        with:',
+        `          python-version: '${ver}'`,
+      ].join('\n'))
+    } else if (kind === 'rust') {
+      const ver = extractRuntimeVersion(reqs, /Rust/)
+      steps.push([
+        '      - name: 准备 Rust 工具链',
+        '        uses: dtolnay/rust-toolchain@stable',
+        ...(ver ? ['        with:', `          toolchain: '${ver}'`] : []),
+      ].join('\n'))
+    } else if (kind === 'go') {
+      const ver = extractRuntimeVersion(reqs, /Go/)
+      steps.push([
+        '      - name: 准备 Go 运行环境',
+        '        uses: actions/setup-go@v5',
+        '        with:',
+        ...(manifests.has('go.mod') || !ver ? ["          go-version-file: 'go.mod'"] : [`          go-version: '${ver}'`]),
+      ].join('\n'))
+    } else if (kind === 'java') {
+      const ver = extractRuntimeVersion(reqs, /Java/) || '21'
+      steps.push([
+        '      - name: 准备 Java 运行环境',
+        '        uses: actions/setup-java@v4',
+        '        with:',
+        "          distribution: 'temurin'",
+        `          java-version: '${ver}'`,
+      ].join('\n'))
+    } else if (kind === 'ruby') {
+      const ver = extractRuntimeVersion(reqs, /Ruby/) || '3.3'
+      steps.push([
+        '      - name: 准备 Ruby 运行环境',
+        '        uses: ruby/setup-ruby@v1',
+        '        with:',
+        `          ruby-version: '${ver}'`,
+      ].join('\n'))
+    } else if (kind === 'php') {
+      const ver = extractRuntimeVersion(reqs, /PHP/) || '8.3'
+      steps.push([
+        '      - name: 准备 PHP 运行环境',
+        '        uses: shivammathur/setup-php@v2',
+        '        with:',
+        `          php-version: '${ver}'`,
+      ].join('\n'))
+    } else if (kind === 'dotnet') {
+      const ver = extractRuntimeVersion(reqs, /\.?NET/) || '8.0.x'
+      steps.push([
+        '      - name: 准备 .NET 运行环境',
+        '        uses: actions/setup-dotnet@v4',
+        '        with:',
+        `          dotnet-version: '${ver}'`,
+      ].join('\n'))
+    } else if (kind === 'dart') {
+      steps.push([
+        '      - name: 准备 Dart 运行环境',
+        '        uses: dart-lang/setup-dart@v1',
+      ].join('\n'))
+    } else if (kind === 'elixir') {
+      steps.push([
+        '      - name: 准备 Elixir 运行环境',
+        '        uses: erlef/setup-beam@v1',
+        '        with:',
+        "          otp-version: '26'",
+        "          elixir-version: '1.16'",
+      ].join('\n'))
+    }
+  }
+
+  return steps.join('\n\n')
+}
+
 /**
  * 把模板里的待办占位替换成勘察到的真实取值。
  *
- * 只替换能确定的那几行：门禁命令。定不下来的**原样保留模板里的待办标记**——
+ * 只替换能确定的那几行：运行环境安装步骤与门禁命令。定不下来的**原样保留模板里的待办标记**——
  * 留一个显眼的标记比填一个猜的值安全：猜的值会静默跑错，标记会被人看见。
  */
 function hydrateCheckTemplate(template, facts) {
+  let out = template
+  const setupBlock = renderEcosystemSetupSteps(facts)
+  const setupRe = / {6}# TODO\(1\)：按生态只留一块，其余整块删掉。\n {6}- name: 准备运行环境\n {8}uses: actions\/setup-node@v4\n {8}with:\n {10}node-version: '<清单声明的版本>'/
+  if (setupBlock) {
+    out = out.replace(setupRe, setupBlock)
+  } else if ((facts.ecosystem?.kinds ?? []).includes('docs-only')) {
+    out = out.replace(new RegExp(`\n${setupRe.source}\n`), '\n')
+  } else {
+    out = out.replace(setupRe, '      # TODO(1)：按项目实际生态补充对应的运行时安装步骤')
+  }
+
   const commands = facts.commands ?? {}
   const order = ['install', 'build', 'typecheck', 'lint', 'test', 'verify']
   const runLines = order.map((k) => commands[k]).filter((v) => typeof v === 'string' && v.trim())
-  if (runLines.length === 0) return template
+  if (runLines.length === 0) return out
 
   // 「与本地跑的是同一条」是这条替换的全部意义：命令来自勘察，不是这里编的。
-  return template.replace(
+  return out.replace(
     / {10}<安装命令>\n {10}<构建命令>\n {10}<测试命令>/,
     runLines.map((c) => `          ${c}`).join('\n'),
   )
@@ -263,10 +377,19 @@ function hydrateCheckTemplate(template, facts) {
 
 function hydrateReleaseTemplate(template, facts) {
   const conventions = facts.conventions ?? {}
-  const manifest = facts.ecosystem?.manifests?.[0]
+  const manifests = facts.ecosystem?.manifests ?? []
+  const kinds = facts.ecosystem?.kinds ?? []
+  const manifest = kinds.includes('obsidian-plugin') && manifests.includes('manifest.json')
+    ? 'manifest.json'
+    : manifests[0]
   let out = template
   if (manifest) out = out.replace(/<版本来源文件>/g, manifest)
-  if (conventions.defaultBranch) out = out.replace(/<默认分支>/g, conventions.defaultBranch)
+  if (conventions.tagPrefix === '') {
+    out = out
+      .replace("tags: ['v*']", "tags: ['[0-9]*']")
+      .replace("startsWith(github.ref, 'refs/tags/v')", "startsWith(github.ref, 'refs/tags/')")
+      .replace(/例如 v1\.2\.3/g, '例如 1.2.3')
+  }
   return out
 }
 
@@ -343,7 +466,7 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (args.dryRun) {
-    if (args.json) process.stdout.write(`${JSON.stringify({ status: 'DRY_RUN', dest: destRel, bytes: Buffer.byteLength(rendered) }, null, 2)}\n`)
+    if (args.json) process.stdout.write(`${JSON.stringify({ status: 'DRY_RUN', dest: destRel, bytes: Buffer.byteLength(rendered), content: rendered }, null, 2)}\n`)
     else process.stdout.write(`[dry-run] 将写入 ${destRel}（${Buffer.byteLength(rendered)} 字节）\n\n${rendered}\n`)
     return 0
   }

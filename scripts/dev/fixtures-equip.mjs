@@ -282,10 +282,10 @@ cases.push(['equip.mjs + survey.mjs：通用空目录基线、已有 README/LICE
   }
 }])
 
-cases.push(['统一完整装配、manifest v2 删除墓碑与 --adopt-custom 绿灯', async () => {
+cases.push(['统一完整装配、manifest v3 删除墓碑与 --adopt-custom 绿灯', async () => {
   const dir = tmpProject({
     'package.json': '{"name":"tier-demo","version":"1.0.0","scripts":{"test":"node --test"}}\n',
-    'README.md': '# tier-demo\n\n统一完整装配与 manifest v2 测试仓。\n',
+    'README.md': '# tier-demo\n\n统一完整装配与 manifest v3 测试仓。\n',
     'src/index.mjs': 'export const ok = true\n',
   })
   gitInit(dir)

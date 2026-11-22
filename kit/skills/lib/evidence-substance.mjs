@@ -32,7 +32,7 @@ export const SHALLOW_EXACT_SET = new Set([
 const PLACEHOLDER_RE = /^(?:<[^>]{1,40}>|\{[^}]{1,40}\}|\[[^\]]{1,40}\]|[.…\-_=*!?？\s]+)$/
 
 /** 具体锚点：命令、路径、等式、数字、退出码、状态码这一类可核对的东西。 */
-const CONCRETE_ANCHOR_RE = /(?:[=:/\\.]|\d|exit|stdout|stderr|status|http|cli|smoke|e2e|json|html|svg|ok_|_ok|pass_|_pass)/i
+const EVIDENCE_CONCRETE_ANCHOR_RE = /(?:[=:/\\.]|\d|exit|stdout|stderr|status|http|cli|smoke|e2e|json|html|svg|ok_|_ok|pass_|_pass)/i
 
 /** 去掉首尾引号、括号与标点，压平空白。 */
 function normalizeText(raw) {
@@ -74,7 +74,7 @@ export function evaluateTextSubstance(raw, { minChars = 6, subject = '实证说�
   }
   const tokens = stripped.split(/[\s,，;；|]+/).filter(Boolean)
   const meaningful = tokens.filter((t) => !SHALLOW_EXACT_SET.has(t.toLowerCase().replace(/[.!！?？]+$/, '')))
-  const hasAnchor = CONCRETE_ANCHOR_RE.test(stripped)
+  const hasAnchor = EVIDENCE_CONCRETE_ANCHOR_RE.test(stripped)
   if (meaningful.length === 0 || (!hasAnchor && compact.length < 8 && meaningful.length < 2)) {
     return {
       ok: false,

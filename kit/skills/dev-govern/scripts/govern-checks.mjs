@@ -10,7 +10,7 @@ import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import {
-  DEFAULT_WALK_SKIP_DIRS, canonicalPath, gitRun, inspectBranchMergeState,
+  COMMON_OUTPUT_DIRS, DEFAULT_WALK_SKIP_DIRS, canonicalPath, gitRun, inspectBranchMergeState,
   isMacOsJunkPath, parseWorktreeListPorcelain, posixPath, readJsonSafe,
   readTextSafe, samePath, sha256Text,
 } from '../../lib/git.mjs'
@@ -19,18 +19,18 @@ import { isAllowedExtensionPath } from '../../lib/overlay.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, ISSUE_REF_RE, JUSTIFICATION_ANCHOR_RE,
   RUST_ALLOW_RE, TEST_FILE_RE, TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
-  extractLineCommentInfo, isTestOrFixtureFile,
+  extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode,
 } from '../../lib/static-gates.mjs'
 import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
+import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES } from '../../lib/tool-owned.mjs'
 
-export const AGENTS_WARN_BYTES = 24576
-export const AGENTS_MAX_BYTES = 30720
+export { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES }
 export const GOD_FILE_WARN_LINES = 800
 export const GOD_FILE_HIGH_LINES = 1500
 const LARGE_FILE_BYTES = 1024 * 1024
 const MAX_READ_BYTES = 512 * 1024
 
-const OUTPUT_DIRS = ['node_modules', '.venv', '__pycache__', 'dist', 'build', 'out', 'target', 'coverage', '.worktrees']
+const OUTPUT_DIRS = [...COMMON_OUTPUT_DIRS, '.worktrees']
 export const TEXT_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1|md|mdx|txt|rst|ya?ml|json|toml|ini|cfg|env)$/i
 const BOM_EXEMPT_EXT_RE = /\.(?:cs|fs|vb|csproj|fsproj|vbproj|sln)$/i
 
@@ -172,16 +172,6 @@ export function walkFiles(root, scopeRel = '') {
   }
   files.sort((a, b) => a.rel.localeCompare(b.rel))
   return files
-}
-
-function looksLikeCommentedCode(body) {
-  const t = String(body ?? '').trim()
-  if (!t || t.startsWith('@') || /^[-=*#]{3,}$/.test(t)) return false
-  if (/[{};]\s*$/.test(t)) return true
-  if (/^(?:const|let|var|function|async\s+function|class|if|else\s+if|for|while|switch|return|import|export|def|async\s+def|try|except|finally|fn|pub\s+fn|func)\b/.test(t)) return true
-  if (/^[A-Za-z_][A-Za-z0-9_.]*\s*(?:=|:=|\([^)]*\)\s*(?:=>|\{|$))/.test(t)) return true
-  if (/^\s*[})\]]+\s*[,;]?\s*$/.test(t)) return true
-  return false
 }
 
 export function auditSecurity(files, trackedSet, findings) {

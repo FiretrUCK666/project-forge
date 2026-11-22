@@ -8,8 +8,10 @@
  * 临时文件名带进程号，判据是「属主还活着吗」。活着的进程可能在用，死掉的那个不会。
  */
 
-import { existsSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+
+export { writeAtomic } from '../../kit/skills/lib/git-core.mjs'
 
 /** 临时文件名形状的唯一来源：`原名.tmp-<pid>`。 */
 export function tempPathFor(path) {
@@ -99,23 +101,6 @@ export function reportTemps({ removed = [], kept = [] } = {}, { dryRun = false }
     bits.push(`另有 ${kept.length} 个临时文件属于仍在运行的进程，没动：${kept.map((p) => basename(p)).join('、')}`)
   }
   return bits.length === 0 ? '' : `${bits.join('\n')}\n`
-}
-
-/**
- * 原子写：先写临时文件、再改名。
- *
- * 同目录改名在同一个文件系统上是原子的，所以读者要么看到旧内容、要么看到新内容，
- * 不会看到半截。失败时把临时文件删掉——留着它，下一次运行会把它当成「别人的残留」。
- */
-export function writeAtomic(path, content) {
-  const tmp = tempPathFor(path)
-  writeFileSync(tmp, content, 'utf8')
-  try {
-    renameSync(tmp, path)
-  } catch (error) {
-    try { unlinkSync(tmp) } catch { /* 清不掉就留着 */ }
-    throw error
-  }
 }
 
 /** 这个路径上有没有东西（文件或目录）。 */

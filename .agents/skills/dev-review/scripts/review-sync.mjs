@@ -353,7 +353,8 @@ export async function syncReviewToGitHub({
     const ghClient = opts._ghClient ?? ghProbe?.client ?? null
     const tier = ghClient?.tier ?? ghProbe?.env?.trackB?.tier ?? 'offline'
     const ghLogin = ghProbe?.env?.trackB?.login
-    const providerCaps = getHostingProvider(ledger.providerId || 'github')?.capabilities ?? { mention: true }
+    const fallbackProvider = ledger.role === 'local-only' ? 'none' : (targetRepo ? 'github' : 'generic-git')
+    const providerCaps = getHostingProvider(ledger.providerId || fallbackProvider)?.capabilities ?? { mention: false }
     const revLayers = resolveIdentityLayers({ ghLogin, ghTier: tier, explicitAgent: reviewerId })
     const implLayers = resolveIdentityLayers({
       ledgerAccount: ledger.account,

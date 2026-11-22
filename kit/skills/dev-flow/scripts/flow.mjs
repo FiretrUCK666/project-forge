@@ -39,7 +39,7 @@ function printHelp() {
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
     '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
-    '  intake    [--pr <M> | --issue <N>] [--decision <accept|defer|reject-out-of-scope|reject-duplicate|needs-info>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
+    '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
     '  milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--title "<标题>"] [--description "<描述>"] [--due <ISO>] [--issue <N>] [--pr <N>] [--task <id>] [--state open|closed|all] [--json]',
@@ -126,7 +126,7 @@ async function main(argv) {
         process.stdout.write(`- 身份: ${data.identity.role}${scopeLabel} (${data.identity.reason})\n`)
         if (data.identity.teamProbeHint) process.stdout.write(`- 团队权限提示: ${data.identity.teamProbeHint}\n`)
         process.stdout.write(`- 分支: ${data.branch ?? 'detached'} @ ${(data.head ?? 'unborn').slice(0, 7)} | 默认基线: ${data.defaultBranch} | 脏文件: ${data.dirty}\n`)
-        process.stdout.write(`- 平台通道: provider=${data.github.providerId ?? 'github'}, TrackB=${data.github.trackB.tier}, https=${data.github.trackA.https}, ssh=${data.github.trackA.ssh}\n`)
+        process.stdout.write(`- 平台通道: provider=${data.github.providerId ?? data.identity?.providerId ?? 'none'}, TrackB=${data.github.trackB.tier}, https=${data.github.trackA.https}, ssh=${data.github.trackA.ssh}\n`)
         if (data.github.trackA.remediationCmd) process.stdout.write(`- 协议修复建议: ${data.github.trackA.remediationCmd}\n`)
         if (data.inputs.reuseExistingPr) process.stdout.write(`- 复用已有 PR: #${data.inputs.reuseExistingPr.prNumber} (${data.inputs.reuseExistingPr.note})\n`)
         if (data.inputs.issues.length > 1) process.stdout.write(`- 多 Issue 拓扑排序: ${data.inputs.issueGraph.orderedIssues.map((n) => `#${n}`).join(' -> ')}\n`)

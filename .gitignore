@@ -19,14 +19,22 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+._*
+__MACOSX/
 Thumbs.db
 desktop.ini
 *.swp
 *~
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 
 # 临时与产物
 *.log
 *.tmp
+*.tmp-*
 *.bak
 *.tar
 tmp/

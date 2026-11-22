@@ -9,15 +9,17 @@
 import { createHash } from 'node:crypto'
 import {
   accessSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync,
-  readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync,
+  readFileSync, rmSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
-import { isInsideDir } from '../../kit/skills/lib/git-core.mjs'
+import { canonicalPath, isInsideDir } from '../../kit/skills/lib/git-core.mjs'
 import { writeAtomic } from './fs-atomic.mjs'
 import { isMacOsMetadata, isMacOsMetadataPath, isRepoOnlyPath } from './protocol.mjs'
 import { frontmatterBlock, posixPath, skillVersion } from './text.mjs'
+
+export { canonicalPath as canonicalRealPath }
 
 /** 离线或核对失败后的短冷却时间：防止离线环境每次启动重复等满网络超时。 */
 export const FAILURE_COOLDOWN_MS = 15 * 60 * 1000
@@ -37,24 +39,6 @@ export const KNOWN_RETIRED_PACKAGE_ASSETS = new Set([
   'templates/release-spec.md',
   'templates/work-item.md',
 ])
-
-/** 对路径按最深存在祖先做 realpathSync.native + NFC 归一，避免软链/NFD 导致键分裂。 */
-export function canonicalRealPath(p) {
-  const abs = resolve(String(p ?? ''))
-  let head = abs
-  const tail = []
-  for (;;) {
-    try {
-      const real = realpathSync.native(head)
-      return (tail.length > 0 ? join(real, ...tail.reverse()) : real).normalize('NFC')
-    } catch {
-      const up = dirname(head)
-      if (up === head) return abs.normalize('NFC')
-      tail.push(basename(head))
-      head = up
-    }
-  }
-}
 
 function deepestExistingDir(dirPath) {
   let cur = resolve(dirPath)
@@ -102,7 +86,7 @@ export function resolveCacheDir() {
 
 /** 按归一化后的副本真实路径生成唯一状态文件路径。 */
 export function resolveStatePath(skillRoot) {
-  const key = canonicalRealPath(skillRoot)
+  const key = canonicalPath(skillRoot)
   const hashInput = process.platform === 'win32' ? key.toLowerCase() : key
   const hash = createHash('sha1').update(hashInput).digest('hex').slice(0, 12)
   return join(resolveCacheDir(), `project-forge-update-${hash}.json`)

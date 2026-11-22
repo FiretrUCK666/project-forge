@@ -17,12 +17,11 @@ import {
   classifyDoorType, detectGateWeakeningInEntry, evaluateArchRules, isTestOrFixtureFile, matchGlob,
   scanStructuralHygiene, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
-import { hasValidE2eObservationOnHead } from '../../lib/workflow-policy.mjs'
+import { EXTRA_CI_FILE_RE, hasValidE2eObservationOnHead } from '../../lib/workflow-policy.mjs'
 import { formatReviewContextLines } from './review-context.mjs'
 
 const EXPORT_API_RE = /^\s*(?:export\s+(?:default\s+|async\s+)?(?:function|const|let|var|class|type|interface|enum|\{)|module\.exports\b|exports\.[A-Za-z0-9_]+\s*=|pub\s+(?:fn|struct|enum|trait|mod|type)\s+|func\s+[A-Z]|def\s+[a-zA-Z][a-zA-Z0-9_]*\s*\()/
 const CLI_FLAG_RE = /(?:--[a-z][a-z0-9-]{1,}\b|\bprocess\.argv\b|\bargparse\b|\bcommander\b|\byargs\b|\bclap\b|\bflag\.)/
-const EXTRA_CI_FILE_RE = /(?:^|\/)(?:\.travis\.ya?ml|\.drone\.ya?ml|\.buildkite\/pipeline\.ya?ml|\.woodpecker(?:\.ya?ml|\/[^/]+\.ya?ml))$/i
 
 /**
  * Checks code-to-doc parity, Mermaid 16/12 diagram truncation safety,

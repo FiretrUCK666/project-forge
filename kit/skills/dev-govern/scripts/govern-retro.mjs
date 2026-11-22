@@ -601,15 +601,33 @@ export async function handleRetro(workRoot, mainRoot, gitDir, isGit, opts) {
   return 0
 }
 
+function printHelp() {
+  process.stdout.write([
+    '用法：node govern-retro.mjs [summary|retro] [dir] [options]',
+    '',
+    'Options:',
+    '  --dir <path>                 Repository directory',
+    '  --task <id>                  Filter signals and ledgers by taskId',
+    '  --auto                       Run automatic retro mode with checkpoint persistence',
+    '  --apply-patches              Write Tier 2 Todo draft proposals',
+    '  --allow-tier3-fallback       Allow Tier 3 prompt note fallback (requires --reason)',
+    '  --skip-govern                Skip retro with auditable --reason',
+    '  --escalate                   Escalate Tier 1 findings via TaskBackend',
+    '  --reason <text>              Audit rationale for --skip-govern or --allow-tier3-fallback',
+    '  --json                       Emit machine-readable JSON',
+    '  --help                       Show help',
+  ].join('\n') + '\n')
+}
+
 export async function runRetroCli(argv = process.argv.slice(2)) {
   const { sub, opts } = parseStandardCli(argv, {
     subcommands: ['summary', 'retro'],
     allowPositionalWithoutSubcommand: true,
-    booleanFlags: ['json', 'auto', 'apply-patches', 'allow-tier3-fallback', 'skip-govern', 'escalate', 'help'],
-    valueFlags: ['dir', 'task', 'reason'],
+    booleanFlags: ['auto', 'apply-patches', 'allow-tier3-fallback', 'skip-govern', 'escalate'],
+    valueFlags: ['task', 'reason'],
   })
   if (opts.help) {
-    process.stdout.write('用法：node govern-retro.mjs [summary|retro] [dir] [--task <id>] [--auto] [--apply-patches] [--allow-tier3-fallback --reason "<text>"] [--skip-govern --reason "<text>"] [--json]\n')
+    printHelp()
     return 0
   }
   const targetDir = resolve(String(opts.dir ?? opts._?.[0] ?? process.cwd()))

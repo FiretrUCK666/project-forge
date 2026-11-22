@@ -25,12 +25,12 @@ import {
   GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, detectGateWeakeningInEntry,
   splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
+import { EXTRA_CI_FILE_RE } from '../../lib/workflow-policy.mjs'
 
 export { EXIT } from '../../lib/exit-codes.mjs'
 
 const LIFECYCLE_HOOK_RE = /"(?:preinstall|install|postinstall|preuninstall|uninstall|postuninstall|prepublish|prepublishOnly|preprepare|prepare|postprepare|prepack|postpack)"\s*:/
 const BUILD_SCRIPT_RE = /(?:^|\/)(?:Makefile|GNUmakefile|makefile|justfile|Taskfile\.ya?ml|build\.rs|setup\.py)$|\.(?:mk)$|(?:^|\/)(?:preinstall|install|postinstall|bootstrap)\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$|(?:^|\/)(?:scripts?|tools?|build)\/[^/]*(?:build|install|setup|bootstrap|hook)[^/]*\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$/i
-const EXTRA_CI_FILE_RE = /(?:^|\/)(?:\.travis\.ya?ml|\.drone\.ya?ml|\.buildkite\/pipeline\.ya?ml|\.woodpecker(?:\.ya?ml|\/[^/]+\.ya?ml))$/i
 
 export async function hasCommits(repoRoot) {
   const fastHead = readHeadFast(resolveGitDirFast(repoRoot))

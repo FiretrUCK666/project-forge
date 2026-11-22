@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `.agents/skills/` 工程套件统一装配、manifest v2 墓碑/定制豁免、
+ * `.agents/skills/` 工程套件统一装配、manifest v3 墓碑/定制豁免、
  * 字节级校验与通用空白工程初始化。
  *
  * - 只使用 Node 18+ 内置模块，零第三方依赖。
@@ -33,6 +33,7 @@ import {
 import { captureMemoryRollbackSnapshot, verifyEquippedIntegrityOrRollback } from './lib/equip-integrity.mjs'
 import { computeFileStates, EQUIP_FILE_STATES, formatEquipCheckReport, isCodeLikePath, judgeManagedFile, resolveThreeWayEquipFile } from './lib/merge3.mjs'
 import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
+import { DEFAULT_KIT_SKILLS_DIR } from '../kit/skills/lib/skill-discovery.mjs'
 import {
   PF_MANIFEST_REL,
   PF_MANIFEST_SCHEMA_VERSION,
@@ -42,7 +43,6 @@ import {
 import { flushAndExit, isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
 
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const DEFAULT_KIT_SKILLS_DIR = join(SKILL_ROOT, 'kit', 'skills')
 const DOCS_GITKEEP_PATHS = ['docs/prd/.gitkeep', 'docs/specs/.gitkeep', 'docs/todo/.gitkeep']
 
 function normalizeSkillFilterArg(raw) {

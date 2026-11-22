@@ -1,6 +1,6 @@
 # {{PROJECT_NAME}} — 项目工程契约（每次会话自动读）
 
-AI 新开会话先读本文件，确认定位、入口、边界、命令与协作流程。**只写现状，不写变更履历；面向人的说明见 `README.md`、`CONTRIBUTING.md`、`{{RELEASING_DOC}}`。** 账号、远端、分支与版本号一律现场读取；**24KB 预警、上限 30KB**，超长细节外置至 `docs/TDD.md`（若存在）或 `<subdir>/AGENTS.md`。
+AI 新开会话先读本文件，确认定位、入口、边界、命令与协作流程。**只写现状，不写变更履历；面向人的说明见 `README.md`、`CONTRIBUTING.md`（单人仓可选）、`{{RELEASING_DOC}}`。** 账号、远端、分支与版本号一律现场读取；**24KB 预警、上限 30KB**，超长细节外置至 `docs/TDD.md`（若存在）或 `<subdir>/AGENTS.md`。
 
 <!-- project-forge: begin 意图路由 -->
 ## 意图路由（静默触发，不反问）
@@ -110,7 +110,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 <!-- project-forge: endif -->
 <!-- project-forge: if no-commands -->
 
-本项目尚未在清单声明标准命令。读源码后替换为真实命令（纯文档项目说明无构建步骤并删除代码块）：
+本项目尚未在清单里声明标准命令。读源码后替换为真实命令（纯文档项目说明无构建步骤并删除代码块）：
 
 <!-- project-forge: fill 构建与验证命令：填这个项目真实的构建、静态检查、测试命令，一条一行 -->
 ```sh
@@ -170,13 +170,13 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
 - **第一步：双轴五态身份判定与入站分诊**——
 <!-- project-forge: if has-remote -->
-  先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁自合与提前删分支，标签 403 降级）；只读为 **clone-readonly**（三选一）；未注册主机退化 `generic-git`（merge 现场取回远端并按四态合流判定核验，核不到就阻断，只在人类签字后放行）；外部/新增 Issue 与 PR 先经 `flow.mjs intake` 业务分诊（已 `approve` 自研豁免）。
+  先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 fork 写权远端向 `upstream` 开 PR，禁自合与提前删分支，私有规划与任务单留隔离分支/工作区或 fork 侧不污染上游，标签 403 降级）；只读为 **clone-readonly**（三选一）；未注册主机退化 `generic-git`（推分支并发起手工 MR 合流；merge 现场取回远端并按四态合流判定核验，核不到就阻断，只在人类签字后放行）；外部/新增 Issue 与 PR 先经 `flow.mjs intake` 业务分诊（已 `approve` 自研豁免）。
 <!-- project-forge: endif -->
 <!-- project-forge: if no-remote -->
   还没有远端时按 `local-only` 运作，通过本地特性分支与临时 `--detach` 试合推进主干；高风险或 `one-way` 变更仍须独立审查，新增提案可走 `flow.mjs intake` 离线分诊。
 <!-- project-forge: endif -->
 
-- **第二步：纯调度分波、五档分流与三正交策略**——主会话保持薄上下文纯调度底线：无论是否配置远端或大仓接入，主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查一律派发独立隔离代理。跑 `flow.mjs next`（就绪 `docs/specs/*.md` 在 `Wave 1 >= 2` 时并行派发）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项：
+- **第二步：纯调度分波、五档分流与三正交策略**——主会话保持薄上下文纯调度底线：无论是否配置远端或大仓接入，主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查一律派发独立隔离代理。跑 `flow.mjs next --handoff`（就绪 `docs/specs/*.md` 在 `Wave 1 >= 2` 时并行派发）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项（规划态 `plan_mode` 与未就绪阻断 `BLOCKED_PLAN_NOT_READY`；隔离规划用 `init --worktree` + `start --planning`）：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |
@@ -186,14 +186,14 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
   | **Case 4** | `L3` 跨模块/契约变更或高风险 | 先建 `docs/specs/` + `{{WORK_DIR}}` Todo；经 `audit` + 3 轮停损 Critique（禁自审/全历史换人）-> `approve` |
   | **Case 5** | 与 `docs/TDD.md`（若存在）或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**（若存在），内审获批后再继续 |
 
-  风险定级：`low`（纯非可执行文本，无 CI 必过静态门禁）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 2/3/4 在隔离 `impl` 位派 `impl` 子代理。
+  风险定级：`low`（纯非可执行文本，走 `runLowRiskDocStaticCheck` 静态门禁，免重跑 CI）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 1-4 在隔离 `impl` 位派 `impl` 子代理。
 
-- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 可原地特性分支；**所有 `commits > 0` 仓**一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`（跨轮复用、自动解绑重挂载依赖）。卸 worktree 前先 `worktree-deps.mjs` 仅对链接 `unlinkSync` 解绑，严禁直接递归删目录。
+- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 可原地特性分支；**所有 `commits > 0` 仓**（Case 1-4）一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`（跨轮复用、自动解绑重挂载依赖）。卸 worktree 前先 `worktree-deps.mjs` 仅对链接 `unlinkSync` 解绑，严禁直接递归删目录。
 
 <!-- project-forge: if has-remote -->
-- **第四步：认领与 PR 前文档同步**——**谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（协调者不代提 PR；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危）；统一前缀（`docs:`/`fix:`/`feat:`）、四态标签与 Milestone 继承；变基/试合附 `GIT_EDITOR=true`/`--no-edit`。PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对 `git mv` 归档至 `docs/archive/`，`1:N` 总控 PRD 走四态闭环），`submit` 推后零跟踪文件写回、自动抽取 SPEC/Todo/`evidence.json` 生成干净 PR 正文并双写评论。
+- **第四步：认领与 PR 前文档同步**——**谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（协调者不代提 PR；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危）；统一前缀（`docs:`/`fix:`/`feat:`）、四态标签与 Milestone 继承；变基/试合附 `GIT_EDITOR=true`/`--no-edit`。PR/MR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对 `git mv` 归档至 `docs/archive/`，`1:N` 总控 PRD 走四态闭环），`submit` 推后零跟踪文件写回、自动抽取 SPEC/Todo/`evidence.json` 生成干净 PR 正文并双写评论。
 
-- **第五步：独立审查与合并**——**独立审查通过（`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮硬停损约束；触碰高风险路径须加故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 的 merge 现场取回远端并按四态合流判定核验，核不到就阻断、只在人类签字后放行）。合前强校三方 `headSha`、干净工作区与 E2E 观察；详见各技能 `SKILL.md` 与协作判据。
+- **第五步：独立审查与合并**——**独立审查通过（`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮硬停损约束；触碰高风险路径须加故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR 合流，merge 现场取回远端并按四态合流判定核验，核不到就阻断、只在人类签字后放行）。合前强校三方 `headSha`、干净工作区与 E2E 观察；详见各技能 `SKILL.md` 与协作判据。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo 完成记录与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、随同分支提交；
@@ -202,7 +202,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
   4. `git switch {{DEFAULT_BRANCH}} && git pull`；
   5. **先卸 worktree**：`git worktree remove <路径>`（先 `worktree-deps` 解绑共享依赖链接）；
   6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；
-  7. **删远端分支前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base（Fork 另查上游 PR 非 `OPEN`）；两件都清了才 `git push origin --delete <分支>`。
+  7. **删远端分支前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`，多远端换写权远端名）、有没有下游堆叠 PR 以该分支为 base（Fork 另查上游 PR 非 `OPEN`）；两件都清了才 `git push origin --delete <分支>`（多远端换对应写权远端名）。
 
   **第 5 步前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支及干净状态；**问到人点头才删**（`flow.mjs cleanup --confirm`）。平台命令含非 ASCII 正文一律写系统临时 UTF-8 文件经 `--body-file`/`--notes-file` 提交并删临时文件。
 
@@ -228,7 +228,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
 <!-- project-forge: fill 高风险路径：列出本项目中「改错了不可逆、或会让门禁从此静默少查一项」的目录前缀或文件 -->
 
-目录结尾带 `/`，单文件不带；默认至少含 `.github/`、`AGENTS.md` 与 `Dev Profile` 中的 `high-risk` 路径。
+目录结尾带 `/`，单文件不带；默认至少含 `AGENTS.md`、`.gitattributes`（GitHub 仓另含 `.github/workflows/`）与 `Dev Profile` 中的 `high-risk` 路径。
 <!-- project-forge: end 高风险路径 -->
 
 <!-- project-forge: begin 改哪看哪 -->

@@ -1,5 +1,5 @@
 /**
- * fixtures-attribution-routing.mjs —— Issue #108 双向测试矩阵：
+ * fixtures-attribution-routing.mjs —— 双层身份归因、PR/Issue 双写、8 技能路由与文件拆分正反双向测试矩阵：
  *   - C1: 正交双层身份 resolveIdentityLayers + 能力驱动 formatAttribution（零正则黑名单、零假 @mention、零 @maintainer）
  *   - C2: PR 正文与 5 类评论中文标签统一、parseAcceptanceCriteria issueContext 回退、实证核验双状态输出、flow-intake/explore 修复
  *   - C3: AGENTS.md 意图路由去歧义、8 技能脚本与无 tier: full、根 SKILL.md v3 与四类真融合/主调度纯调度

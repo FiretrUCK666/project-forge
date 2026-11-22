@@ -1,5 +1,5 @@
 /**
- * fixtures-doc-depth.mjs —— Issue #56 双向行为断言（--domain doc-depth）：
+ * fixtures-doc-depth.mjs —— 规划文档深度裁剪、实质性与互链闭环双向行为断言（--domain doc-depth）：
  *   C1: init 骨架保留（pruneUnfilled=false）、--no-prune、spec 自洽与 pruneUnfilled=true 向后兼容
  *   C2: doc-shape 工作区实时形态探测、可复核跳过说明与主干/required_sections 硬保护
  *   C3: 核心实质性（零字数下限）、INLINE_FORMS 防占位与跨轮防退化（DOC_REGRESSION_* + delta）

@@ -1,5 +1,5 @@
 /**
- * fixtures-review-empirical.mjs —— Issue #57 审查「先跑实证与故障注入再允许 --include-diff」双向断言夹具。
+ * fixtures-review-empirical.mjs —— 审查「先跑实证与故障注入再允许 --include-diff」双向断言夹具。
  *
  * 覆盖 C1–C3 全部正反双向断言：
  *   1. formatPackText 纯文本旁路封堵（不带 --include-diff 不打印 240 行补丁）

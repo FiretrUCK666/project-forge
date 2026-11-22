@@ -166,7 +166,9 @@ async function initDoc({
     }
   }
   const profile = parseAgentsProfile(writeRoot)
-  const quickCmd = profile.quickTest ?? '<填写项目快测命令>'
+  const quickCmd = profile.quickTest && profile.quickTest !== 'none'
+    ? profile.quickTest
+    : '无自动快测命令（按手动步骤实证替代）'
   const needsShape = kindsToCreate.some((k) => k !== 'tdd')
   const docShape = needsShape && !noPrune ? await probeWorkspaceDocShape(writeRoot) : null
 

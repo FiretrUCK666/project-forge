@@ -14,8 +14,8 @@ import {
 } from '../../lib/doc-locator.mjs'
 import { isMainModule } from '../../lib/git.mjs'
 
-function usageText() {
-  return [
+function printHelp() {
+  process.stdout.write([
     '用法：node .agents/skills/dev-explore/scripts/doc-locate.mjs [targetDir] [选项]',
     '',
     '选项：',
@@ -25,15 +25,16 @@ function usageText() {
     '  --section <heading>    按 Markdown 标题精确/模糊定位节区间',
     `  --kind <kind>          过滤类型（${VALID_LOCATE_KINDS.join(' | ')}）`,
     `  --scope <scope>        检索范围（${VALID_LOCATE_SCOPES.join(' | ')}，默认 all）`,
-    '  --limit <N>            返回切片数量上限（默认 5，别名 --max-slices）',
+    '  --limit <N>            返回切片数量上限（默认 5）',
+    '  --max-slices <N>       --limit 的别名',
     '  --budget-lines <N>     切片总行数预算（默认 220）',
     '  --worktree <path>      指定目标仓库或工作树根目录',
     '  --list                 仅列出可索引文档与路径（不做检索或切片读取）',
     '  --json                 输出结构化 JSON',
-    '  --help, -h             显示帮助',
+    '  --help                 显示帮助',
     '',
     '承诺：严格只读，全程零文件写入、零原文件修改、零临时索引残留。',
-  ].join('\n') + '\n'
+  ].join('\n') + '\n')
 }
 
 export async function runCli(argv = []) {
@@ -41,14 +42,12 @@ export async function runCli(argv = []) {
   try {
     cli = parseStandardCli(argv, {
       positionalDir: 'auto',
-      booleanFlags: ['list', 'json', 'help'],
+      booleanFlags: ['list'],
       valueFlags: [
         'file', 'query', 'symbol', 'section', 'kind', 'scope',
-        'limit', 'max-slices', 'worktree', 'budget-lines', 'dir', 'repo',
+        'limit', 'max-slices', 'worktree', 'budget-lines',
       ],
       aliases: {
-        h: 'help',
-        repo: 'dir',
         'max-slices': 'limit',
       },
       usageHint: 'node .agents/skills/dev-explore/scripts/doc-locate.mjs --query "<关键词>" [--json]',
@@ -59,7 +58,7 @@ export async function runCli(argv = []) {
   }
 
   if (cli.help) {
-    process.stdout.write(usageText())
+    printHelp()
     return 0
   }
 

@@ -11,13 +11,22 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { readJsonSafe, readTextSafe } from './git.mjs'
 import {
   TEAM_PROBE_HINT, extractHostAndPath, githubRepoFull, githubRepoPath,
-  lookupSshHost, normalizeGitHubRepo, parseRemoteUrlHost, parseSshConfigHostMap, probeGitHubEnvCore,
+  normalizeGitHubRepo, parseRemoteUrlHost, parseSshConfigHostMap, probeGitHubEnvCore,
 } from './platform-probe.mjs'
 import { createGitHubClient, parseBodyRelations } from './github-client.mjs'
+import {
+  GENERIC_GIT_PROVIDER, GITHUB_PROVIDER, NONE_CAPABILITIES, REQUIRED_PROVIDER_METHODS,
+  getHostingProvider, listHostingProviders, registerHostingProvider, resolveRemoteDescriptor,
+  validateHostingProvider,
+} from './platform-registry.mjs'
 
 export {
-  TEAM_PROBE_HINT, githubRepoFull, githubRepoPath, lookupSshHost, normalizeGitHubRepo, parseSshConfigHostMap,
+  GENERIC_GIT_PROVIDER, GITHUB_PROVIDER, NONE_CAPABILITIES, REQUIRED_PROVIDER_METHODS,
+  TEAM_PROBE_HINT, getHostingProvider, githubRepoFull, githubRepoPath, listHostingProviders,
+  normalizeGitHubRepo, parseSshConfigHostMap, registerHostingProvider, resolveRemoteDescriptor,
+  validateHostingProvider,
 }
+export { lookupSshHost } from './platform-probe.mjs'
 export {
   DEFAULT_PROBE_TIMEOUT_MS, buildOneClickPrUrl, detectRemoteProtocol,
   parseRemoteUrlHost, parseSshConfigDetails, probeSshKeyReadiness, probeSshTransport,
@@ -27,119 +36,6 @@ export {
   listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parseMilestoneNumber, parsePfStateTags, parsePrNumber, removeLabel, resolveIdentityLayers, summarizeCommitChecks,
 } from './github-client.mjs'
-
-export const GENERIC_GIT_PROVIDER = Object.freeze({
-  id: 'generic-git',
-  label: 'Generic Git Remote',
-  capabilities: Object.freeze({ api: false, pr: false, issues: false, releases: false, labels: false, milestones: false, branchProtection: false, mention: false }),
-})
-
-const PROVIDER_REGISTRY = new Map()
-
-function resolveEffectiveHost(host, sshHostMap) {
-  const h = String(host ?? '').toLowerCase()
-  if (!h) return ''
-  const mapped = lookupSshHost(sshHostMap, h)
-  return mapped ? String(mapped).toLowerCase() : h
-}
-
-export const REQUIRED_PROVIDER_METHODS = Object.freeze([
-  'matchRemote',
-  'normalizeRepo',
-  'parseRelations',
-  'formatIssueRef',
-])
-
-export function validateHostingProvider(provider) {
-  if (!provider || typeof provider !== 'object') {
-    throw new Error('HostingProvider 必须是非空对象')
-  }
-  const id = String(provider.id ?? '').trim().toLowerCase()
-  if (!id || id === 'generic-git') {
-    throw new Error(`非法的 HostingProvider id：「${id}」`)
-  }
-  const missing = REQUIRED_PROVIDER_METHODS.filter((m) => typeof provider[m] !== 'function')
-  if (missing.length > 0) {
-    throw new Error(`HostingProvider「${id}」缺少必备方法契约：${missing.join(', ')}`)
-  }
-  return id
-}
-
-const GITHUB_PROVIDER = Object.freeze({
-  id: 'github',
-  label: 'GitHub',
-  capabilities: Object.freeze({ api: true, pr: true, issues: true, releases: true, labels: true, milestones: true, branchProtection: true, mention: true }),
-  matchRemote(remoteUrl, sshHostMap) {
-    const ext = extractHostAndPath(remoteUrl)
-    if (!ext) return false
-    const effective = resolveEffectiveHost(ext.host, sshHostMap)
-    return effective === 'github.com' || effective === 'www.github.com' || effective === 'ssh.github.com'
-  },
-  normalizeRepo(remoteUrl, sshHostMap) {
-    return normalizeGitHubRepo(remoteUrl, sshHostMap)
-  },
-  parseRelations(body) {
-    return parseBodyRelations(body)
-  },
-  formatIssueRef(repo, number) {
-    const n = Number(number)
-    if (!Number.isInteger(n) || n <= 0) return ''
-    return repo ? `${repo}#${n}` : `#${n}`
-  },
-})
-
-/** 注册平台适配器（强校验必备方法契约，缺方法即 Fail-Closed 抛错）。 */
-export function registerHostingProvider(provider) {
-  const id = validateHostingProvider(provider)
-  const normalized = Object.freeze({
-    ...provider,
-    id,
-    capabilities: Object.freeze({
-      api: false, pr: false, issues: false, releases: false, labels: false, milestones: false, branchProtection: false, mention: false,
-      ...(provider.capabilities && typeof provider.capabilities === 'object' ? provider.capabilities : {}),
-    }),
-  })
-  PROVIDER_REGISTRY.set(id, normalized)
-  return normalized
-}
-
-export function getHostingProvider(id) {
-  return PROVIDER_REGISTRY.get(id) ?? (id === 'generic-git' ? GENERIC_GIT_PROVIDER : undefined)
-}
-
-export function listHostingProviders() {
-  return [...PROVIDER_REGISTRY.values()]
-}
-
-registerHostingProvider(GITHUB_PROVIDER)
-
-/** 解析单个远端地址的适配归属（命中已注册适配器或安全退化为 generic-git）。 */
-export function resolveRemoteDescriptor(remoteUrl, sshHostMap = parseSshConfigHostMap()) {
-  const raw = String(remoteUrl ?? '').trim()
-  if (!raw) return { url: raw, providerId: 'none', repoSlug: undefined, capabilities: GENERIC_GIT_PROVIDER.capabilities }
-  const isLocal = /^file:\/\//i.test(raw) || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^[^@/]+@[^:]+:/i.test(raw))
-  if (isLocal) {
-    return { url: raw, providerId: 'generic-git', isLocal: true, repoSlug: undefined, capabilities: GENERIC_GIT_PROVIDER.capabilities }
-  }
-  for (const provider of PROVIDER_REGISTRY.values()) {
-    if (provider.matchRemote(raw, sshHostMap)) {
-      return {
-        url: raw,
-        providerId: provider.id,
-        repoSlug: provider.normalizeRepo(raw, sshHostMap),
-        capabilities: provider.capabilities,
-      }
-    }
-  }
-  const ext = extractHostAndPath(raw)
-  return {
-    url: raw,
-    providerId: 'generic-git',
-    host: ext?.host,
-    repoSlug: ext?.path?.replace(/\.git$/i, '').replace(/\/+$/, ''),
-    capabilities: GENERIC_GIT_PROVIDER.capabilities,
-  }
-}
 
 /** 兼容旧版远端 URL 映射视图（origin / upstream -> fetchUrl）。 */
 export function parseRemoteUrls(remoteOutput) {
@@ -192,7 +88,7 @@ export function parseRemotesTopology(remoteOutput, sshHostMap = parseSshConfigHo
 export function normalizeDeclaredRepo(value, sshHostMap = parseSshConfigHostMap()) {
   const s = String(value ?? '').trim()
   if (!s || /^file:\/\//i.test(s)) return undefined
-  for (const provider of PROVIDER_REGISTRY.values()) {
+  for (const provider of listHostingProviders()) {
     try {
       if (provider.matchRemote(s, sshHostMap)) {
         const slug = provider.normalizeRepo(s, sshHostMap)

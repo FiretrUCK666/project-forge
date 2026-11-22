@@ -40,9 +40,7 @@ assignees: ''
 <!--
 这一项决定它要走多长的流程：
 - 会不会改变现有行为、让已经在用的人需要改自己的代码；
-- 会不会碰到高风险区。本仓库的高风险路径是 `SKILL.md`、`AGENTS.md`、`scripts/`（尤其
-  `scripts/lib/protocol.mjs` 与 `scripts/dev/preflight.mjs`）、`templates/`、`.github/`、
-  `.gitattributes`——它们的错误不会当场失败，而是让门禁从此少查一项。
+- 会不会碰到高风险区。本仓库的高风险路径是 `scripts/lib/`、`scripts/dev/preflight.mjs`、`templates/`、`kit/`、`SKILL.md`、`AGENTS.md`、`.github/workflows/`、`.gitattributes`——它们的错误不会当场失败，而是让门禁从此少查一项。
 
 碰到任何一种，它就不能靠一次改动直接合进去，需要先讨论清楚。
 -->
@@ -69,8 +67,8 @@ assignees: ''
 没有它，审查就会变成「还能不能再找出一个问题」——而那个问题永远找得到。
 -->
 
-- [ ]
-- [ ]
+- [ ] C1: 
+- [ ] C2: 
 
 ## 关联的设计产物
 

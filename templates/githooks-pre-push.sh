@@ -73,8 +73,13 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha || [ -n "${local
   if [ "${remote_ref:-}" = "$blocked_ref" ]; then
     printf '错误：禁止直接推送到默认分支 %s（%s）。\n' "$default_branch" "$blocked_ref" >&2
     printf '[NEXT STEP] 请先切入独立任务分支/工作树，完成后发起评审合并：\n' >&2
-    printf '  1. node .agents/skills/dev-flow/scripts/flow.mjs start --task <任务ID> --case <2|3|4>\n' >&2
-    printf '  2. 完成验证后提交评审/合并：node .agents/skills/dev-flow/scripts/flow.mjs submit --task <任务ID>\n' >&2
+    if [ -f ".agents/skills/dev-flow/scripts/flow.mjs" ]; then
+      printf '  1. node .agents/skills/dev-flow/scripts/flow.mjs start --task <任务ID> --slug <短标识> --case <1|2|3|4|5>\n' >&2
+      printf '  2. 完成后依次执行：finalize -> verify -> submit（node .agents/skills/dev-flow/scripts/flow.mjs submit --task <任务ID>）\n' >&2
+    else
+      printf '  1. 切换新分支：git switch -c feat/<短标识>（或 fix/<短标识>）\n' >&2
+      printf '  2. 本地跑通全部门禁后再推送新分支并提交评审合流\n' >&2
+    fi
     printf '  （仅紧急情况或人工确认直推时，可临时设置 PF_ALLOW_DIRECT_PUSH=1 后重试）\n' >&2
     exit 1
   fi

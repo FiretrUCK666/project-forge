@@ -252,7 +252,7 @@ export { GitHubBackend as GitHubTaskBackend }
 
 /** 根据身份角色与 HostingProvider 注册表分发构造统一的 17 方法 TaskBackend。 */
 export function createTaskBackend({
-  role = 'local-only', providerId = 'github', targetRepo = null, client = null,
+  role = 'local-only', providerId = 'none', targetRepo = null, client = null,
   pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null, baseBranch = 'main',
 } = {}) {
   if (role === 'local-only' || providerId === 'none') {
@@ -262,7 +262,7 @@ export function createTaskBackend({
   if (provider && typeof provider.createTaskBackend === 'function') {
     return provider.createTaskBackend({ role, providerId, targetRepo, client, pushRemote, mainRoot, gitDir, baseBranch })
   }
-  if (role === 'generic-git' || !provider || provider.id === 'generic-git' || provider.capabilities?.api !== true || !targetRepo) {
+  if (role === 'generic-git' || !provider || provider.id !== 'github' || provider.capabilities?.api !== true || !targetRepo) {
     return new GenericRemoteBackend({ targetRepo, pushRemote, mainRoot, gitDir })
   }
   return new GitHubBackend({ targetRepo, client, pushRemote, mainRoot, gitDir })

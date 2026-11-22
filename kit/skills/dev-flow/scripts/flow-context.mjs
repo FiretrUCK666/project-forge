@@ -10,10 +10,9 @@ import { dirname, join } from 'node:path'
 import { parseDocFilename, parseDocFrontmatter, syncDocsLifecycle } from '../../lib/docs.mjs'
 import { gitDiffNameStatusZ, gitRunBuffer, gitStatusPorcelainZ, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { NON_API_CLIENT_TIERS } from '../../lib/github-client.mjs'
 import { getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
 import { githubRepoFull, probeGitHubEnv } from '../../lib/platform.mjs'
-
-const NON_API_CLIENT_TIERS = new Set(['none', 'offline', 'half-duplex'])
 
 /** 将远端读取失败归一为可追踪的稳定错误码（`no-api-channel` / `not-found` / `forbidden` 等）。 */
 export function normalizeContextFetchReason(res, error = null) {
@@ -82,7 +81,7 @@ export function summarizeContextBody(rawBody, maxLen = 1200) {
 export async function fetchIssueContextList({
   mainRoot = null,
   gitDir = null,
-  providerId = 'github',
+  providerId = 'none',
   role = null,
   issueNumbers = [],
   existingContext = [],
@@ -346,6 +345,12 @@ export async function getChangedFiles(cwd, baseRef, opts = {}) {
   if (tree?.ok) for (const f of tree.stdout.toString('utf8').split('\0')) if (f) set.add(posixPath(f))
   if (st.ok) for (const e of st.entries) if (e.file) set.add(e.file)
   return [...set].sort()
+}
+
+export function resolvePreferredRemoteName(remotesTopology = [], preferredProviderId = 'github') {
+  return remotesTopology?.find((r) => r.providerId === preferredProviderId)?.name
+    ?? remotesTopology?.[0]?.name
+    ?? 'origin'
 }
 
 export function buildTargetRepoContext(role, remoteUrls, declaredRepo, topology = null) {

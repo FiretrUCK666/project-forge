@@ -48,7 +48,7 @@ import {
 
 export { detectConventions, detectDocs } from './survey-docs.mjs'
 
-const LIKELY_DEFAULT_BRANCHES = protocol.LIKELY_DEFAULT_BRANCHES ?? ['main', 'master', 'trunk', 'develop', 'default', 'development']
+const { LIKELY_DEFAULT_BRANCHES } = protocol
 
 const SECRET_FILE_PATTERNS = [
   /^\.env(?:\..+)?$/i,

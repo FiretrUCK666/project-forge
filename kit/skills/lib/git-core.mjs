@@ -23,6 +23,10 @@ export const COMMON_SKIP_DIRS = new Set([
   '__MACOSX', '.Spotlight-V100', '.Trashes', '.fseventsd',
 ])
 
+export const COMMON_OUTPUT_DIRS = Object.freeze([
+  'node_modules', '.venv', '__pycache__', 'dist', 'build', 'out', 'target', 'coverage',
+])
+
 export const DEFAULT_WALK_SKIP_DIRS = COMMON_SKIP_DIRS
 
 const MACOS_JUNK_NAMES = new Set([
@@ -42,7 +46,10 @@ export function posixPath(p) {
  * 修复 macOS `/var` vs `/private/var`、APFS NFD 以及 Windows 盘符大小写差异。
  */
 export function canonicalPath(p) {
-  let cur = resolve(String(p ?? '.'))
+  if (p === undefined || p === null) return ''
+  const raw = String(p)
+  if (raw.trim() === '') return ''
+  let cur = resolve(raw)
   const tail = []
   while (!existsSync(cur)) {
     const parent = dirname(cur)
@@ -64,8 +71,11 @@ export function canonicalPath(p) {
 
 /** 比较两个路径是否指向同一位置（兼容 macOS 祖先 symlink、APFS NFD 与 Win32 大小写）。 */
 export function samePath(a, b) {
+  if (a === undefined || a === null || b === undefined || b === null) return false
+  if (String(a).trim() === '' || String(b).trim() === '') return false
   const ca = canonicalPath(a)
   const cb = canonicalPath(b)
+  if (!ca || !cb) return false
   if (process.platform === 'win32') {
     return ca.toLowerCase() === cb.toLowerCase()
   }
@@ -123,13 +133,14 @@ export function readJsonSafe(filePath) {
   try { return JSON.parse(text) } catch { return undefined }
 }
 
-/** 原子写入文本文件：先写同目录临时文件再改名，自增计数器防同毫秒碰撞。 */
+/** 原子写入文本或二进制 Buffer：先写同目录临时文件再改名，自增计数器防同毫秒碰撞。 */
 export function writeAtomic(filePath, content) {
   const abs = resolve(filePath)
   mkdirSync(dirname(abs), { recursive: true })
   atomicCounter += 1
   const tmp = `${abs}.tmp-${process.pid}-${Date.now()}-${atomicCounter}`
-  writeFileSync(tmp, String(content ?? ''), 'utf8')
+  const data = Buffer.isBuffer(content) ? content : String(content ?? '')
+  writeFileSync(tmp, data, 'utf8')
   try {
     renameSync(tmp, abs)
   } catch (error) {
@@ -215,6 +226,7 @@ export function unescapeGitPath(rawPath) {
 }
 
 export const CODE_EXT_RE = /\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1)$/i
+export const BROAD_CODE_EXT_RE = /\.(?:js|mjs|cjs|mts|cts|ts|tsx|jsx|vue|svelte|astro|py|rs|go|java|kt|kts|scala|groovy|c|cc|cpp|cxx|h|hpp|m|mm|cs|fs|rb|php|sh|bash|zsh|ps1|psm1|lua|r|swift|dart|ex|exs|clj|hs|erl|jl|zig|nim|sol|sql|proto)$/i
 
 export function matchGlob(filePath, pattern) {
   const f = posixPath(filePath).replace(/^\.\//, '').replace(/^\/+/, '')

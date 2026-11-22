@@ -248,19 +248,20 @@ function buildVisualEvidenceView({ evidence, ledger, visualFilesChanged = [], vi
   return view
 }
 
+function matchHeadingCandidates(rawTitle, headingCandidates) {
+  const clean = String(rawTitle ?? '').replace(/^(?:\d+[.)、]\s*|[一二三四五六七八九十]+[、.)]\s*)/, '').trim()
+  const low = clean.toLowerCase()
+  return headingCandidates.some((cand) => (cand instanceof RegExp ? cand.test(clean) : String(cand).trim().toLowerCase() === low))
+}
+
 export function replaceSectionIfPresent(md, headingCandidates, newBody) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
-  const matchHeading = (rawTitle) => {
-    const clean = String(rawTitle ?? '').replace(/^(?:\d+[.)、]\s*|[一二三四五六七八九十]+[、.)]\s*)/, '').trim()
-    const low = clean.toLowerCase()
-    return headingCandidates.some((cand) => (cand instanceof RegExp ? cand.test(clean) : String(cand).trim().toLowerCase() === low))
-  }
   let inFence = false
   for (let i = 0; i < lines.length; i += 1) {
     if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
     if (inFence) continue
     const m = /^##\s+(.+?)\s*$/.exec(lines[i])
-    if (!m || !matchHeading(m[1])) continue
+    if (!m || !matchHeadingCandidates(m[1], headingCandidates)) continue
     let end = lines.length
     let innerFence = false
     for (let j = i + 1; j < lines.length; j += 1) {
@@ -269,6 +270,26 @@ export function replaceSectionIfPresent(md, headingCandidates, newBody) {
     }
     const replacement = [lines[i], '', ...String(newBody ?? '').split('\n'), '']
     const nextLines = [...lines.slice(0, i), ...replacement, ...lines.slice(end)]
+    return { matched: true, text: nextLines.join('\n') }
+  }
+  return { matched: false, text: md }
+}
+
+export function removeSectionIfPresent(md, headingCandidates) {
+  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
+  let inFence = false
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
+    if (inFence) continue
+    const m = /^##\s+(.+?)\s*$/.exec(lines[i])
+    if (!m || !matchHeadingCandidates(m[1], headingCandidates)) continue
+    let end = lines.length
+    let innerFence = false
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
+      if (!innerFence && /^##\s+/.test(lines[j])) { end = j; break }
+    }
+    const nextLines = [...lines.slice(0, i), ...lines.slice(end)]
     return { matched: true, text: nextLines.join('\n') }
   }
   return { matched: false, text: md }

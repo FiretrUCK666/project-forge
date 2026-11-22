@@ -588,13 +588,13 @@ export function formatTextReport(result) {
   }
 
   if (result.issues) {
-    lines.push('', '--- GitHub Issue Payloads (UTF-8 --body-file safe) ---')
+    lines.push('', '--- Issue Payloads (TaskBackend / UTF-8 --body-file safe) ---')
     if (result.issues.length === 0) lines.push('  No actionable findings to convert into issues.')
     else {
       for (let i = 0; i < result.issues.length; i += 1) {
         const iss = result.issues[i]
         lines.push(`  Issue #${i + 1}: ${iss.title}`, `    Labels: ${iss.labels.join(', ')}`)
-        lines.push(`    Safe Command: write UTF-8 temp file, then run \`gh issue create --title "${iss.title.replace(/"/g, '\\"')}" --body-file <tmp.md>\``)
+        lines.push(`    Safe Command: GitHub write UTF-8 temp file + \`gh issue create --title "${iss.title.replace(/"/g, '\\"')}" --body-file <tmp.md>\` (local-only/generic-git: \`flow.mjs issue create\`)`)
       }
     }
   }

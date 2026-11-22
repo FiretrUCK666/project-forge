@@ -1,21 +1,21 @@
 ---
 kind: todo
 title: 全仓深度对齐与去硬编码清理（C1-C7）
-status: active
+status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: 128
 pr: null
 branch: fix/w3-repo-alignment
-owner: plan-align
+owner: impl-align
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-22
 task_id: w3-repo-alignment
 planned_at: caa5501784549ee86f3abbe7c1607328f51b7517
 related_prd: null
 related_spec: ../specs/261122-issue128-w3-repo-alignment-spec.md
-scope_files: [SKILL.md, AGENTS.md, CONTRIBUTING.md, RELEASING.md, .gitignore, docs/TDD.md, docs/feature-map.json, .github/workflows/check.yml, .github/pull_request_template.md, .github/ISSUE_TEMPLATE/bug_report.md, .github/ISSUE_TEMPLATE/feature_request.md, "templates/**", "references/**", "scripts/*.mjs", "scripts/lib/**", "scripts/dev/bench.mjs", "scripts/dev/cli-parity.mjs", "scripts/dev/gap-coverage.mjs", "scripts/dev/merge-gate.mjs", "scripts/dev/preflight-kernel-parity.mjs", "scripts/dev/preflight-suite.mjs", "scripts/dev/preflight-suite-checks.mjs", "scripts/dev/fixtures-*.mjs", "scripts/dev/injections-data-*.mjs", "kit/skills/**", ".agents/skills/**"]
+scope_files: [SKILL.md, AGENTS.md, CONTRIBUTING.md, RELEASING.md, .gitignore, docs/TDD.md, docs/feature-map.json, .github/workflows/check.yml, .github/pull_request_template.md, .github/ISSUE_TEMPLATE/bug_report.md, .github/ISSUE_TEMPLATE/feature_request.md, "templates/**", "references/**", "scripts/*.mjs", "scripts/lib/**", scripts/dev/bench.mjs, scripts/dev/cli-parity.mjs, scripts/dev/gap-coverage.mjs, scripts/dev/merge-gate.mjs, scripts/dev/preflight-kernel-parity.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/preflight-suite-checks.mjs, "scripts/dev/fixtures-*.mjs", "scripts/dev/injections-data-*.mjs", "kit/skills/**", ".agents/skills/**"]
 ---
 
 # 全仓深度对齐与去硬编码清理（C1-C7）

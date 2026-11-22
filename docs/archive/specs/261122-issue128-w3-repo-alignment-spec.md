@@ -1,17 +1,17 @@
 ---
 kind: spec
 title: 全仓深度对齐与去硬编码清理（C1-C7）
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
 issue: 128
 pr: null
 branch: fix/w3-repo-alignment
-owner: plan-align
+owner: impl-align
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-align-r2, round=2, sha=983b8a1f6950, summary=Round 1 两项阻塞均已闭环：C2 仅豁免 collab.* 与 release.absent 并保留 local-only 的 ci.absent 契约；C3 明确补全 doc-locate/repo-map/govern-retro/flow-intake 的 printHelp 与 --help 且全文件 <=800L，C1-C7 与 I386-I397 无新增硬伤)"
 related_prd: null
 related_todo: ../todo/261122-issue128-w3-repo-alignment-todo.md

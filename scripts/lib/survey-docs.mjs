@@ -7,12 +7,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import * as protocol from './protocol.mjs'
-import { isMacMetadataName, readTextSafe } from './text.mjs'
-import { classifyWorkspaceIdentity, detectGitModeMarkers } from './platform/index.mjs'
-import { resolveDocRequirements } from '../../kit/skills/lib/doc-requirements.mjs'
-import { detectTddShapes, tddDropSections } from '../../kit/skills/lib/tdd-shape.mjs'
-import { CODE_EXT_RE } from '../../kit/skills/lib/git-core.mjs'
-import { isSymbolCandidatePath, summarizeSymbolCoverage } from '../../kit/skills/lib/symbol-index.mjs'
+import { isMacMetadataName, readJsonSafe, readTextSafe } from './text.mjs'
 import { scanNeutralCiSteps } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { isManagedPlanDoc } from '../../kit/skills/lib/doc-frontmatter.mjs'
 
@@ -28,6 +23,10 @@ const RELEASE_WORKFLOW_PATTERNS = [
   { tool: 'gh-release', re: /\bgh\s+release\b/i },
   { tool: 'npm-publish', re: /\b(?:npm|pnpm|bun)\s+publish\b|\byarn\s+npm\s+publish\b/i },
   { tool: 'pypi-publish', re: /\b(?:twine\s+upload|pypi-publish)\b|pypa\/gh-action-pypi-publish/i },
+  { tool: 'uv-publish', re: /\buv\s+publish\b/i },
+  { tool: 'dotnet-publish', re: /\bdotnet\s+(?:[^\n]*\s)?(?:publish|nuget\s+push)\b/i },
+  { tool: 'jsr-publish', re: /\b(?:jsr|deno)\s+publish\b/i },
+  { tool: 'vp-pack', re: /\b(?:vp|vite-plus)\s+pack\b/i },
   { tool: 'cargo-publish', re: /\bcargo\s+publish\b/i },
   { tool: 'vsce-publish', re: /\b(?:vsce|ovsx)\s+publish\b/i },
   { tool: 'action-gh-release', re: /softprops\/action-gh-release|ncipollo\/release-action|actions\/create-release|actions\/upload-release-asset/i },
@@ -36,6 +35,107 @@ const RELEASE_WORKFLOW_PATTERNS = [
   { tool: 'changesets', re: /changesets\/action/i },
   { tool: 'semantic-release', re: /\bsemantic-release\b/i },
 ]
+
+const ZIZMOR_IGNORE_DANGEROUS_RE = /#\s*zizmor:\s*ignore\[[^\]]*\bdangerous-triggers\b[^\]]*\]/i
+const UNSAFE_PR_REF_RE = /(?:github\.event\.pull_request\.head\.(?:sha|ref|label|repo\.full_name)|github\.head_ref\b|refs\/pull\/[^\n]*github\.event\.pull_request\.number)/i
+const UNSAFE_PR_CLI_RE = /\b(?:git\s+(?:checkout|fetch)\b[^\n]*(?:github\.event\.pull_request\.head|github\.head_ref|refs\/pull\/[^\n]*pull_request\.number)|gh\s+pr\s+checkout\b[^\n]*pull_request\.number)/i
+
+function stripYamlComment(line) {
+  return String(line ?? '').replace(/(?:^|\s)#.*$/, '')
+}
+
+function splitWorkflowJobs(lines) {
+  const jobsIdx = lines.findIndex((l) => /^jobs\s*:\s*(?:#.*)?$/.test(l))
+  if (jobsIdx < 0) return []
+  const jobs = []
+  let jobIndent = -1
+  let current = null
+  for (let i = jobsIdx + 1; i < lines.length; i += 1) {
+    const raw = lines[i]
+    if (!raw.trim() || /^\s*#/.test(raw)) {
+      if (current) current.lines.push(raw)
+      continue
+    }
+    const indent = /^(\s*)/.exec(raw)[1].length
+    if (indent === 0) break
+    if (jobIndent < 0) jobIndent = indent
+    const keyM = new RegExp(`^\\s{${jobIndent}}([A-Za-z0-9_-]+)\\s*:(?:\\s*(?:#.*)?$)`).exec(raw)
+    if (keyM && indent === jobIndent) {
+      if (current) jobs.push(current)
+      current = { id: keyM[1], headerLine: raw, prevLine: lines[i - 1] ?? '', lines: [raw] }
+    } else if (current) {
+      current.lines.push(raw)
+    }
+  }
+  if (current) jobs.push(current)
+  return jobs
+}
+
+function jobHasUnsafePrCheckout(jobLines, prevLine = '') {
+  if (ZIZMOR_IGNORE_DANGEROUS_RE.test(prevLine) || ZIZMOR_IGNORE_DANGEROUS_RE.test(jobLines[0] ?? '')) return false
+  let inCheckoutStep = false
+  let stepIgnored = false
+  for (let i = 0; i < jobLines.length; i += 1) {
+    const raw = jobLines[i]
+    const active = stripYamlComment(raw)
+    if (/^\s*-\s+/.test(active)) {
+      inCheckoutStep = /\buses\s*:\s*actions\/checkout\b/i.test(active)
+      stepIgnored = ZIZMOR_IGNORE_DANGEROUS_RE.test(raw) || ZIZMOR_IGNORE_DANGEROUS_RE.test(jobLines[i - 1] ?? '')
+    } else if (/\buses\s*:\s*actions\/checkout\b/i.test(active)) {
+      inCheckoutStep = true
+      if (ZIZMOR_IGNORE_DANGEROUS_RE.test(raw)) stepIgnored = true
+    }
+    const lineIgnored = stepIgnored || ZIZMOR_IGNORE_DANGEROUS_RE.test(raw) || ZIZMOR_IGNORE_DANGEROUS_RE.test(jobLines[i - 1] ?? '')
+    if (lineIgnored) continue
+    if (inCheckoutStep && /\b(?:ref|repository)\s*:/.test(active) && UNSAFE_PR_REF_RE.test(active)) return true
+    if (UNSAFE_PR_CLI_RE.test(active)) return true
+  }
+  return false
+}
+
+/** 按工作流文件与 job 粒度结构化分析 `pull_request_target` 风险（含 zizmor ignore 与单独 `pull_request.number` 豁免）。 */
+export function analyzeWorkflowSecurity(workflowsDir, files = null) {
+  const entries = Array.isArray(files)
+    ? files
+    : (existsSync(workflowsDir) ? readdirSync(workflowsDir).filter((n) => !isMacMetadataName(n) && /\.ya?ml$/i.test(n)) : [])
+  let usesPullRequestTarget = false
+  const unsafePullRequestTargetWorkflows = []
+
+  for (const item of entries) {
+    const name = typeof item === 'string' ? item : item?.name
+    if (!name || !/\.ya?ml$/i.test(name)) continue
+    const text = (typeof item === 'object' && typeof item.text === 'string')
+      ? item.text
+      : (readTextSafe(join(workflowsDir, name)) ?? '')
+    const lines = text.replace(/\r\n/g, '\n').split('\n')
+    const activeText = lines.map(stripYamlComment).join('\n')
+    if (!/\bpull_request_target\b/.test(activeText)) continue
+    usesPullRequestTarget = true
+
+    const prtIdx = lines.findIndex((l) => /\bpull_request_target\b/.test(stripYamlComment(l)))
+    const triggerIgnored = prtIdx >= 0 && (
+      ZIZMOR_IGNORE_DANGEROUS_RE.test(lines[prtIdx])
+      || (prtIdx > 0 && ZIZMOR_IGNORE_DANGEROUS_RE.test(lines[prtIdx - 1]))
+    )
+    if (triggerIgnored) continue
+
+    const jobs = splitWorkflowJobs(lines)
+    if (jobs.length === 0) {
+      if (!ZIZMOR_IGNORE_DANGEROUS_RE.test(text) && (UNSAFE_PR_REF_RE.test(activeText) || UNSAFE_PR_CLI_RE.test(activeText))) {
+        unsafePullRequestTargetWorkflows.push({ file: name, jobs: ['<file>'] })
+      }
+      continue
+    }
+    const unsafeJobs = jobs.filter((j) => jobHasUnsafePrCheckout(j.lines, j.prevLine)).map((j) => j.id)
+    if (unsafeJobs.length > 0) unsafePullRequestTargetWorkflows.push({ file: name, jobs: unsafeJobs })
+  }
+
+  return {
+    usesPullRequestTarget,
+    unsafePullRequestTargetWorkflows,
+    checkoutsPrHead: unsafePullRequestTargetWorkflows.length > 0,
+  }
+}
 
 /**
  * 列出某个文档目录下**真实存在的文件**（相对仓库根的 posix 路径）。
@@ -290,6 +390,7 @@ export function detectDocs(root, opts = {}) {
 
   const wfDir = join(root, '.github', 'workflows')
   const workflows = []
+  const wfEntries = []
   const workflowFacts = {
     hasCheck: false,
     hasRelease: false,
@@ -298,6 +399,7 @@ export function detectDocs(root, opts = {}) {
     releaseTools: [],
     neutralCiConfigs: [],
     usesPullRequestTarget: false,
+    unsafePullRequestTargetWorkflows: [],
     checkoutsPrHead: false,
     hasContentsWrite: false,
   }
@@ -308,6 +410,7 @@ export function detectDocs(root, opts = {}) {
       if (!/\.ya?ml$/i.test(name)) continue
       workflows.push(name)
       const text = textByRel?.get(`.github/workflows/${name}`) ?? readTextSafe(join(wfDir, name)) ?? ''
+      wfEntries.push({ name, text })
       const activeText = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
       let matchedRelease = false
       for (const pat of RELEASE_WORKFLOW_PATTERNS) {
@@ -326,12 +429,12 @@ export function detectDocs(root, opts = {}) {
         workflowFacts.hasCheck = true
         workflowFacts.checkWorkflows.push(name)
       }
-      if (/pull_request_target/.test(activeText)) workflowFacts.usesPullRequestTarget = true
-      if (/github\.event\.pull_request\.(?:head\.(?:sha|ref)|number)/.test(activeText)) {
-        workflowFacts.checkoutsPrHead = true
-      }
       if (/permissions:[\s\S]{0,160}contents:\s*write/.test(activeText)) workflowFacts.hasContentsWrite = true
     }
+    const sec = analyzeWorkflowSecurity(wfDir, wfEntries)
+    workflowFacts.usesPullRequestTarget = sec.usesPullRequestTarget
+    workflowFacts.unsafePullRequestTargetWorkflows = sec.unsafePullRequestTargetWorkflows
+    workflowFacts.checkoutsPrHead = sec.checkoutsPrHead
   }
 
   const neutralCi = preNeutralCi ?? scanNeutralCiSteps(root)
@@ -582,6 +685,43 @@ export function detectGitHooksState(root, { coreHooksPath, hooksPathScope } = {}
     })
   }
 
+  const pkg = readJsonSafe(join(root, 'package.json'))
+  const sghCfgFile = [
+    '.simple-git-hooks.json', '.simple-git-hooks.cjs', '.simple-git-hooks.mjs', '.simple-git-hooks.js',
+    'simple-git-hooks.json', 'simple-git-hooks.cjs', 'simple-git-hooks.mjs', 'simple-git-hooks.js', '.simple-git-hooks',
+  ].find((rel) => existsSync(join(root, rel)))
+  const hasPkgSgh = Boolean(pkg && typeof pkg['simple-git-hooks'] === 'object' && pkg['simple-git-hooks'] !== null
+    && Object.keys(pkg['simple-git-hooks']).length > 0)
+  if (hasPkgSgh || sghCfgFile) {
+    const sghPath = sghCfgFile ?? 'package.json#simple-git-hooks'
+    conflicts.push({
+      kind: 'simple-git-hooks',
+      path: sghPath,
+      detail: `仓库已配置 ${sghPath}，preserve 不接管 core.hooksPath`,
+    })
+  }
+
+  const dotGitHooksAbs = join(root, '.git', 'hooks')
+  if (existsSync(dotGitHooksAbs)) {
+    try {
+      const customDotHooks = readdirSync(dotGitHooksAbs, { withFileTypes: true })
+        .filter((e) => e.isFile() && !e.name.endsWith('.sample') && !isMacMetadataName(e.name))
+        .filter((e) => {
+          try { return statSync(join(dotGitHooksAbs, e.name)).size > 0 } catch { return false }
+        })
+        .map((e) => e.name)
+        .sort()
+      if (customDotHooks.length > 0) {
+        conflicts.push({
+          kind: 'custom-git-hooks',
+          path: '.git/hooks/',
+          files: customDotHooks,
+          detail: `仓库已存在自定义 .git/hooks/ 钩子（${customDotHooks.join('、')}），preserve 不覆写`,
+        })
+      }
+    } catch { /* ignore */ }
+  }
+
   return {
     coreHooksPath: normalizedHooksPath || undefined,
     coreHooksPathScope: scope || undefined,
@@ -637,105 +777,5 @@ export function detectConventions(root, { gitFacts, docs, ecosystem }) {
     commitStyle: gitFacts.commitStyle ?? 'plain',
     workDir,
     workflowTooling: detectWorkflowTooling(root),
-  }
-}
-
-export function summarizeTddAndSymbolCoverage(root, rawWs, facts) {
-  // 文档形态：TDD 该有哪些章节，由这个仓自己有什么决定，不由模板定死。
-  // 只看路径清单，不读文件内容——路径已经足够可靠，读内容会让勘察变慢且易误判。
-  // finalize 之后 files 已经不是数组，路径清单要用扫完那一刻的原始结果。
-  const shapePaths = (rawWs.files ?? []).map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
-  const tddShape = detectTddShapes({
-    paths: shapePaths,
-    kinds: facts.ecosystem?.kinds ?? [],
-    runtimeRequirements: facts.artifacts?.runtimeRequirements ?? [],
-    codeFiles: facts.scale?.codeFiles ?? 0,
-  })
-  const tddReq = resolveDocRequirements(root, 'tdd')
-  const tddReqIds = new Set(tddReq.sections.map((s) => s.id))
-  const tddShapeSummary = {
-    enabled: [...tddShape.enabled],
-    reasons: tddShape.reasons,
-    dropSections: [...tddDropSections(tddShape, { omit: tddReq.omit, required: tddReqIds })],
-    filePaths: shapePaths,
-    topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
-  }
-
-  // 符号抽取的覆盖情况：这个仓里有几门语言有符号规则、几门没有。
-  // 报出来而不是「抽不到就当没有管理」：差别只在覆盖这一面，所以必须单独说。
-  const symbolCoverage = summarizeSymbolCoverage(
-    (rawWs.files ?? [])
-      .map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
-      .filter((rel) => !protocol.isToolOwnedPath(rel)
-        && (CODE_EXT_RE.test(rel) || isSymbolCandidatePath(rel))),
-  )
-  return { tddShape: tddShapeSummary, symbolCoverage }
-}
-
-/**
- * 角色决定「能做到哪一步」，通过双轴五态分类器与平台注册表得出：
- * `local-only` / `contributor-fork` / `clone-readonly` / `maintainer` / `undetermined`。
- */
-export function judgeRole(gitFacts, declaredRepo, opts = {}) {
-  const markers = opts.cwd ? detectGitModeMarkers(opts.cwd) : { localMode: false, forkMode: false, standaloneMode: false }
-  const localMode = typeof opts.localMode === 'boolean' ? opts.localMode : markers.localMode
-  const forkMode = typeof opts.forkMode === 'boolean' ? opts.forkMode : markers.forkMode
-  const standaloneMode = typeof opts.standaloneMode === 'boolean' ? opts.standaloneMode : markers.standaloneMode
-  return classifyWorkspaceIdentity({
-    gitFacts,
-    declaredRepo,
-    probeApi: opts.probeApi,
-    localIdentity: opts.localIdentity,
-    localMode,
-    forkMode,
-    standaloneMode,
-    sshHostMap: opts.sshHostMap,
-  })
-}
-
-export async function runSurveyCli(argv, surveyFn) {
-  let target = process.cwd()
-  let format = 'json'
-  let probeAuth = false
-  let verifyToken = false
-
-  for (const arg of argv) {
-    if (arg === '--help' || arg === '-h') {
-      process.stdout.write([
-        '用法：node scripts/survey.mjs [目标目录] [选项]',
-        '',
-        '  --markdown      输出给人读的报告（默认输出 JSON）',
-        '  --probe-auth    额外问一次凭据助手与 SSH/gh 状态（无远端亦可探测）',
-        '  --verify-token  配合 --probe-auth 对本地 Token 发一次轻量验活请求',
-        '',
-        '只读：不写任何文件。',
-      ].join('\n') + '\n')
-      return 0
-    }
-    if (arg === '--markdown' || arg === '--md') format = 'markdown'
-    else if (arg === '--json') format = 'json'
-    else if (arg === '--probe-auth') probeAuth = true
-    else if (arg === '--verify-token') { probeAuth = true; verifyToken = true }
-    else if (!arg.startsWith('-')) target = arg
-    else {
-      process.stderr.write(`未知选项：${arg}（用 --help 看用法）\n`)
-      return 2
-    }
-  }
-
-  try {
-    const facts = await surveyFn(target, { probeAuth, verifyToken })
-    let out
-    if (format === 'markdown') {
-      const { toMarkdown } = await import('./render.mjs')
-      out = toMarkdown(facts)
-    } else {
-      out = `${JSON.stringify(facts, null, 2)}\n`
-    }
-    process.stdout.write(out)
-    return 0
-  } catch (err) {
-    process.stderr.write(`勘察失败：${err instanceof Error ? err.message : String(err)}\n`)
-    return 2
   }
 }

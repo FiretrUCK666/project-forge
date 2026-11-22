@@ -11,8 +11,15 @@ import { prepareExecInvocation, resolveExecutable } from '../../kit/skills/lib/e
 import { hasDotGitInAncestors, readHeadFast, readLooseCommitLogFast } from '../../kit/skills/lib/git-fast.mjs'
 import { inspectSurveyStatusFast } from '../../kit/skills/lib/git-status-fast.mjs'
 import {
-  SAFE_ENV_RE, SECRET_CONTENT_PATTERNS, SECRET_FILE_RE, isNpmrcFile, isSensitiveSecretFile,
+  SAFE_ENV_RE, SECRET_FILE_RE, isEnvFile, isNpmrcFile, isSensitiveSecretFile,
 } from '../../kit/skills/lib/credential-scan.mjs'
+import {
+  classifyHomePath,
+  collectUntrackedCandidatesInDir,
+  isExplicitlyUnignoredPath,
+  parseGitignoreNegations,
+  scanBufferSecretsAndLeaks,
+} from './survey-workspace-secrets.mjs'
 
 import {
   detectGitModeMarkers,
@@ -50,6 +57,7 @@ import {
 } from './survey-git-fast.mjs'
 
 export { detectConventions, detectDocs } from './survey-docs.mjs'
+export { classifyHomePath }
 
 const { LIKELY_DEFAULT_BRANCHES } = protocol
 
@@ -351,19 +359,6 @@ export async function detectGit(root, opts = {}) {
   }
 }
 
-export function classifyHomePath(rel, line) {
-  const path = String(rel ?? '').replace(/\\/g, '/')
-  if (/(^|\/)(?:tests?|specs?|__tests__|fixtures?|examples?|__mocks__|testdata)(\/|$)/i.test(path)) return 'test-data'
-  if (/\.(?:test|spec)\.[a-z0-9]+$/i.test(path)) return 'test-data'
-  if (/(^|\/)(?:docs\/work|docs\/tasks|work)(\/|$)/i.test(path)) return 'generated'
-  if (/^changelog\.md$/i.test(path) || /(^|\/)release-notes\//i.test(path)) return 'generated'
-  if (/\.(?:md|mdx|rst|txt)$/i.test(path)) {
-    if (/[`'"]|<|>|\bexample\b|示例/i.test(line)) return 'doc-example'
-    return 'leak'
-  }
-  return 'leak'
-}
-
 const SECRET_FAST_PRECHECK_RE = /(?:\b(?:gh[pousr]_|github_pat_|npm_|pypi-|sk-(?:proj-)?[A-Za-z0-9]{20}|AKIA)|-----BEGIN )/
 const DEPENDENCY_OUTPUT_DIRS = new Set(['node_modules', '.venv', '__pycache__', 'target'])
 
@@ -379,28 +374,6 @@ function countLinesFast(text) {
   return count
 }
 
-function collectUntrackedCandidatesInDir(root, dirRel, trackedSet, hasIgnoredPrefix, limit = 64) {
-  const candidates = []
-  const stack = [{ abs: join(root, dirRel), rel: dirRel }]
-  while (stack.length > 0 && candidates.length < limit) {
-    const cur = stack.pop()
-    let entries
-    try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
-    for (const entry of entries) {
-      if (entry.isSymbolicLink() || isMacMetadataName(entry.name) || entry.name === '.git') continue
-      const nextRel = `${cur.rel}/${entry.name}`
-      if (entry.isDirectory()) {
-        stack.push({ abs: join(cur.abs, entry.name), rel: nextRel })
-      } else if (entry.isFile() && !isJunkFile(nextRel)) {
-        if (trackedSet.has(nextRel) || hasIgnoredPrefix(nextRel)) continue
-        candidates.push(nextRel)
-        if (candidates.length >= limit) break
-      }
-    }
-  }
-  return candidates
-}
-
 function processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii = true) {
   if (buf === undefined || (buf.length > 4096 ? buf.subarray(0, 4096) : buf).includes(0)) {
     rec.unreadable = true
@@ -409,8 +382,9 @@ function processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii = true) {
   const isSkillFile = rec.rel.startsWith('.agents/skills/')
   const isCodeFile = CODE_EXT.test(rec.name)
   const isNpmrc = isNpmrcFile(rec.name)
+  const isEnv = isEnvFile(rec.name)
   if (isSkillFile) rec.rawBuf = buf
-  const needText = isNpmrc || (!isCodeFile
+  const needText = isNpmrc || isEnv || (!isCodeFile
     && !rec.rel.startsWith('docs/archive/')
     && !rec.rel.startsWith('kit/')
     && (!isSkillFile || rec.rel === '.agents/skills/.pf-manifest.json' || rec.rel.endsWith('/SKILL.md') || rec.rel.endsWith('/skill.md')))
@@ -426,25 +400,7 @@ function processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii = true) {
   const mightHaveHome = Boolean(homeFastRe && homeFastRe.test(text))
   if (mightHaveSecret || mightHaveHome) {
     if (!needText && homeIsAscii) text = buf.toString('utf8')
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]
-      if (mightHaveSecret) {
-        for (const pat of SECRET_CONTENT_PATTERNS) {
-          if (pat.re.test(line)) {
-            if (!rec.textSecrets) rec.textSecrets = []
-            rec.textSecrets.push({ file: rec.rel, line: i + 1, kind: pat.zhLabel ?? pat.label })
-          }
-        }
-      }
-      if (mightHaveHome && homeRe.test(line.replace(/\\\\/g, '/').replace(/\\/g, '/'))) {
-        const category = classifyHomePath(rec.rel, line)
-        if (category) {
-          if (!rec.textLeaks) rec.textLeaks = []
-          rec.textLeaks.push({ file: rec.rel, line: i + 1, category })
-        }
-      }
-    }
+    scanBufferSecretsAndLeaks(rec, text, homeFastRe, homeRe, mightHaveSecret, mightHaveHome)
   }
 }
 
@@ -506,7 +462,7 @@ function collectWorkspaceWalk(root, opts = {}) {
           textLeaks: null,
           unreadable: false,
         }
-        readQueue.push({ rec, full, isText: TEXT_EXT.test(entry.name) || isNpmrcFile(entry.name) })
+        readQueue.push({ rec, full, isText: TEXT_EXT.test(entry.name) || isNpmrcFile(entry.name) || isEnvFile(entry.name) })
         files.push(rec)
       }
     }
@@ -585,6 +541,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
   }
 
   const pendingTrackableDirs = []
+  const gitignoreNegations = canAskGit ? parseGitignoreNegations(root, files.map((f) => f.rel)) : []
   if (canAskGit) {
     const checkList = []
     for (const d of dirs) {
@@ -594,7 +551,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
     for (const f of files) {
       if (!trackedSet.has(f.rel) && !hasIgnoredPrefix(f.rel)) {
         const isSecret = SECRET_FILE_RE.test(f.name) && !SAFE_ENV_RE.test(f.name)
-          && (!isNpmrcFile(f.name) || f.size > 256 * 1024 || isSensitiveSecretFile(f.name, f.text))
+          && ((!isNpmrcFile(f.name) && !isEnvFile(f.name)) || f.size > 256 * 1024 || isSensitiveSecretFile(f.name, f.text, f.rel))
         if (isSecret || OUTPUT_DIRS.has(f.rel.split('/')[0])) checkList.push(f.rel)
       }
     }
@@ -630,10 +587,15 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
       if (leaf !== 'bin') unignoredOutputDirs.push(dir)
       continue
     }
+    if (isExplicitlyUnignoredPath(dir, gitignoreNegations)) continue
+    if (DEPENDENCY_OUTPUT_DIRS.has(leaf)
+      && collectUntrackedCandidatesInDir(root, dir, trackedSet, hasIgnoredPrefix, gitignoreNegations, 4).length === 0) {
+      continue
+    }
     if (DEPENDENCY_OUTPUT_DIRS.has(leaf)) {
       unignoredOutputDirs.push(dir)
     } else {
-      const candidates = collectUntrackedCandidatesInDir(root, dir, trackedSet, hasIgnoredPrefix)
+      const candidates = collectUntrackedCandidatesInDir(root, dir, trackedSet, hasIgnoredPrefix, gitignoreNegations)
       if (candidates.length > 0) pendingTrackableDirs.push({ dir, candidates })
     }
   }
@@ -678,7 +640,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
 
     if (SECRET_FILE_RE.test(file.name) && !SAFE_ENV_RE.test(file.name)) {
       const tooLarge = fileSize > 256 * 1024
-      if (tooLarge || isSensitiveSecretFile(file.name, file.text)) {
+      if (tooLarge || isSensitiveSecretFile(file.name, file.text, file.rel)) {
         const status = !canAskGit ? 'undetermined'
           : tooLarge ? 'unverified-large'
             : tracked ? 'tracked' : (ignored ? 'ignored' : 'exposed')
@@ -687,7 +649,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
       }
     }
 
-    if (ignored || (!TEXT_EXT.test(file.name) && !isNpmrcFile(file.name)) || fileSize > 256 * 1024) continue
+    if (ignored || (!TEXT_EXT.test(file.name) && !isNpmrcFile(file.name) && !isEnvFile(file.name)) || fileSize > 256 * 1024) continue
     if (file.unreadable) { unreadableFiles += 1; continue }
     if (file.textSecrets) {
       for (const s of file.textSecrets) {

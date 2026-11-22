@@ -237,26 +237,6 @@ export function commitStyleHint(facts) {
   return `${observed}——沿用它，不要混用第二套格式，不用内部编号充当说明`
 }
 
-export function conventionsHint(facts) {
-  const bits = []
-  const others = facts.docs?.otherAiConventions ?? []
-  if (others.length > 0) {
-    bits.push(`项目里已有这些 AI 约定文件：${others.map((f) => `\`${f}\``).join('、')}。`
-      + '逐条读一遍，把其中仍然成立的规则合进本节；合完问用户要不要把旧文件改成'
-      + '指向 `AGENTS.md` 的单行引用——留着两份，迟早各说各的')
-  }
-  const subdirAgents = facts.docs?.subdirAgentsFiles ?? []
-  if (subdirAgents.length > 0) {
-    bits.push(`检测到子目录分段契约：${subdirAgents.map((f) => `\`${f}\``).join('、')}——进入对应子目录前按需加读，原样保留不回并覆盖。`)
-  }
-  const tooling = facts.conventions?.workflowTooling ?? []
-  if (tooling.length > 0) {
-    bits.push(`项目已在用这些发版/提交工具：${tooling.map((f) => `\`${f}\``).join('、')}。`
-      + '本节的发布与提交规则按它们的实际行为写，不要照抄模板默认话术')
-  }
-  return bits.length === 0 ? '' : `\n\n${bits.join('\n\n')}`
-}
-
 export function customSkillsBlock(facts) {
   const custom = customSkillsOf(facts)
   if (custom.length === 0) return ''
@@ -437,6 +417,7 @@ export function buildVars(facts, root, { kitDir } = {}) {
     ? 'CHANGELOG.md 的对应版本节'
     : 'docs/release-notes/<标签>.md'
   const readmes = facts.docs?.readmes ?? []
+  const subdirAgents = facts.docs?.subdirAgentsFiles ?? []
   const packages = facts.workspace?.packages ?? []
   const targetRoot = root || facts.target?.path
   const legacyWorkExists = Boolean(targetRoot && existsSync(join(targetRoot, 'docs', 'work')) && !existsSync(join(targetRoot, 'docs', 'todo')))
@@ -456,14 +437,14 @@ export function buildVars(facts, root, { kitDir } = {}) {
     EXPLORATION_STRATEGY: explorationStrategyBlock(facts),
     RUNTIME_REQUIREMENTS: (facts.artifacts?.runtimeRequirements ?? []).join('、') || '见清单文件声明',
     DEFAULT_BRANCH: conventions.defaultBranch || 'main',
-    VERSION_SOURCE: facts.ecosystem?.manifests?.[0] ?? '清单文件',
+    VERSION_SOURCE: facts.ecosystem?.versionSource ?? facts.ecosystem?.manifests?.[0] ?? '清单文件',
     RELEASING_DOC: facts.docs?.releasing ?? 'RELEASING.md',
     RELEASE_NOTES_TARGET: releaseNotesTarget,
     WORK_DIR: `${resolvedWorkDir}/`,
     COMMIT_STYLE_HINT: commitStyleHint(facts),
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
+    SUBDIR_AGENTS_POINTER: subdirAgents.length > 0 ? subdirAgents.map((f) => `\`${f}\``).join('、') : '`<subdir>/AGENTS.md`',
     WORKSPACE_PACKAGES: formatWorkspacePackages(packages),
-    CONVENTIONS_HINT: conventionsHint(facts),
     KIT_ROUTING_ROWS: renderKitRoutingRows({ customSkills, discoveredSkills, hasRemote }),
     CUSTOM_SKILLS_BLOCK: customSkillsBlock(facts),
     ...buildDevProfileVars(facts, targetRoot),

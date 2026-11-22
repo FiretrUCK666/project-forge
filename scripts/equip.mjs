@@ -16,6 +16,7 @@ import { writeAtomic } from './lib/fs-atomic.mjs'
 import { isAllowedExtensionPath } from '../kit/skills/lib/overlay.mjs'
 import { cleanStaleLocalModeMarker } from '../kit/skills/lib/platform.mjs'
 import { detectSkillKind } from './lib/survey-ecosystem.mjs'
+import { detectOptionalNativeCheckers } from '../kit/skills/lib/profile-sniffer.mjs'
 import {
   generateInitialBootstrappedAgents,
   installGitHooks,
@@ -753,11 +754,14 @@ async function main(argv) {
     if (doBootstrap && !dryRun) {
       agentsResult = await generateInitialBootstrappedAgents(target, { stack: stack ?? lang ?? 'universal', name, noBackup })
     }
+    const nativeCheckers = detectOptionalNativeCheckers(target)
+    const pendingIgnoreAdvice = (nativeCheckers.agentIgnoreAdvice ?? []).filter((a) => !a.alreadyIgnored)
     process.stdout.write(`${JSON.stringify({
       ...(bootstrapResult ? { bootstrap: bootstrapResult } : {}),
       equip: equipResult,
       ...(hooksResult ? { hooks: hooksResult } : {}),
       ...(agentsResult ? { agents: agentsResult } : {}),
+      ...(pendingIgnoreAdvice.length > 0 ? { agentIgnoreAdvice: pendingIgnoreAdvice } : {}),
     }, null, 2)}\n`)
     // 退出码只看逐文件判定：写入路径能解决的都解决了，结束状态里还有需要处置的，
     // 就和校验路径一样退 3。「本地改动被保留」在过去只进运行报告，写路径因此永远退 0，

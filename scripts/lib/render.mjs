@@ -181,6 +181,14 @@ export function toMarkdown(facts) {
     lines.push('**根目录没有清单，命令在子目录里**：' + subdirs.map((s) => `\`${s.dir}/\`（${s.kinds.join('、')}）`).join('、')
       + '——写契约与 CI 时要带上目录前缀，否则命令在仓库根跑不起来')
   }
+  const pendingIgnoreAdvice = (facts.artifacts?.nativeCheckers?.agentIgnoreAdvice ?? []).filter((a) => !a.alreadyIgnored)
+  if (pendingIgnoreAdvice.length > 0) {
+    lines.push('')
+    lines.push('**根 Linter/Formatter `.agents/` 隔离建议**（只读探测，不自动改写第三方配置）：')
+    for (const item of pendingIgnoreAdvice) {
+      lines.push(`- \`${item.tool}\`（${item.configFile}）：${item.suggestion}`)
+    }
+  }
   lines.push('')
 
   // 既有约定：默认分支、标签形状、提交风格、工作记录目录。

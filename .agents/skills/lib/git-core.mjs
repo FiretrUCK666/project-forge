@@ -117,7 +117,8 @@ export function isInsideDir(candidateAbs, parentAbs) {
 export function readTextSafe(filePath, maxBytes = 512 * 1024) {
   try {
     const st = statSync(filePath)
-    if (!st.isFile() || st.size > maxBytes) return undefined
+    const limit = maxBytes == null ? Infinity : maxBytes
+    if (!st.isFile() || st.size > limit) return undefined
     const buf = readFileSync(filePath)
     if (buf.subarray(0, 4096).includes(0)) return undefined
     return buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
@@ -127,8 +128,8 @@ export function readTextSafe(filePath, maxBytes = 512 * 1024) {
 }
 
 /** 安全读取 JSON 文件；失败返回 undefined。 */
-export function readJsonSafe(filePath) {
-  const text = readTextSafe(filePath)
+export function readJsonSafe(filePath, maxBytes = 512 * 1024) {
+  const text = readTextSafe(filePath, maxBytes)
   if (text === undefined) return undefined
   try { return JSON.parse(text) } catch { return undefined }
 }
@@ -262,5 +263,35 @@ export function matchGlob(filePath, pattern) {
   reStr += '$'
   return new RegExp(reStr).test(f)
 }
+
+/**
+ * 求值包含 `!` 负向排除模式的 glob 列表：
+ * 需至少命中一条正向模式，且不被任何 `!` 负向模式排除。
+ */
+export function matchGlobList(filePath, patterns) {
+  if (!Array.isArray(patterns) || patterns.length === 0) return false
+  const f = posixPath(filePath).replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/+$/, '')
+  if (!f) return false
+  const positives = []
+  const negatives = []
+  for (const raw of patterns) {
+    const p = posixPath(raw).trim().replace(/^`+|`+$/g, '').replace(/\/+$/, '')
+    if (!p) continue
+    if (p.startsWith('!')) {
+      const neg = p.slice(1).replace(/^\.\//, '').replace(/^\/+/, '')
+      if (neg) negatives.push(neg)
+    } else {
+      positives.push(p)
+    }
+  }
+  if (positives.length === 0) return false
+  if (!positives.some((p) => matchGlob(f, p))) return false
+  for (const neg of negatives) {
+    if (matchGlob(f, neg)) return false
+    if (neg.endsWith('/**') && matchGlob(f, neg.slice(0, -3))) return false
+  }
+  return true
+}
+
 
 

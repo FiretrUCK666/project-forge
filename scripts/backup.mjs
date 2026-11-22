@@ -176,7 +176,7 @@ function collectEligibleWorkspaceFiles(canonRoot, canonBackupDir) {
 }
 
 function readIndex(indexPath, root) {
-  const existing = readJsonSafe(indexPath)
+  const existing = readJsonSafe(indexPath, Infinity)
   if (existing && typeof existing === 'object' && Array.isArray(existing.backups)) {
     return {
       schemaVersion: 1,
@@ -295,7 +295,6 @@ export function createBackup(targetDir, {
     }
   }
 
-  const existingPaths = entries.map((e) => e.relPath)
   const id = makeSnapshotId(label)
   const archiveName = format === 'zip' ? `${id}.zip` : `${id}.tar.gz`
   const archivePath = join(backupDir, archiveName)
@@ -332,7 +331,6 @@ export function createBackup(targetDir, {
     fileCount: entries.length,
     totalBytes,
     treeSha256,
-    existingPaths,
     ...(skippedLarge.length > 0 ? { skippedLarge } : {}),
   })
 

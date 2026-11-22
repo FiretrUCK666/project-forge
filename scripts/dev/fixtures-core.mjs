@@ -123,8 +123,10 @@ cases.push(['已入库的凭据形状判 tracked', async () => {
 }])
 
 cases.push(['未忽略的 node_modules 判成缺口', async () => {
-  const dir = tmpProject({ 'package.json': '{"name":"a","version":"1.0.0"}', 'node_modules/x/i.js': '1\n' })
+  const dir = tmpProject({ 'package.json': '{"name":"a","version":"1.0.0"}' })
   gitInit(dir)
+  mkdirSync(join(dir, 'node_modules', 'x'), { recursive: true })
+  writeFileSync(join(dir, 'node_modules', 'x', 'i.js'), '1\n')
   try {
     const f = await survey(dir)
     if (!f.ignores.unignoredOutputDirs.includes('node_modules')) {

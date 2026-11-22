@@ -90,7 +90,7 @@ export const DARK_BASELINE = Object.freeze({
  * 两者与真实解析分支必须一一对应——`main()` 里新增一个分支而不改这里，对拍就会失败。
  */
 export const HAND_ROLLED_SPECS = Object.freeze([
-  { label: '交棒入口', file: 'scripts/handoff.mjs', registered: ['help', 'scan', 'verify', 'json'], declared: ['help', 'scan', 'verify', 'json'] },
+  { label: '交棒入口', file: 'scripts/handoff.mjs', registered: ['help', 'scan', 'verify', 'strict-clean', 'json'], declared: ['help', 'scan', 'verify', 'strict-clean', 'json'] },
 ])
 
 /** 括号配对：从 `open` 指向的字符开始，返回与之配对的闭括号下标；配不上返回 -1。 */

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="svg-title svg-desc">
   <title id="svg-title">project-forge 八技能完整流转闭环</title>
-  <desc id="svg-desc">上层交付链依次经过 dev-explore、dev-plan（含最多 3 轮独立 Critique 内审闭环）、dev-edit、dev-flow 与 dev-review（不通过回原分支最多 3 轮返工）；下层外环由 dev-verify-tools、dev-iterate 与 dev-govern 驱动验证复用、盲区补测并回流至 dev-plan 建单修复。</desc>
+  <desc id="svg-desc">上层交付链依次经过 dev-explore（只读勘察）、dev-plan（澄清规划与最多 3 轮独立 Critique）、dev-edit（改码门禁）、dev-flow（隔离与提审）与 dev-review（独立审查合入，不通过回原分支最多 3 轮返工）；下层外环由 dev-govern（体检与复盘）、dev-verify-tools（验证工具与地图）与 dev-iterate（盲区压测与 PoC 复现建单）构成并回流至 dev-plan。</desc>
 
   <defs>
     <!-- Organic warm cotton paper speckles -->
@@ -107,8 +107,8 @@
       <rect x="-34" y="-34" width="68" height="68" fill="#F5F1E8"/>
       <rect x="-46" y="-46" width="22" height="92" fill="#DDA027"/>
       <rect x="-46" y="-46" width="92" height="16" fill="#1E4DD8"/>
-      <polygon points="-14,4 -4,-6 6,6 32,-20 42,-10 6,26" fill="#D93829"/>
-      <polygon points="-14,4 -4,-6 6,6 16,-4 6,26" fill="#1B1E38"/>
+      <polygon points="-16,3 -8,-5 0,4 20,-16 28,-8 0,20" fill="#D93829"/>
+      <polygon points="-16,3 -8,-5 0,4 8,-4 0,20" fill="#1B1E38"/>
     </g>
 
     <!-- 4. dev-flow (x=834, y=188): Split-Track Railway Switch Emblem -->
@@ -134,19 +134,19 @@
 
     
     <text x="132" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1B1E38">dev-explore</text>
-    <text x="132" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">只读定位</text>
+    <text x="132" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">只读勘察</text>
   
     <text x="366" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1E4DD8">dev-plan</text>
-    <text x="366" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">分档内审</text>
+    <text x="366" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">澄清规划</text>
   
     <text x="600" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1B1E38">dev-edit</text>
-    <text x="600" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">边界静检</text>
+    <text x="600" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">改码门禁</text>
   
     <text x="834" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1E4DD8">dev-flow</text>
-    <text x="834" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">隔离实证</text>
+    <text x="834" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">隔离与提审</text>
   
     <text x="1068" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#D93829">dev-review</text>
-    <text x="1068" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">独立合入</text>
+    <text x="1068" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">独立审查合入</text>
   
   </g>
 
@@ -156,10 +156,10 @@
     <path d="M 1068 326 L 1068 424 Q 1068 468 1024 468 L 976 468" fill="none" stroke="#1B1E38" stroke-width="3.5"/>
     <polygon points="962,468 977,461 977,475" fill="#1B1E38"/>
 
-    <!-- Left Vermilion Defect Escalation Curve emerging cleanly from dev-verify-tools edge (244) up into dev-plan -->
+    <!-- Left Vermilion Defect Escalation Curve emerging cleanly from dev-iterate edge (244) up into dev-plan -->
     <path d="M 244 468 L 214 468 Q 186 468 186 440 L 186 406 Q 186 378 214 378 L 338 378 Q 366 378 366 350 L 366 338" fill="none" stroke="#D93829" stroke-width="3.5"/>
     <polygon points="366,326 359,340 373,340" fill="#D93829"/>
-    <text x="266" y="362" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#D93829">缺陷回流建单</text>
+    <text x="266" y="362" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#D93829">PoC 复现建单</text>
   </g>
 
   <!-- Lower Outer Governance and Iterate Loop -->
@@ -167,29 +167,29 @@
     <!-- Halftone backing band across outer-loop emblems -->
     <rect x="242" y="454" width="716" height="28" fill="url(#ht-ochre)" fill-opacity="0.55"/>
 
-    <!-- Gap arrows right-to-left or bidirectional? Keep natural cycle: dev-govern (910) -> dev-iterate (600) -> dev-verify-tools (290), plus verify-tools <-> iterate -->
+    <!-- Natural cycle: dev-govern (910) -> dev-verify-tools (600) -> dev-iterate (290) -> escalate to dev-plan -->
     <line x1="846" y1="468" x2="674" y2="468" stroke="#1B1E38" stroke-width="3.5"/>
     <polygon points="664,468 678,461 678,475" fill="#1B1E38"/>
     <line x1="536" y1="468" x2="364" y2="468" stroke="#1B1E38" stroke-width="3.5"/>
     <polygon points="354,468 368,461 368,475" fill="#1B1E38"/>
 
-    <!-- 6. dev-verify-tools (x=290, y=468): Precision Gauge Dial -->
-    <g id="emblem-verify-tools" transform="translate(290, 468)">
-      <circle cx="0" cy="0" r="46" fill="#1B1E38"/>
-      <circle cx="0" cy="0" r="36" fill="#DDA027"/>
-      <path d="M -24 14 A 27 27 0 1 1 24 14" fill="none" stroke="#F5F1E8" stroke-width="3.5"/>
-      <polygon points="0,4 -4,-6 24,-22 6,4" fill="#D93829"/>
-      <circle cx="0" cy="0" r="8" fill="#1B1E38"/>
-    </g>
-
-    <!-- 7. dev-iterate (x=600, y=468): Vermilion/Indigo Twin-Arc Cycle -->
-    <g id="emblem-iterate" transform="translate(600, 468)">
+    <!-- 6. dev-iterate (x=290, y=468): Vermilion/Indigo Twin-Arc Cycle -->
+    <g id="emblem-iterate" transform="translate(290, 468)">
       <circle cx="0" cy="0" r="46" fill="#F5F1E8" stroke="#1B1E38" stroke-width="2.5"/>
       <path d="M -28 -8 A 30 30 0 0 1 26 -14" fill="none" stroke="#D93829" stroke-width="10" stroke-linecap="round"/>
       <polygon points="32,-4 18,-10 29,-22" fill="#D93829"/>
       <path d="M 28 8 A 30 30 0 0 1 -26 14" fill="none" stroke="#1B1E38" stroke-width="10" stroke-linecap="round"/>
       <polygon points="-32,4 -18,10 -29,22" fill="#1B1E38"/>
       <circle cx="0" cy="0" r="10" fill="#1E4DD8"/>
+    </g>
+
+    <!-- 7. dev-verify-tools (x=600, y=468): Precision Gauge Dial -->
+    <g id="emblem-verify-tools" transform="translate(600, 468)">
+      <circle cx="0" cy="0" r="46" fill="#1B1E38"/>
+      <circle cx="0" cy="0" r="36" fill="#DDA027"/>
+      <path d="M -24 14 A 27 27 0 1 1 24 14" fill="none" stroke="#F5F1E8" stroke-width="3.5"/>
+      <polygon points="0,4 -4,-6 24,-22 6,4" fill="#D93829"/>
+      <circle cx="0" cy="0" r="8" fill="#1B1E38"/>
     </g>
 
     <!-- 8. dev-govern (x=910, y=468): Cobalt Ledger Bars + Plumb-Bob -->
@@ -204,14 +204,14 @@
     </g>
 
     
-    <text x="290" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1B1E38">dev-verify-tools</text>
-    <text x="290" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">工具与地图</text>
+    <text x="290" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#D93829">dev-iterate</text>
+    <text x="290" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">盲区压测</text>
   
-    <text x="600" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#D93829">dev-iterate</text>
-    <text x="600" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">盲区补测</text>
+    <text x="600" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1B1E38">dev-verify-tools</text>
+    <text x="600" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">验证工具与地图</text>
   
     <text x="910" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1E4DD8">dev-govern</text>
-    <text x="910" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">体检与下沉</text>
+    <text x="910" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">体检与复盘</text>
   
   </g>
 </svg>

@@ -122,7 +122,7 @@ In daily work, you do not need to memorize commands or stage names. State what y
 ### Bounded Optimization Loop and PoC-First
 
 <p align="center">
-  <img src="assets/readme/skills-cycle-en.svg" alt="Eight-skill lifecycle loop: dev-explore through dev-review with max 3-round plan critique and code rework arcs, connected to outer-loop dev-govern, dev-iterate, and dev-verify-tools with defect escalation" width="100%">
+  <img src="assets/readme/skills-cycle-en.svg" alt="Eight-skill lifecycle loop: upper chain flows through dev-explore (read-only explore), dev-plan (clarify and plan with max 3-round plan critique), dev-edit (edit static gate), dev-flow (worktree and PR), and dev-review (review and merge with max 3-round code rework); lower outer loop flows from dev-review through dev-govern (audit and retro), dev-verify-tools (verify tools and map), and dev-iterate (blind-spot tests), escalating via PoC escalation back into dev-plan" width="100%">
 </p>
 
 When checking test blind spots, review findings, or audit warnings, `dev-iterate`, `dev-review`, and `dev-govern` follow one rule: **run a minimal reproduction (`PoC-first`) to confirm the bug before writing any patch**. Unreproducible static suspicions are dropped as false positives.

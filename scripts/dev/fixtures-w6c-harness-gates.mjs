@@ -15,7 +15,7 @@ import { hydratePrTemplateBody } from '../../kit/skills/lib/pr-template-hydrate.
 import { buildMultiTaskWavePlan } from '../../kit/skills/lib/doc-slice-graph.mjs'
 import {
   determineWorkflowPolicy, evaluateNextState, isEquivalentConcurrentCommand,
-  normalizeConcurrentVerifyCommand, resolveScopedVerificationGate,
+  normalizeConcurrentVerifyCommand, resolveScopedVerificationGate, runLowRiskDocStaticCheck,
 } from '../../kit/skills/lib/workflow-policy.mjs'
 import { syncSpecBodyStatusTable } from '../../kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs'
 import { handleMerge } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
@@ -605,6 +605,119 @@ export function registerW6cHarnessGatesCases(cases) {
       if (!hp.prompt.includes('CLI 可机械实证边界') || !hp.prompt.includes('协调器调度前提')) {
         return `handoff-package 缺少证明边界诚实声明：\n${hp.prompt}`
       }
+      return true
+    } finally { rmTree(dir) }
+  }])
+
+  cases.push(['low-risk 纯文档 check-empirical 禁跑 Dev Profile、diff hunk 静态作用域与 record pass 门禁对齐', async () => {
+    const dir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# low-risk-gate\n\n```yaml\nquick-test: node -e "console.error(\'SHOULD_NOT_RUN_QUICK_TEST\'); process.exit(1)"\nfull-test: node -e "process.exit(1)"\nsmoke-verify: none\nmerge-gate: node -e "process.exit(1)"\n```\n',
+      'docs/guide.md': '# Guide\n\nSafe doc.\n',
+      'docs/legacy.md': '# Legacy\n\nIntro line.\n\n[legacy-dead](missing-legacy.md)\n',
+      'src/app.mjs': 'export const ok = 1\n',
+    })
+    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@low.test' })
+    try {
+      // 1a. low 纯文档 check-empirical --cmd 仅跑显式 --cmd，禁止前置强跑 Dev Profile quick-test
+      writeFileSync(join(dir, 'docs/guide.md'), '# Guide\n\nUpdated safe doc.\n', 'utf8')
+      const empWithCmd = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
+        'check-empirical', '--local', '--cmd', 'node -e "console.log(\'DOC_CMD_OK\')"', '--json',
+      ], { cwd: dir })
+      if (empWithCmd.status !== 0) {
+        return `low 纯文档 check-empirical --cmd 误跑了 Dev Profile quick-test：exit=${empWithCmd.status} out=${empWithCmd.stdout} err=${empWithCmd.stderr}`
+      }
+      const empCmdJson = JSON.parse(empWithCmd.stdout)
+      if (empCmdJson.commands?.length !== 1 || empCmdJson.commands[0]?.cmd?.includes('process.exit(1)')) {
+        return `low 纯文档 check-empirical --cmd 收集了非预期命令：${empWithCmd.stdout}`
+      }
+
+      // 1b. low 纯文档不传 --cmd -> low-risk-no-runtime-checks 安全豁免且不写入 signals/issues
+      const empNoCmd = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
+        'check-empirical', '--local', '--json',
+      ], { cwd: dir })
+      if (empNoCmd.status !== 0) {
+        return `low 纯文档无 --cmd check-empirical 未安全豁免：exit=${empNoCmd.status} out=${empNoCmd.stdout}`
+      }
+      const empNoCmdJson = JSON.parse(empNoCmd.stdout)
+      if (!empNoCmdJson.lowRiskNoRuntimeChecks || empNoCmdJson.commands?.length !== 0) {
+        return `low 纯文档无 --cmd 返回载荷异常：${empNoCmd.stdout}`
+      }
+      if (existsSync(join(dir, '.git/project-forge-flow/signals.jsonl'))) {
+        return 'low 纯文档 check-empirical 不应写入 signals.jsonl'
+      }
+
+      // 1c. 反例：触及运行时代码 src/app.mjs 仍必收集并执行 Dev Profile quick-test（传过关 --cmd 仍因 quick-test exit 1 被拦）
+      gitSync(dir, ['checkout', '--', 'docs/guide.md'])
+      writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 2\n', 'utf8')
+      const empRuntime = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
+        'check-empirical', '--local', '--cmd', 'node -e "process.exit(0)"', '--json',
+      ], { cwd: dir })
+      if (empRuntime.status !== 3 || !empRuntime.stdout.includes('BLOCKED_EMPIRICAL_FAILED')) {
+        return `运行时代码变更未继续强制运行 Dev Profile quick-test：exit=${empRuntime.status} out=${empRuntime.stdout}`
+      }
+      gitSync(dir, ['checkout', '--', 'src/app.mjs'])
+
+      // 2. runLowRiskDocStaticCheck({ diffText })：未改行历史死链与历史凭据放行，新增行死链/凭据阻断，未传 diffText 保持全文件兼容
+      const fakeTok = `${'ghp'}_${'z'.repeat(36)}`
+      writeFileSync(join(dir, 'docs/secret-legacy.md'), `# Sec\n\nClean intro.\n\nold=${fakeTok}\n`, 'utf8')
+      gitCommitFast(dir, 'docs: seed secret legacy')
+      writeFileSync(join(dir, 'docs/legacy.md'), '# Legacy\n\nIntro line v2.\n\n[legacy-dead](missing-legacy.md)\n', 'utf8')
+      writeFileSync(join(dir, 'docs/secret-legacy.md'), `# Sec\n\nClean intro v2.\n\nold=${fakeTok}\n`, 'utf8')
+      const diffOnlyLine3 = gitSync(dir, ['diff', '--unified=3', '--', 'docs/legacy.md', 'docs/secret-legacy.md'], { encoding: 'utf8' }).stdout
+      const scopedPass = runLowRiskDocStaticCheck(dir, ['docs/legacy.md', 'docs/secret-legacy.md'], { diffText: diffOnlyLine3 })
+      const fullFallback = runLowRiskDocStaticCheck(dir, ['docs/legacy.md', 'docs/secret-legacy.md'])
+      if (!scopedPass.ok || fullFallback.ok || fullFallback.errors.length < 2) {
+        return `runLowRiskDocStaticCheck diff hunk 作用域或兼容全文件回退异常：scoped=${JSON.stringify(scopedPass)} full=${JSON.stringify(fullFallback)}`
+      }
+      gitSync(dir, ['checkout', '--', 'docs/legacy.md', 'docs/secret-legacy.md'])
+
+      // 3. --task 全链一致性：修改含历史死链老文档的无关第 3 行 -> --include-diff 与 record --verdict pass 同时通过
+      writeFileSync(join(dir, 'AGENTS.md'), '# low-risk-gate\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\nmerge-gate: exit 0\n```\n', 'utf8')
+      gitCommitFast(dir, 'chore: green profile for task flow', { updateOnly: true })
+      const roots = await resolveRepoRoots(dir)
+
+      await withQuietIo(() => handleStart({ task: 'doc-ok', case: '2', slug: 'doc-ok', implementer: 'alice' }, roots))
+      await withQuietIo(() => handleClaim({ task: 'doc-ok', agent: 'alice' }, roots))
+      const wtOk = join(dir, '.worktrees/impl-doc-ok')
+      writeFileSync(join(wtOk, 'docs/legacy.md'), '# Legacy\n\nIntro line v2.\n\n[legacy-dead](missing-legacy.md)\n', 'utf8')
+      gitCommitFast(wtOk, 'docs: update unrelated line in legacy doc', { updateOnly: true })
+      const vOk = await withQuietIo(() => handleVerify({ task: 'doc-ok', mode: 'gate' }, roots))
+      if (vOk.res.exitCode !== 0) return `修改含历史死链老文档无关行 verify 失败：exit=${vOk.res.exitCode} err=${vOk.err}`
+      await withQuietIo(() => handleSubmit({ task: 'doc-ok', agent: 'alice' }, roots))
+
+      const incOk = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--task', 'doc-ok', '--include-diff', '--json'], { cwd: dir })
+      if (incOk.status !== 0 || JSON.parse(incOk.stdout).diff?.diffIncluded !== true) {
+        return `修改含历史死链老文档无关行被 --include-diff 误拦：exit=${incOk.status} out=${incOk.stdout}`
+      }
+      const tokOk = await issueTokenFor(dir, 'doc-ok', 1)
+      const recOk = await withQuietIo(() => handleRecord({
+        task: 'doc-ok', round: '1', verdict: 'pass', 'reviewer-id': 'rev-doc-1', 'review-token': tokOk,
+        evidence: '实测：仅修改第3行无关文本，未新增死链',
+      }, roots))
+      if (recOk.res !== 0) return `修改含历史死链老文档无关行 record pass 被误拦：exit=${recOk.res} err=${recOk.err} out=${recOk.out}`
+
+      // 4. 反例：在老文档第 3 行新增死链 -> --include-diff 与 record --verdict pass 必须同时拦截 BLOCKED_STATIC_DOC_CHECK_FAILED
+      await withQuietIo(() => handleStart({ task: 'doc-bad', case: '2', slug: 'doc-bad', implementer: 'alice' }, roots))
+      await withQuietIo(() => handleClaim({ task: 'doc-bad', agent: 'alice' }, roots))
+      const wtBad = join(dir, '.worktrees/impl-doc-bad')
+      writeFileSync(join(wtBad, 'docs/legacy.md'), '# Legacy\n\n[added-dead](added-missing.md)\n\n[legacy-dead](missing-legacy.md)\n', 'utf8')
+      gitCommitFast(wtBad, 'docs: introduce new dead link', { updateOnly: true })
+      await withQuietIo(() => handleSubmit({ task: 'doc-bad', agent: 'alice' }, roots))
+
+      const incBad = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--task', 'doc-bad', '--include-diff', '--json'], { cwd: dir })
+      if (incBad.status !== 3 || !incBad.stdout.includes('BLOCKED_STATIC_DOC_CHECK_FAILED')) {
+        return `新增死链未被 --include-diff 拦截：exit=${incBad.status} out=${incBad.stdout}`
+      }
+      const tokBad = await issueTokenFor(dir, 'doc-bad', 1)
+      const recBad = await withQuietIo(() => handleRecord({
+        task: 'doc-bad', round: '1', verdict: 'pass', 'reviewer-id': 'rev-doc-1', 'review-token': tokBad,
+        'no-enforce-gates': true, evidence: '试图绕过静态检查直接放行',
+      }, roots))
+      if (recBad.res !== 3 || !`${recBad.out}\n${recBad.err}`.includes('BLOCKED_STATIC_DOC_CHECK_FAILED')) {
+        return `新增死链未被 record --verdict pass 拦截 BLOCKED_STATIC_DOC_CHECK_FAILED（存在门禁分裂）：exit=${recBad.res} out=${recBad.out} err=${recBad.err}`
+      }
+
       return true
     } finally { rmTree(dir) }
   }])

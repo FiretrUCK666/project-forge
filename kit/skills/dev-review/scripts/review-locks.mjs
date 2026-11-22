@@ -23,7 +23,7 @@ import { resolveHostMode } from '../../lib/harness-context.mjs'
 import { verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
-import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence } from '../../lib/workflow-policy.mjs'
+import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence, runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
 import { EXIT, hasCommits } from './review-diff.mjs'
 
 export { checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId }
@@ -532,6 +532,28 @@ export async function evaluatePassBlockers({
     changedFiles = filesRes.ok ? filesRes.entries.filter((e) => e.status !== 'D').map((e) => e.file) : []
   }
 
+  const pol = changedFiles.length > 0
+    ? determineWorkflowPolicy({
+        changedFiles,
+        ownArchived: [ledger?.archivedTodoFile, ledger?.archivedSpecFile, ledger?.archivedPrdFile].filter(Boolean),
+        caseType: ledger?.caseType ?? 3,
+        highRiskGlobs: profile?.highRisk ?? [],
+        doNotEditGlobs: profile?.doNotEdit ?? [],
+        visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)),
+        profile,
+        hasCiWorkflow: hasRepoCiWorkflow(targetRoot ?? mainRoot),
+      })
+    : null
+
+  let staticDocBlocker = null
+  if (pol?.staticDocCheckRequired && targetRoot) {
+    const docCheck = runLowRiskDocStaticCheck(targetRoot, changedFiles, { diffText: filesRes?.diffText ?? filesRes?.text })
+    if (!docCheck.ok) {
+      staticDocBlocker = `BLOCKED_STATIC_DOC_CHECK_FAILED: ${docCheck.errors.map((e) => e?.message ?? String(e)).join('；')}`
+      blockers.push(staticDocBlocker)
+    }
+  }
+
   const shouldEnforceSmokeOnPass = Boolean(
     enforceGates
     || receipt?.mechanicalPackSeen
@@ -539,16 +561,7 @@ export async function evaluatePassBlockers({
     || evidence
     || profile?.smokeVerify,
   )
-  if (hasAgentsProfile && changedFiles.length > 0 && profile && shouldEnforceSmokeOnPass) {
-    const pol = determineWorkflowPolicy({
-      changedFiles,
-      caseType: ledger?.caseType ?? 3,
-      highRiskGlobs: profile.highRisk,
-      doNotEditGlobs: profile.doNotEdit,
-      visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)),
-      profile,
-      hasCiWorkflow: hasRepoCiWorkflow(targetRoot ?? mainRoot),
-    })
+  if (hasAgentsProfile && pol && profile && shouldEnforceSmokeOnPass) {
     if (pol.smokeRequired && pol.riskTier !== 'low' && !isProfileExplicitNone(profile, 'smoke-verify')) {
       const smokeOk = Boolean(
         (evidence && (!headSha || headSha === 'UNBORN' || evidence.headSha === headSha) && !evidence.dirty && evidence.smokeVerifiedOnHead !== false && evidence.gates?.smoke?.exitCode === 0)
@@ -615,12 +628,15 @@ export async function evaluatePassBlockers({
     }
   }
 
+  const onlyStaticDoc = Boolean(staticDocBlocker && blockers.length === 1)
   return {
     blocked: blockers.length > 0,
-    code: 'BLOCKED_PASS_WITH_OPEN_BLOCKERS',
+    code: onlyStaticDoc ? 'BLOCKED_STATIC_DOC_CHECK_FAILED' : 'BLOCKED_PASS_WITH_OPEN_BLOCKERS',
     exitCode: EXIT.FACT,
     blockers,
-    message: blockers.length > 0 ? `BLOCKED_PASS_WITH_OPEN_BLOCKERS: 存在未收口阻塞门禁，禁止记录 pass：${blockers.join('；')}` : '',
+    message: onlyStaticDoc
+      ? staticDocBlocker
+      : (blockers.length > 0 ? `BLOCKED_PASS_WITH_OPEN_BLOCKERS: 存在未收口阻塞门禁，禁止记录 pass：${blockers.join('；')}` : ''),
   }
 }
 

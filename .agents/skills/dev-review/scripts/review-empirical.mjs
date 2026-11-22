@@ -10,7 +10,7 @@ import { computeWorktreeEnv, gitRun, posixPath } from '../../lib/git.mjs'
 import { hasExecutableCodeMutation } from '../../lib/gate-enforcement.mjs'
 import { updateTaskLedger } from '../../lib/ledger.mjs'
 import {
-  determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead,
+  determineWorkflowPolicy, buildE2eObservation, hasRepoCiWorkflow, hasValidE2eObservationOnHead,
   readVerificationEvidence, resolveScopedVerificationGate, runLowRiskDocStaticCheck, validateE2eEvidenceText,
 } from '../../lib/workflow-policy.mjs'
 import { evaluateStoredVisualEvidence, mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
@@ -61,25 +61,31 @@ export function computeEmpiricalRequirements({
     gateWeakeningHits: gateWeakenedHits,
     visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
     diffBytes: diff?.bytes ?? 0,
+    hasCiWorkflow: repoRoot ? hasRepoCiWorkflow(repoRoot) : false,
     profile: {
       smokeVerify: effectiveProfile?.['smoke-verify']?.[0],
       explicitNone: effectiveProfile?.explicitNone,
     },
   })
-  const scopedGate = resolveScopedVerificationGate({
-    repoRoot,
-    changedFiles: allFiles,
-    profile: effectiveProfile,
-  })
-  const { autoCommands: profileAutoCmds, hasDevProfileTestCmds, skippedCommands: scopedSkippedCommands } = collectDevProfileEmpiricalCmds(effectiveProfile, { scopedGate })
-  const toolAutoRaw = (reviewContext?.healthyToolCommands ?? []).filter(Boolean)
-  const toolAutoCmds = scopedGate.scoped ? scopedGate.filterCommands(toolAutoRaw).kept : toolAutoRaw
+  const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
   const extraCmds = (Array.isArray(explicitCmds) ? explicitCmds : [explicitCmds]).map((s) => String(s ?? '').trim()).filter(Boolean)
-  const baseAuto = profileAutoCmds.length > 0 ? profileAutoCmds : toolAutoCmds
-  const autoCommands = [...new Set([...baseAuto, ...extraCmds])]
+  const scopedGate = isLowRiskPureDoc
+    ? { scoped: false, affectedStacks: [], affectedPackages: [] }
+    : resolveScopedVerificationGate({ repoRoot, changedFiles: allFiles, profile: effectiveProfile })
+  let autoCommands = [...new Set(extraCmds)]
+  let hasDevProfileTestCmds = false
+  let scopedSkippedCommands = []
+  if (!isLowRiskPureDoc) {
+    const devCmds = collectDevProfileEmpiricalCmds(effectiveProfile, { scopedGate })
+    hasDevProfileTestCmds = devCmds.hasDevProfileTestCmds
+    scopedSkippedCommands = devCmds.skippedCommands
+    const toolAutoRaw = (reviewContext?.healthyToolCommands ?? []).filter(Boolean)
+    const toolAutoCmds = scopedGate.scoped ? scopedGate.filterCommands(toolAutoRaw).kept : toolAutoRaw
+    const baseAuto = devCmds.autoCommands.length > 0 ? devCmds.autoCommands : toolAutoCmds
+    autoCommands = [...new Set([...baseAuto, ...extraCmds])]
+  }
   const runtimeTouched = (behavioralGate?.runtimeFilesTouched?.length ?? 0) > 0
   const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
-  const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
 
   const empiricalRequired = !isEmptyDiff && !isLowRiskPureDoc
   const faultRequired = !isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired || hasDevProfileTestCmds || !isLowRiskPureDoc)
@@ -90,6 +96,7 @@ export function computeEmpiricalRequirements({
   return {
     isEmptyDiff,
     isLowRiskPureDoc,
+    staticDocCheckRequired: policy.staticDocCheckRequired,
     changedFiles: allFiles,
     riskTier: policy.riskTier,
     autoCommands,
@@ -113,7 +120,7 @@ export function computeEmpiricalRequirements({
 export function evaluateIncludeDiffGate({
   gitDir, mode, task, round, prNo, baseRef, reviewRoot, mainRoot,
   headSha, diffScope, workspaceFingerprint, dirtyEntries = [],
-  requirements, behavioralGate, opts = {},
+  requirements, behavioralGate, opts = {}, diffText = null,
 }) {
   if (requirements.isEmptyDiff) {
     return {
@@ -229,8 +236,9 @@ export function evaluateIncludeDiffGate({
     ),
   )
 
-  const staticDocCheck = (requirements.isLowRiskPureDoc && Array.isArray(requirements.changedFiles) && requirements.changedFiles.length > 0 && reviewRoot)
-    ? runLowRiskDocStaticCheck(reviewRoot, requirements.changedFiles)
+  const staticDocRequired = requirements.staticDocCheckRequired ?? requirements.isLowRiskPureDoc
+  const staticDocCheck = (staticDocRequired && Array.isArray(requirements.changedFiles) && requirements.changedFiles.length > 0 && reviewRoot)
+    ? runLowRiskDocStaticCheck(reviewRoot, requirements.changedFiles, { diffText })
     : null
   const staticDocBlock = staticDocCheck && !staticDocCheck.ok
     ? { code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', reason: `BLOCKED_STATIC_DOC_CHECK_FAILED: ${staticDocCheck.errors.map((e) => e?.message ?? String(e)).join('；')}`, errors: staticDocCheck.errors }
@@ -512,7 +520,7 @@ export async function handleCheckEmpirical(ctx) {
   const gate = evaluateIncludeDiffGate({
     gitDir, mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot,
     headSha, diffScope, workspaceFingerprint: currentFingerprint, dirtyEntries,
-    requirements, behavioralGate, opts,
+    requirements, behavioralGate, opts, diffText: diff?.text ?? null,
   })
   const payload = {
     status: 'EMPIRICAL_VERIFIED',
@@ -564,7 +572,7 @@ export async function handleCheckFault(ctx) {
     return emitGateBlock({ opts, code: 'BLOCKED_UNTRUSTED_HAZARD', payload: untrusted.payload, textLines: untrusted.textLines })
   }
 
-  const requirements = computeEmpiricalRequirements({ diff, behavioralGate, effectiveProfile, task, gateWeakenedHits })
+  const requirements = computeEmpiricalRequirements({ diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, repoRoot: reviewRoot })
   if (!requirements.faultRequired) {
     const out = {
       status: 'FAULT_EXEMPT_LOW_RISK_OR_EMPTY',
@@ -734,7 +742,7 @@ export async function handleCheckFault(ctx) {
 
   const gate = evaluateIncludeDiffGate({
     gitDir, mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot,
-    headSha, diffScope, workspaceFingerprint: currentFingerprint, dirtyEntries, requirements, behavioralGate, opts,
+    headSha, diffScope, workspaceFingerprint: currentFingerprint, dirtyEntries, requirements, behavioralGate, opts, diffText: diff?.text ?? null,
   })
   const payload = {
     status: 'FAULT_RESTORED_CLEAN', ok: true, mode, round, targetRoot: posixPath(reviewRoot), headSha,

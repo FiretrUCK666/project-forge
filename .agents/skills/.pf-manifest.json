@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-22T14:59:36.514Z",
+  "installedAt": "2026-11-22T16:19:08.168Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "df3a7701f27ade86a614dd94a631af848589a1d3139da05c00be5e87f12743c8"
@@ -55,7 +55,7 @@
       "sha256": "12406cac8dea2b6b724ab113d7a7a7f98a1fb2d03fd081d7debdda47512e4d60"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "8d45b8c7c5e0e6b102d5ee2b3f61cf5468673bed2cab2cf839d5b8e541f259c8"
+      "sha256": "cf4007a44489e3b1415d73f763b76a868a958d5722ff6f8fdd79b95b5db59ea0"
     },
     "dev-flow/scripts/flow-merge-claim.mjs": {
       "sha256": "5173afeecb8e1bf2cf5f52ab870e6dadaa9ba2f96d07b58959a68a4ba66ce6e9"
@@ -160,7 +160,7 @@
       "sha256": "92599e81154f7dab116bbdfb10ddc430458c2528605b2a745a3c91478200f085"
     },
     "dev-review/scripts/review-empirical.mjs": {
-      "sha256": "d555d6d511aa6b3ec249f4a9c9bd2bacbb6aaed23f8b3b176374ce792bc73574"
+      "sha256": "658b77fc772fce4ec479bdcda6844db9a1cf68dc19e7702e8d19a545e4988945"
     },
     "dev-review/scripts/review-gates.mjs": {
       "sha256": "4832f0f2166b1c3a682a31adb514bfd7350e5de68a44aaf5a29df65dea1fd7b6"
@@ -169,10 +169,10 @@
       "sha256": "844763beac0896807bc3753d5de418587a578e618d7c7c6f1015e39e4704e627"
     },
     "dev-review/scripts/review-locks.mjs": {
-      "sha256": "0f1089ac964978266683100a024bc4dff2fdcdd594fdc93a3f27489ff124ed71"
+      "sha256": "8b14f773824c2cd524b2105652107f29032f1e651ab81a46371c86e6b64d5b7c"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "c0edaa35690eea1746f104ffe792c930a3ca4b9a0d4b7ee96ba3f42b4b71f607"
+      "sha256": "6fcd169129927b3941f4720c3563d4e01a5cb0d107a5bd0096adf77fa2f24f9c"
     },
     "dev-review/scripts/review-pr.mjs": {
       "sha256": "a3280030b5845507e0223adcf76bbbed5545f94c5a592b3f28bab637ffb07aea"
@@ -439,7 +439,7 @@
       "sha256": "f21807a32d8cbcb0e76295cf2a5f66bb87c8e7fe83f7147b1c814c94c0d96d5c"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "5302703d3ff9ba876ee58d01d9a3a6280a7daf619af2fa9fc944cebe9433a22f"
+      "sha256": "ab2c8c49a1dff925832bcb76a65a7ca4654db9c4047ee16e6b598c4363906e17"
     },
     "templates/docs-prd.md": {
       "sha256": "a9fc3613c1c7716fddadd06a906e257b577574d9d6b9808a4d23622eec7fa0d9"

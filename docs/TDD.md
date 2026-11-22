@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用基线 | 以仓库当前源码与 `SKILL.md` 当前 `metadata.version`（`6.0.0`）为准 |
-| 最近更新日期 | `2026-11-22` |
+| 最近更新日期 | `2026-11-23` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |
 | 托管平台适配范围 | 产品层注册表当前注册 `github`；未匹配远端降级为 `generic-git`，无远端按 `local-only` 运行 |
@@ -309,7 +309,7 @@ flowchart TB
 | `dev-edit` | 改前禁改区/复用检查与改后词法去噪静态门禁 | `edit-gate.mjs`（`pre-edit` / `verify` / `standalone`） | 拦截 `do-not-edit`（`verify --final` 永不降级）、过程编号文件名、无锚点压制标记、履历墓碑、死代码块、`arch-rules` 越界、单测反作弊与 `>800` 行膨胀 |
 | `dev-flow` | 身份探测、业务分诊、Worktree 隔离、实证绑定、波次调度与收尾清理 | `flow.mjs`（`next` / `inspect` / `intake` / `start` / `explore` / `claim` / `finalize` / `verify` / `submit` / `sync` / `merge` / `cleanup` / `batch`） | 禁 `Case >= 2` 脏主仓与原地开工（`BLOCKED_DIRTY_MAIN` / `BLOCKED_MAIN_SLOT_VIOLATION`）、作者与实施者同人（`BLOCKED_AUTHOR_IS_IMPLEMENTER`）、规划未就绪退场（`BLOCKED_PLAN_NOT_READY`）、未同步主 PRD（`BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED`）、空执行者或协调者代提（`BLOCKED_MISSING_ACTOR` / `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH`）、停损/未合删分支/预览漂移（`BLOCKED_UNMERGED_BRANCH_DELETE` / `BLOCKED_CLEANUP_PREVIEW_MISMATCH`） |
 | `dev-verify-tools` | 验证工具生命期、仓外 `scratch` 试制与唯一地图 `docs/feature-map.json` | `verify-tools.mjs`（`sync` / `create` / `run` / `audit` / `clean`） | 按 `(slotKey, moduleTreeHash, symbolHash)` 隔离每槽位缓存；免日期过时校验：低风险告警、中风险降级引导 E2E、高风险硬阻断（`BLOCKED_STALE_HIGH_RISK_TOOL`） |
-| `dev-review` | 外部 PR 扫雷、先实证后 diff、双门六锁审查与实时双写 | `review-pack.mjs`（`check-empirical` / `check-fault` / `--include-diff` / `record` / `override`） | 默认 `DEFAULT_ENFORCE_GATES = true`；强制先实证（`BLOCKED_EMPIRICAL_FIRST`）、禁水话观察与空代码故障注入、Round 2+ 未闭合阻塞禁 `pass`、UI 必具 `--artifact` 或 `--visual-blocked-reason`、全历史换人与六锁硬拦 |
+| `dev-review` | 外部 PR 扫雷、先实证后 diff、双门六锁审查与实时双写 | `review-pack.mjs`（`check-empirical` / `check-fault` / `--include-diff` / `record` / `override`） | 默认 `DEFAULT_ENFORCE_GATES = true`；强制先实证（`BLOCKED_EMPIRICAL_FIRST`）、禁水话观察与空代码故障注入、`low` 纯文档免收集 Dev Profile 运行时命令并按 diff hunk 变更行执行 `runLowRiskDocStaticCheck` 且在 `--include-diff` 与 `record --verdict pass` 间对齐 `staticDocCheckRequired`、Round 2+ 未闭合阻塞禁 `pass`、UI 必具 `--artifact` 或 `--visual-blocked-reason`、全历史换人与六锁硬拦 |
 | `dev-iterate` | 盲区与热点识别、原生测试扩展、并发压测、PoC 升级建单与有界循环 | `iterate.mjs`（`plan` / `generate` / `run` / `cycle`） | 有状态记录轮次历史；生成测试必过 `edit-gate` 反作弊且不污染 `quick-test`；抓到真缺陷不直接改源码，经 `escalation.mjs` 建单回正流 |
 | `dev-govern` | 静态体检、常青文档与 Worktree 巡检、三层倒金字塔复盘与发版筹备 | `govern-audit.mjs`（`audit` / `reconcile` / `plan` / `retro` / `release-prep`） | `reconcile` 全覆盖 `kit/`、校验 `docAnchors`/`verificationTools`/`testRefs`；`flow` 关键节点默认启用轻量治理；`retro` 默认不越权自动改写 `AGENTS.md`，同类指纹复发 `>= 2` 次强制升格 Tier 1 重构或 Tier 2 静态门禁 |
 

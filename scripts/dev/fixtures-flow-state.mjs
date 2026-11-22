@@ -69,6 +69,7 @@ export function registerFlowStateCases(cases) {
     const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const qOnlyDir = tmpProject({
       '.gitignore': '.worktrees/\n',
       'AGENTS.md': '# qonly\n\n```yaml\nquick-test: node -e "process.exit(0)" -- {target}\nfull-test: none\nsmoke-verify: none\nmerge-gate: none\nhigh-risk: none\n```\n',
@@ -77,18 +78,19 @@ export function registerFlowStateCases(cases) {
     gitInit(qOnlyDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     try {
       const roots = await resolveRepoRoots(qOnlyDir)
-      await handleStart({ task: 'q1', case: '2', slug: 'q1' }, roots)
+      await handleStart({ task: 'q1', case: '2', slug: 'q1', implementer: 'alice' }, roots)
+      await handleClaim({ task: 'q1', agent: 'alice' }, roots)
       await seedExploredFor(qOnlyDir, 'q1')
       const wtq = join(qOnlyDir, '.worktrees', 'impl-q1')
       writeFileSync(join(wtq, 'src/a.mjs'), 'export const q = 2\n')
       gitCommitFast(wtq, 'q2', { updateOnly: true })
       await handleVerify({ task: 'q1', tier: 'quick', target: 'src/a.mjs' }, roots)
-      const qBypass = await handleSubmit({ task: 'q1' }, roots)
+      const qBypass = await handleSubmit({ task: 'q1', agent: 'alice' }, roots)
       if (qBypass.exitCode !== 3) {
         return `quick-only 仓库 --target 局部旁路未被拦截：exit=${qBypass.exitCode}`
       }
       await handleVerify({ task: 'q1', tier: 'quick' }, roots)
-      const qOk = await handleSubmit({ task: 'q1' }, roots)
+      const qOk = await handleSubmit({ task: 'q1', agent: 'alice' }, roots)
       if (qOk.exitCode !== 0) return `quick-only 仓库全量 quick 误拦：exit=${qOk.exitCode}`
       return true
     } finally { rmTree(qOnlyDir) }
@@ -100,6 +102,7 @@ export function registerFlowStateCases(cases) {
     } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleNext } = await import('../../kit/skills/dev-flow/scripts/flow-next.mjs')
     // 3. quick --target 旁路拦截 + flow next (idle/ambiguous/--probe-auth/ownerRole) + submit 权责锁
     const dir = tmpProject({
@@ -127,7 +130,8 @@ export function registerFlowStateCases(cases) {
         return `idle next 异常：${JSON.stringify(nextIdle)}`
       }
 
-      await handleStart({ task: 'c1-code', case: '2', slug: 'c1-code' }, roots)
+      await handleStart({ task: 'c1-code', case: '2', slug: 'c1-code', implementer: 'alice' }, roots)
+      await handleClaim({ task: 'c1-code', agent: 'alice' }, roots)
       await seedExploredFor(dir, 'c1-code')
       const wt1 = join(dir, '.worktrees', 'impl-c1-code')
       writeFileSync(join(wt1, 'src/app.mjs'), 'export const a = 2\n')
@@ -136,7 +140,7 @@ export function registerFlowStateCases(cases) {
       const vPartial = await handleVerify({ task: 'c1-code', tier: 'quick', target: 'src/app.mjs' }, roots)
       if (vPartial.exitCode !== 0) return `quick --target 失败：${vPartial.exitCode}`
 
-      const subBypass = await handleSubmit({ task: 'c1-code' }, roots)
+      const subBypass = await handleSubmit({ task: 'c1-code', agent: 'alice' }, roots)
       if (subBypass.exitCode !== 3) {
         return `quick --target 旁路未被 submit 拦截：exit=${subBypass.exitCode}`
       }
@@ -182,7 +186,7 @@ export function registerFlowStateCases(cases) {
         if (okAlice.exitCode !== 0) return `原实施者 alice submit 被误拦：exit=${okAlice.exitCode}`
       } finally { rmTree(bare) }
 
-      await handleStart({ task: 'c1-doc', case: '1', slug: 'c1-doc' }, roots)
+      await handleStart({ task: 'c1-doc', case: '2', slug: 'c1-doc' }, roots)
       const nextAmb = (await handleNext({ json: true }, roots)).payload
       if (nextAmb.phase !== 'ambiguous' || nextAmb.ownerRole !== 'coordinator' || (nextAmb.candidates?.length ?? 0) < 2) {
         return `多任务 ambiguous next 异常：${JSON.stringify(nextAmb)}`
@@ -227,16 +231,17 @@ export function registerFlowStateCases(cases) {
       }
 
       // 分支已在 mainRoot 检出 -> 拦截 BLOCKED_BRANCH_IN_USE (exit 3)
-      const clash = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-bad', '--case', '1', '--branch', 'main'], { cwd: committed })
+      const clash = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-bad', '--case', '2', '--branch', 'main'], { cwd: committed })
       if (clash.status !== 3 || !clash.stderr.includes('BLOCKED_BRANCH_IN_USE')) {
         return `已被占用分支未拦截：exit=${clash.status}, err=${clash.stderr}`
       }
 
       const mainSha = gitSync(committed, ['rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).stdout.trim()
-      const sCom = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-wt', '--case', '1', '--slug', 'c2-wt', '--json'], { cwd: committed })).stdout)
+      const sCom = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-wt', '--case', '2', '--slug', 'c2-wt', '--implementer', 'alice', '--json'], { cwd: committed })).stdout)
       if (sCom.isolation !== 'worktree' || sCom.worktreePath !== '.worktrees/impl-c2-wt' || sCom.baseSha !== mainSha) {
-        return `有提交仓 Case 1 未强制 Tier 2 或 baseSha 不对：${JSON.stringify(sCom)}`
+        return `有提交仓 Case 2 未进 Tier 2 或 baseSha 不对：${JSON.stringify(sCom)}`
       }
+      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['claim', '--task', 'c2-wt', '--agent', 'alice'], { cwd: committed })
       await seedExploredFor(committed, 'c2-wt')
 
       const implAbs = join(committed, sCom.worktreePath)
@@ -244,7 +249,7 @@ export function registerFlowStateCases(cases) {
       writeFileSync(join(implAbs, 'src/a.mjs'), 'export const a = 2\n')
       gitCommitFast(implAbs, 'r1', { updateOnly: true })
       await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c2-wt'], { cwd: implAbs })
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt'], { cwd: implAbs })
+      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt', '--agent', 'alice'], { cwd: implAbs })
       if (!existsSync(join(revAbs, 'node_modules/p/i.js'))) return '首轮 review 槽未挂载共享依赖'
 
       // 弄脏审查位 + 修改锁文件 -> 不带 --reset-review-slot 正常失败（或保留），带 --reset-review-slot 自动解绑重建并清理脏文件
@@ -254,7 +259,7 @@ export function registerFlowStateCases(cases) {
       writeFileSync(join(implAbs, 'src/a.mjs'), 'export const a = 3\n')
       gitCommitFast(implAbs, 'r2', { updateOnly: true })
       await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c2-wt', '--mode', 'gate'], { cwd: implAbs })
-      const subReset = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt', '--reset-review-slot', '--json'], { cwd: implAbs })
+      const subReset = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt', '--agent', 'alice', '--reset-review-slot', '--json'], { cwd: implAbs })
       if (subReset.status !== 0) return `submit --reset-review-slot 失败：${subReset.stderr}`
       if (existsSync(join(revAbs, 'stray.tmp')) || existsSync(join(revAbs, 'node_modules')) || !readFileSync(join(revAbs, 'src/a.mjs'), 'utf8').includes('a = 3')) {
         return '--reset-review-slot 未清理脏审查位或锁变化未解除共享依赖'
@@ -272,10 +277,10 @@ export function registerFlowStateCases(cases) {
       '.github/pull_request_template.md': '# PR\n\n## 改了什么\n\n## 关联 Issue\n\n## 为什么\n\n## 实现依据\n\n## 怎么验证的\n\n## 回滚点\n\n## 风险与影响范围\n\n## 合并授权\n\n## 独立审查与故障注入\n',
       'AGENTS.md': '# c3\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\n```\n',
       'src/app.mjs': 'export const v = 1\n',
-      'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "t"\nrelated_spec: null\nrelated_todo: null\n---\n\n# PRD: Master\n\n## 要解决的问题\n- 统一一个可复用的组件库\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 五、验收标准\n\n- [ ] C1: `src/app.mjs` M1\n- [ ] C2: `src/app.mjs` M2\n',
-      'docs/specs/261116-issue11-m1-spec.md': '---\nkind: spec\ntitle: "M1"\nstatus: approved\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: ../todo/261116-issue11-m1-todo.md\nhigh_risk_paths: []\n---\n\n# SPEC: M1\n\n## 要解决的问题\n- 拆出第一个切片\n\n## 关联\n- [Master](../prd/261116-issue10-master-prd.md)\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 实现说明\n- 已完成实现。\n',
-      'docs/todo/261116-issue11-m1-todo.md': '---\nkind: todo\ntitle: "M1"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\ndone_at: null\ntask_id: m1\nplanned_at: HEAD\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_spec: ../specs/261116-issue11-m1-spec.md\n---\n\n# Todo: M1\n\n## 要解决的问题\n- 拆出第一个切片\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 完成后的记录\n**在合并之前写完，随这次改动一起提交。**\n',
-      'docs/specs/261116-issue12-m2-spec.md': '---\nkind: spec\ntitle: "M2"\nstatus: draft\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 12\npr: null\nbranch: null\nowner: "t"\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: null\nhigh_risk_paths: []\n---\n\n# SPEC: M2\n\n## 要解决的问题\n- 拆出第二个切片\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [ ] C1: `src/app.mjs` next\n- [ ] C2: 认领总控 PRD 的另一条\n',
+      'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "t"\nplan_critique: passed\nrelated_spec: null\nrelated_todo: null\n---\n\n# PRD: Master\n\n## 要解决的问题\n- 统一 `src/app.mjs` 可复用的组件库\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 五、验收标准\n\n- [ ] C1: `src/app.mjs` M1\n- [ ] C2: `src/app.mjs` M2\n',
+      'docs/specs/261116-issue11-m1-spec.md': '---\nkind: spec\ntitle: "M1"\nstatus: approved\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: ../todo/261116-issue11-m1-todo.md\nscope_files:\n  - src/app.mjs\ndepends_on: []\nhigh_risk_paths: []\n---\n\n# SPEC: M1\n\n## 要解决的问题\n- 拆出 `src/app.mjs` 第一个切片\n\n## 关联\n- [Master](../prd/261116-issue10-master-prd.md)\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 实现说明\n- 已完成实现。\n',
+      'docs/todo/261116-issue11-m1-todo.md': '---\nkind: todo\ntitle: "M1"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\ndone_at: null\ntask_id: m1\nplanned_at: HEAD\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_spec: ../specs/261116-issue11-m1-spec.md\n---\n\n# Todo: M1\n\n## 要解决的问题\n- 拆出 `src/app.mjs` 第一个切片\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 完成后的记录\n**在合并之前写完，随这次改动一起提交。**\n',
+      'docs/specs/261116-issue12-m2-spec.md': '---\nkind: spec\ntitle: "M2"\nstatus: draft\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 12\npr: null\nbranch: null\nowner: "t"\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: null\nscope_files:\n  - src/app.mjs\ndepends_on: []\nhigh_risk_paths: []\n---\n\n# SPEC: M2\n\n## 要解决的问题\n- 拆出 `src/app.mjs` 第二个切片\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [ ] C1: `src/app.mjs` next\n- [ ] C2: 认领总控 PRD 的另一条\n',
     })
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'https://github.com/acme/c3.git' })
 
@@ -286,6 +291,7 @@ export function registerFlowStateCases(cases) {
     try {
       const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
       const { handleFinalize, handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+      const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
       const { auditDoc, auditRepoDocs } = await import('../../kit/skills/dev-plan/scripts/doc-plan.mjs')
       const roots = await resolveRepoRoots(dir)
 
@@ -293,7 +299,8 @@ export function registerFlowStateCases(cases) {
         return '1:N 总控 PRD 未被 isSharedMasterPrd 识别'
       }
 
-      await handleStart({ task: 'm1', case: '4', slug: 'm1', issue: '11', spec: 'docs/specs/261116-issue11-m1-spec.md' }, roots)
+      await handleStart({ task: 'm1', case: '4', slug: 'm1', issue: '11', spec: 'docs/specs/261116-issue11-m1-spec.md', implementer: 'alice' }, roots)
+      await handleClaim({ task: 'm1', agent: 'alice' }, roots)
       await seedExploredFor(dir, 'm1')
       const st = readTaskLedger(dir, 'm1')
       const wt = join(dir, st.worktreePath)
@@ -327,7 +334,7 @@ export function registerFlowStateCases(cases) {
         async createPr() { createdCount += 1; return { ok: true, number: 56 } },
         async postComment() { return { ok: true, id: 1, verifiedReadback: true } },
       }
-      const subReuse = await handleSubmit({ task: 'm1', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'alice' } }, client: reusedClient } }, roots)
+      const subReuse = await handleSubmit({ task: 'm1', agent: 'alice', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'alice' } }, client: reusedClient } }, roots)
       if (subReuse.exitCode !== 0 || createdCount !== 0 || readTaskLedger(dir, 'm1')?.prNumber !== 55) {
         return `OPEN PR 防重失败：code=${subReuse.exitCode}, created=${createdCount}, pr=${readTaskLedger(dir, 'm1')?.prNumber}`
       }
@@ -342,7 +349,7 @@ export function registerFlowStateCases(cases) {
     const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-    const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+    const { handleClaim, handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const { runTrialMerge } = await import('../../kit/skills/dev-flow/scripts/flow-trial-merge.mjs')
 
@@ -355,12 +362,14 @@ export function registerFlowStateCases(cases) {
 
     try {
       const roots = await resolveRepoRoots(dir)
-      await handleStart({ task: 'm1b', case: '1', slug: 'm1b', implementer: 'alice' }, roots)
+      await handleStart({ task: 'm1b', case: '2', slug: 'm1b', implementer: 'alice' }, roots)
+      await handleClaim({ task: 'm1b', agent: 'alice' }, roots)
+      await seedExploredFor(dir, 'm1b')
       const wt = join(dir, readTaskLedger(dir, 'm1b').worktreePath)
       writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
       gitCommitFast(wt, 'feat: m1b v2', { updateOnly: true })
       await handleVerify({ task: 'm1b', mode: 'full' }, roots)
-      await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a' }, roots)
+      await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'm1b', 1) }, roots)
 
       const mainBefore = gitSync(dir, ['rev-parse', 'main'], { encoding: 'utf8' }).stdout.trim()
       const tmFail = await runTrialMerge({
@@ -388,7 +397,8 @@ export function registerFlowStateCases(cases) {
         async getPr() { return { ok: true, state: 'MERGED', merged: true } },
         async listOpenPrsByBase() { return { ok: true, prs: [] } },
       }
-      const clRes = await handleCleanup({ task: 'm1b', confirm: true, json: true, _ghClient: mergedClient }, roots)
+      const prevM1b = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 'm1b', '--json'], { cwd: dir })).stdout).previewHash
+      const clRes = await handleCleanup({ task: 'm1b', confirm: true, 'preview-hash': prevM1b, json: true, _ghClient: mergedClient }, roots)
       const branchStillExists = gitSync(dir, ['show-ref', '--verify', '--quiet', `refs/heads/${readTaskLedger(dir, 'm1b').branch}`]).status === 0
       if (clRes.exitCode !== 0 || branchStillExists) {
         return `MERGED/Squash 状态 cleanup 未删除本地分支：exit=${clRes.exitCode}, exists=${branchStillExists}`
@@ -396,7 +406,7 @@ export function registerFlowStateCases(cases) {
 
       const soloDir = tmpProject({ 'README.md': '# solo\n' })
       try {
-        const sInit = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'all', '--slug', 'solo', '--title', 'Solo', '--json'], { cwd: soloDir })).stdout)
+        const sInit = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'all', '--slug', 'solo', '--title', 'Solo', '--owner', 'alice', '--json'], { cwd: soloDir })).stdout)
         const sp = sInit.files.find((f) => f.endsWith('-solo-spec.md'))
         const prd = sInit.files.find((f) => f.endsWith('-solo-prd.md'))
         if (isSharedMasterPrd(soloDir, prd, sp)) return '1:1 PRD 被误判为 1:N 总控 PRD'
@@ -416,7 +426,7 @@ export function registerFlowStateCases(cases) {
 
     try {
       // 1. 统一模板链路：init --kind all -> 填充 -> audit 0 错（含 Todo 断点与遗留决策非尖括号默认）
-      const initAll = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'all', '--slug', 'u-c5', '--title', 'Unified C5', '--json'], { cwd: dir })).stdout)
+      const initAll = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'all', '--slug', 'u-c5', '--title', 'Unified C5', '--owner', 'alice', '--json'], { cwd: dir })).stdout)
       for (const rel of initAll.files) {
         let t = readFileSync(join(dir, rel), 'utf8')
           .replace('<two-way | one-way>', 'two-way')
@@ -441,9 +451,12 @@ export function registerFlowStateCases(cases) {
       const { readTaskLedger, resolveRepoRoots: resRoots } = await import('../../kit/skills/lib/shared.mjs')
       const { handleStart: hStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
       const { handleVerify: hVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+      const { handleClaim: hClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
       const { handleRecord: hRecord, handleOverride: hOverride } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
       const roots = await resRoots(dir)
-      await hStart({ task: 'c4-lk', case: '2', slug: 'c4-lk' }, roots)
+      await hStart({ task: 'c4-lk', case: '2', slug: 'c4-lk', implementer: 'alice' }, roots)
+      await hClaim({ task: 'c4-lk', agent: 'alice' }, roots)
+      await seedExploredFor(dir, 'c4-lk')
       const st = readTaskLedger(dir, 'c4-lk')
       const wt = join(dir, st.worktreePath)
       writeFileSync(join(wt, 'src/a.mjs'), 'x1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nx10\n')
@@ -510,7 +523,7 @@ export function registerFlowStateCases(cases) {
         return `失败 verify 后虚假 pass 未被拦截：exit=${passBlocked.status}, out=${passBlocked.stdout}, err=${passBlocked.stderr}`
       }
       await hVerify({ task: 'c4-lk' }, roots)
-      const passOk = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-4', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
+      const passOk = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', resolved: ['C1'], 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-4', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
       if (passOk !== 0) return `override+复绿后 Round 4 pass 失败：exit=${passOk}`
 
       return true
@@ -539,7 +552,7 @@ cases.push(["flow start 能指定基线分支", async () => {
     execFileSync("git", ["checkout", defaultBranch], { cwd: dir, stdio: "ignore", windowsHide: true })
 
     const res = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", [
-      "start", "--task", "base-probe", "--case", "4", "--base", "feat/base-probe", "--branch", "feat/base-probe-task", "--json",
+      "start", "--task", "base-probe", "--case", "4", "--allow-plan-bootstrap", "--base", "feat/base-probe", "--branch", "feat/base-probe-task", "--json",
     ], { cwd: dir })
     if (res.status !== 0) return `--base 没被接受：${res.stderr}`
     const out = JSON.parse(res.stdout)

@@ -23,11 +23,11 @@ import { auditDoc, VALID_STATUS_BY_TYPE } from '../../kit/skills/dev-plan/script
 import { approveSpec } from '../../kit/skills/dev-plan/scripts/doc-plan-ops.mjs'
 import { handleStatus } from '../../kit/skills/dev-flow/scripts/flow-cleanup.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
-import { handleMerge } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
+import { handleClaim, handleMerge } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
 import { handleVerify } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'
 import { buildClusterReport } from '../../kit/skills/dev-govern/scripts/govern-state.mjs'
 import { syncReviewToGitHub } from '../../kit/skills/dev-review/scripts/review-sync.mjs'
-import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 
 async function captureIo(fn) {
   const origOut = process.stdout.write.bind(process.stdout)
@@ -169,7 +169,7 @@ export function registerParallelDispatchCases(cases) {
 
       // 4) doc-plan init --worktree 独立建隔离规划工作树，main 保持干净
       const initWt = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'pair', '--slug', 'p2', '--title', 'Plan P2', '--worktree', '--json',
+        'init', '--kind', 'pair', '--slug', 'p2', '--title', 'Plan P2', '--owner', 'arch-1', '--worktree', '--json',
       ], { cwd: dir })
       if (initWt.status !== 0) return `doc-plan init --worktree 失败：${initWt.stderr}`
       const initJson = JSON.parse(initWt.stdout)
@@ -499,6 +499,8 @@ export function registerParallelDispatchCases(cases) {
       gitSync(wtC7, ['add', '-A'])
       gitSync(wtC7, ['commit', '-qm', 'feat: c7 change'])
       const wtHeadC7 = gitSync(wtC7, ['rev-parse', 'HEAD'], { stdio: 'pipe' }).stdout.trim()
+      await captureIo(() => handleClaim({ task: 'c7-t', agent: 'dev-a' }, roots))
+      await seedExploredFor(dir, 'c7-t')
       await captureIo(() => handleVerify({ task: 'c7-t', mode: 'gate', 'e2e-evidence': 'e2e pass' }, roots))
       await updateTaskLedger(dir, 'c7-t', (cur) => ({
         ...cur,

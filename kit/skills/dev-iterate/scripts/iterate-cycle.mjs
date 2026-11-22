@@ -8,6 +8,35 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块）。
  */
 
+import { existsSync } from 'node:fs'
+import { isAbsolute, join, resolve } from 'node:path'
+
+import { readJsonSafe, readTextSafe, writeJsonAtomic } from '../../lib/git.mjs'
+import { resolveGitDirFast } from '../../lib/git-fast.mjs'
+
+function resolveCycleStatePath(repoRoot) {
+  const root = resolve(String(repoRoot || process.cwd()))
+  const gd = resolveGitDirFast(root)
+  if (gd && existsSync(gd)) {
+    const cdFile = join(gd, 'commondir')
+    const common = existsSync(cdFile) ? (readTextSafe(cdFile) ?? '').trim() : ''
+    const gitCommonDir = common ? (isAbsolute(common) ? resolve(common) : resolve(gd, common)) : gd
+    return join(gitCommonDir, 'project-forge-flow', 'iterate-cycle.json')
+  }
+  return join(root, '.worktrees', '.state', 'iterate-cycle.json')
+}
+
+export function loadCycleState(repoRoot) {
+  return readJsonSafe(resolveCycleStatePath(repoRoot), null)
+}
+
+export function saveCycleState(repoRoot, state) {
+  const path = resolveCycleStatePath(repoRoot)
+  const payload = { schemaVersion: 1, updatedAt: new Date().toISOString(), ...(state && typeof state === 'object' ? state : {}) }
+  writeJsonAtomic(path, payload)
+  return payload
+}
+
 /** 默认与硬上限轮次：无论调用方传什么，循环都不会超过硬上限。 */
 export const DEFAULT_MAX_ROUNDS = 3
 export const HARD_MAX_ROUNDS = 10

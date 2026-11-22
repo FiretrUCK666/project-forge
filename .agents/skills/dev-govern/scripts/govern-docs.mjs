@@ -220,6 +220,14 @@ function checkMarkdownDeadLinks(repoRoot, files, findings) {
   }
 }
 
+export function isAuthoritativeEvergreenDoc(rel, { authoritativeTddPath = null, codeDir = '' } = {}) {
+  if (rel === 'AGENTS.md' || rel === 'docs/TDD.md' || isRootReadmeRel(rel) || rel === 'ARCHITECTURE.md') return true
+  if (/^(?:contributing|security)(?:\.[a-z0-9_.-]+)?\.(?:md|mdx|rst|txt)$/i.test(rel)) return true
+  if (authoritativeTddPath && rel === authoritativeTddPath) return true
+  if (codeDir && (rel === `${codeDir}/AGENTS.md` || rel === `${codeDir}/CLAUDE.md`)) return true
+  return false
+}
+
 async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, authoritativeTddPath = null) {
   if (!isGit) return
   const wtGitDir = resolveGitDirFast(repoRoot)
@@ -250,14 +258,7 @@ async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, autho
     || (existsSync(join(repoRoot, 'docs', 'TDD.md')) ? 'docs/TDD.md' : findPrimaryReadmeRel(repoRoot))
   if (!targetDoc) return
 
-  const isDocUpdate = (rel, codeDir) => {
-    if (rel === 'AGENTS.md' || rel === 'docs/TDD.md' || isRootReadmeRel(rel) || rel === 'ARCHITECTURE.md') return true
-    if (/^(?:contributing|security)(?:\.[a-z0-9_.-]+)?\.(?:md|mdx|rst|txt)$/i.test(rel)) return true
-    if (authoritativeTddPath && rel === authoritativeTddPath) return true
-    if (codeDir && (rel === `${codeDir}/AGENTS.md` || rel === `${codeDir}/CLAUDE.md`)) return true
-    if (rel.startsWith('docs/') && rel.endsWith('.md') && !rel.startsWith('docs/todo/') && !rel.startsWith('docs/archive/')) return true
-    return false
-  }
+  const isDocUpdate = (rel, codeDir) => isAuthoritativeEvergreenDoc(rel, { authoritativeTddPath, codeDir })
   const codeDirKey = (rel) => {
     const parts = rel.split('/')
     if (parts.length <= 1) return ''
@@ -723,6 +724,7 @@ export async function buildPlan(findings, repoRoot, devProfile, isGit) {
     kind: 'todo',
     title: 'Governance Remediation Plan',
     safeSlug: 'govern-remediation',
+    owner: 'govern-audit',
     headSha,
     headBranch,
     taskId,

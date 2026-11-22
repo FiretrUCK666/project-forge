@@ -12,7 +12,8 @@ import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMergeComments, formatAttribution } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
-import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
+import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, samePath } from '../../lib/git.mjs'
+import { enforceSlotBoundary } from '../../lib/harness-context.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
@@ -71,6 +72,16 @@ export async function assertPreMergeGates({
 
   const implRoot = ledger.worktreePath ? resolve(mainRoot, ledger.worktreePath) : mainRoot
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)
+  if (ledger.tier !== 1 && !samePath(implRoot, mainRoot)) {
+    const mainStPre = await gitStatusPorcelainZ(mainRoot)
+    const dirtyMainEntries = mainStPre.ok ? (mainStPre.entries ?? []).filter((e) => e.file && !e.file.startsWith('.worktrees/')) : []
+    const mainGate = enforceSlotBoundary({ mainRoot, implRoot, caseType: ledger.caseType, isDirtyMain: dirtyMainEntries.length > 0, commits: ledger.baseSha ? 1 : 0 })
+    if (!mainGate.ok) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: mainGate.code, reason: mainGate.reason }, null, 2)}\n`)
+      process.stderr.write(`${mainGate.code}: ${mainGate.reason}\n`)
+      return { ok: false, exitCode: mainGate.exitCode, code: mainGate.code }
+    }
+  }
 
   const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), gitDir)?.oid ?? null
   const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: gitDir })
@@ -470,7 +481,7 @@ export async function handleMerge(opts, roots) {
       process.stdout.write(`  补发命令：node .agents/skills/dev-flow/scripts/flow.mjs issue comment --issue ${num} --body "<回告正文>"\n`)
     }
     printCleanupChecklistText(checklist)
-    printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
+    printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }

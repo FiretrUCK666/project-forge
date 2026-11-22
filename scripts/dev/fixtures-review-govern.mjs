@@ -426,6 +426,7 @@ export function registerReviewGovernCases(cases) {
   cases.push(['signals.jsonl 自动写回(I74)+retro --apply-patches、flow-batch CI 门禁与 zip CRC32 冒烟', async () => {
     const { appendGovernSignal, readSignalsJsonl, resolveRepoRoots, writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+    const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleVerify, handleRework } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const { handleBatch } = await import('../../kit/skills/dev-flow/scripts/flow-batch.mjs')
@@ -452,7 +453,9 @@ export function registerReviewGovernCases(cases) {
       const filledAgents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
         .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填完。')
         .replace('<填写项目快测命令>', 'node -e "process.exit(1)"')
+        .replace('<单文件或快测命令>', 'node -e "process.exit(1)"')
         .replace('<运行时端到端冒烟验证命令，或 none>', 'none')
+        .replace(/<[^>]+>/g, 'none')
       writeFileSync(join(dir, 'AGENTS.md'), filledAgents)
       gitCommitFast(dir, 'init agents', { files: ['AGENTS.md'], name: 'alice', email: 'alice@acme.test' })
 
@@ -468,6 +471,7 @@ export function registerReviewGovernCases(cases) {
       }
 
       await handleStart({ task: 'c3-t', case: '2', slug: 'c3-t', implementer: 'alice' }, roots)
+      await handleClaim({ task: 'c3-t', agent: 'alice' }, roots)
       await seedExploredFor(dir, 'c3-t')
       const wt = join(dir, '.worktrees', 'impl-c3-t')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const app = 2\n')
@@ -499,6 +503,8 @@ export function registerReviewGovernCases(cases) {
       if (chkAgents.status !== 0) {
         return `retro --apply-patches 破坏了 compose-agents --check：${chkAgents.stderr}`
       }
+      gitSync(dir, ['add', '-A'])
+      gitCommitFast(dir, 'chore: apply retro patches', { name: 'alice', email: 'alice@acme.test' })
 
       // Test flow-batch merge-queue CI guard WITHOUT marking ledger rework
       writeTaskLedger(dir, {

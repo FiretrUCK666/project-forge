@@ -27,7 +27,7 @@ import {
   resolveNativeTestDir, slugTestToken, updateFeatureMapTestRefs, validateGeneratedTestQuality,
 } from '../../lib/test-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
-import { buildCyclePlan, formatCycleText } from './iterate-cycle.mjs'
+import { buildCyclePlan, formatCycleText, loadCycleState, saveCycleState } from './iterate-cycle.mjs'
 
 export { validateGeneratedTestQuality }
 
@@ -568,11 +568,21 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   const repoRoot = roots.workTreeRoot
 
   if (sub === 'cycle') {
+    const prevCycle = loadCycleState(roots.mainRoot)
+    const effectiveProgress = opts['progress-history'] ?? prevCycle?.progressHistory ?? []
     const plan = buildCyclePlan({
-      goal: opts.goal ?? '',
-      maxRounds: opts['max-rounds'],
-      progressHistory: opts['progress-history'],
+      goal: opts.goal || prevCycle?.goal || '',
+      maxRounds: opts['max-rounds'] ?? prevCycle?.maxRounds,
+      progressHistory: effectiveProgress,
       pendingGates: opts['pending-gates'],
+    })
+    saveCycleState(roots.mainRoot, {
+      goal: plan.goal,
+      maxRounds: plan.maxRounds,
+      round: plan.nextRound ?? plan.roundsCompleted,
+      progressHistory: plan.roundProgress,
+      stopped: plan.stopped,
+      stopReason: plan.stopReason ?? null,
     })
     if (opts.json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
     else process.stdout.write(`${formatCycleText(plan)}\n`)
@@ -636,6 +646,11 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       for (const r of out.results) {
         process.stdout.write(`  - [${r.ok ? 'PASS' : 'FAIL'}] ${r.file} (${r.durationMs}ms${r.failureKind ? `, ${r.failureKind}` : ''})\n`)
       }
+      printNextStep([
+        out.ok
+          ? { skill: 'dev-iterate', text: 'node ".agents/skills/dev-iterate/scripts/iterate.mjs" cycle --json' }
+          : { skill: 'dev-flow', text: 'node ".agents/skills/dev-flow/scripts/flow.mjs" next' },
+      ], { repoRoot: roots.mainRoot })
     }
     return out.ok ? 0 : 1
   }

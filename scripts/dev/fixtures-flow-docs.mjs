@@ -122,14 +122,14 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
     const { handleFinalize, handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const lRoots = await resolveRepoRoots(localDir)
 
-    const start1 = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-flow', '--case', '3', '--slug', 'demo-feat', '--json'], { cwd: localDir })
+    const start1 = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-flow', '--case', '3', '--slug', 'demo-feat', '--agent', 'alice', '--allow-plan-bootstrap', '--json'], { cwd: localDir })
     if (start1.status !== 0) return `flow start 失败：${start1.stderr}`
     await seedExploredFor(localDir, 't-flow')
     const ledger1 = JSON.parse(start1.stdout)
     const wtRoot = join(localDir, ledger1.worktreePath)
 
     // 建未勾选 Todo -> finalize 必须失败
-    const todoInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--type', 'todo', '--slug', 'demo-feat', '--title', '测试任务', '--task', 't-flow', '--json'], { cwd: wtRoot })
+    const todoInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--type', 'todo', '--slug', 'demo-feat', '--title', '测试任务', '--task', 't-flow', '--owner', 'planner', '--json'], { cwd: wtRoot })
     if (todoInit.status !== 0) return `doc-plan init todo 失败：${todoInit.stderr}`
     const todoInfo = JSON.parse(todoInit.stdout)
 
@@ -143,7 +143,7 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
 
     const v1 = await handleVerify({ task: 't-flow', cmd: 'exit 0' }, lRoots)
     if (v1.exitCode !== 0) return `verify 失败：${v1.exitCode}`
-    const subNoFin = await handleSubmit({ task: 't-flow' }, lRoots)
+    const subNoFin = await handleSubmit({ task: 't-flow', agent: 'alice' }, lRoots)
     if (subNoFin.exitCode !== 3) {
       return `未 finalize 时 submit 未拦截：exit=${subNoFin.exitCode}`
     }
@@ -155,13 +155,13 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
 
     writeFileSync(join(wtRoot, 'src/app.mjs'), 'export const n = 2\n')
     gitCommitFast(wtRoot, 'code change after verify', { updateOnly: true })
-    const subStale = await handleSubmit({ task: 't-flow' }, lRoots)
+    const subStale = await handleSubmit({ task: 't-flow', agent: 'alice' }, lRoots)
     if (subStale.exitCode !== 3) return `代码变更后 verifiedHead 失效未拦截 submit：exit=${subStale.exitCode}`
 
     // 重跑 finalize + verify -> submit 放行退出 0
     await handleFinalize({ task: 't-flow' }, lRoots)
     await handleVerify({ task: 't-flow', cmd: 'exit 0' }, lRoots)
-    const subOk = await handleSubmit({ task: 't-flow' }, lRoots)
+    const subOk = await handleSubmit({ task: 't-flow', agent: 'alice' }, lRoots)
     if (subOk.exitCode !== 0) return `本地完整校验后 submit 失败：exit=${subOk.exitCode}`
     return true
   } finally {
@@ -200,18 +200,19 @@ cases.push(['flow inspect + fork 禁止 merge 与 OPEN PR 禁止 cleanup', async
     }
 
     // 清理未带 --confirm 必须阻断（exit 3）
-    const cNoConfirm = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork'], { cwd: forkDir })
+    const cNoConfirm = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork', '--json'], { cwd: forkDir })
     if (cNoConfirm.status !== 3 || !/BLOCKED_CONFIRMATION_REQUIRED/.test(cNoConfirm.stdout)) {
       return `cleanup 未带 --confirm 未阻断：exit=${cNoConfirm.status} out=${cNoConfirm.stdout}`
     }
+    const previewHash = JSON.parse(cNoConfirm.stdout).previewHash
 
-    // 将 PR 状态写为 OPEN 后，哪怕带 --confirm 也必须硬锁拒绝删 Fork 分支（exit 3）
+    // 将 PR 状态写为 OPEN 后，哪怕带 --confirm --preview-hash 也必须硬锁拒绝删 Fork 分支（exit 3）
     const ledgerFile = join(forkDir, '.worktrees', '.state', 'tasks', 't-fork.json')
     const lObj = JSON.parse(readFileSync(ledgerFile, 'utf8'))
     lObj.prState = 'OPEN'
     writeFileSync(ledgerFile, JSON.stringify(lObj, null, 2))
 
-    const cOpenPr = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork', '--confirm'], { cwd: forkDir })
+    const cOpenPr = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork', '--confirm', '--preview-hash', previewHash], { cwd: forkDir })
     if (cOpenPr.status !== 3 || !/BLOCKED_OPEN_FORK_PR/.test(cOpenPr.stderr)) {
       return `上游 PR OPEN 时 cleanup --confirm 未硬锁：exit=${cOpenPr.status} stderr=${cOpenPr.stderr}`
     }

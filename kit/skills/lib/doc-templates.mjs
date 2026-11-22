@@ -330,6 +330,8 @@ export function buildStandardDocContent({
   noPrune = false,
   docShape = null,
   planMode = null,
+  multiSpec = false,
+  caseType = null,
   serializeFm,
   keyOrders,
 }) {
@@ -361,6 +363,8 @@ export function buildStandardDocContent({
     const fm = serializeFm({
       kind: 'prd', title, status: 'draft', created: today, updated: today,
       issue: issueNum, pr: null, owner: owner ?? null, plan_mode: resolveDocPlanMode({ kind: 'prd', explicit: planMode }),
+      ...(multiSpec ? { multi_spec: true } : {}),
+      ...(Number.isInteger(caseType) ? { case_type: caseType } : {}),
       plan_critique: 'pending',
       related_spec: relatedSpecRel ?? null, related_todo: relatedTodoRel ?? null,
     }, keyOrders.prd)

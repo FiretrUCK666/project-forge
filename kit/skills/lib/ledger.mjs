@@ -24,40 +24,51 @@ const OPEN_TASK_STATUSES = new Set(['planned', 'planning', 'started', 'claimed',
  * 令牌的形状刻意不透明（前缀 `pf-rv-` 便于在日志里认出来，其余是随机字节），
  * 它不承载任何可推导的信息：能推导的东西就等于能自己造。
  */
-export function issueReviewToken(round) {
+export function issueReviewToken(round, { reviewerId = null, headSha = null } = {}) {
   const bytes = randomBytes(18)
   const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-  return { token: `pf-rv-${hex}`, round: Number(round) || 1, issuedAt: new Date().toISOString(), consumedAt: null }
+  return {
+    token: `pf-rv-${hex}`,
+    round: Number(round) || 1,
+    reviewerId: reviewerId ? String(reviewerId).trim() : null,
+    headSha: headSha ? String(headSha).trim() : null,
+    issuedAt: new Date().toISOString(),
+    consumedAt: null,
+  }
 }
 
 /**
- * 取这一轮的一次性审查令牌：有未消费的就复用，没有就发一枚并写回账本。
- *
- * 只有 `flow next` 在待审查阶段调用它——**签发点唯一**，否则调用方各发各的，
- * 令牌就不再是「现场签发的那个东西」。
- *
- * 复用而不是每次新发：`flow next` 可能被连跑好几次（人看状态、脚本问路），
- * 每次新发一枚会让前一枚作废，而调用方手里拿的很可能是前一枚。
+ * 取这一轮的一次性审查令牌：有未消费且绑定一致的就复用，否则重发并写回账本。
  *
  * @returns {{ token: string, entry: object, issued: boolean }}
  */
-export function ensureReviewToken(mainRoot, ledger, round) {
+export function ensureReviewToken(mainRoot, ledger, round, { reviewerId = null, headSha = null } = {}) {
   const list = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
-  const existing = list.find((t) => t && Number(t.round) === Number(round) && !t.consumedAt)
-  if (existing) return { token: existing.token, entry: existing, issued: false }
-  const entry = issueReviewToken(round)
+  const wantReviewer = reviewerId ? String(reviewerId).trim().toLowerCase() : null
+  const wantHead = headSha ? String(headSha).trim() : null
+  const existing = list.find((t) => {
+    if (!t || Number(t.round) !== Number(round) || t.consumedAt) return false
+    if (t.headSha && wantHead && t.headSha !== wantHead) return false
+    if (t.reviewerId && wantReviewer && String(t.reviewerId).trim().toLowerCase() !== wantReviewer) return false
+    return true
+  })
+  if (existing) {
+    let changed = false
+    if (wantHead && !existing.headSha) { existing.headSha = wantHead; changed = true }
+    if (reviewerId && !existing.reviewerId) { existing.reviewerId = String(reviewerId).trim(); changed = true }
+    if (changed) writeTaskLedger(mainRoot, ledger)
+    return { token: existing.token, entry: existing, issued: false }
+  }
+  const entry = issueReviewToken(round, { reviewerId, headSha })
   ledger.reviewTokens = [...list, entry]
   writeTaskLedger(mainRoot, ledger)
   return { token: entry.token, entry, issued: true }
 }
 
 /**
- * 消费一枚令牌。成功返回 `{ ok: true }`，失败返回原因。
- *
- * 三条都要满足：令牌存在、round 对得上、未被消费过。少判一条就等于没有令牌——
- * 复用旧令牌、或拿 Round 1 的令牌记 Round 3，都会让「独立审查」这个说法失效。
+ * 消费一枚令牌。校验令牌存在、未消费、round 一致，以及绑定的 headSha / reviewerId 一致。
  */
-export function consumeReviewToken(ledger, token, round) {
+export function consumeReviewToken(ledger, token, round, { reviewerId = null, headSha = null } = {}) {
   const value = String(token ?? '').trim()
   if (!value) return { ok: false, reason: 'MISSING_REVIEW_TOKEN' }
   const list = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
@@ -66,6 +77,22 @@ export function consumeReviewToken(ledger, token, round) {
   if (hit.consumedAt) return { ok: false, reason: 'REVIEW_TOKEN_ALREADY_CONSUMED' }
   if (Number(hit.round) !== Number(round)) {
     return { ok: false, reason: `REVIEW_TOKEN_ROUND_MISMATCH: 令牌是 Round ${hit.round} 的，当前记 Round ${round}` }
+  }
+  const gotHead = headSha ? String(headSha).trim() : null
+  if (hit.headSha && gotHead && hit.headSha !== gotHead) {
+    return {
+      ok: false,
+      code: 'BLOCKED_REVIEW_TOKEN_BINDING',
+      reason: `REVIEW_TOKEN_HEAD_MISMATCH: 令牌绑定 HEAD=${hit.headSha.slice(0, 7)}，当前 HEAD=${gotHead.slice(0, 7)}，请重跑 flow.mjs next 刷新令牌`,
+    }
+  }
+  const gotReviewer = reviewerId ? String(reviewerId).trim().toLowerCase() : null
+  if (hit.reviewerId && gotReviewer && String(hit.reviewerId).trim().toLowerCase() !== gotReviewer) {
+    return {
+      ok: false,
+      code: 'BLOCKED_REVIEW_TOKEN_BINDING',
+      reason: `REVIEW_TOKEN_REVIEWER_MISMATCH: 令牌绑定审查人=${hit.reviewerId}，当前传参=${reviewerId}`,
+    }
   }
   hit.consumedAt = new Date().toISOString()
   return { ok: true, entry: hit }

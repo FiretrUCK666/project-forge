@@ -16,19 +16,21 @@
  *   list           [--json]
  */
 
-import { existsSync, mkdirSync, statSync } from 'node:fs'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
+import { join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
+import { resolveHostMode, resolveNonEmptyActor, validateDocOwnerValue } from '../../lib/harness-context.mjs'
+import { recordTriageDecision } from '../../lib/session-state.mjs'
 import {
-  archiveCompletedDocsGroup, buildDocFilename, DOC_FRONTMATTER_KEY_ORDER,
-  docDateTag, docIsoDate, isApprovingStatusValue, parseDocFilename, parseDocFrontmatter,
-  renderStandardDocTemplate, resolveRepoCustomDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
+  archiveCompletedDocsGroup, DOC_FRONTMATTER_KEY_ORDER,
+  docIsoDate, isApprovingStatusValue, parseDocFilename, parseDocFrontmatter,
+  syncDocsLifecycle, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import {
-  ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
-  canonicalPath, posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
+  gitStatusPorcelainZ, isMainModule,
+  canonicalPath, posixPath, readTextSafe, resolveRepoRoots, sha256Text,
 } from '../../lib/git.mjs'
 import {
   buildCritiqueScope, collectExcludedReviewers, CRITIQUE_FINDINGS_KEY,
@@ -37,18 +39,13 @@ import {
 } from '../../lib/critique-rounds.mjs'
 import { resolveDocIssueNumber, syncPlanPhaseToBackend } from '../../lib/plan-sync.mjs'
 import { renderVerificationForReviewer, verifyDocClaims } from '../../lib/doc-verify.mjs'
-import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
-import { collectTddFacts } from '../../lib/tdd-facts.mjs'
-import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
-import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
   readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger,
 } from '../../lib/ledger.mjs'
-import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
 import { describeAuditNotApplicable } from './doc-audit-repo.mjs'
-import { approveSpec, clarifyDoc, supersedeSpec } from './doc-plan-ops.mjs'
+import { approveSpec, clarifyDoc, initDoc, supersedeSpec } from './doc-plan-ops.mjs'
 import {
   isValidPlanMode, normalizePlanMode, PLAN_MODES, resolveDocPlanMode,
 } from '../../lib/pending-decisions.mjs'
@@ -107,203 +104,13 @@ function resolveCliPlanMode(raw) {
   throw err
 }
 
-async function initDoc({
-  repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
-  taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
-  planMode = null, worktree = false,
-}) {
-  const effectiveKind = kind ?? type
-  if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
-    throw new Error(`--kind / --type 必须是 prd、spec、todo、tdd、pair 或 all，收到：${effectiveKind}`)
-  }
-  const safeSlug = slugify(slug)
-  const issueNum = parseIssueArg(issue)
-  const dateTag = docDateTag()
-  const today = docIsoDate()
-
-  let writeRoot = repoRoot
-  let existingLedger = null
-  const effTaskId = taskId ? sanitizeTaskId(taskId) : (worktree ? sanitizeTaskId(safeSlug) : null)
-  if (effTaskId) {
-    existingLedger = readTaskLedger(mainRoot, effTaskId)
-    if (existingLedger?.worktreePath && existsSync(join(mainRoot, existingLedger.worktreePath))) {
-      writeRoot = join(mainRoot, existingLedger.worktreePath)
-    }
-  }
-  let planningBranch = branch ?? existingLedger?.branch ?? null
-  let planningWorktreeRel = existingLedger?.worktreePath ?? null
-  if (worktree) {
-    if (!isGit) throw new Error('--worktree 仅支持 Git 仓库')
-    await ensureWorktreesIgnored(mainRoot, gitDir)
-    planningWorktreeRel = planningWorktreeRel || `.worktrees/impl-${effTaskId}`
-    planningBranch = planningBranch || `feat/${effTaskId}`
-    const wtAbs = join(mainRoot, planningWorktreeRel)
-    if (!existsSync(wtAbs)) {
-      const hasBr = await gitRun(mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${planningBranch}`])
-      const addArgs = hasBr.ok
-        ? ['worktree', 'add', wtAbs, planningBranch]
-        : ['worktree', 'add', '-b', planningBranch, wtAbs, 'HEAD']
-      const wtRes = await gitRun(mainRoot, addArgs)
-      if (!wtRes.ok) throw new Error(`创建规划隔离 worktree 失败：${wtRes.stderr}`)
-    }
-    writeRoot = wtAbs
-  }
-
-  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo', tdd: 'docs' }
-  const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
-  const fastHead = isGit ? readHeadFast(resolveGitDirFast(writeRoot), gitDir) : null
-  const headRes = fastHead?.oid
-    ? { ok: true, stdout: fastHead.oid }
-    : (isGit ? await gitRun(writeRoot, ['rev-parse', 'HEAD']) : { ok: false, stdout: '' })
-  const headSha = headRes.ok && headRes.stdout ? headRes.stdout.trim() : 'uncommitted'
-  let headBranch = branch ?? (fastHead?.branch ?? null)
-  if (!headBranch && isGit && !fastHead) {
-    const sym = await gitRun(writeRoot, ['symbolic-ref', '--short', 'HEAD'])
-    if (sym.ok && sym.stdout.trim()) headBranch = sym.stdout.trim()
-    else {
-      const brRes = await gitRun(writeRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      if (brRes.ok && brRes.stdout && brRes.stdout.trim() !== 'HEAD') headBranch = brRes.stdout.trim()
-    }
-  }
-  const profile = parseAgentsProfile(writeRoot)
-  const quickCmd = profile.quickTest && profile.quickTest !== 'none'
-    ? profile.quickTest
-    : '无自动快测命令（按手动步骤实证替代）'
-  const needsShape = kindsToCreate.some((k) => k !== 'tdd')
-  const docShape = needsShape && !noPrune ? await probeWorkspaceDocShape(writeRoot) : null
-
-  let inheritedPrdAbs = relatedPrd ? resolve(writeRoot, relatedPrd) : null
-  if (!inheritedPrdAbs && relatedSpec) {
-    const parentSpecAbs = resolve(writeRoot, relatedSpec)
-    const parentRaw = readTextSafe(parentSpecAbs)
-    const parentFm = parentRaw ? parseDocFrontmatter(parentRaw) : null
-    const rawRelPrd = parentFm?.data?.related_prd
-    if (typeof rawRelPrd === 'string' && rawRelPrd.trim() && !/^(?:无|none|null)$/i.test(rawRelPrd.trim())) {
-      const candAbs = resolve(dirname(parentSpecAbs), rawRelPrd.trim())
-      if (existsSync(candAbs)) inheritedPrdAbs = candAbs
-    }
-  }
-
-  const planned = []
-  for (const k of kindsToCreate) {
-    // TDD 是常青单文件，文件名固定为 docs/TDD.md——加日期前缀会让每份 TDD 变成新文件，
-    // 而它本来就该被就地改写。
-    const fileName = k === 'tdd' ? 'TDD.md' : buildDocFilename({ date: dateTag, issue: issueNum, slug: safeSlug, kind: k })
-    const relFile = `${dirMap[k]}/${fileName}`
-    const absFile = join(writeRoot, relFile)
-    if (existsSync(absFile) && !force) throw new Error(`目标文件已存在：${relFile}（如确需重建请加 --force）`)
-    planned.push({ kind: k, file: relFile, absFile })
-  }
-
-  const customTemplates = []
-  for (const item of planned) {
-    const relatedSpecRel = item.kind === 'todo' && relatedSpec
-      ? posixPath(relative(dirname(item.absFile), resolve(writeRoot, relatedSpec)))
-      : null
-    const relatedPrdRel = item.kind !== 'prd' && inheritedPrdAbs
-      ? posixPath(relative(dirname(item.absFile), inheritedPrdAbs))
-      : null
-    const customTpl = resolveRepoCustomDocTemplate(writeRoot, item.kind)
-    if (customTpl) customTemplates.push({ kind: item.kind, template: customTpl.rel })
-    let content
-    if (item.kind === 'tdd') {
-      // 从仓库事实预填：技术栈、模块表、命令这些读得出来的东西不该让人再抄一遍。
-      // 只收集生成 TDD 需要的那几项事实：跑整套勘察既慢又跨层。
-      const facts = await collectTddFacts(writeRoot)
-      content = buildPreFilledTdd(facts, {
-        repoRoot: writeRoot,
-        noPrune: Boolean(noPrune),
-        projectName: title,
-        today,
-        topLevelDirs: facts?.tddShape?.topLevelDirs ?? [],
-        allPaths: facts?.tddShape?.filePaths ?? [],
-      })
-    } else {
-      content = renderStandardDocTemplate({
-        kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
-        taskId, issueNum, owner, quickCmd, relatedPrdRel, relatedSpecRel,
-        pruneUnfilled: false, noPrune: Boolean(noPrune), docShape, planMode,
-      })
-    }
-    mkdirSync(dirname(item.absFile), { recursive: true })
-    writeAtomic(item.absFile, content)
-  }
-
-  if (planned.length > 1 || relatedSpec || relatedPrd) {
-    const syncRes = await syncDocsLifecycle(writeRoot, {
-      slugOrPath: planned[0].file,
-      issue: issueNum ?? undefined,
-      branch: planned.length > 1 ? (headBranch ?? undefined) : (branch ?? undefined),
-      owner: owner ?? undefined,
-    })
-    for (const r of syncRes.renamed ?? []) {
-      const hit = planned.find((p) => p.file === r.from)
-      if (hit) {
-        hit.file = r.to
-        hit.absFile = join(writeRoot, r.to)
-      }
-    }
-  }
-
-  let ledgerUpdated = false
-  if (milestone) {
-    for (const item of planned) {
-      if (item.kind !== 'tdd') updateDocFrontmatter(item.absFile, { milestone }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? [] })
-    }
-  }
-  if (effTaskId) {
-    if (isGit) await ensureWorktreesIgnored(mainRoot, gitDir)
-    await updateTaskLedger(mainRoot, effTaskId, (cur) => {
-      const next = { ...cur }
-      for (const item of planned) {
-        if (item.kind === 'prd') next.prdFile = item.file
-        else if (item.kind === 'spec') next.specFile = item.file
-        else if (item.kind === 'todo') next.todoFile = item.file
-      }
-      if (issueNum && Array.isArray(next.linkedIssues) && !next.linkedIssues.includes(issueNum)) {
-        next.linkedIssues = [...next.linkedIssues, issueNum]
-      }
-      if (milestone) next.milestone = milestone
-      if (worktree) {
-        next.isolation = 'worktree'
-        next.worktreePath = planningWorktreeRel
-        next.branch = planningBranch
-        if (!cur.status || cur.status === 'planned' || cur.status === 'planning') {
-          next.status = 'planning'
-          next.planning = true
-        }
-      }
-      return next
-    }, {
-      createIfMissing: true,
-      defaults: {
-        taskId: effTaskId, slug: safeSlug,
-        isolation: worktree ? 'worktree' : null,
-        worktreePath: worktree ? planningWorktreeRel : null,
-        branch: worktree ? planningBranch : null,
-        planning: worktree,
-        status: worktree ? 'planning' : 'planned',
-      },
-    })
-    ledgerUpdated = true
-  }
-
-  const primary = planned[planned.length - 1]
-  return {
-    type: effectiveKind, kind: effectiveKind, writeRoot, file: primary.file, absFile: primary.absFile,
-    files: planned.map((p) => p.file), created: planned.map((p) => ({ kind: p.kind, file: p.file })),
-    taskId: effTaskId, worktreePath: planningWorktreeRel, branch: planningBranch,
-    issue: issueNum, milestone: milestone ?? null, plannedAt: headSha, ledgerUpdated, customTemplates,
-  }
-}
-
 function printHelp() {
   process.stdout.write([
     '用法：node .agents/skills/dev-plan/scripts/doc-plan.mjs <子命令> [选项]',
     '',
     '子命令：',
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--json]',
-    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree] [--no-prune] [--json]',
+    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--owner <name>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--single-session] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree] [--no-prune] [--json]',
     '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O> --owner-reason "<变更原因>"] [--status <S>] [--milestone <m>] [--json]',
     '  audit              [--file <docPath> | .] [--json]',
@@ -312,7 +119,7 @@ function printHelp() {
     '  critique-reject    --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
     '  critique-continue  --file <docPath> --reason <改进方向> [--by <actor>] [--task <id>] [--json]',
     '  critique-override  --file <docPath> --human-approved --reason <原因> [--by <actor>] [--json]',
-    '  approve            --file <specPath> [--skip-critique-reason <文本>] [--json]',
+    '  approve            --file <specPath> [--skip-critique-reason <文本>] [--host-mode <m>] [--single-session] [--human-approved] [--json]',
     '  archive            [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
     '  supersede          <oldSpec> --by <newSpec> [--json]',
     '  list               [--json]',
@@ -328,8 +135,8 @@ async function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'multi-spec', 'single-session'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
       usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|critique-reject|critique-continue|critique-override|approve|archive|supersede|list>',
@@ -378,6 +185,15 @@ async function main(argv) {
         doorType: result.doorType,
         explicit: explicitPlanMode,
       })
+      try {
+        recordTriageDecision(mainRoot, {
+          caseType: result.caseType,
+          summary,
+          paths: triagePaths,
+          doorType: result.doorType,
+          planMode: result.planMode,
+        })
+      } catch { /* non-fatal on non-writable root */ }
       if (cli.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
       else {
         process.stdout.write(`分流结论：Case ${result.caseType} (${result.action})${result.blocked ? ' [BLOCKED]' : ''}\n`)
@@ -401,13 +217,35 @@ async function main(argv) {
 
     if (sub === 'init') {
       if (!opts.kind || !opts.slug || !opts.title) throw new Error('init 需要 --kind <prd|spec|todo|pair|all>、--slug <slug> 与 --title <title>')
+      let resolvedOwner = opts.owner
+      if (String(opts.kind).toLowerCase() !== 'tdd') {
+        if (opts.owner !== undefined) {
+          const chk = validateDocOwnerValue(opts.owner)
+          if (!chk.ok) throw Object.assign(new Error(chk.reason), { code: chk.code, exitCode: chk.exitCode })
+          resolvedOwner = chk.owner
+        } else {
+          const hostMode = resolveHostMode(opts)
+          const actorRes = resolveNonEmptyActor([opts.agent], {
+            role: 'doc-owner',
+            hostMode,
+            humanApproved: Boolean(opts['human-approved']),
+            allowSingleSessionWaive: true,
+          })
+          if (!actorRes.ok) {
+            throw Object.assign(new Error(actorRes.reason), { code: 'INVALID_OWNER', exitCode: EXIT.USAGE })
+          }
+          resolvedOwner = actorRes.actor
+        }
+      }
       const res = await initDoc({
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         kind: opts.kind, slug: opts.slug, title: opts.title, taskId: opts.task,
-        issue: opts.issue, owner: opts.owner, branch: opts.branch, relatedSpec: opts.spec,
+        issue: opts.issue, owner: resolvedOwner, branch: opts.branch, relatedSpec: opts.spec,
         relatedPrd: opts.prd, milestone: opts.milestone, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
         planMode: resolveCliPlanMode(opts['plan-mode']),
         worktree: Boolean(opts.worktree),
+        multiSpec: Boolean(opts['multi-spec']),
+        caseType: opts.case !== undefined ? Number(opts.case) : null,
       })
       res.planSync = await syncPlanPhaseToBackend({
         repoRoot: res.writeRoot ?? repoRoot, mainRoot, gitDir: roots.gitDir,
@@ -426,7 +264,7 @@ async function main(argv) {
       if (!opts.file || !opts.decision) throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"')
       const res = clarifyDoc({
         repoRoot, file: opts.file, question: opts.question ?? '',
-        decision: opts.decision, by: opts.by ?? 'user', criterion: opts.criterion ?? '',
+        decision: opts.decision, by: opts.by ?? 'user', explicitBy: opts.by, criterion: opts.criterion ?? '',
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else process.stdout.write(`已写入澄清记录到 ${res.file}：${res.entry}${res.addedCriterion ? `（新增 ${res.addedCriterion.id}）` : ''}\n`)
@@ -667,6 +505,7 @@ async function main(argv) {
       const res = approveSpec({
         repoRoot, mainRoot, gitDir: roots.gitDir,
         file: opts.file, skipCritiqueReason: opts['skip-critique-reason'], taskId: opts.task ?? null,
+        hostMode: resolveHostMode(opts), humanApproved: Boolean(opts['human-approved']),
       })
       const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
       const taskKey = opts.task ?? fm.data?.task_id

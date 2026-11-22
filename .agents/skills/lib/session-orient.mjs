@@ -96,6 +96,12 @@ export function buildSessionOrientation(mainRoot) {
     specs: (listed.specs ?? []).map((d) => summarize('spec', d)),
     todos: (listed.todos ?? []).map((d) => summarize('todo', d)),
   }
+  const remediationTodos = (listed.todos ?? [])
+    .filter((d) => {
+      const txt = readTextSafe(join(mainRoot, d.file)) ?? ''
+      return /^source:\s*retro\b/mi.test(txt) || /retro/i.test(d.file)
+    })
+    .map((d) => d.file)
 
   // 账本里的任务：`listTaskLedgers` 返回的是活跃任务，读不出来就当没有。
   let tasks = []
@@ -258,6 +264,7 @@ export function buildSessionOrientation(mainRoot) {
 
   return {
     docs,
+    remediationTodos,
     contextIndex: contextDocs.contextIndex,
     docLocateHints: contextDocs.docLocateHints,
     tasks,

@@ -379,11 +379,20 @@ async function finishAudit({
     const unmappedSourceModules = fm.valid
       ? files
           .map((f) => posixPath(f.rel ?? f))
-          .filter((rel) => /^(?:src|lib|app|packages|services|scripts)\//.test(rel)
+          .filter((rel) => /^(?:src|lib|kit|app|apps|packages|pkg|cmd|internal|services|scripts)\//.test(rel)
             && /\.(?:mjs|cjs|js|ts|tsx|py|go|rs|java|rb|php|cs)$/.test(rel)
             && !/(?:^|\/)(?:test|tests|__tests__|fixtures|dev)\//i.test(rel)
             && !mappedPaths.has(rel))
           .slice(0, 20)
+      : []
+    const emptyDocAnchors = fm.valid
+      ? fm.features.filter((f) => !Array.isArray(f.docAnchors) || f.docAnchors.length === 0).map((f) => f.id ?? f.name).filter(Boolean)
+      : []
+    const emptyToolDomains = fm.valid
+      ? fm.features.filter((f) => !Array.isArray(f.verificationTools) || f.verificationTools.length === 0).map((f) => f.id ?? f.name).filter(Boolean)
+      : []
+    const emptyTestRefDomains = fm.valid
+      ? fm.features.filter((f) => !Array.isArray(f.testRefs) || f.testRefs.length === 0).map((f) => f.id ?? f.name).filter(Boolean)
       : []
     const hotDocSkewModules = findings
       .filter((f) => String(f.id ?? '').startsWith('docs.stale-vs-churn'))
@@ -394,6 +403,9 @@ async function finishAudit({
       || missingEntryPaths.length > 0
       || staleFeatures.length > 0
       || unmappedSourceModules.length > 0
+      || emptyDocAnchors.length > 0
+      || emptyToolDomains.length > 0
+      || emptyTestRefDomains.length > 0
       || hotDocSkewModules.length > 0
     const nextCommands = docGapOrDrift
       ? [
@@ -406,6 +418,9 @@ async function finishAudit({
       tddPresent: existsSync(join(workTreeRoot, 'docs', 'TDD.md')),
       evergreenDocs,
       duplicateGroups,
+      emptyDocAnchors,
+      emptyToolDomains,
+      emptyTestRefDomains,
       featureMap: {
         path: FEATURE_MAP_REL,
         present: fm.present,
@@ -418,6 +433,9 @@ async function finishAudit({
       featureMapDrift: {
         missingEntryPaths,
         unmappedSourceModules,
+        emptyDocAnchors,
+        emptyToolDomains,
+        emptyTestRefDomains,
         staleFeatures,
         hotDocSkewModules,
       },

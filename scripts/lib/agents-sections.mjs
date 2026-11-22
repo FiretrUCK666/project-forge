@@ -487,4 +487,30 @@ export function findMissingIntentRoutingSkills(root, agentsText) {
   return missing
 }
 
+/** 校验 AGENTS.md Dev Profile 区间非空且不含未填占位值。 */
+export function validateDevProfileRegion(agentsText) {
+  const text = String(agentsText ?? '').replace(/\r\n/g, '\n')
+  const { regions } = markerRegions(text, 'AGENTS.md')
+  const dp = regions.find((r) => r.id === 'Dev Profile')
+  if (!dp) return { ok: true }
+  const body = text.split('\n').slice(dp.start + 1, dp.end).join('\n')
+  if (parseMarkers(body, 'AGENTS.md').some((m) => m.kind === 'fill')) {
+    return { ok: false, reason: 'Dev Profile 含未填 fill 标记' }
+  }
+  const yamlMatch = /```ya?ml\n([\s\S]*?)```/i.exec(body)
+  if (!yamlMatch) return { ok: false, reason: 'Dev Profile 缺少 yaml 配置块' }
+  let count = 0
+  for (const line of yamlMatch[1].split('\n')) {
+    const clean = line.replace(/(?:^|\s)#.*$/, '').trim()
+    const kv = /^([a-z-]+)\s*:\s*(.*)$/i.exec(clean)
+    if (!kv) continue
+    count += 1
+    const val = kv[2].trim()
+    if (!val || isAnglePlaceholder(val) || /^(?:待填|待补充|tbd|fixme)$/i.test(val)) {
+      return { ok: false, reason: `Dev Profile 键 ${kv[1]} 仍为占位或空值（${val || '空'}）` }
+    }
+  }
+  return count > 0 ? { ok: true } : { ok: false, reason: 'Dev Profile 配置块为空' }
+}
+
 

@@ -120,6 +120,36 @@ const RECEIPT_LINES = Object.freeze([
  * 具体步骤、命令、门禁一律不抄——那些由状态机与 Dev Profile 现算。
  */
 const ROLE_BOUNDARY = Object.freeze({
+  explore: Object.freeze({
+    label: '只读探索者',
+    scope: '只负责按需测绘仓库架构、模块边界、符号入口与相关文档切片。',
+    mustNot: Object.freeze([
+      '在探索阶段修改源码、配置或规划文档',
+      '用主观猜想替代 `repo-map.mjs` / `doc-locate.mjs` 实际定位结果',
+      '全量通读无关归档或大体积锁文件浪费上下文',
+    ]),
+    report: '**交回来要说清**：核心入口与可复用模块列表、依赖边界、`symbolCount` 与拟改造文件影响面。',
+  }),
+  plan: Object.freeze({
+    label: '规划设计者',
+    scope: '只负责收敛需求、冻结 C1..Cn 可验证验收标准与编写 PRD/SPEC/Todo，不参与实现。',
+    mustNot: Object.freeze([
+      '在多代理模式下自己兼任同一任务的实施者',
+      '保留未清空的待拍板问题或 `<待填>` 占位桩去强行过审',
+      '在验收标准里写没有可执行命令或断言的空泛套话',
+    ]),
+    report: '**交回来要说清**：生成的 PRD/SPEC/Todo 路径、冻结的 `C1..Cn`、门型与回滚路径，以及待 Critique 清单。',
+  }),
+  critique: Object.freeze({
+    label: '规划内审者',
+    scope: '只负责站在独立只读视角挑规划缺陷（`critique-scope` + 事实核对），不替规划者改文档。',
+    mustNot: Object.freeze([
+      '与规划作者为同一主体，或 Round 2+ 复用历史复核人上下文',
+      '直接修改待审 SPEC/PRD/Todo 正文',
+      '在文档仍有 `AUDIT_FAILED` 或未清待拍板项时给出 `critique-pass`',
+    ]),
+    report: '**交回来要说清**：逐条核实结果（`pass` / `reject`）、未闭环隐患列表，以及是否触发三轮停损。',
+  }),
   implementer: Object.freeze({
     label: '实现者',
     scope: '只负责把认领的验收标准落进代码，并在隔离实施位里跑绿门禁。',
@@ -181,13 +211,13 @@ function factsHasRemote(mainRoot) {
   } catch { return false }
 }
 
-export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null, profile = null, current = null }) {
+export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRole = null, policy = null, headSha = null, ownerRole = null, profile = null, current = null } = {}) {
   // 归档之后 specFile/todoFile 会指向 docs/archive/，而审核阶段正是归档之后。
   // 只读 specFile 会让审核交接包变成「没有登记验收标准」——判据在，只是搬了家。
   //
   // 两个根都要看：主仓里有已归档的文档，而这条任务的归档在**实施位**里，
   // 还没合并回主仓。只查一个根，两种情形各漏一半。
-  const docRoots = [mainRoot, ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null].filter(Boolean)
+  const docRoots = mainRoot ? [mainRoot, ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null].filter(Boolean) : []
   const pickDoc = (live, archived) => {
     for (const rel of [live, archived]) {
       if (!rel) continue
@@ -240,7 +270,7 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   }
 
   // 结合变更路径与验收关键词抽取相关度 Top-3 文档切片，替代全文塞入。
-  const wtCandidate = ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null
+  const wtCandidate = mainRoot && ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null
   const locateRoot = wtCandidate && existsSync(wtCandidate) ? wtCandidate : mainRoot
   const keywords = [
     ledger?.taskId,
@@ -249,48 +279,52 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   ].filter(Boolean)
   let relatedSlices = []
   try {
-    const ev = discoverEvergreenDocs(locateRoot)
-    const priorityFiles = (ev?.markdownDocs ?? []).map((d) => d.path)
-    relatedSlices = locateTopSlicesForPaths(locateRoot, {
-      paths,
-      keywords,
-      excludeFiles: [specRel, todoRel].filter(Boolean),
-      priorityFiles,
-      limit: 3,
-      budgetLines: 48,
-    }).map((s) => ({
-      absPath: s.absPath,
-      relPath: s.relPath,
-      kind: s.kind,
-      section: s.section,
-      startLine: s.startLine,
-      endLine: s.endLine,
-      score: s.score,
-      summary: s.summary,
-      locateCommand: s.locateCommand,
-    }))
+    if (locateRoot) {
+      const ev = discoverEvergreenDocs(locateRoot)
+      const priorityFiles = (ev?.markdownDocs ?? []).map((d) => d.path)
+      relatedSlices = locateTopSlicesForPaths(locateRoot, {
+        paths,
+        keywords,
+        excludeFiles: [specRel, todoRel].filter(Boolean),
+        priorityFiles,
+        limit: 3,
+        budgetLines: 48,
+      }).map((s) => ({
+        absPath: s.absPath,
+        relPath: s.relPath,
+        kind: s.kind,
+        section: s.section,
+        startLine: s.startLine,
+        endLine: s.endLine,
+        score: s.score,
+        summary: s.summary,
+        locateCommand: s.locateCommand,
+      }))
+    }
   } catch {
     relatedSlices = []
   }
 
   let featureMapContext = { exists: false, corrupt: false, warning: null, matchedFeatures: [], businessFlows: [], verificationTools: [], testRefs: [] }
   try {
-    const fm = matchFeatureMapForPaths(locateRoot, paths, keywords)
-    featureMapContext = {
-      exists: Boolean(fm.exists),
-      corrupt: Boolean(fm.corrupt),
-      warning: fm.warning ?? null,
-      matchedFeatures: (fm.matchedFeatures ?? []).map((f) => ({ id: f.id, name: f.name, matchedBy: f.matchedBy })),
-      businessFlows: fm.businessFlows ?? [],
-      verificationTools: (fm.verificationTools ?? []).map((t) => ({ id: t.id, kind: t.kind, command: t.command, riskLevel: t.riskLevel })),
-      testRefs: fm.testRefs ?? [],
+    if (locateRoot) {
+      const fm = matchFeatureMapForPaths(locateRoot, paths, keywords)
+      featureMapContext = {
+        exists: Boolean(fm.exists),
+        corrupt: Boolean(fm.corrupt),
+        warning: fm.warning ?? null,
+        matchedFeatures: (fm.matchedFeatures ?? []).map((f) => ({ id: f.id, name: f.name, matchedBy: f.matchedBy })),
+        businessFlows: fm.businessFlows ?? [],
+        verificationTools: (fm.verificationTools ?? []).map((t) => ({ id: t.id, kind: t.kind, command: t.command, riskLevel: t.riskLevel })),
+        testRefs: fm.testRefs ?? [],
+      }
     }
   } catch {
     // Fail-Soft on read-only handoff context assembly
   }
 
   // 验收命令从 AGENTS.md 的 Dev Profile 读，不在这里编。
-  const agentsText = readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
+  const agentsText = mainRoot ? (readTextSafe(join(mainRoot, 'AGENTS.md')) ?? '') : ''
   const quick = /^\s*quick-test:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
   const full = /^\s*full-test:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
   const mergeGate = /^\s*merge-gate:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
@@ -424,7 +458,7 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   // 抄不走的只有一件事：**这个角色该做与不该做的边界**。它不随流程改动而失效。
   const taskId = ledger?.taskId ?? null
   // `ownerRole` 由状态机算出，`ledger.role` 是平台身份——不是一回事。
-  const role = String(ownerRole ?? ledger?.ownerRole ?? ledger?.role ?? '')
+  const role = String(explicitRole ?? ownerRole ?? ledger?.ownerRole ?? ledger?.role ?? 'implementer')
   const boundary = ROLE_BOUNDARY[role] ?? ROLE_BOUNDARY.default
 
   lines.push('## 你的角色与边界')
@@ -496,6 +530,20 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
 
   // 审核侧要的两样：这一轮该看什么、上一轮提了什么。
   // 实现侧不需要它们（那是审查者的事），所以按角色给，不给所有人。
+  if (role === 'explore') {
+    lines.push('## 只读探索范围', '')
+    lines.push('1. 按需定位架构文档与模块边界：`doc-locate.mjs` / `repo-map.mjs`。')
+    lines.push('2. 记录真实探索证据：`flow.mjs explore --task ' + (taskId || '<id>') + '`。', '')
+  } else if (role === 'plan') {
+    lines.push('## 规划冻结要求', '')
+    lines.push('1. 确认 `owner` 明确且与实施者分离，清零所有待拍板问题。')
+    lines.push('2. 冻结可证伪的 `C1..Cn` 验收标准并附上真实技术锚点。', '')
+  } else if (role === 'critique') {
+    lines.push('## 独立规划内审顺序', '')
+    lines.push('1. 运行 `doc-plan.mjs critique-scope --file <docPath> --reviewer <id>` 核实增量与声明。')
+    lines.push('2. 仅依据实证与文档实质性记录 `critique-pass` 或 `critique-reject`。', '')
+  }
+
   if (role === 'reviewer' || role === 'human') {
     const nextRound = nextReviewRound(ledger)
 
@@ -583,6 +631,7 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
 
   const receiptTemplate = RECEIPT_LINES.join('\n')
   return {
+    role,
     prompt: `${lines.join('\n').trimEnd()}\n`,
     fields: {
       taskId: ledger?.taskId ?? null,

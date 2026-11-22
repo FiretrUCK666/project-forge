@@ -10,7 +10,8 @@ import { join, resolve } from 'node:path'
 
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { execSafe, execShellCommand, gitDiffNameStatusZ, posixPath, readTextSafe } from '../../lib/git.mjs'
-import { rememberPreviousImplementer } from '../../lib/ledger.mjs'
+import { enforceSlotBoundary, resolveHostMode, resolveNonEmptyActor } from '../../lib/harness-context.mjs'
+import { hasExploredEvidence, rememberPreviousImplementer } from '../../lib/ledger.mjs'
 import {
   loadForgeHooksConfig, resolveStageHookCommands, scanExtensionSlotHazards,
 } from '../../lib/overlay.mjs'
@@ -24,7 +25,19 @@ const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|revi
 /** 强制校验 submit/lifecycle 的 `--agent` 权属与认领者匹配，禁止协调者/审查者代提交。 */
 export function assertSubmitOwnership(ledger, opts = {}) {
   const rawExplicitAgent = String(opts.agent ?? '').trim()
-  if (!rawExplicitAgent) return { ok: true }
+  const hostMode = resolveHostMode(opts)
+  const humanApproved = Boolean(opts['human-approved'])
+  if (!rawExplicitAgent || /^(?:null|undefined|unknown|none|<[^>]+>)$/i.test(rawExplicitAgent)) {
+    if (opts.requireAgent === false) return { ok: true }
+    const waived = resolveNonEmptyActor([], { role: 'submit', hostMode, humanApproved, allowSingleSessionWaive: true })
+    if (waived.ok) return { ok: true, waived: true, actor: waived.actor }
+    return {
+      ok: false,
+      code: 'BLOCKED_MISSING_ACTOR',
+      exitCode: EXIT.USAGE,
+      message: 'BLOCKED_MISSING_ACTOR: submit 必须显式传入非空 --agent <实施代理名>（禁止为空、null 或占位词）；仅 single-session 模式下可附 --host-mode single-session --human-approved。',
+    }
+  }
   const lowExplicit = rawExplicitAgent.toLowerCase()
   const nonImplRole = NON_IMPL_ROLE_RE.test(lowExplicit)
   if (opts.takeover) {
@@ -87,6 +100,15 @@ export function assertSubmitOwnership(ledger, opts = {}) {
 }
 
 /** 校核任务在 finalize/verify 前的认领与探索前置态（已释放任务硬阻断，其余输出提醒或严格拦截）。 */
+export function checkTaskSlotBoundaryOrEmit(mainRoot, implRoot, ledger, opts = {}) {
+  if (!ledger || ledger.tier === 1) return { ok: true }
+  const slotCheck = enforceSlotBoundary({ mainRoot, implRoot, caseType: ledger.caseType, isDirtyMain: false, commits: ledger.baseSha ? 1 : 0 })
+  if (slotCheck.ok) return { ok: true }
+  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: slotCheck.code, reason: slotCheck.reason }, null, 2)}\n`)
+  process.stderr.write(`${slotCheck.code}: ${slotCheck.reason}\n`)
+  return { ok: false, exitCode: slotCheck.exitCode }
+}
+
 export function checkLifecyclePreconditions(ledger, opts = {}) {
   const warnings = []
   if (!ledger || ledger.role === 'inbound-external-pr') return { ok: true, warnings }
@@ -99,16 +121,26 @@ export function checkLifecyclePreconditions(ledger, opts = {}) {
       message: `BLOCKED_NOT_CLAIMED: 任务 ${ledger.taskId} 已释放认领，请先重新执行 flow.mjs claim --task ${ledger.taskId} 再继续。`,
     }
   }
-  const ownerCheck = assertSubmitOwnership(ledger, opts)
+  const ownerCheck = assertSubmitOwnership(ledger, { ...opts, requireAgent: false })
   if (!ownerCheck.ok) return { ...ownerCheck, warnings }
-  if (!ledger.claimedAt) {
-    warnings.push({
-      code: 'WARN_NOT_CLAIMED',
-      message: `任务 ${ledger.taskId} 尚未记录 claimedAt，建议先运行 flow.mjs claim --task ${ledger.taskId}。`,
-    })
+  const caseNum = Number(ledger.caseType ?? 3)
+  if (caseNum >= 2 && Boolean(ledger.baseSha) && !ledger.claimedAt) {
+    return {
+      ok: false,
+      code: 'BLOCKED_UNCLAIMED_TASK',
+      exitCode: EXIT.FACT,
+      warnings,
+      message: `BLOCKED_UNCLAIMED_TASK: Case ${caseNum} 任务 ${ledger.taskId} 尚未认领（缺少 claimedAt），请先运行 flow.mjs claim --task ${ledger.taskId}。`,
+    }
   }
-  if (opts['strict-lifecycle'] && warnings.length > 0) {
-    return { ok: false, code: 'BLOCKED_NOT_CLAIMED', exitCode: EXIT.FACT, warnings, message: `BLOCKED_NOT_CLAIMED: ${warnings[0].message}` }
+  if (caseNum >= 3 && !hasExploredEvidence(ledger)) {
+    return {
+      ok: false,
+      code: 'BLOCKED_UNEXPLORED_TASK',
+      exitCode: EXIT.FACT,
+      warnings,
+      message: `BLOCKED_UNEXPLORED_TASK: Case ${caseNum} 任务 ${ledger.taskId} 缺少真实 dev-explore 探索证据，请先运行 flow.mjs explore --task ${ledger.taskId}。`,
+    }
   }
   return { ok: true, warnings }
 }
@@ -205,28 +237,13 @@ function resolveSkillScript(mainRoot, implRoot, relPath) {
 export async function runPreVerifyEditGateHook({ mainRoot, implRoot, taskId, ledger, opts = {} } = {}) {
   const now = new Date().toISOString()
   if (opts['skip-edit-gate']) {
-    // 跳过改码门禁是放行点：理由必填，且必须实质。
-    //
-    // 此前这里在缺省 `--reason` 时自动填一句占位串，等于校验点要求理由、调用点却自己
-    // 编一个——账本里留下一句谁也没说过的「理由」，而门禁看起来是被正当放行的。
-    const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '跳过改码门禁的理由' })
-    if (!reasonCheck.ok) {
-      return {
-        ok: false,
-        blocked: true,
-        code: 'BLOCKED_SHALLOW_OVERRIDE_REASON',
-        exitCode: EXIT.USAGE,
-        message: `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason} 跳过改码门禁必须写清：这次为什么不用它、漏掉它可能放过什么。`,
-      }
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_SKIP_EDIT_GATE_FORBIDDEN_ON_FINAL',
+      exitCode: EXIT.FACT,
+      message: 'BLOCKED_SKIP_EDIT_GATE_FORBIDDEN_ON_FINAL: verify 收口编辑门禁（--final）严禁传入 --skip-edit-gate 跳过。',
     }
-    if (ledger) {
-      ledger.hooks = {
-        ...(ledger.hooks ?? {}),
-        editGateSkippedAt: now,
-        editGateSkipReason: reasonCheck.cleaned,
-      }
-    }
-    return { ok: true, skipped: true, reason: 'skip-edit-gate-flag', skipReason: reasonCheck.cleaned }
   }
   const hookCfg = readForgeHooksConfig(mainRoot, implRoot)
   if (hookCfg?.config?.editGate === false || hookCfg?.config?.hooks?.editGate?.enabled === false) {
@@ -236,7 +253,7 @@ export async function runPreVerifyEditGateHook({ mainRoot, implRoot, taskId, led
   if (!scriptPath) {
     return { ok: true, skipped: true, reason: 'dev-edit-not-installed' }
   }
-  const res = await execSafe(process.execPath, [scriptPath, '--task', String(taskId), '--json'], {
+  const res = await execSafe(process.execPath, [scriptPath, '--task', String(taskId), '--final', '--json'], {
     cwd: implRoot || mainRoot,
     timeout: 60000,
   })
@@ -331,9 +348,9 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
   if (stageCfg === false || stageCfg?.enabled === false || hookCfg?.config?.govern === false) {
     return { ok: true, skipped: true, stage, reason: 'disabled-by-forge-hooks', ...(customResults.length ? { customResults } : {}) }
   }
-  const governEnabled = Boolean(stageCfg?.govern === true || stageCfg?.enabled === true || opts['run-govern-hook'])
+  const governEnabled = stageCfg?.govern !== false && opts['run-govern-hook'] !== false
   if (!governEnabled) {
-    return { ok: true, skipped: true, stage, reason: 'opt-in-not-configured', ...(customResults.length ? { customResults } : {}) }
+    return { ok: true, skipped: true, stage, reason: 'disabled-by-stage-cfg', ...(customResults.length ? { customResults } : {}) }
   }
   const isRetroStage = stage === 'merge' || stage === 'cleanup'
   const relScript = isRetroStage
@@ -350,7 +367,7 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
     cwd: implRoot || mainRoot,
     timeout: 45000,
   })
-  const strict = Boolean(stageCfg?.strict)
+  const strict = Boolean(stageCfg?.strict || opts['strict-lifecycle'])
   if (!res.ok && strict) {
     return {
       ok: false,

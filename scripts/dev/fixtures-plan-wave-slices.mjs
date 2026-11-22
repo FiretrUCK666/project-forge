@@ -318,7 +318,7 @@ export function registerPlanWaveSliceCases(cases) {
     try {
       const evRoots = await resolveRootsForArtifact(evDir)
       const st = await startForArtifact({
-        task: 'art-ev', case: '1', slug: 'art-ev', files: 'src/App.tsx', implementer: 'alice',
+        task: 'art-ev', case: '2', slug: 'art-ev', files: 'src/App.tsx', implementer: 'alice',
       }, evRoots)
       if (st.exitCode !== 0) return `附件用例 start 失败：${st.exitCode}`
       const evWt = join(evDir, '.worktrees', 'impl-art-ev')

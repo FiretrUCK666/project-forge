@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   HERE, SCRIPTS, SKILL_ROOT, existingKept, gitCommitFast, gitInit, gitSync, issueTokenFor, loadPreflight,
-  readDirRefs, rmTree, runAbs, runAbsAsync, runNode, survey, textsOf, tmpProject,
+  readDirRefs, rmTree, runAbs, runAbsAsync, runNode, seedExploredFor, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 
@@ -544,24 +544,28 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
 
     // 1. flow.mjs start --create-issue（正向进 gh-cli 建单 + 反向进 ACTION_REQUIRED_CREATE_ISSUE_DELEGATED exit 4）
     const logCiPos = join(sb, "ci-pos.log")
-    const ciPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-pos", "--slug", "ci-pos", "--create-issue", "--title", "Real Issue", "--case", "3", "--json"], { cwd: dir, env: childEnv(true, logCiPos), windowsHide: true })
+    const ciPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-pos", "--slug", "ci-pos", "--create-issue", "--title", "Real Issue", "--case", "3", "--implementer", "alice", "--allow-plan-bootstrap", "--json"], { cwd: dir, env: childEnv(true, logCiPos), windowsHide: true })
     if (ciPos.status !== 0) return `start --create-issue 正向失败(${ciPos.status})：${ciPos.stderr || ciPos.stdout}`
     const ciPosJson = JSON.parse(ciPos.stdout)
     if (ciPosJson.createdIssue?.number !== 101 || !readFileSync(logCiPos, "utf8").includes("issue create")) {
       return `start --create-issue 未走 gh-cli 建单：${ciPos.stdout}`
     }
     const logCiNeg = join(sb, "ci-neg.log")
-    const ciNeg = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-neg", "--slug", "ci-neg", "--create-issue", "--title", "Neg Issue", "--case", "3", "--json"], { cwd: dir, env: childEnv(false, logCiNeg), windowsHide: true })
+    const ciNeg = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-neg", "--slug", "ci-neg", "--create-issue", "--title", "Neg Issue", "--case", "3", "--allow-plan-bootstrap", "--json"], { cwd: dir, env: childEnv(false, logCiNeg), windowsHide: true })
     if (ciNeg.status !== 4 || !ciNeg.stdout.includes("ACTION_REQUIRED_CREATE_ISSUE_DELEGATED")) {
       return `start --create-issue 反向未阻断为 exit 4：status=${ciNeg.status}, out=${ciNeg.stdout}, err=${ciNeg.stderr}`
     }
 
     // 2. review-pack.mjs record（正向 real gh-cli 双写 + 反向 offlineOrNoCreds + delegatedPayloads）
+    await seedExploredFor(dir, "ci-pos")
     const wtPos = join(dir, ".worktrees", "impl-ci-pos")
     writeFileSync(join(wtPos, "src/app.mjs"), "export const v = 3\n")
     gitCommitFast(wtPos, "r1", { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
     writeTaskLedger(dir, { ...readTaskLedger(dir, "ci-pos"), prNumber: 88, linkedIssues: [77] })
     const logRecPos = join(sb, "rec-pos.log")
+    runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["claim", "--task", "ci-pos", "--agent", "alice"], { cwd: dir, env: childEnv(true, logRecPos), windowsHide: true })
+    const vPos1 = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", "ci-pos", "--mode", "full"], { cwd: dir })
+    if (vPos1.status !== 0) return `ci-pos r1 verify 失败：status=${vPos1.status}, err=${vPos1.stderr}`
     const recPos = runAbs("kit/skills/dev-review/scripts/review-pack.mjs", [
       "record", "--task", "ci-pos", "--round", "1", "--verdict", "pass", "--reviewer-id", "rev-x",
       "--review-token", await issueTokenFor(dir, "ci-pos", 1), "--evidence", "real fake-gh verified", "--json",
@@ -572,6 +576,8 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
     }
     writeFileSync(join(wtPos, "src/app.mjs"), "export const v = 4\n")
     gitCommitFast(wtPos, "r2", { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
+    const vPos2 = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", "ci-pos", "--mode", "full"], { cwd: dir })
+    if (vPos2.status !== 0) return `ci-pos r2 verify 失败：status=${vPos2.status}, err=${vPos2.stderr}`
     const logRecNeg = join(sb, "rec-neg.log")
     const recNeg = runAbs("kit/skills/dev-review/scripts/review-pack.mjs", [
       "record", "--task", "ci-pos", "--round", "2", "--verdict", "pass", "--reviewer-id", "rev-y",
@@ -585,12 +591,14 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
     // 3. flow-batch merge-queue（正向真合并 + 反向绝不虚报 merged）
     for (const [tid, pr] of [["mq-pos", 91], ["mq-neg", 92]]) {
       await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", tid, "--case", "2", "--slug", tid, "--implementer", "alice"], { cwd: dir })
+      await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["claim", "--task", tid, "--agent", "alice"], { cwd: dir })
+      await seedExploredFor(dir, tid)
       const wt = join(dir, ".worktrees", `impl-${tid}`)
       writeFileSync(join(wt, "src/app.mjs"), `export const v = '${tid}'\n`)
       gitCommitFast(wt, tid, { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
       await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", tid, "--mode", "full"], { cwd: dir })
       await runAbsAsync("kit/skills/dev-review/scripts/review-pack.mjs", ["record", "--task", tid, "--round", "1", "--verdict", "pass", "--reviewer-id", "rev-mq", "--review-token", await issueTokenFor(dir, tid, 1), "--evidence", "mq verified"], { cwd: dir })
-      writeTaskLedger(dir, { ...readTaskLedger(dir, tid), prNumber: pr, explored: { at: "2026-01-01T00:00:00Z", tier: "direct-read", symbolCount: 1, by: "alice" } })
+      writeTaskLedger(dir, { ...readTaskLedger(dir, tid), prNumber: pr })
     }
     const logMqPos = join(sb, "mq-pos.log")
     const mqPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["batch", "merge-queue", "--tasks", "mq-pos", "--json"], { cwd: dir, env: childEnv(true, logMqPos), windowsHide: true })
@@ -725,7 +733,7 @@ cases.push(["记审查结论必须交实证佐证", async () => {
     const roots = await resolveRepoRoots(dir)
     await handleStart({ task: "ev", case: "2", slug: "ev" }, roots)
 
-    const base = { task: "ev", round: "1", verdict: "pass", "reviewer-id": "rev-x" }
+    const base = { task: "ev", round: "1", verdict: "pass", "reviewer-id": "rev-x", "no-enforce-gates": true }
 
     // 反向：不传 evidence 必须拒绝，且要说清为什么
     const noEv = await handleRecord({ ...base, "review-token": await issueTokenFor(dir, "ev", 1) }, roots)

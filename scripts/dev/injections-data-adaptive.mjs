@@ -170,8 +170,8 @@ export const INJECTIONS_ADAPTIVE = [
     what: 'C23 A6 合并前放行 evidence.headSha 与当前 HEAD 不匹配的篡改状态',
     file: 'kit/skills/lib/workflow-helpers.mjs',
     alsoDropIn: ['.agents/skills/lib/workflow-helpers.mjs'],
-    from: '  if (!currentHead || !evidence?.headSha || evidence.headSha !== currentHead) {',
-    to: '  if (false && (!currentHead || !evidence?.headSha || evidence.headSha !== currentHead)) {',
+    from: '  if (!currentHead || !evidence?.headSha || evidence.headSha !== currentHead || (ledger && ledger.verifiedHead && ledger.verifiedHead !== currentHead)) {',
+    to: '  if (false && (!currentHead || !evidence?.headSha || evidence.headSha !== currentHead || (ledger && ledger.verifiedHead && ledger.verifiedHead !== currentHead))) {',
     expect: 'A6：合前三方 headSha',
   },
   {

@@ -37,7 +37,7 @@ const VALID_MODES = new Set(['verify', 'pre-edit', 'standalone'])
 
 function printHelp() {
   process.stdout.write([
-    '用法：node edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--with-native] [--dir <path>] [--task <id>] [--skip-edit-gate --reason <why>] [--json]',
+    '用法：node edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--with-native] [--dir <path>] [--task <id>] [--final] [--skip-edit-gate --reason <why>] [--json]',
     '',
     'Options:',
     '  --mode <mode>       verify | pre-edit | standalone (default: standalone)',
@@ -263,14 +263,12 @@ export async function runEditGate(opts = {}) {
   const nearLimitFiles = []
   const highRiskHits = []
   const checkedFiles = dedupEntries.map((e) => e.file)
-  const delegatedToFlowPolicy = mode === 'verify' && Boolean(opts.task)
 
   for (const entry of dedupEntries) {
     const rel = entry.file
     if (!isLegalArchiveMove(entry, deletedFiles) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
       const hit = { ruleId: 'edit.do-not-edit', defectClass: 'stale-contract', severity: 'high', file: rel, line: 1, message: `目标文件命中 AGENTS.md do-not-edit 禁改路径：${rel}`, fixHint: '停止修改受保护归档/生成目录；若属合法任务归档请走 flow.mjs finalize。' }
-      if (delegatedToFlowPolicy) warnings.push(hit)
-      else blockers.push(hit)
+      blockers.push(hit)
     }
     if (mode === 'pre-edit' || existsSync(join(workTreeRoot, rel))) {
       const procNameHit = checkProcessArtifactFilename(rel)

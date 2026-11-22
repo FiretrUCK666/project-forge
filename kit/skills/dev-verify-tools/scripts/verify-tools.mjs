@@ -484,6 +484,7 @@ export async function handleRun(opts, roots) {
   let anyFailed = false
 
   for (const { feature, tool } of matched) {
+    const slotKey = posixPath(relative(roots.mainRoot, workRoot)) || 'main'
     const staleness = await evaluateToolStaleness({
       repoRoot: workRoot,
       gitCommonDir: roots.gitDir,
@@ -491,6 +492,7 @@ export async function handleRun(opts, roots) {
       feature,
       tool,
       baseRef,
+      slotKey,
     })
 
     if (staleness.status === 'missing-script') {
@@ -577,6 +579,7 @@ export async function handleRun(opts, roots) {
         verifiedSha: headSha,
         passedAtCommit: headSha,
         symbolsByFile: fp.symbolsByFile,
+        slotKey: posixPath(relative(roots.mainRoot, workRoot)) || 'main',
       })
       baselineUpdated = true
     }

@@ -291,9 +291,10 @@ export const INJECTIONS_GATES = [
   {
     id: 'I139',
     what: 'initDoc 恢复强制 pruneUnfilled=true（3 文件 Go CLI 仓可选骨架再次被裁光）',
-    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
-    from: '        pruneUnfilled: false, noPrune: Boolean(noPrune), docShape,',
-    to: '        pruneUnfilled: true, noPrune: Boolean(noPrune), docShape,',
+    file: 'kit/skills/dev-plan/scripts/doc-plan-ops.mjs',
+    alsoDropIn: ['.agents/skills/dev-plan/scripts/doc-plan-ops.mjs'],
+    from: '        pruneUnfilled: false, noPrune: Boolean(noPrune), docShape, planMode,',
+    to: '        pruneUnfilled: true, noPrune: Boolean(noPrune), docShape, planMode,',
     expect: '3 文件 Go CLI init 保留可选骨架',
   },
   {

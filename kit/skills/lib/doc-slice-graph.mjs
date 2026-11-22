@@ -225,13 +225,6 @@ function scopeMatchers(scopeFiles) {
 export function buildSliceGraph(repoRoot) {
   const docs = collectPlanDocs(repoRoot)
   const prds = docs.filter((d) => d.kind === 'prd')
-  // 只对**活跃**总控判归属：`docs/archive/prd/` 里的是已关账的历史，
-  // 那时还没有 `scope_files` / `depends_on` 这套约定，拿今天的判据去判昨天的账，
-  // 报出来的每一条都在说「这份历史文件不符合现在的规范」——那不是发现，是噪音。
-  const masters = prds.filter((d) => !d.archived
-    && d.data?.multi_spec === true
-    && !INERT_STATUS.has(normalizeStatus(d.data?.status)))
-
   const slices = docs
     .filter((d) => d.kind === 'spec' || d.kind === 'todo')
     .filter((d) => !INERT_STATUS.has(normalizeStatus(d.data?.status)))
@@ -249,6 +242,14 @@ export function buildSliceGraph(repoRoot) {
       data: d.data,
       text: d.text,
     }))
+  const prdRefCounts = new Map()
+  for (const s of slices) {
+    if (s.kind !== 'spec' || !s.masterRel) continue
+    prdRefCounts.set(s.masterRel, (prdRefCounts.get(s.masterRel) ?? 0) + 1)
+  }
+  const masters = prds.filter((d) => !d.archived
+    && !INERT_STATUS.has(normalizeStatus(d.data?.status))
+    && (d.data?.multi_spec === true || (prdRefCounts.get(d.rel) ?? 0) >= 2))
 
   return { docs, prds, masters, slices }
 }

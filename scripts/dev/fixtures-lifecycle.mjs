@@ -171,7 +171,7 @@ export function registerLifecycleCases(cases) {
         }
 
         if (out.phase === "needs-submit") {
-          const sub = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["submit", "--task", "lc", "--json"], { cwd: dir })
+          const sub = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["submit", "--task", "lc", "--agent", "local-agent", "--json"], { cwd: dir })
           if (sub.status !== 0) return `submit 跑不通：${String(sub.stderr).slice(0, 220)}`
         }
 

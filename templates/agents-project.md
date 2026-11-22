@@ -188,12 +188,12 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
   风险定级：`low`（纯非可执行文本，走 `runLowRiskDocStaticCheck` 静态门禁，免重跑 CI）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 1-4 在隔离 `impl` 位派 `impl` 子代理。
 
-- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 可原地特性分支；**所有 `commits > 0` 仓**（Case 1-4）一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`（跨轮复用、自动解绑重挂载依赖）。卸 worktree 前先 `worktree-deps.mjs` 仅对链接 `unlinkSync` 解绑，严禁直接递归删目录。
+- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 可原地分支；`Case 1` 可原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`（跨轮复用）。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，严禁直接递归删目录。
 
 <!-- project-forge: if has-remote -->
-- **第四步：认领与 PR 前文档同步**——**谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（协调者不代提 PR；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危）；统一前缀（`docs:`/`fix:`/`feat:`）、四态标签与 Milestone 继承；变基/试合附 `GIT_EDITOR=true`/`--no-edit`。PR/MR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对 `git mv` 归档至 `docs/archive/`，`1:N` 总控 PRD 走四态闭环），`submit` 推后零跟踪文件写回、自动抽取 SPEC/Todo/`evidence.json` 生成干净 PR 正文并双写评论。
+- **第四步：认领与 PR 前文档同步**——**谁改代码谁认领（`Case >= 2` 强校 `claimedAt`）并负责 `finalize`/`verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）/`submit --agent <id>`（禁协调/审查者代提，仅 `single-session + --human-approved` 豁免）**；PR/作者同名拦截 `BLOCKED_AUTHOR_IS_IMPLEMENTER`；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危；统一前缀、四态标签与 Milestone 继承；PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对归档，`1:N` 总控 PRD 走四态闭环），`submit` 零写回跟踪文件。
 
-- **第五步：独立审查与合并**——**独立审查通过（`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮硬停损约束；触碰高风险路径须加故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR 合流，merge 现场取回远端并按四态合流判定核验，核不到就阻断、只在人类签字后放行）。合前强校三方 `headSha`、干净工作区与 E2E 观察；详见各技能 `SKILL.md` 与协作判据。
+- **第五步：独立审查与合并**——**独立审查通过（默认启用 `--enforce-gates`、`reviewToken` 绑定轮次/审查者/`HEAD`、`fail` 为空）后由审查者直接合**（Round 2+ 换全新独立审查上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮停损约束；UI 变更缺真实 `--artifact`/`--visual-blocked-reason` 阻断；触高风险须实效故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR 合流，merge 现场核四态）。合前强校三方 `headSha` 与干净工作区。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo 完成记录与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、随同分支提交；
@@ -204,7 +204,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
   6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；
   7. **删远端分支前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`，多远端换写权远端名）、有没有下游堆叠 PR 以该分支为 base（Fork 另查上游 PR 非 `OPEN`）；两件都清了才 `git push origin --delete <分支>`（多远端换对应写权远端名）。
 
-  **第 5 步前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支及干净状态；**问到人点头才删**（`flow.mjs cleanup --confirm`）。平台命令含非 ASCII 正文一律写系统临时 UTF-8 文件经 `--body-file`/`--notes-file` 提交并删临时文件。
+  **第 5 步前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支及干净状态；**问到人点头才删**（`flow.mjs cleanup --confirm --preview-hash <hash>` 校验清单并按安全删判定放行）。平台命令含非 ASCII 正文一律写系统临时 UTF-8 文件经 `--body-file`/`--notes-file` 提交并删临时文件。
 
 - **日常到此为止**：合并即改动终点，发版必须人明令。
 - **同步不变量**：本节与项目协作判据为同一套规则，改动须同提交对齐；指路一律用标题名，不用节号。
@@ -214,7 +214,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
 - **第五步：独立审查与本地试合**——**独立审查通过（`fail` 为空）后由审查者直接合入 `{{DEFAULT_BRANCH}}`**（Round 2+ 换全新独立审查上下文，受全历史换人、增量视野与 3 轮硬停损约束；**仅弱化门禁须人点头**；「取舍」写 `merge-authority: human` 收回人合）。本地合入经临时 `--detach` 工作树试合复测后 `--ff-only` 推进主干。
 
-- **第六步：本地合入收尾与 Worktree 清理**——1. 合并前完成 Todo 记录与归档提交；2. 经 `flow.mjs merge` 试合推进 `{{DEFAULT_BRANCH}}`；3. `git switch {{DEFAULT_BRANCH}}` 核对主干；4. 列出 worktree 与本地分支干净状态清单，**问到人点头才删**（`flow.mjs cleanup --confirm`）。
+- **第六步：本地合入收尾与 Worktree 清理**——1. 合并前完成 Todo 记录与归档提交；2. 经 `flow.mjs merge` 试合推进 `{{DEFAULT_BRANCH}}`；3. `git switch {{DEFAULT_BRANCH}}` 核对主干；4. 列出 worktree 与本地分支干净状态清单，**问到人点头才删**（`flow.mjs cleanup --confirm --preview-hash <hash>`）。
 
 - **日常到此为止**：本地合入 `{{DEFAULT_BRANCH}}` 即改动终点，发版必须人明令。
 - **同步不变量**：本节与项目协作判据为同一套规则，改动须同提交对齐；指路一律用标题名，不用节号。

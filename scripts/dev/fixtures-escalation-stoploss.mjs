@@ -10,7 +10,7 @@ import { handleBatch } from '../../kit/skills/dev-flow/scripts/flow-batch.mjs'
 import { handleStart, inspectWorkspace } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import { handleIssue, handleMilestone } from '../../kit/skills/dev-flow/scripts/flow-issues.mjs'
 import { handleFinalize, handleSubmit, handleVerify } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'
-import { handleMerge } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
+import { handleClaim, handleMerge } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
 import { handleNext } from '../../kit/skills/dev-flow/scripts/flow-next.mjs'
 import { handleSync } from '../../kit/skills/dev-flow/scripts/flow-sync.mjs'
 import { runTrialMerge } from '../../kit/skills/dev-flow/scripts/flow-trial-merge.mjs'
@@ -200,8 +200,9 @@ export function registerStageBLoopB4bCases(cases) {
         return `parseAcceptanceCriteria 误拉总控 PRD C9：${JSON.stringify(criteria)}`
       }
 
-      const st = await withQuietIo(() => handleStart({ task: 'c13-t', case: '3', slug: 'c13-t', implementer: 'alice' }, roots))
+      const st = await withQuietIo(() => handleStart({ task: 'c13-t', case: '3', slug: 'c13-t', implementer: 'alice', 'allow-plan-bootstrap': true }, roots))
       if (st.res.exitCode !== 0) return `start 失败：${st.res.exitCode}`
+      await withQuietIo(() => handleClaim({ task: 'c13-t', agent: 'alice' }, roots))
       const wt = join(dir, readTaskLedger(dir, 'c13-t').worktreePath)
       writeFileSync(join(wt, 'src/app.mjs'), 'export const x = 2\n')
       gitCommitFast(wt, 'feat: v2', { updateOnly: true })
@@ -271,7 +272,7 @@ export function registerStageBLoopB4bCases(cases) {
       const revSlotAbs = join(dir, readTaskLedger(dir, 'c13-t').reviewWorktreePath)
       await withQuietIo(() => runReviewPackCli(['check-empirical', '--task', 'c13-t', '--dir', dir, '--cmd', faultCmd, '--json']))
       const origRevApp = readFileSync(join(revSlotAbs, 'src/app.mjs'), 'utf8')
-      writeFileSync(join(revSlotAbs, 'src/app.mjs'), `${origRevApp}// FAULT_BREAK\n`)
+      writeFileSync(join(revSlotAbs, 'src/app.mjs'), `${origRevApp}export const faultBreak = 'FAULT_BREAK'\n`)
       await withQuietIo(() => runReviewPackCli(['check-fault', '--phase', 'fail', '--task', 'c13-t', '--dir', dir, '--cmd', faultCmd, '--json']))
       writeFileSync(join(revSlotAbs, 'src/app.mjs'), origRevApp)
       await withQuietIo(() => runReviewPackCli(['check-fault', '--phase', 'restore', '--task', 'c13-t', '--dir', dir, '--cmd', faultCmd, '--json']))
@@ -293,11 +294,13 @@ export function registerStageBLoopB4bCases(cases) {
 
       // C22③: low 风险可选无令牌 review-pack record 且不阻塞直合
       await withQuietIo(() => handleStart({ task: 'low-t', case: '1', slug: 'low-t', implementer: 'alice' }, roots))
-      const wtLow = join(dir, readTaskLedger(dir, 'low-t').worktreePath)
+      await withQuietIo(() => handleClaim({ task: 'low-t', agent: 'alice' }, roots))
+      const lowLg = readTaskLedger(dir, 'low-t')
+      const wtLow = lowLg.worktreePath ? join(dir, lowLg.worktreePath) : dir
       writeFileSync(join(wtLow, 'docs/notes.md'), '# notes updated\n')
       gitCommitFast(wtLow, 'docs: update notes', { updateOnly: true })
       await seedExploredFor(dir, 'low-t')
-      const lowVer1 = await withQuietIo(() => handleVerify({ task: 'low-t', mode: 'smoke' }, roots))
+      const lowVer1 = await withQuietIo(() => handleVerify({ task: 'low-t', mode: 'gate' }, roots))
       if (lowVer1.res.exitCode !== 0) return `low-t 首次 verify 失败：${lowVer1.err}`
       const lowRec = await withQuietIo(() => handleReviewRecord({
         task: 'low-t', round: '1', verdict: 'pass', evidence: 'static ok', 'reviewer-id': 'rev-low', json: true,
@@ -306,7 +309,7 @@ export function registerStageBLoopB4bCases(cases) {
       // 再提交一次小改仅验证后应仍可直接 merge（可选记录不强锁 reviewPassedHead）
       writeFileSync(join(wtLow, 'docs/notes.md'), '# notes updated 2\n')
       gitCommitFast(wtLow, 'docs: tweak notes', { updateOnly: true })
-      const lowVer2 = await withQuietIo(() => handleVerify({ task: 'low-t', mode: 'smoke' }, roots))
+      const lowVer2 = await withQuietIo(() => handleVerify({ task: 'low-t', mode: 'gate' }, roots))
       if (lowVer2.res.exitCode !== 0) return `low-t 二次 verify 失败：${lowVer2.err}`
       const lowMerge = await withQuietIo(() => handleMerge({ task: 'low-t', json: true }, roots))
       if (lowMerge.res.exitCode !== 0) return `low 风险可选 record 后直接 merge 遭误拦：${JSON.stringify(lowMerge.res)}`
@@ -321,8 +324,8 @@ export function registerStageBLoopB4bCases(cases) {
       '---', 'kind: spec', 'title: "C14 Demo"', 'status: draft', 'tier: L3', 'created: 2026-11-18',
       'updated: 2026-11-18', 'issue: 14', 'owner: author-a', 'approved: false', 'implemented: false',
       'plan_critique: pending', 'related_prd: null', `related_todo: ../todo/261118-issue14-c14-todo.md`, '---', '',
-      '# SPEC: C14 Demo', '', '## 要解决的问题', `- ${revNote}`, '',
-      '## 本期不做', '- 不改外部网络契约', '',
+      '# SPEC: C14 Demo', '', '## 要解决的问题', `- 在 \`src/app.mjs\` 补齐输入校验（${revNote}）。`, '',
+      '## 本期不做', '- 不改 `src/app.mjs` 之外的外部网络契约。', '',
       '## 门型与回滚路径', '- two-way；单次 revert', '',
       '## 验收标准', '- [ ] C1: `src/app.mjs` 导出校验', '',
     ].join('\n')
@@ -412,16 +415,16 @@ export function registerStageBLoopB4bCases(cases) {
     const todoB = 'docs/todo/261118-issue32-b-todo.md'
     const makeMaster = (extra = '') => [
       '---', 'kind: prd', 'title: "Master"', 'status: active', 'created: 2026-11-18', 'updated: 2026-11-18',
-      'issue: null', 'pr: null', 'owner: p', ...(extra ? [extra] : []), 'related_spec: null', 'related_todo: null', '---', '',
-      '# Master', '', '## 要解决的问题', '- 分批迭代', '', '## 本期不做', '- 不改旧 API', '', '## 门型与回滚路径', '- two-way', '',
+      'issue: null', 'pr: null', 'owner: p', 'plan_critique: passed', ...(extra ? [extra] : []), 'related_spec: null', 'related_todo: null', '---', '',
+      '# Master', '', '## 要解决的问题', '- 分批迭代 `src/a.mjs` 与 `src/b.mjs`', '', '## 本期不做', '- 不改旧 API', '', '## 门型与回滚路径', '- two-way', '',
       '## 五、验收标准', '- [ ] C1: Slice A', '- [ ] C2: Slice B', '',
     ].join('\n')
     const makeSpec = (iss, cid, bodyDone = true) => [
       '---', 'kind: spec', `title: "S${iss}"`, 'status: approved', 'tier: L3', 'created: 2026-11-18', 'updated: 2026-11-18',
       `issue: ${iss}`, 'pr: null', 'branch: null', 'owner: p', 'approved: true', 'implemented: false', 'plan_critique: passed',
       'related_prd: ../prd/261118-master-prd.md', `related_todo: ../todo/261118-issue${iss}-${iss === 31 ? 'a' : 'b'}-todo.md`,
-      'high_risk_paths: []', '---', '', `# S${iss}`, '', '## 要解决的问题', `- ${cid}`, '',
-      '## 本期不做', '- 不扩 scope', '', '## 门型与回滚路径', '- two-way', '',
+      'high_risk_paths: []', '---', '', `# S${iss}`, '', '## 要解决的问题', `- 改造 \`src/${iss === 31 ? 'a' : 'b'}.mjs\` (${cid})`, '',
+      '## 本期不做', '- 不修改 `src/other.mjs` 范围', '', '## 门型与回滚路径', '- two-way', '',
       '## 验收标准', `- [${bodyDone ? 'x' : ' '}] ${cid}: done`, '', '## 实现说明', `- 已实现 ${cid}。`, '',
     ].join('\n')
     const makeTodo = (iss, cid, tid) => [
@@ -464,8 +467,12 @@ export function registerStageBLoopB4bCases(cases) {
       gitCommitFast(dir, 'docs: reset c19 slices')
 
       const roots = await resolveRepoRoots(dir)
-      await withQuietIo(() => handleStart({ task: 'slice-a', case: '4', slug: 'a', issue: '31', spec: specA, todo: todoA }, roots))
-      await withQuietIo(() => handleStart({ task: 'slice-b', case: '4', slug: 'b', issue: '32', spec: specB, todo: todoB }, roots))
+      const stA = await withQuietIo(() => handleStart({ task: 'slice-a', case: '4', slug: 'a', issue: '31', spec: specA, todo: todoA, implementer: 'alice' }, roots))
+      const stB = await withQuietIo(() => handleStart({ task: 'slice-b', case: '4', slug: 'b', issue: '32', spec: specB, todo: todoB, implementer: 'alice' }, roots))
+      if (stA.res.exitCode !== 0 || stB.res.exitCode !== 0) return `C19 start 失败：${stA.err} / ${stB.err}`
+      await withQuietIo(() => handleClaim({ task: 'slice-a', agent: 'alice' }, roots))
+      await withQuietIo(() => handleClaim({ task: 'slice-b', agent: 'alice' }, roots))
+      await seedExploredFor(dir, 'slice-a', 'slice-b')
       const wtA = join(dir, readTaskLedger(dir, 'slice-a').worktreePath)
       const wtB = join(dir, readTaskLedger(dir, 'slice-b').worktreePath)
 
@@ -544,11 +551,17 @@ export function registerStageBLoopB4bCases(cases) {
         return `milestone assign 未绑定本地单：${msAss.err}`
       }
 
-      // 裸 Milestone URL 探测 + Case 1 docs: 前缀 + 跨 worktree listTaskLedgers(mainRoot) 修复（缺陷 3）+ updateTaskLedger（缺陷 4）
-      const stDocs = await withQuietIo(() => handleStart({ _: ['https://github.com/acme/c22/milestone/7'], task: 'docs-task', case: '1', slug: 'fix-typo', implementer: 'alice', json: true }, roots))
-      if (stDocs.res.exitCode !== 0) return `Case 1 start 失败：${stDocs.err}`
+      // 裸 Milestone URL 探测 + Case 1 in-place + Case 2 worktree + 跨 worktree listTaskLedgers(mainRoot) 修复（缺陷 3）+ updateTaskLedger（缺陷 4）
+      const stC1 = await withQuietIo(() => handleStart({ _: ['https://github.com/acme/c22/milestone/7'], task: 'docs-c1', case: '1', slug: 'fix-c1', implementer: 'alice', json: true }, roots))
+      if (stC1.res.exitCode !== 0) return `Case 1 start 失败：${stC1.err}`
+      const lC1 = readTaskLedger(dir, 'docs-c1')
+      if (lC1.branch !== 'main' || lC1.worktreePath !== null || lC1.milestone !== 7) {
+        return `Case 1 原地微调或裸 Milestone URL 失败：${JSON.stringify(lC1)}`
+      }
+      const stDocs = await withQuietIo(() => handleStart({ _: ['https://github.com/acme/c22/milestone/7'], task: 'docs-task', case: '2', slug: 'fix-typo', implementer: 'alice', json: true }, roots))
+      if (stDocs.res.exitCode !== 0) return `Case 2 start 失败：${stDocs.err}`
       const lDocs = readTaskLedger(dir, 'docs-task')
-      if (lDocs.branch !== 'docs/fix-typo' || lDocs.milestone !== 7) return `Case 1 docs: 前缀或裸 Milestone URL 失败：${JSON.stringify(lDocs)}`
+      if (lDocs.branch !== 'fix/fix-typo' || lDocs.milestone !== 7) return `Case 2 分支或裸 Milestone URL 失败：${JSON.stringify(lDocs)}`
       const wtDocs = join(dir, lDocs.worktreePath)
       await syncDocsLifecycle(wtDocs, { slugOrPath: 'docs/specs/261118-issue41-ms-spec.md', issue: 41, branch: 'feat/x' })
       await updateTaskLedger(dir, 'docs-task', (cur) => ({ ...cur, noteA: 1 }))
@@ -631,11 +644,12 @@ export function registerStageBLoopB4bCases(cases) {
         gitSync(dir, ['config', `url.${bareUrl}.pushInsteadOf`, 'https://github.com/acme/c22.git'])
         const stPr = await withQuietIo(() => handleStart({ task: 'pr-ms', case: '1', slug: 'readme-note', issue: '99', implementer: 'alice', _ghClient: fakeGhClient, _ghProbe: { env: { providerId: 'github', trackB: { tier: 'node-https-token', login: 'alice' } }, client: fakeGhClient }, json: true }, roots))
         if (stPr.res.exitCode !== 0) return `pr-ms start 失败：${stPr.err}`
-        const wtPr = join(dir, readTaskLedger(dir, 'pr-ms').worktreePath)
+        const prMsLg = readTaskLedger(dir, 'pr-ms')
+        const wtPr = prMsLg.worktreePath ? join(dir, prMsLg.worktreePath) : dir
         writeFileSync(join(wtPr, 'docs/note-pr.md'), '# pr\n')
         gitSync(wtPr, ['add', 'docs/note-pr.md']); gitCommitFast(wtPr, 'docs: add note')
         await seedExploredFor(dir, 'pr-ms')
-        const verPr = await withQuietIo(async () => handleVerify({ task: 'pr-ms', mode: 'full' }, await resolveRepoRoots(wtPr)))
+        const verPr = await withQuietIo(async () => handleVerify({ task: 'pr-ms', mode: 'gate' }, await resolveRepoRoots(wtPr)))
         if (verPr.res.exitCode !== 0) return `pr-ms verify 失败：${verPr.err}`
         const createdPrTitles = []
         const subClient = {

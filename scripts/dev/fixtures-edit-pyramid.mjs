@@ -16,6 +16,7 @@ import { appendGovernSignal, readSignalsJsonl, resolveGovernStateDir } from '../
 import { discoverKitSkills } from '../../kit/skills/lib/skill-discovery.mjs'
 import { runEditGate } from '../../kit/skills/dev-edit/scripts/edit-gate.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
+import { handleVerify } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'
 import { handleRecord } from '../../kit/skills/dev-review/scripts/review-ledger.mjs'
 import {
   formatReviewCriteriaTable, sanitizeReviewTableCell, syncReviewToGitHub,
@@ -287,6 +288,10 @@ export function registerEditPyramidCases(cases) {
       const wt = join(dir, '.worktrees', 'impl-c6-t')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const x = 2\n')
       gitCommitFast(wt, 'feat: c6', { updateOnly: true })
+      const verRes = await withQuietIo(() => handleVerify({ task: 'c6-t', mode: 'full', json: true }, roots))
+      if (verRes.res?.exitCode && verRes.res.exitCode !== 0) {
+        return `handleVerify 失败：exit=${verRes.res.exitCode}, out=${verRes.out}, err=${verRes.err}`
+      }
 
       // 普通审查（Round 1 非停损）：包含 2 条重复的高危范围外发现 + 1 条低危存量备注
       const tok = await issueTokenFor(dir, 'c6-t', 1)

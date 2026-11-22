@@ -165,17 +165,22 @@ export async function handleRecord(opts, roots) {
         ? resolve(mainRoot, baseLedger.reviewWorktreePath)
         : workTreeRoot)
 
+  const headSha = opts.head
+    ? await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, opts.head)
+    : await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, 'HEAD')
+
   const optionalLowRiskRecord = opts['review-token'] === undefined
     ? await isOptionalLowRiskReview({ mainRoot, targetRoot, baseLedger })
     : false
 
   if (!optionalLowRiskRecord) {
-    const tokenCheck = consumeReviewToken(baseLedger, opts['review-token'], round)
+    const tokenCheck = consumeReviewToken(baseLedger, opts['review-token'], round, { reviewerId, headSha })
     if (!tokenCheck.ok) {
-      const msg = `BLOCKED_REVIEW_TOKEN: ${tokenCheck.reason}。`
+      const errCode = tokenCheck.code ?? 'BLOCKED_REVIEW_TOKEN'
+      const msg = `${errCode}: ${tokenCheck.reason}。`
         + '独立审查要凭 flow.mjs next 在待审查阶段签发的一次性令牌，--reviewer-id 一个字符串不再是凭据。'
       if (opts.json) {
-        process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_REVIEW_TOKEN', code: tokenCheck.reason, error: msg, taskId, round, reviewerId }, null, 2)}\n`)
+        process.stdout.write(`${JSON.stringify({ status: errCode, code: errCode, error: msg, taskId, round, reviewerId, headSha }, null, 2)}\n`)
       } else {
         process.stdout.write(`${msg}\n`)
       }
@@ -237,10 +242,6 @@ export async function handleRecord(opts, roots) {
     ? (prevRound.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved')
     : []
 
-  const headSha = opts.head
-    ? await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, opts.head)
-    : await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, 'HEAD')
-
   const sameHeadLock = checkSameHeadRereview({ round, prevRound, headSha })
   if (sameHeadLock.blocked) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ status: sameHeadLock.code, exitCode: sameHeadLock.exitCode, taskId, round, headSha, error: sameHeadLock.message }, null, 2)}\n`)
@@ -293,7 +294,7 @@ export async function handleRecord(opts, roots) {
       taskId,
       ledger: baseLedger,
       headSha,
-      enforceGates: Boolean(opts['enforce-gates']),
+      enforceGates: opts['no-enforce-gates'] ? false : (opts['enforce-gates'] !== false),
       humanApproved: Boolean(opts['human-approved']),
       receipt,
       opts,
@@ -331,6 +332,17 @@ export async function handleRecord(opts, roots) {
     } else {
       unmentionedFromPrev.push(pm.id)
     }
+  }
+
+  if (round >= 2 && verdict === 'pass' && unmentionedFromPrev.length > 0) {
+    const msg = `BLOCKED_PASS_WITH_OPEN_BLOCKERS: Round ${round} 试图给出 pass，但上一轮尚有未逐条闭环的阻塞项（${unmentionedFromPrev.join(', ')}）；请使用 --resolved 或 --rebut-accepted 逐条确认，或判 changes。`
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_PASS_WITH_OPEN_BLOCKERS', code: 'BLOCKED_PASS_WITH_OPEN_BLOCKERS', exitCode: EXIT.FACT, taskId, round, headSha, unmentionedFromPrev, error: msg }, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${msg}\n`)
+    }
+    process.stderr.write(`${msg}\n`)
+    return EXIT.FACT
   }
 
   // 整轮通过不等于所有历史阻塞项都被解决。

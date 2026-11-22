@@ -278,6 +278,12 @@ export function evaluateNextState({
     blockingReasons.push('CHANGES_REQUESTED')
     nextAction = `Round ${lastRound.round} 已退回修改，请在 ${t.worktreePath ?? '原分支'} 修复并提交新 commit 后执行 verify + submit`
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" rework --task ${t.taskId}`
+  } else if (Number(t.caseType ?? 3) >= 3 && !t.explored?.at) {
+    phase = 'needs-explore'
+    ownerRole = 'explore'
+    blockingReasons.push('BLOCKED_UNEXPLORED_TASK')
+    nextAction = 'Case >= 3 任务须先运行只读 dev-explore 探索收集架构与复用证据，再进入实施与归档'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${t.taskId}`
   } else if (nothingImplementedYet) {
     phase = 'implementing'
     ownerRole = 'implementer'

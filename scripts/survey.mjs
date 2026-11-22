@@ -34,6 +34,7 @@ import {
   summarizeTddAndSymbolCoverage,
 } from './lib/survey-docs.mjs'
 import { readDecisionMap } from '../kit/skills/lib/profile.mjs'
+import { recordStepStateSafe } from '../kit/skills/lib/session-state.mjs'
 import {
   getHostingProvider,
   resolveWorkspaceIdentity,
@@ -573,6 +574,9 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   delete gitFacts._hasGit
   delete gitFacts._ignoredTracked
   delete gitFacts._statusIgnored
+  if (existsSync(join(root, '.git'))) {
+    recordStepStateSafe(root, { step: 'S1', ok: true, summary: `survey:${facts.scale.codeFiles}files` })
+  }
   return facts
 }
 

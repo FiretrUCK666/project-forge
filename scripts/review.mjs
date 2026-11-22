@@ -15,7 +15,7 @@ import { survey } from './survey.mjs'
 import { flushAndExit, isMainModule, readTextSafe } from './lib/text.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, parseMarkers } from './lib/protocol.mjs'
 import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
-import { inspectKitManifestForReview } from './lib/agents-sections.mjs'
+import { inspectKitManifestForReview, validateDevProfileRegion } from './lib/agents-sections.mjs'
 import {
   checkGovernancePrdCoverage,
   collectMissingRemoteCapabilities,
@@ -302,7 +302,15 @@ export async function reviewProject(targetDir, { scopes } = {}) {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
       } else if (!oversize) {
-        add(finding('ok', 'agents', 'agents.ready', `${facts.docs.agents.file} 已就绪，没有未填的占位，结构也完整`))
+        const dpChk = validateDevProfileRegion(agentsText)
+        if (!dpChk.ok) {
+          add(finding('missing', 'agents', 'agents.dev-profile-invalid',
+            `${facts.docs.agents.file} 的 Dev Profile 未校验通过：${dpChk.reason}`, {
+              ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+            }))
+        } else {
+          add(finding('ok', 'agents', 'agents.ready', `${facts.docs.agents.file} 已就绪，没有未填的占位，结构也完整`))
+        }
       }
     }
     if (facts.docs.otherAiConventions.length > 0) {

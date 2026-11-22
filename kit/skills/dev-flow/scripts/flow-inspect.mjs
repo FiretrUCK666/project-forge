@@ -9,9 +9,11 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
-import { autoPopulateExplored } from './flow-explore.mjs'
-import { checkAuthorIsNotImplementer } from '../../lib/doc-requirements.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
+import {
+  applyLocalAutoClaim, checkStartAuthorSeparation, checkStartMainCleanAndSlot,
+  emitBlockedStart, promotePlanningToStarted,
+} from './flow-start-helpers.mjs'
 import { workTypePrefix } from '../../lib/escalation.mjs'
 import {
   canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
@@ -36,6 +38,7 @@ import {
   parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveIdentityLayers, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { checkTriageDowngrade, readSessionState } from '../../lib/session-state.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import {
   assertNoDuplicatePrForTask, checkUnresolvedDependencies, resolveExternalCollaborationGraph,
@@ -316,6 +319,11 @@ export async function handleStart(opts, roots) {
     process.stderr.write('BLOCKED_CASE_5_TDD_CONFLICT: 需求与 docs/TDD.md 或生效 SPEC 冲突，请先更新 TDD.md 并获批后再开工。\n')
     return { exitCode: EXIT.FACT }
   }
+  if (opts.case !== undefined) {
+    const sess = readSessionState(roots.mainRoot)
+    const down = checkTriageDowngrade({ previousCase: sess?.triage?.caseType, nextCase: caseType, reason: opts.reason })
+    if (!down.ok) return emitBlockedStart(opts, down)
+  }
 
   const state = await inspectWorkspace(roots.mainRoot, {
     roots, inputs: opts._, externalPr: opts['external-pr'] ?? externalPr, pr: opts.pr ?? prFromFlag,
@@ -449,27 +457,10 @@ export async function handleStart(opts, roots) {
       existing.prHeadSha = null
     }
     if ((existing.status === 'planning' || existing.planning === true) && !isPlanning) {
-      const gateRoot = existsSync(existingWorkRootPre) ? existingWorkRootPre : roots.mainRoot
-      const gateRes = runStartPlanGate(gateRoot, {
-        caseType: opts.case !== undefined ? Number(opts.case) : existing.caseType,
-        slug: existing.slug ?? slug,
-        taskId,
-        issue: existing.linkedIssues?.[0] ?? null,
-        docs: { spec: existing.specFile, todo: existing.todoFile, prd: existing.prdFile },
-        opts,
-        planCritique: existing.planCritique ?? null,
+      const promo = await promotePlanningToStarted({
+        roots, existing, existingWorkRootPre, slug, taskId, opts, runStartPlanGate,
       })
-      if (gateRes.blocked) return { exitCode: gateRes.exitCode }
-      existing.status = 'started'
-      existing.planning = false
-      if (!existing.explored) {
-        existing.explored = await autoPopulateExplored(gateRoot, opts.agent ?? opts.implementer ?? existing.implementerId ?? 'local-agent')
-      }
-      if (existing.worktreePath && !existing.depsMode && existsSync(existingWorkRootPre)) {
-        const depMount = mountSharedDeps(roots.mainRoot, existingWorkRootPre)
-        existing.depsMode = depMount.mode
-        recordMountedDepsInLedger(existing, existing.worktreePath, depMount)
-      }
+      if (promo.blocked) return { exitCode: promo.exitCode }
     } else if (isPlanning && (existing.status === 'planning' || existing.status === 'planned')) {
       existing.status = 'planning'
       existing.planning = true
@@ -673,26 +664,24 @@ export async function handleStart(opts, roots) {
     if (gateRes.blocked) return { exitCode: gateRes.exitCode }
   }
 
-  for (const docRel of [initialSpec, initialTodo]) {
-    const authored = checkAuthorIsNotImplementer(roots.mainRoot, docRel, implementerId)
-    if (authored.length > 0) {
-      const msg = `BLOCKED_SELF_AUTHORED_ACCEPTANCE: ${authored[0].message}`
-      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_SELF_AUTHORED_ACCEPTANCE', file: docRel, ...authored[0] }, null, 2)}\n`)
-      else process.stdout.write(`${msg}\n`)
-      process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT.FACT }
-    }
+  const authCheck = checkStartAuthorSeparation(roots.mainRoot, [initialSpec, initialTodo, initialPrd], implementerId, opts)
+  if (authCheck.blocked) {
+    return emitBlockedStart(opts, authCheck)
   }
 
-  if (state.commits === 0) {
-    if (Boolean(opts.parallel)) throw new Error('仓库尚无初始提交，无法使用 worktree 并行隔离')
-    const hasBranch = await resolveLocalBranchRef()
-    const sw = hasBranch.ok ? await gitRun(roots.mainRoot, ['switch', branch]) : await gitRun(roots.mainRoot, ['switch', '-c', branch])
-    if (!sw.ok) throw new Error(`切换分支 ${branch} 失败：${sw.stderr}`)
-    const autoExplored = await autoPopulateExplored(roots.mainRoot, implementerId)
+  if (state.commits === 0 || (caseType === 1 && !Boolean(opts.parallel) && !Boolean(opts.worktree))) {
+    const inPlaceOnExisting = state.commits > 0 && caseType === 1
+    if (!inPlaceOnExisting) {
+      if (Boolean(opts.parallel)) throw new Error('仓库尚无初始提交，无法使用 worktree 并行隔离')
+      const hasBranch = await resolveLocalBranchRef()
+      const sw = hasBranch.ok ? await gitRun(roots.mainRoot, ['switch', branch]) : await gitRun(roots.mainRoot, ['switch', '-c', branch])
+      if (!sw.ok) throw new Error(`切换分支 ${branch} 失败：${sw.stderr}`)
+    }
     const ledger = createDefaultLedger({
-      taskId, slug, caseType, tier: 1, isolation: 'branch', role, providerId, branch, baseBranch, baseSha,
-      worktreePath: null, reviewWorktreePath: `.worktrees/review-${taskId}`,
+      taskId, slug, caseType, tier: 1, isolation: inPlaceOnExisting ? 'in-place' : 'branch', role, providerId,
+      branch: inPlaceOnExisting ? (state.branch && state.branch !== '(detached)' ? state.branch : branch) : branch,
+      baseBranch, baseSha,
+      worktreePath: null, reviewWorktreePath: inPlaceOnExisting ? null : `.worktrees/review-${taskId}`,
       todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
       linkedIssues, prNumber, implementerId,
       account: startIdentity.account, verifiedPlatformLogin: startIdentity.verifiedPlatformLogin, agent: startIdentity.agent,
@@ -700,18 +689,19 @@ export async function handleStart(opts, roots) {
       prContext, prContextUnavailable, ...prPatch,
       status: isPlanning ? 'planning' : 'started',
       planning: isPlanning,
-      explored: autoExplored,
+      explored: null,
       ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
     })
+    applyLocalAutoClaim(ledger, { role, isPlanning, implementerId, opts })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
-      process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 初始无提交分支模式${isPlanning ? '·规划阶段' : ''}）：branch=${branch}, role=${role}\n`)
+      process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 ${inPlaceOnExisting ? 'Case 1 原地微调' : '初始无提交分支'}模式${isPlanning ? '·规划阶段' : ''}）：branch=${ledger.branch}, role=${role}\n`)
       const nextTier1 = isPlanning
         ? [
-            { skill: 'dev-plan', text: `1. 在分支 ${branch} 起草规划文档并经 critique-pass 与 approve` },
+            { skill: 'dev-plan', text: `1. 在分支 ${ledger.branch} 起草规划文档并经 critique-pass 与 approve` },
             { skill: 'dev-flow', text: `2. 过审后执行 flow.mjs start --task ${taskId} 转入实施` },
           ]
         : [
@@ -723,7 +713,12 @@ export async function handleStart(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  // commits > 0 全量进入 Tier 2 Worktree 隔离，不再允许在主仓原地切换分支
+  const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, { caseType, commits: state.commits })
+  if (!slotChk.ok) {
+    return emitBlockedStart(opts, slotChk)
+  }
+
+  // commits > 0 且 Case >= 2 全量进入 Tier 2 Worktree 隔离，不再允许在主仓原地切换分支
   const implRel = `.worktrees/impl-${taskId}`
   const reviewRel = `.worktrees/review-${taskId}`
   const implAbs = join(roots.mainRoot, implRel)
@@ -743,7 +738,6 @@ export async function handleStart(opts, roots) {
   }
 
   const depMount = isPlanning ? { mode: 'deferred-planning', mounted: [], mountedPaths: [] } : mountSharedDeps(roots.mainRoot, implAbs)
-  const autoExplored = await autoPopulateExplored(implAbs, implementerId)
   const ledger = createDefaultLedger({
     taskId, slug, caseType, tier: 2, isolation: 'worktree', role, providerId, branch, baseBranch, baseSha,
     worktreePath: implRel, reviewWorktreePath: reviewRel, depsMode: depMount.mode,
@@ -754,9 +748,10 @@ export async function handleStart(opts, roots) {
     prContext, prContextUnavailable, ...prPatch,
     status: isPlanning ? 'planning' : 'started',
     planning: isPlanning,
-    explored: autoExplored,
+    explored: null,
     ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
   })
+  applyLocalAutoClaim(ledger, { role, isPlanning, implementerId, opts })
   recordMountedDepsInLedger(ledger, implRel, depMount)
 
   const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger, state.dirty)

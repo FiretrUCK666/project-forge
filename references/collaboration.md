@@ -43,15 +43,15 @@
 
 | 隔离档位 | 适用条件 | 工作位与规则 |
 | --- | --- | --- |
-| **第 1 档** | `commits === 0` 且非 `--parallel` | 本地新建特性分支开发（0 提交仓例外） |
-| **第 2 档** | **所有有提交历史仓（`commits > 0`）**、并行或 `L2`/`L3` | 建 `.worktrees/impl-<taskId>/`（新分支，迁入规划文档）；跨轮复用同一 `impl` / `review` 槽；`submit` / `review-pack` 先解绑旧 Junction 再同步 `review-<taskId>/` 至最新 `HEAD` 并重挂载依赖（支持 `--reset-review-slot` 清理审查位，**故障注入只在审查位做**）；本地合入须先在临时 `.worktrees/.tmp-merge-*` `--detach` 试合复测后推进干净主干 |
+| **第 1 档** | `commits === 0` 且非 `--parallel`；或 `Case 1` 原地微调 | 本地特性分支或 `Case 1` 原地微调；`Case >= 2` 严禁在脏主仓直接开工（`BLOCKED_MAIN_SLOT_VIOLATION`） |
+| **第 2 档** | **有提交历史仓（`commits > 0`）的 `Case >= 2`**、并行或 `L2`/`L3` | 建 `.worktrees/impl-<taskId>/`（新分支，迁入规划文档）；跨轮复用同一 `impl` / `review` 槽；`submit` / `review-pack` 先解绑旧 Junction 再同步 `review-<taskId>/` 至最新 `HEAD` 并重挂载依赖（支持 `--reset-review-slot` 清理审查位，**故障注入只在审查位做**）；本地合入须先在临时 `.worktrees/.tmp-merge-*` `--detach` 试合复测后推进干净主干 |
 | **第 3 档** | `inbound-external-pr` 外来提案 | 建 `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`），先过安全扫描 |
 
 **共享依赖、四态判定与防删穿红线**：锁文件按子包独立比对 SHA256 一致时，通过 `.agents/skills/dev-flow/` 内的 `worktree-deps.mjs` 以 Windows Junction / POSIX Symlink 挂载依赖；**若检测到 Workspace 本地包软链或 Python 可编辑 `.venv` 指回主仓，自动拒绝共享并切换为局部隔离**；锁文件变更亦降级独立安装。清理前用 `git cherry` / `git patch-id` 辨识 `merged`、`squash_or_rebase_merged`、`no_own_commits`（先问再清防误删）与 `unmerged` 四态；挂载/卸载均校验 `samePath(main, wt)`，**拆卸 worktree 前必须先仅对链接执行 `unlinkSync` 解绑并问人点头，再 `git worktree remove`**。`.worktrees/` 须已忽略。
 
 ## 四、认领、PR 前文档同步与双写节点
 
-- **谁改谁认领、谁推送提 PR 与四态语义标签（一任务一 PR）**：`maintainer` 可用 `flow.mjs start --create-issue --title "..."` 自动建单并联动 `syncDocsLifecycle` 重命名文档；**谁改代码谁负责在隔离 `impl` 位跑完 `claim` -> `finalize` -> `verify` -> `submit` 推送分支、创建/复用 PR 并写关联评论**（协调者只做路由与派发，不代提 PR；接管须 `--takeover --reason` 双写 Issue+PR，弃领用 `flow.mjs release`）。建单与 PR 入口统一套用工作前缀（默认 `Case 1 -> docs:`、`Case 2 -> fix:`、`Case >= 3 -> feat:`，保留显式前缀）并在 `TaskBackend` 同步四态语义标签（`in-progress`/`in-review`/`changes-requested`/`reviewed`，支持 `no-labels` 豁免与 403/`generic-git` 降级），新建 PR 自动继承关联 Issue Milestone。同一任务已有 OPEN PR 直接复用；返工在原分支追加提交更新同一 PR；`git rebase --continue` 与 `git merge` 统一带 `GIT_EDITOR=true` / `--no-edit` 非交互保护，`flow-trial-merge` 遇冲突在 `--abort` 前输出每文件 `<= 4`、总计 `<= 8` 块有界冲突与恢复包。
+- **谁改谁认领、谁推送提 PR 与四态语义标签（一任务一 PR）**：`maintainer` 可用 `flow.mjs start --create-issue --title "..."` 自动建单并联动 `syncDocsLifecycle` 重命名文档；**谁改代码谁负责在隔离 `impl` 位跑完 `claim`（`Case >= 2` 强校 `claimedAt`）-> `finalize` -> `verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）-> `submit --agent <id>`（禁协调/审查者代提，仅 `--host-mode single-session --human-approved` 豁免）推送分支、创建/复用 PR 并写关联评论**（协调者只做路由与派发，不代提 PR；接管须 `--takeover --reason` 双写 Issue+PR，弃领用 `flow.mjs release`）。建单与 PR 入口统一套用工作前缀（默认 `Case 1 -> docs:`、`Case 2 -> fix:`、`Case >= 3 -> feat:`，保留显式前缀）并在 `TaskBackend` 同步四态语义标签（`in-progress`/`in-review`/`changes-requested`/`reviewed`，支持 `no-labels` 豁免与 403/`generic-git` 降级），新建 PR 自动继承关联 Issue Milestone。同一任务已有 OPEN PR 直接复用；返工在原分支追加提交更新同一 PR；`git rebase --continue` 与 `git merge` 统一带 `GIT_EDITOR=true` / `--no-edit` 非交互保护，`flow-trial-merge` 遇冲突在 `--abort` 前输出每文件 `<= 4`、总计 `<= 8` 块有界冲突与恢复包。
 - **PR 提交前文档同步锁（`flow.mjs finalize` 四态闭环）与零脏文件提审**：
   1. 核对关联 Todo 所有 `[ ]` 已完成勾选 `[x]`、填写「完成后的记录」，将关联 `PRD`、`SPEC` 与 `Todo` 一并 `git mv` **成对归档**进 `docs/archive/{prd,specs,todo}/` 并重算互链；若总控 PRD 为 `1:N` 共享，由 `evaluateMasterPrdClosureState` 执行确定性四态闭环：① 手动策略或仍有活跃兄弟切片维持 `active`；② 尚留未覆盖后续 `C*` 维持 `active`；③ 无其余活跃切片、100% 覆盖且全勾 `[x]` 时无需额外 `--include-master-prd` 即自动同分支归档（含并行后 `sync`/rebase 幂等重跑 `finalize`）；④ 100% 覆盖却仍留 `[ ] C*` 时 `finalize` 与 `verify` 均返回 `BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED` 与单一 `[NEXT STEP]`；
   2. 检查源码模块边界、对外 CLI 或契约变更是否同步更新 `docs/TDD.md` 与 `README*.md` / `AGENTS.md`；
@@ -114,4 +114,4 @@
 6. **再删本地分支**：`git branch -d <分支>`（不是 `-D`）；
 7. **删远端分支之前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base，以及 Fork 场景上游 PR 是否仍 `OPEN`；**两件都清了才** `git push origin --delete <分支>`。
 
-**第 5 步之前先把要删的清单列出来问一次**：明确汇报哪个 worktree、哪条本地分支、哪条远端分支以及「干净的」是哪几项；**问到人点头才删**（对应带 `--confirm` 执行清理），绝不私自自动清理或绕过确认（`contributor-fork` 在上游 PR 仍 `OPEN` 时硬锁禁止删分支）。
+**第 5 步之前先把要删的清单列出来问一次**：明确汇报哪个 worktree、哪条本地分支、哪条远端分支以及「干净的」是哪几项；**问到人点头才删**（对应带 `--confirm --preview-hash <hash>` 执行清理并校验安全删条件），绝不私自自动清理或绕过确认（`contributor-fork` 在上游 PR 仍 `OPEN` 时硬锁禁止删分支）。

@@ -7,7 +7,7 @@
 import { PLACEHOLDER_TEXT_RE } from '../../lib/doc-substantive.mjs'
 
 const ANGLE_PLACEHOLDER_RE = /<([^>\n]{1,60})>/g
-const PATH_PREFIX_RE = /^(?:src|lib|kit|scripts|tests?|spec|app|apps|packages|pkg|cmd|internal|docs|templates|references|\.github)\//
+export const PATH_PREFIX_RE = /^(?:src|lib|kit|scripts|tests?|spec|app|apps|packages|pkg|cmd|internal|docs|templates|references|\.github)\//
 
 /** 在已拆行的文档头部 Frontmatter 中查找指定键的 1-based 行号。 */
 export function findFmKeyLine(lines, fmEndIdx, key) {
@@ -81,8 +81,9 @@ export function extractLinePathCandidates(strippedLine) {
     }
   }
   const withoutHttpRoutes = strippedLine.replace(/\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/?[A-Za-z0-9_./:-]+/gi, ' ')
-  for (const pm of withoutHttpRoutes.matchAll(/(?:^|[\s(（:：,])((?:src|lib|kit|scripts|tests?|spec|apps?|packages|docs|templates|references)\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\/?)/g)) {
-    cands.add(pm[1].trim())
+  for (const pm of withoutHttpRoutes.matchAll(/(?:^|[\s(（:：,])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\/?)/g)) {
+    const cand = pm[1].trim()
+    if (PATH_PREFIX_RE.test(cand)) cands.add(cand)
   }
   return [...cands]
 }

@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path'
 
 import { hasSkillSupport } from '../../lib/cli.mjs'
 import { evaluateStoredVisualEvidence } from '../../lib/empirical-artifacts.mjs'
+import { DEFAULT_ENFORCE_GATES } from '../../lib/gate-enforcement.mjs'
 import {
   checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId,
 } from '../../lib/critique-rounds.mjs'
@@ -498,7 +499,7 @@ export async function checkIncrementalScopeLock({
 
 /** Pass 门禁阻断核验（`findingsBlocker`），仅在失败实证、缺失 E2E/观察实证或显式 `--enforce-gates` 时阻断虚假 pass。 */
 export async function evaluatePassBlockers({
-  mainRoot, targetRoot, gitDir, taskId, ledger, headSha, enforceGates = false, humanApproved = false, receipt = null, opts = {},
+  mainRoot, targetRoot, gitDir, taskId, ledger, headSha, enforceGates = DEFAULT_ENFORCE_GATES, humanApproved = false, receipt = null, opts = {},
 }) {
   const blockers = []
   if (ledger?.lastVerifyExitCode !== null && ledger?.lastVerifyExitCode !== undefined && ledger.lastVerifyExitCode !== 0) {

@@ -82,7 +82,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
    - **Tier 1（架构重构优先）**：状态分裂、竞态、超长紧文件或跨模块结构耦合经 `escalation.mjs` 自动生成并按指纹去重 Tier 1 重构单。
    - **Tier 2（确定性门禁次优先）**：可静态拦截缺陷产出 `arch-rules`、`dev-edit/scripts/edit-gate.mjs`、CI 或目标仓既有原生校验配置建议（绝不硬绑定第三方外部 linter 二进制）。
    - **Tier 3（仅显式兜底与定期淘汰）**：仅传 `--allow-tier3-fallback --reason "<原因>"` 方允许写入带 `[TIER-3-FALLBACK]` 标记与到期条件的极简词条；常规 `retro` 自动识别并清理过期或已由 Tier 2 覆盖的陈旧条目。
-3. **生命周期自动触发**：`flow finalize`/`verify` 链路自动执行轻量 `audit . --changed --quiet --json`，`flow merge`/`cleanup` 后自动执行 `retro --auto --task <id> --json`；显式跳过必带 `--skip-govern --reason "<原因>"` 写入账本与信号流留痕。
+- **生命周期自动触发**：`flow finalize`/`verify` 默认自动跑轻量 `audit . --changed --quiet --json`（禁无痕跳过），`flow merge`/`cleanup` 后自动跑 `retro --auto` 并把待整改项注入 `next` 引导；显式跳过必带 `--skip-govern --reason` 留痕。
 
 ## 先最小运行复现，再评整类加固
 
@@ -103,7 +103,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 
 除 `docs/TDD.md` 外，自动覆盖 `DESIGN.md`、`ARCHITECTURE.md`、`RUNBOOK.md`、`SECURITY.md` 及 `AGENTS.md`「改哪看哪」登记的常青权威文档与 `docs/feature-map.json`，固定三步执行：
 
-1. **机械定位**：先跑 `govern-audit.mjs reconcile` 获取 `evergreenDocs`、`featureMapDrift`（源码模块增删与热改温差）、`docs.duplicate-authority` 与 `nextCommands`；
+1. **机械定位**：先跑 `govern-audit.mjs reconcile`（覆盖 `kit/`/`app/`/`apps/`/`pkg/`/`cmd/`/`internal/` 并按权威常青文档判定温差）获取 `evergreenDocs`、`featureMapDrift`、`emptyDocAnchors`/`emptyToolDomains`/`emptyTestRefDomains` 与 `nextCommands`；
 2. **按节语义核对**：按 `nextCommands` 调用 `dev-explore`（`repo-map.mjs` + `doc-locate.mjs --file <doc>`）按模块和章节对照源码核查语义漏项，不强灌全文；
 3. **隔离补全**：汇总缺口清单后走 `dev-flow` 隔离分支修改并经 `dev-review` 审校合入（绝不直接改主干）。
 

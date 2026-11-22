@@ -78,24 +78,21 @@ export function registerFlowExploreGateCases(cases) {
       if (!stRemote.out.includes('[NEXT STEP]') || !stRemote.out.includes('claim --task t-rem')) {
         return `Tier 2 远端 start [NEXT STEP] 未引导 claim：${stRemote.out}`
       }
-      if (!hasExploredEvidence(readTaskLedger(remoteDir, 't-rem'))) {
-        return 'Tier 2 远端 start 未自动填充 explored 证据'
+      if (hasExploredEvidence(readTaskLedger(remoteDir, 't-rem'))) {
+        return 'Tier 2 远端 start 不应自动伪造 explored 证据'
       }
 
-      // 2) Tier 2 local-only without --issue
+      // 2) Tier 2 local-only without --issue（W4A C1 自动认领 local-only 无 Issue 任务）
       const localRoots = await resolveRepoRoots(localDir)
       const stLocal = await withCaptureIo(() => handleStart({
         task: 't-loc', slug: 'loc-fix', case: '2', implementer: 'alice',
       }, localRoots))
       if (stLocal.res.exitCode !== 0) return `Tier 2 本地 start 失败：exit=${stLocal.res.exitCode}, err=${stLocal.err}`
-      if (!stLocal.out.includes('[NEXT STEP]') || !stLocal.out.includes('claim --task t-loc')) {
-        return `Tier 2 本地 start [NEXT STEP] 未引导 claim：${stLocal.out}`
-      }
-      if (!hasExploredEvidence(readTaskLedger(localDir, 't-loc'))) {
-        return 'Tier 2 本地 start 未自动填充 explored 证据'
+      if (!readTaskLedger(localDir, 't-loc')?.claimedAt) {
+        return 'Tier 2 local-only 无 Issue start 应自动记 claimedAt'
       }
 
-      // 2b) claim 后直接引导 finalize（不再强制人工 flow explore）
+      // 2b) 显式 claim 后引导 finalize（Case 2 不强卡 needs-explore）
       const clLocal = await withCaptureIo(() => handleClaim({ task: 't-loc', agent: 'alice' }, localRoots))
       if (clLocal.res.exitCode !== 0) return `claim 失败：exit=${clLocal.res.exitCode}, err=${clLocal.err}`
       if (!clLocal.out.includes('finalize --task t-loc')) {
@@ -111,8 +108,8 @@ export function registerFlowExploreGateCases(cases) {
       if (!stEmpty.out.includes('[NEXT STEP]') || !stEmpty.out.includes('claim --task t-t1')) {
         return `Tier 1 start [NEXT STEP] 未引导 claim：${stEmpty.out}`
       }
-      if (!hasExploredEvidence(readTaskLedger(emptyCommitDir, 't-t1'))) {
-        return 'Tier 1 start 未自动填充 explored 证据'
+      if (hasExploredEvidence(readTaskLedger(emptyCommitDir, 't-t1'))) {
+        return 'Tier 1 start 不应自动伪造 explored 证据'
       }
 
       return true
@@ -137,17 +134,17 @@ export function registerFlowExploreGateCases(cases) {
       const verPlan = await withCaptureIo(() => handleVerify({ task: 'c2-plan', mode: 'full', json: true }, roots))
       if (verPlan.res.exitCode !== 0) return `c2-plan verify 失败：${verPlan.err}`
 
-      const subBlockText = await withCaptureIo(() => handleSubmit({ task: 'c2-plan' }, roots))
+      const subBlockText = await withCaptureIo(() => handleSubmit({ task: 'c2-plan', agent: 'alice' }, roots))
       if (subBlockText.res.exitCode !== 3 || !subBlockText.err.includes('BLOCKED_PLAN_NOT_READY')) {
         return `planning 态 submit 未以 exit 3 BLOCKED_PLAN_NOT_READY 阻断：exit=${subBlockText.res.exitCode}, err=${subBlockText.err}`
       }
-      const subBlockJson = await withCaptureIo(() => handleSubmit({ task: 'c2-plan', json: true }, roots))
+      const subBlockJson = await withCaptureIo(() => handleSubmit({ task: 'c2-plan', agent: 'alice', json: true }, roots))
       const parsedBlock = JSON.parse(subBlockJson.out)
       if (subBlockJson.res.exitCode !== 3 || parsedBlock.code !== 'BLOCKED_PLAN_NOT_READY') {
         return `planning 态 submit JSON 载荷不符预期：${subBlockJson.out}`
       }
 
-      // 正向 1：正常 Case 2 启动自动带 explored，无需手工 explore 即可 submit 放行
+      // 正向 1：正常 Case 2 启动，无需手工 explore 即可 submit 放行
       await withCaptureIo(() => handleStart({ task: 'c2-code', slug: 'c2-code', case: '2', implementer: 'alice', json: true }, roots))
       await withCaptureIo(() => handleClaim({ task: 'c2-code', agent: 'alice', json: true }, roots))
       const wtC2 = join(dir, '.worktrees', 'impl-c2-code')
@@ -155,7 +152,7 @@ export function registerFlowExploreGateCases(cases) {
       gitCommitFast(wtC2, 'fix: update value', { updateOnly: true })
       const verC2 = await withCaptureIo(() => handleVerify({ task: 'c2-code', mode: 'full', json: true }, roots))
       if (verC2.res.exitCode !== 0) return `c2-code verify 失败：${verC2.err}`
-      const subPass = await withCaptureIo(() => handleSubmit({ task: 'c2-code', json: true }, roots))
+      const subPass = await withCaptureIo(() => handleSubmit({ task: 'c2-code', agent: 'alice', json: true }, roots))
       if (subPass.res.exitCode !== 0) {
         return `自动探索后 submit 未放行：exit=${subPass.res.exitCode}, err=${subPass.err}, out=${subPass.out}`
       }

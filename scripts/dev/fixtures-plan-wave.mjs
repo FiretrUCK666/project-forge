@@ -134,12 +134,13 @@ export function registerPlanWaveCases(cases) {
         return '自举豁免放行时没有说明被绕过的是哪一条'
       }
 
-      // 反向 5：一份规划都没绑时不拦，但要留一条可见的警告
+      // 反向 5：Case 3/4 未绑定任何规划文档时也应硬阻断 BLOCKED_PLAN_NOT_READY（仅 --allow-plan-bootstrap 可豁免）
       const unbound = evaluatePlanExitGate(dir, { caseType: 3, taskId: 'no-docs', docs: {} })
-      if (!unbound.ok) return '没绑文档就被拦了——先 start 后 init 的合法顺序会被判死'
-      if (!unbound.warnings?.some((w) => w.code === 'WARN_PLAN_NOT_BOUND')) {
-        return `没绑文档时没有留可见的警告：${JSON.stringify(unbound)}`
+      if (!unbound.blocked || unbound.code !== 'BLOCKED_PLAN_NOT_READY') {
+        return `Case >= 3 未绑文档应阻断 BLOCKED_PLAN_NOT_READY：${JSON.stringify(unbound)}`
       }
+      const unboundBoot = evaluatePlanExitGate(dir, { caseType: 3, taskId: 'no-docs', docs: {}, allowBootstrap: true })
+      if (!unboundBoot.ok) return `带 --allow-plan-bootstrap 应放行：${JSON.stringify(unboundBoot)}`
       return true
     } finally { rmTree(dir) }
   }])
@@ -289,7 +290,7 @@ export function registerPlanWaveCases(cases) {
 
       // 正向 2：显式 --plan-mode 写进 Frontmatter
       const initOk = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--dir', dir, '--kind', 'pair', '--slug', 'pm', '--title', 'PM', '--plan-mode', 'autonomous', '--json',
+        'init', '--dir', dir, '--kind', 'pair', '--slug', 'pm', '--title', 'PM', '--owner', 'arch-1', '--plan-mode', 'autonomous', '--json',
       ])
       if (initOk.status !== 0) return `init --plan-mode 失败：${initOk.stderr}`
       for (const rel of JSON.parse(initOk.stdout).files) {
@@ -299,7 +300,7 @@ export function registerPlanWaveCases(cases) {
 
       // 反向 1：非法枚举被结构化拒绝（不是静默降级）
       const initBad = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--dir', dir, '--kind', 'todo', '--slug', 'bad', '--title', 'Bad', '--plan-mode', 'manual', '--json',
+        'init', '--dir', dir, '--kind', 'todo', '--slug', 'bad', '--title', 'Bad', '--owner', 'arch-1', '--plan-mode', 'manual', '--json',
       ])
       if (initBad.status === 0) return '非法 --plan-mode 被放行了'
       const badJson = JSON.parse(initBad.stdout)

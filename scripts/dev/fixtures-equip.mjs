@@ -82,6 +82,7 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
 
     const agentsFilled = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
       .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+      .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none')
     writeFileSync(join(dir, 'AGENTS.md'), agentsFilled)
     const caCheck = await runAbsAsync('scripts/compose-agents.mjs', [dir, '--check'], { env: bkEnv })
     if (caCheck.status !== 0) return `compose-agents --check 失败：${caCheck.stderr}`

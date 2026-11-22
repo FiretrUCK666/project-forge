@@ -104,13 +104,13 @@ cases.push(['8 层深 Java+React repo-map、Dev Profile 显式 none 与未知 fl
     if (!avail.has('dev-flow') || avail.has('dev-review')) return `resolveAvailableSkills 探测错误：${avail.skills}`
 
     // 3. Dev Profile 显式 none -> flow verify 与 submit 正常放行 + status/abort 可用
-    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-none', '--case', '1', '--slug', 'none-ok', '--json'], { cwd: dir })
+    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-none', '--case', '1', '--slug', 'none-ok', '--agent', 'alice', '--json'], { cwd: dir })
     if (st.status !== 0) return `start 失败：${st.stderr}`
     const exp = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['explore', '--task', 't-none', '--json'], { cwd: dir })
     if (exp.status !== 0) return `explore 失败：${exp.stderr}`
     const ver = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--json'], { cwd: dir })
     if (ver.status !== 0) return `Dev Profile quick-test: none 时 verify 失败：${ver.stderr}`
-    const sub = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--json'], { cwd: dir })
+    const sub = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--agent', 'alice', '--json'], { cwd: dir })
     if (sub.status !== 0) return `submit 失败：${sub.stderr}`
     const stat = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['status', '--json'], { cwd: dir })
     if (stat.status !== 0 || JSON.parse(stat.stdout).taskId !== 't-none') return `status 自动推断失败：${stat.stdout}`
@@ -209,6 +209,7 @@ cases.push(['survey.mjs + compose-agents.mjs：自有技能共存路由、reentr
     if (gen1.status !== 0) return `compose-agents customDir 失败：${gen1.stderr}`
     const filledCustom = readFileSync(join(customDir, 'AGENTS.md'), 'utf8')
       .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+      .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none')
     writeFileSync(join(customDir, 'AGENTS.md'), filledCustom)
 
     const agentsCustom = readFileSync(join(customDir, 'AGENTS.md'), 'utf8')

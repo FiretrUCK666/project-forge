@@ -352,12 +352,8 @@ export function registerIssue50Cases(cases) {
       const clExp = await handleClaim({ task: 't-exp', agent: 'dev-a' }, roots)
       if (clExp.exitCode !== 0) return `t-exp claim 失败：${clExp.exitCode}`
       const expLedgerAuto = readTaskLedger(dir, 't-exp')
-      if (!hasExploredEvidence(expLedgerAuto)) {
-        return `flow start 未自动写入 explored 证据：${JSON.stringify(expLedgerAuto?.explored)}`
-      }
-      const nxAfterStart = await handleNext({ task: 't-exp', json: true }, roots)
-      if (nxAfterStart.payload?.phase === 'needs-explore') {
-        return `flow start 后不应再停留在 needs-explore：${JSON.stringify(nxAfterStart.payload)}`
+      if (hasExploredEvidence(expLedgerAuto)) {
+        return `flow start 不应自动伪造 explored 证据：${JSON.stringify(expLedgerAuto?.explored)}`
       }
       const implExp = join(dir, '.worktrees', 'impl-t-exp')
       writeFileSync(join(implExp, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(2, 2)\n', 'utf8')
@@ -366,6 +362,9 @@ export function registerIssue50Cases(cases) {
       if (vExp.exitCode !== 0) return `t-exp verify 失败：${vExp.exitCode}`
       const runEx = await handleExplore({ task: 't-exp', by: 'dev-a' }, roots)
       if (runEx.exitCode !== 0) return `handleExplore 显式刷新失败：${runEx.exitCode}`
+      if (!hasExploredEvidence(readTaskLedger(dir, 't-exp'))) {
+        return 'flow explore 跑完后未写入 explored 证据'
+      }
 
       // Empty diff structural gate
       const emptyGate = assessStructuralGate({ reviewRoot: implExp, diff: { files: [], untracked: [], text: '' }, devProfile: {}, parity: {} })

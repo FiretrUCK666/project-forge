@@ -37,7 +37,7 @@ export function registerFlowCleanupCases(cases) {
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
     try {
       const roots = await resolveRepoRoots(dir)
-      const started = await handleStart({ task: 'outbound', case: '3', slug: 'outbound' }, roots)
+      const started = await handleStart({ task: 'outbound', case: '3', slug: 'outbound', 'allow-plan-bootstrap': true }, roots)
       if (started.exitCode !== 0) return `start 失败：${started.exitCode}`
       const ledger = readTaskLedger(dir, 'outbound')
       const implAbs = join(dir, ledger.worktreePath)
@@ -91,7 +91,8 @@ export function registerFlowCleanupCases(cases) {
       }
 
       // 真实 cleanup --confirm --force 与 abort --confirm --force 都必须以 EXIT_POLICY_BLOCK(3) 拦截
-      const cl = await handleCleanup({ task: 'outbound', confirm: true, force: true, json: true }, roots)
+      const prevOut = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 'outbound', '--json'], { cwd: dir })).stdout).previewHash
+      const cl = await handleCleanup({ task: 'outbound', confirm: true, force: true, 'preview-hash': prevOut, json: true }, roots)
       if (cl.exitCode !== 3) return `cleanup --confirm --force 带着外链未返回 EXIT_POLICY_BLOCK(3)：exit=${cl.exitCode}`
       const ab = await handleAbort({ task: 'outbound', confirm: true, force: true, json: true }, roots)
       if (ab.exitCode !== 3) return `abort --confirm --force 带着外链未返回 EXIT_POLICY_BLOCK(3)：exit=${ab.exitCode}`
@@ -103,7 +104,7 @@ export function registerFlowCleanupCases(cases) {
       // 通过真实 CLI 传入可重复 --allow-outbound（含 ./ 与尾部斜杠归一）放行
       const allowFlags = expectedOutside.flatMap((p) => ['--allow-outbound', `./${p}/`])
       const cliOk = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'cleanup', '--task', 'outbound', '--confirm', '--force', ...allowFlags, '--json',
+        'cleanup', '--task', 'outbound', '--confirm', '--preview-hash', prevOut, '--force', ...allowFlags, '--json',
       ], { cwd: dir })
       if (cliOk.status !== 0) return `CLI 显式逐条放行失败：${cliOk.stderr}\n${cliOk.stdout}`
       const parsed = JSON.parse(cliOk.stdout)
@@ -129,6 +130,7 @@ export function registerFlowCleanupCases(cases) {
     const { handleCleanup, handleAbort } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleFinalize, handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleSync } = await import('../../kit/skills/dev-flow/scripts/flow-sync.mjs')
     const { resolveRepoRoots, readTaskLedger, writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
 
@@ -152,8 +154,9 @@ export function registerFlowCleanupCases(cases) {
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
     try {
       const roots = await resolveRepoRoots(dir)
-      const s1 = await handleStart({ task: 'c2-auto', case: '2', slug: 'c2-auto' }, roots)
+      const s1 = await handleStart({ task: 'c2-auto', case: '2', slug: 'c2-auto', implementer: 'impl' }, roots)
       if (s1.exitCode !== 0) return `start 失败：${s1.exitCode}`
+      await handleClaim({ task: 'c2-auto', agent: 'impl' }, roots)
       await seedExploredFor(dir, 'c2-auto')
       const l1 = readTaskLedger(dir, 'c2-auto')
       if (!Array.isArray(l1.mountedDeps) || !l1.mountedDeps.includes('node_modules') || !l1.mountedDeps.includes('packages/app/node_modules')) {
@@ -189,7 +192,7 @@ export function registerFlowCleanupCases(cases) {
 
       await handleFinalize({ task: 'c2-auto' }, roots)
       await handleVerify({ task: 'c2-auto', mode: 'gate' }, roots)
-      const subRes = await handleSubmit({ task: 'c2-auto' }, roots)
+      const subRes = await handleSubmit({ task: 'c2-auto', agent: 'impl' }, roots)
       if (subRes.exitCode !== 0) return `submit 失败：${subRes.exitCode}`
       const lAfterSub = readTaskLedger(dir, 'c2-auto')
       const revMounted = lAfterSub.mountedDepsByWorktree?.[lAfterSub.reviewWorktreePath]
@@ -201,13 +204,14 @@ export function registerFlowCleanupCases(cases) {
       gitCommitFast(implAbs1, 'round 2')
       await handleFinalize({ task: 'c2-auto' }, roots)
       await handleVerify({ task: 'c2-auto', mode: 'gate' }, roots)
-      const subRes2 = await handleSubmit({ task: 'c2-auto' }, roots)
+      const subRes2 = await handleSubmit({ task: 'c2-auto', agent: 'impl' }, roots)
       if (subRes2.exitCode !== 0) return `二次 submit（review 槽已挂载 node_modules）失败：${subRes2.exitCode}`
 
       // 先把分支合并进 main，再验证真实 CLI cleanup 不带 --allow-outbound，自动解绑并输出「工具挂载，自动解绑」回执
       gitSync(dir, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'merge', '--no-ff', lAfterSub.branch, '-m', 'merge c2-auto'])
+      const prevC2 = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 'c2-auto', '--json'], { cwd: dir })).stdout).previewHash
       const clCli = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'cleanup', '--task', 'c2-auto', '--confirm',
+        'cleanup', '--task', 'c2-auto', '--confirm', '--preview-hash', prevC2,
       ], { cwd: dir })
       if (clCli.status !== 0) return `工具挂载工作树不带 --allow-outbound 清理失败：${clCli.stderr}\n${clCli.stdout}`
       if (!clCli.stdout.includes('工具挂载，自动解绑') || !clCli.stdout.includes('node_modules ->')) {
@@ -311,7 +315,8 @@ export function registerFlowCleanupCases(cases) {
       gitSync(dir, ['merge', '--ff-only', l.branch])
       symlinkSync(join(implAbs, 'inner'), join(implAbs, 'inner-junc'), linkType)
 
-      const cl = await handleCleanup({ task: 'c3-main', confirm: true, json: true }, roots)
+      const prevC3 = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 'c3-main', '--json'], { cwd: dir })).stdout).previewHash
+      const cl = await handleCleanup({ task: 'c3-main', confirm: true, 'preview-hash': prevC3, json: true }, roots)
       if (cl.exitCode !== 0) return `含内部 junction 的 worktree 清理失败：exit=${cl.exitCode}`
       if (existsSync(implAbs)) return 'cleanup 后 worktree 目录依然存在'
       const brExists = gitSync(dir, ['show-ref', '--verify', '--quiet', `refs/heads/${l.branch}`]).status === 0
@@ -418,8 +423,11 @@ export function registerFlowCleanupCases(cases) {
 
       // 2. review-diff syncTier2ReviewSlotIfNeeded（走 callReviewDepsHelper + { mode: 'deps' }）+ runTrialMerge 端到端
       const roots = await resolveRepoRoots(dir)
-      const started = await handleStart({ task: 'c5-tm', case: '2', slug: 'c5-tm' }, roots)
+      const started = await handleStart({ task: 'c5-tm', case: '2', slug: 'c5-tm', implementer: 'impl' }, roots)
       if (started.exitCode !== 0) return `start c5-tm 失败：${started.exitCode}`
+      const { handleClaim: claimC5 } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+      await claimC5({ task: 'c5-tm', agent: 'impl' }, roots)
+      await seedExploredFor(dir, 'c5-tm')
       const l1 = readTaskLedger(dir, 'c5-tm')
       const implAbs = join(dir, l1.worktreePath)
       writeFileSync(join(implAbs, 'src', 'app.mjs'), 'export const v = 2\n')
@@ -477,7 +485,8 @@ export function registerFlowCleanupCases(cases) {
         gitSync(wtTr, ['add', 'extlink'])
         gitSync(wtTr, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'commit tracked extlink'])
         gitSync(dir, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'merge', '--no-ff', lTr.branch, '-m', 'merge tracked extlink'])
-        const clTr = await handleCleanup({ task: 'c1-tracked-clean', confirm: true, 'allow-outbound': ['extlink'], json: true }, roots)
+        const prevTr = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 'c1-tracked-clean', '--json'], { cwd: dir })).stdout).previewHash
+        const clTr = await handleCleanup({ task: 'c1-tracked-clean', confirm: true, 'preview-hash': prevTr, 'allow-outbound': ['extlink'], json: true }, roots)
         if (clTr.exitCode !== 0 || existsSync(wtTr)) {
           return `干净工作树含跟踪外链不带 --force 清理失败：exit=${clTr.exitCode}`
         }

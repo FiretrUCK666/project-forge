@@ -101,7 +101,7 @@ export function registerStageBLoopB5Cases(cases) {
       writeFileSync(join(noneWt, 'src/app.mjs'), 'export const n = 2\n')
       gitCommitFast(noneWt, 'feat: none', { updateOnly: true })
       const noneVer = await withQuietIo(() => handleVerify({ task: 'none-t', mode: 'full', json: true }, noneRoots))
-      const noneSub = await withQuietIo(() => handleSubmit({ task: 'none-t', json: true }, noneRoots))
+      const noneSub = await withQuietIo(() => handleSubmit({ task: 'none-t', agent: 'alice', json: true }, noneRoots))
       if (noneVer.res.exitCode !== 0 || noneSub.res.exitCode !== 0) {
         return `显式 smoke-verify: none 被误拦：ver=${noneVer.res.exitCode}, sub=${noneSub.res.exitCode}`
       }
@@ -116,14 +116,14 @@ export function registerStageBLoopB5Cases(cases) {
 
       const fullOnly = await withQuietIo(() => handleVerify({ task: 'c15-t', mode: 'full', json: true }, roots))
       if (fullOnly.res.exitCode !== 0) return `c15 full verify 本身失败：${fullOnly.err}`
-      const subTierBlock = await withQuietIo(() => handleSubmit({ task: 'c15-t', json: true }, roots))
+      const subTierBlock = await withQuietIo(() => handleSubmit({ task: 'c15-t', agent: 'alice', json: true }, roots))
       if (subTierBlock.res.exitCode !== 3 || !`${subTierBlock.out}${subTierBlock.err}`.includes('BLOCKED_INSUFFICIENT_VERIFICATION_TIER')) {
         return `full 竟绕过了 smoke-verify：exit=${subTierBlock.res.exitCode}, out=${subTierBlock.out}`
       }
 
       const smokeNoObs = await withQuietIo(() => handleVerify({ task: 'c15-t', mode: 'smoke', json: true }, roots))
       if (smokeNoObs.res.exitCode !== 0) return `smoke verify 执行失败：${smokeNoObs.err}`
-      const subObsBlock = await withQuietIo(() => handleSubmit({ task: 'c15-t', json: true }, roots))
+      const subObsBlock = await withQuietIo(() => handleSubmit({ task: 'c15-t', agent: 'alice', json: true }, roots))
       if (subObsBlock.res.exitCode !== 3 || !`${subObsBlock.out}${subObsBlock.err}`.includes('BLOCKED_E2E_OBSERVATION_REQUIRED')) {
         return `缺 --e2e-evidence 时 submit 未拦截：exit=${subObsBlock.res.exitCode}, out=${subObsBlock.out}`
       }
@@ -140,7 +140,7 @@ export function registerStageBLoopB5Cases(cases) {
         task: 'c15-t', mode: 'smoke', 'e2e-evidence': 'observed SMOKE_BANNER_OK exit=0', json: true,
       }, roots))
       if (smokeWithObs.res.exitCode !== 0) return `smoke --e2e-evidence 失败：${smokeWithObs.err}`
-      const subOk = await withQuietIo(() => handleSubmit({ task: 'c15-t', json: true }, roots))
+      const subOk = await withQuietIo(() => handleSubmit({ task: 'c15-t', agent: 'alice', json: true }, roots))
       if (subOk.res.exitCode !== 0) return `带 --e2e-evidence 后 submit 失败：${subOk.err}`
 
       // 构造无观察记录的独立评审上下文，验证缺 E2E 观察拦截 --include-diff 与 pass
@@ -262,7 +262,7 @@ export function registerStageBLoopB5Cases(cases) {
       gitCommitFast(wt, 'feat: a6', { updateOnly: true })
       const a6Smoke = await withQuietIo(() => handleVerify({ task: 'a6-t', mode: 'smoke', 'e2e-evidence': 'a6 smoke ok', json: true }, roots))
       const a6Full = await withQuietIo(() => handleVerify({ task: 'a6-t', mode: 'full', json: true }, roots))
-      const a6Sub = await withQuietIo(() => handleSubmit({ task: 'a6-t', json: true }, roots))
+      const a6Sub = await withQuietIo(() => handleSubmit({ task: 'a6-t', agent: 'alice', json: true }, roots))
       if (a6Smoke.res.exitCode !== 0 || a6Full.res.exitCode !== 0 || a6Sub.res.exitCode !== 0) {
         return `A6 verify/submit 失败：smoke=${a6Smoke.res.exitCode}, full=${a6Full.res.exitCode}, sub=${a6Sub.res.exitCode}`
       }

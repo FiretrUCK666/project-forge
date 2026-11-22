@@ -76,7 +76,7 @@ function printHelp() {
     '  [--implementer-id <id>] [--must-fix <textOrJson>...] [--should-fix <text>...]',
     '  [--pre-existing <text>...] [--disposition "<idOrFp>:<outcome>"...]',
     '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
-    '  [--enforce-gates] [--evidence <text>] [--artifact <path>]... [--e2e-evidence <text>] [--visual-blocked-reason <text>] [--visual-checked] [--visual-evidence <text>] [--no-escalate --reason <text>] [--human-approved] [--reason <text>]',
+    '  [--enforce-gates] [--no-enforce-gates] [--evidence <text>] [--artifact <path>]... [--e2e-evidence <text>] [--visual-blocked-reason <text>] [--visual-checked] [--visual-evidence <text>] [--no-escalate --reason <text>] [--human-approved] [--reason <text>]',
     '',
     `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.FACT}=BLOCKED_EMPIRICAL_FIRST/DIRTY_RESIDUE/UNTRUSTED_HAZARD, ${EXIT.HUMAN}=STOP_LOSS_ESCALATE`,
     '',
@@ -326,7 +326,7 @@ async function main(argv = process.argv.slice(2)) {
       booleanFlags: [
         'local', 'staged', 'untrusted-scan', 'human-approved-exec', 'override-intake',
         'human-approved', 'include-diff', 'visual-checked',
-        'reset-review-slot', 'enforce-gates', 'escalate', 'no-escalate',
+        'reset-review-slot', 'enforce-gates', 'no-enforce-gates', 'escalate', 'no-escalate',
       ],
       valueFlags: [
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',

@@ -203,6 +203,7 @@ Daily workflows route through `AGENTS.md`, so you do not need to memorize these 
 | --- | --- |
 | `node scripts/survey.mjs <dir>` | Read-only inventory of layout, docs, remote topology, and auth state |
 | `node scripts/backup.mjs create <dir>` | Create an incremental `.zip` snapshot outside the repository (`list` / `restore`) |
+| `scripts/zip.mjs` | Zero-dependency `node:zlib` zip reader/writer shared by `backup.mjs` and `update.mjs` |
 | `node scripts/equip.mjs <dir>` | Install or losslessly refresh `.agents/skills/` (`--check`, `--adopt-custom`, `--restore`, `--bootstrap-empty`) |
 | `node scripts/compose-agents.mjs <dir>` | Generate or refresh `AGENTS.md` (`< 24KB` target, `<= 30KB` cap) |
 | `node scripts/equip-ci.mjs <dir>` | Write CI workflows from survey facts or configure branch protection |

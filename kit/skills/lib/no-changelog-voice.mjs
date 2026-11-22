@@ -31,12 +31,22 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { readTextSafe } from './git.mjs'
+import { buildLexedViews } from './static-gates-lexer.mjs'
 
 /** 明确指向「以前怎么怎么样」的词。 */
 const STRONG = [
-  '早先', '以前是', '以前这里', '原来是', '原来这里', '后来改', '后来才', '曾经', '过去是',
-  '老版本', '旧版本里', '之前这里是', '原本是',
+  '早先', '以前是', '以前这里', '以前写在', '以前写成', '原来是', '原来这里', '原来的做法', '原来在',
+  '原先是', '原本是', '之前是', '之前这里是', '旧版是', '老版本', '旧版本', '后来改', '后来才',
+  '曾经', '过去是', '历史兼容保留',
 ]
+
+const ENGLISH_TOMBSTONE_RE = /\b(?:used to be|previously (?:was|were|called|used)|migrated from|replaced old|formerly\b|removed in favor of|deprecated since v?\d|changed from\b.{1,30}\bto\b)/i
+
+/** 单源履历/墓碑词形正则（中英文合并，供 static-gates.mjs 与全仓文档扫描共用）。 */
+export const CHANGELOG_VOICE_TOMBSTONE_RE = new RegExp(
+  `${ENGLISH_TOMBSTONE_RE.source}|(?:${STRONG.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+  'i',
+)
 
 /** 只有同时出现新旧对照才算履历的弱信号。 */
 const WEAK = ['现在改成', '改成这样', '不再是', '已经不']
@@ -44,17 +54,20 @@ const WEAK = ['现在改成', '改成这样', '不再是', '已经不']
 /** 同一行里出现这些，说明是在做新旧对照。 */
 const CONTRAST = /(?:现在|改成|换成|改为|变成)/
 
+const CODE_FILE_EXT_RE = /\.(m?[jt]sx?|cjs|py|rs|go|java|kt|kts|cs|c|cc|cpp|cxx|h|hpp|swift|dart|rb|php|sh|bash|ps1)$/i
+
 /** 文档里本来就该出现这些词的场景：讲现状的章节标题、引用原文、规则条文本身。 */
 const LEGIT_LINE = [
   /^#{1,6}\s*(?:现状|背景|动机|问题)/,
   /(?:引|摘自|原文|用户说的|Issue\s*#)/,
   // 规则条文本身要举例说明「什么算履历体」，此时的词是**被引用的对象**，不是履历。
-  /(?:如|例如|比如|形如|诸如)[^\n]{0,20}(?:早先|以前是|原来|曾经|后来)/,
-  /[`「『][^`」』]{0,30}(?:早先|以前是|原来是|曾经)[^`」』]{0,30}[`」』]/,
+  /(?:如|例如|比如|形如|诸如|覆盖|词形|举例)[^\n]{0,24}(?:早先|以前是|以前写在|原来|曾经|后来|过去是|老版本|旧版本)/,
+  /[`「『“][^`」』”]{0,40}(?:早先|以前是|以前写在|原来是|原来的做法|原来在|曾经|过去是|老版本|旧版本|deprecated\s+since)[^`」』”]{0,40}[`」』”]/,
 ]
 
 /**
  * 从一段文本里找出履历体句子。
+ * 检查源码文件时先经词法剥离字面量，只扫描真实注释行。
  *
  * @param {string} text
  * @param {{file?: string}} [opts]
@@ -62,18 +75,25 @@ const LEGIT_LINE = [
  */
 export function findChangelogVoice(text, opts = {}) {
   const out = []
-  const lines = String(text ?? '').split('\n')
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]
-    if (LEGIT_LINE.some((re) => re.test(line))) continue
+  const fileRel = String(opts.file ?? '')
+  const codeMatch = CODE_FILE_EXT_RE.exec(fileRel)
+  const rawLines = String(text ?? '').split('\n')
+  const scanLines = codeMatch
+    ? buildLexedViews(String(text ?? ''), codeMatch[1].toLowerCase()).commentLines
+    : rawLines
+
+  for (let i = 0; i < scanLines.length; i += 1) {
+    const line = scanLines[i]
+    if (!line || LEGIT_LINE.some((re) => re.test(line))) continue
     const strong = STRONG.find((w) => line.includes(w))
+      ?? ENGLISH_TOMBSTONE_RE.exec(line)?.[0]
     if (strong) {
-      out.push({ file: opts.file ?? '', line: i + 1, word: strong, text: line.trim() })
+      out.push({ file: fileRel, line: i + 1, word: strong, text: rawLines[i].trim() })
       continue
     }
     const weak = WEAK.find((w) => line.includes(w))
     if (weak && CONTRAST.test(line)) {
-      out.push({ file: opts.file ?? '', line: i + 1, word: weak, text: line.trim() })
+      out.push({ file: fileRel, line: i + 1, word: weak, text: rawLines[i].trim() })
     }
   }
   return out

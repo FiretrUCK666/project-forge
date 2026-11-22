@@ -10,30 +10,26 @@ import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import {
-  COMMON_OUTPUT_DIRS, DEFAULT_WALK_SKIP_DIRS, canonicalPath, gitRun, inspectBranchMergeState,
-  isMacOsJunkPath, parseWorktreeListPorcelain, posixPath, readJsonSafe,
-  readTextSafe, samePath, sha256Text,
+  DEFAULT_WALK_SKIP_DIRS, gitRun, isMacOsJunkPath, posixPath,
 } from '../../lib/git.mjs'
-import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
-import { isAllowedExtensionPath } from '../../lib/overlay.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, ISSUE_REF_RE, JUSTIFICATION_ANCHOR_RE,
   RUST_ALLOW_RE, TEST_FILE_RE, TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
-  extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode,
+  extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode, scanStructuralHygiene,
 } from '../../lib/static-gates.mjs'
 import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 import {
-  NPMRC_FILE_RE, SAFE_ENV_RE, SECRET_CONTENT_PATTERNS, SECRET_FILE_RE, isSensitiveSecretFile,
+  NPMRC_FILE_RE, SAFE_ENV_RE, SECRET_FILE_RE, isSensitiveSecretFile, matchSecretContentLine,
 } from '../../lib/credential-scan.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES } from '../../lib/tool-owned.mjs'
+import { auditUnignoredOutputDirs, inspectManifest, inspectWorktrees } from './govern-checks-hygiene.mjs'
 
-export { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES }
+export { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, inspectManifest, inspectWorktrees }
 export const GOD_FILE_WARN_LINES = 800
 export const GOD_FILE_HIGH_LINES = 1500
 const LARGE_FILE_BYTES = 1024 * 1024
 const MAX_READ_BYTES = 512 * 1024
 
-const OUTPUT_DIRS = [...COMMON_OUTPUT_DIRS, '.worktrees']
 export const TEXT_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1|md|mdx|txt|rst|ya?ml|json|toml|ini|cfg|env)$/i
 const BOM_EXEMPT_EXT_RE = /\.(?:cs|fs|vb|csproj|fsproj|vbproj|sln)$/i
 
@@ -190,20 +186,18 @@ export function auditSecurity(files, trackedSet, findings) {
     const lines = getLinesCached(f.full, info) ?? []
     for (let idx = 0; idx < lines.length; idx += 1) {
       const line = lines[idx]
-      for (const pat of SECRET_CONTENT_PATTERNS) {
-        if (pat.re.test(line)) {
-          addFinding(findings, {
-            id: `sec.token.${f.rel}:${idx + 1}`,
-            category: 'security',
-            severity: trackedSet.has(f.rel) ? 'critical' : 'high',
-            file: f.rel,
-            line: idx + 1,
-            title: `Possible ${pat.label} in ${f.rel}:${idx + 1}`,
-            detail: 'Secret-like literal detected (value redacted).',
-            action: 'Rotate secret and load via environment variables or credential manager.',
-          })
-          break
-        }
+      for (const pat of matchSecretContentLine(line)) {
+        addFinding(findings, {
+          id: `sec.token.${f.rel}:${idx + 1}`,
+          category: 'security',
+          severity: trackedSet.has(f.rel) ? 'critical' : 'high',
+          file: f.rel,
+          line: idx + 1,
+          title: `Possible ${pat.label} in ${f.rel}:${idx + 1}`,
+          detail: 'Secret-like literal detected (value redacted).',
+          action: 'Rotate secret and load via environment variables or credential manager.',
+        })
+        break
       }
       if (CODE_EXT_RE.test(f.name) && !TEST_FILE_RE.test(f.rel)) {
         if (/\bNODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]0['"]/.test(line)) {
@@ -367,212 +361,6 @@ export function auditPerf(repoRoot, files, findings) {
   }
 }
 
-export async function inspectWorktrees(mainRoot, isGit, defaultBranch) {
-  const stale = []
-  const worktreeEntries = []
-  const counts = { merged: 0, squash_or_rebase_merged: 0, no_own_commits: 0, unmerged: 0, prunable: 0, orphan_dir: 0 }
-  if (!isGit) return { total: 0, counts, entries: worktreeEntries, stale }
-
-  const fastWtList = readWorktreeListFast(mainRoot)
-  let rawEntries = fastWtList
-  if (!rawEntries) {
-    const listRes = await gitRun(mainRoot, ['worktree', 'list', '--porcelain'])
-    rawEntries = listRes.ok && listRes.stdout ? parseWorktreeListPorcelain(listRes.stdout) : []
-  }
-  const mainCanon = canonicalPath(mainRoot)
-  const registeredPaths = []
-  let registeredInDotWorktrees = 0
-
-  const dotWorktreeEntries = rawEntries.filter((e) => {
-    registeredPaths.push(e.path)
-    if (samePath(e.path, mainCanon)) return false
-    const rel = posixPath(relative(mainCanon, e.path))
-    return rel.startsWith('.worktrees/')
-  })
-  registeredInDotWorktrees = dotWorktreeEntries.length
-
-  const mergeCache = { firstParentPromises: new Map(), patchIdPromises: new Map() }
-  const inspected = new Array(dotWorktreeEntries.length)
-  let wtCursor = 0
-  const inspectOneWt = async () => {
-    while (wtCursor < dotWorktreeEntries.length) {
-      const idx = wtCursor
-      wtCursor += 1
-      const e = dotWorktreeEntries[idx]
-      const rel = posixPath(relative(mainCanon, e.path))
-      if (e.prunable) {
-        inspected[idx] = {
-          stateKey: 'prunable',
-          item: { path: rel, branch: e.branch, headSha: e.head, state: 'prunable', dirty: false, reason: `prunable (${e.prunable})` },
-          isStale: true,
-        }
-        continue
-      }
-      const fastCleanWt = existsSync(e.path) ? isCleanWorktreeFast(e.path) : null
-      const [stRes, mergeInfo] = await Promise.all([
-        fastCleanWt?.clean
-          ? Promise.resolve({ ok: true, stdout: '' })
-          : (existsSync(e.path) ? gitRun(e.path, ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=normal']) : Promise.resolve({ ok: false, stdout: '' })),
-        inspectBranchMergeState(mainRoot, {
-          branch: e.branch,
-          headSha: e.head,
-          defaultBranch: defaultBranch || 'main',
-          cache: mergeCache,
-        }),
-      ])
-      const dirty = Boolean(stRes.ok && stRes.stdout.trim())
-      const st = mergeInfo.state
-      const item = {
-        path: rel,
-        branch: e.branch,
-        headSha: e.head,
-        state: st,
-        dirty,
-        ownCommits: mergeInfo.ownCommits,
-        isShallow: mergeInfo.isShallow,
-        reason: st === 'no_own_commits'
-          ? `no_own_commits: no unique commits ahead of ${defaultBranch || 'main'} (dirty=${dirty}; ask human before cleaning)`
-          : `${st}: ${mergeInfo.reason}`,
-      }
-      inspected[idx] = { stateKey: st, item, isStale: st !== 'unmerged' }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(2, dotWorktreeEntries.length) }, inspectOneWt))
-
-  for (const res of inspected) {
-    counts[res.stateKey] = (counts[res.stateKey] ?? 0) + 1
-    worktreeEntries.push(res.item)
-    if (res.isStale) stale.push(res.item)
-  }
-
-  const wtContainer = join(mainRoot, '.worktrees')
-  if (existsSync(wtContainer)) {
-    try {
-      for (const d of readdirSync(wtContainer, { withFileTypes: true })) {
-        if (!d.isDirectory() || d.name === '.state' || isMacOsJunkPath(d.name)) continue
-        const abs = canonicalPath(join(wtContainer, d.name))
-        if (!registeredPaths.some((rp) => samePath(rp, abs))) {
-          counts.orphan_dir += 1
-          const item = { path: `.worktrees/${d.name}`, branch: undefined, state: 'orphan_dir', dirty: false, reason: 'unregistered orphan directory inside .worktrees/' }
-          worktreeEntries.push(item)
-          stale.push(item)
-        }
-      }
-    } catch { /* ignore */ }
-  }
-
-  return { total: registeredInDotWorktrees, counts, entries: worktreeEntries, stale }
-}
-
-export function inspectManifest(repoRoot) {
-  const skillsDir = join(repoRoot, '.agents', 'skills')
-  const manifestPath = join(skillsDir, '.pf-manifest.json')
-  if (!existsSync(skillsDir) && !existsSync(manifestPath)) {
-    return { present: false, status: 'not-equipped', issues: [], customizedCount: 0 }
-  }
-  if (existsSync(skillsDir) && !existsSync(manifestPath)) {
-    return {
-      present: true,
-      status: 'missing-manifest',
-      issues: [{ file: '.agents/skills/.pf-manifest.json', kind: 'missing', detail: '.agents/skills/ exists without .pf-manifest.json' }],
-      customizedCount: 0,
-    }
-  }
-
-  const manifest = readJsonSafe(manifestPath)
-  if (!manifest || typeof manifest !== 'object' || typeof manifest.files !== 'object' || manifest.files === null) {
-    return {
-      present: true,
-      status: 'corrupt-manifest',
-      issues: [{ file: '.agents/skills/.pf-manifest.json', kind: 'corrupt', detail: 'Invalid JSON or missing files map' }],
-      customizedCount: 0,
-    }
-  }
-
-  const disabledSet = new Set(Array.isArray(manifest.disabledSkills) ? manifest.disabledSkills.map(String) : [])
-  const removedMap = manifest.removedFiles && typeof manifest.removedFiles === 'object' && !Array.isArray(manifest.removedFiles)
-    ? manifest.removedFiles
-    : {}
-  const customizedMap = manifest.customizedFiles && typeof manifest.customizedFiles === 'object' && !Array.isArray(manifest.customizedFiles)
-    ? manifest.customizedFiles
-    : {}
-  const pendingConflicts = manifest.pendingConflicts && typeof manifest.pendingConflicts === 'object' && !Array.isArray(manifest.pendingConflicts)
-    ? manifest.pendingConflicts
-    : {}
-  const issues = []
-  let checked = 0
-  let customizedCount = 0
-
-  const hashDiskFile = (abs) => {
-    const buf = readFileSync(abs)
-    const textNormHash = !buf.subarray(0, 4096).includes(0)
-      ? sha256Text(buf.toString('utf8').replace(/\r\n/g, '\n'))
-      : null
-    const rawHash = sha256Text(buf.toString('utf8'))
-    return { textNormHash, rawHash }
-  }
-
-  for (const [relKey, meta] of Object.entries(manifest.files)) {
-    const norm = posixPath(relKey).replace(/^\.agents\/skills\//, '').replace(/^\/+/, '')
-    if (!norm || isAllowedExtensionPath(norm) || isAllowedExtensionPath(`.agents/${norm}`)) continue
-    const topSkill = norm.split('/')[0]
-    if (disabledSet.has(topSkill) || Object.prototype.hasOwnProperty.call(removedMap, norm)) continue
-    checked += 1
-
-    const abs = norm.startsWith('.agents/skills/') ? join(repoRoot, norm) : join(skillsDir, norm)
-    if (!existsSync(abs)) {
-      issues.push({ file: norm, kind: 'missing-managed', detail: 'Managed skill file listed in manifest is missing on disk' })
-      continue
-    }
-
-    const customEntry = customizedMap[norm]
-    if (customEntry && typeof customEntry === 'object') {
-      try {
-        const { textNormHash, rawHash } = hashDiskFile(abs)
-        const baseSha = typeof customEntry.baseSha256 === 'string' ? customEntry.baseSha256 : null
-        if (!baseSha || textNormHash === baseSha || rawHash === baseSha) {
-          customizedCount += 1
-        } else {
-          issues.push({ file: norm, kind: 're-edited-custom', detail: 'Customized file changed after --adopt-custom baseline; re-adopt or merge' })
-        }
-      } catch {
-        issues.push({ file: norm, kind: 'unreadable', detail: 'Unable to hash customized file' })
-      }
-      continue
-    }
-
-    const expectedSha = typeof meta === 'string' ? meta : meta?.sha256
-    if (typeof expectedSha === 'string' && expectedSha) {
-      try {
-        const { textNormHash, rawHash } = hashDiskFile(abs)
-        if (textNormHash !== expectedSha && rawHash !== expectedSha) {
-          issues.push({ file: norm, kind: 'drifted', detail: 'File checksum differs from manifest baseline (local modification or drift)' })
-        }
-      } catch {
-        issues.push({ file: norm, kind: 'unreadable', detail: 'Unable to hash managed file' })
-      }
-    }
-  }
-
-  for (const [relKey, info] of Object.entries(pendingConflicts)) {
-    issues.push({
-      file: posixPath(relKey),
-      kind: 'pending-conflict',
-      detail: `Unresolved three-way upgrade conflict (${info?.conflictFile ?? `${relKey}.pf-conflict`})`,
-    })
-  }
-
-  return {
-    present: true,
-    schemaVersion: manifest.schemaVersion ?? 1,
-    status: issues.length === 0 ? 'ok' : 'drift-detected',
-    checkedFiles: checked,
-    customizedCount,
-    pendingConflictCount: Object.keys(pendingConflicts).length,
-    issues,
-  }
-}
-
 export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBranch, devProfile, findings, opts = {}) {
   const changedSet = opts?.changedFilesSet instanceof Set ? opts.changedFilesSet : null
   const home = homedir().replace(/\\/g, '/')
@@ -631,22 +419,29 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
       const lines = getLinesCached(f.full, info) ?? []
       const parsedComments = getCommentLinesCached(f.full, lines, ext)
       if (!isTestOrFixtureFile(f.rel) && !f.name.endsWith('.min.js') && lines.length > GOD_FILE_WARN_LINES) {
-        const isHigh = lines.length > GOD_FILE_HIGH_LINES
-        addFinding(findings, {
-          id: `hygiene.god-file.${f.rel}`,
-          category: 'hygiene',
-          severity: isHigh ? 'high' : 'medium',
-          file: f.rel,
-          title: `Oversized source file (${lines.length} lines > ${isHigh ? GOD_FILE_HIGH_LINES : GOD_FILE_WARN_LINES}): ${f.rel}`,
-          action: 'Split cohesive responsibilities into smaller focused modules rather than expanding a god file.',
+        const structCheck = scanStructuralHygiene({
+          fileRel: f.rel, lines, fullText: info.text, fullLineCount: lines.length,
+          warnLines: GOD_FILE_WARN_LINES, highLines: GOD_FILE_HIGH_LINES, skipFixtureCheck: true,
         })
+        if (structCheck.godFile) {
+          const isHigh = lines.length > GOD_FILE_HIGH_LINES
+          addFinding(findings, {
+            id: `hygiene.god-file.${f.rel}`,
+            category: 'hygiene',
+            severity: isHigh ? 'high' : 'medium',
+            file: f.rel,
+            title: `Oversized source file (${lines.length} lines > ${isHigh ? GOD_FILE_HIGH_LINES : GOD_FILE_WARN_LINES}): ${f.rel}`,
+            action: 'Split cohesive responsibilities into smaller focused modules rather than expanding a god file.',
+          })
+        }
       }
 
       let tombCount = 0
       let excuseCount = 0
+      const skipFixtureHygiene = isTestOrFixtureFile(f.rel)
       for (let i = 0; i < lines.length; i += 1) {
         const { commentText } = parsedComments[i]
-        if (commentText && TOMBSTONE_COMMENT_RE.test(commentText)) {
+        if (!skipFixtureHygiene && commentText && TOMBSTONE_COMMENT_RE.test(commentText)) {
           tombCount += 1
           if (tombCount <= 5) {
             addFinding(findings, {
@@ -712,29 +507,7 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
     })
   }
 
-  const presentOutputs = OUTPUT_DIRS.filter((d) => existsSync(join(workRoot, d)))
-  if (isGit && presentOutputs.length > 0) {
-    const giTxt = readTextSafe(join(workRoot, '.gitignore')) ?? ''
-    const exTxt = readTextSafe(join(mainRoot, '.git', 'info', 'exclude')) ?? ''
-    const onlyWorktrees = presentOutputs.length === 1 && presentOutputs[0] === '.worktrees'
-      && [giTxt, exTxt].some((t) => /^\s*\/?\.worktrees\/?\s*(?:#.*)?$/m.test(t))
-    const res = onlyWorktrees
-      ? { stdout: '.worktrees\0' }
-      : await gitRun(workRoot, ['check-ignore', '-z', '--stdin'], { input: presentOutputs.join('\0') })
-    const ignored = new Set((res.stdout || '').split('\0').filter(Boolean).map((s) => posixPath(s).replace(/\/$/, '')))
-    for (const d of presentOutputs) {
-      if (!ignored.has(d)) {
-        addFinding(findings, {
-          id: `hygiene.unignored-dir.${d}`,
-          category: 'hygiene',
-          severity: d === '.worktrees' ? 'high' : 'medium',
-          file: d,
-          title: `Output/workspace directory "${d}/" exists on disk and is NOT in .gitignore`,
-          action: `Add "${d}/" to .gitignore.`,
-        })
-      }
-    }
-  }
+  await auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findings, addFinding)
 
   const wtReport = await inspectWorktrees(mainRoot, isGit, defaultBranch)
   for (const s of wtReport.stale) {

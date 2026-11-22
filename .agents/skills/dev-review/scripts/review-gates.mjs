@@ -420,7 +420,7 @@ export function assessStructuralGate({ reviewRoot, diff, devProfile, parity }) {
 
     const fullText = !isTestOrFixtureFile(f) ? readTextSafe(join(reviewRoot, f), 2 * 1024 * 1024) : undefined
     const fullLineCount = fullText ? fullText.split('\n').length : 0
-    const hy = scanStructuralHygiene({ fileRel: f, lines: added, fullLineCount, warnLines: 800, highLines: 1500 })
+    const hy = scanStructuralHygiene({ fileRel: f, lines: added, fullText, fullLineCount, warnLines: 800, highLines: 1500 })
 
     for (const tc of hy.tombstoneComments) {
       tombstoneComments.push({

@@ -77,6 +77,8 @@ export function checkReadmeVisualsAndDocFrontmatter({ ROOT, readText, fail, note
     'assets/readme/hero.svg', 'assets/readme/hero-en.svg',
     'assets/readme/workflow.svg', 'assets/readme/workflow-en.svg',
     'assets/readme/architecture.svg', 'assets/readme/architecture-en.svg',
+    'assets/readme/skills-cycle.svg', 'assets/readme/skills-cycle-en.svg',
+    'assets/readme/docs-layers.svg', 'assets/readme/docs-layers-en.svg',
   ]
   const svgDir = join(ROOT, 'assets', 'readme')
   const discoveredSvgs = existsSync(svgDir)

@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">project-forge 八技能完整流转闭环</title>
+  <desc id="svg-desc">上层交付链依次经过 dev-explore、dev-plan（含最多 3 轮独立 Critique 内审闭环）、dev-edit、dev-flow 与 dev-review（不通过回原分支最多 3 轮返工）；下层外环由 dev-verify-tools、dev-iterate 与 dev-govern 驱动验证复用、盲区补测并回流至 dev-plan 建单修复。</desc>
+
+  <defs>
+    <!-- Organic warm cotton paper speckles -->
+    <pattern id="paper-speck" width="160" height="160" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="24" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="64" cy="12" r="0.8" fill="#B5482A" fill-opacity="0.16"/>
+      <circle cx="118" cy="38" r="1.3" fill="#6F6758" fill-opacity="0.18"/>
+      <circle cx="42" cy="76" r="0.9" fill="#1B1E38" fill-opacity="0.14"/>
+      <circle cx="95" cy="92" r="1.2" fill="#8C8270" fill-opacity="0.24"/>
+      <circle cx="144" cy="74" r="0.8" fill="#B5482A" fill-opacity="0.15"/>
+      <circle cx="24" cy="132" r="1.4" fill="#7D7464" fill-opacity="0.2"/>
+      <circle cx="78" cy="146" r="0.9" fill="#1B1E38" fill-opacity="0.12"/>
+      <circle cx="132" cy="128" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="152" cy="150" r="0.7" fill="#6F6758" fill-opacity="0.16"/>
+    </pattern>
+
+    <!-- 45-degree Risograph halftone screens -->
+    <pattern id="ht-indigo" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#1B1E38" fill-opacity="0.52"/>
+    </pattern>
+    <pattern id="ht-indigo-dense" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="2.0" fill="#1B1E38" fill-opacity="0.76"/>
+    </pattern>
+    <pattern id="ht-red" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#D93829" fill-opacity="0.58"/>
+    </pattern>
+    <pattern id="ht-cobalt" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.75" fill="#1E4DD8" fill-opacity="0.48"/>
+    </pattern>
+    <pattern id="ht-ochre" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#DDA027" fill-opacity="0.62"/>
+    </pattern>
+    <pattern id="ht-cream" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="1.75" fill="#F5F1E8" fill-opacity="0.65"/>
+    </pattern>
+    <pattern id="blueprint-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#F5F1E8" stroke-opacity="0.18" stroke-width="0.8"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="640" fill="#F5F1E8"/>
+  <rect width="1200" height="640" fill="url(#paper-speck)"/>
+
+  <!-- Overhead Cobalt Critique Arc over dev-plan (max 3 rounds) -->
+  <g id="critique-arc">
+    <path d="M 412 126 C 412 66, 320 66, 320 116" fill="none" stroke="#1E4DD8" stroke-width="3" stroke-dasharray="9 6"/>
+    <polygon points="320,128 313,114 327,114" fill="#1E4DD8"/>
+    <text x="366" y="48" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#1E4DD8">独立内审 Critique · 最多 3 轮</text>
+  </g>
+
+  <!-- Overhead Vermilion Rework Arc (dev-review back to dev-edit, max 3 rounds) -->
+  <g id="rework-arc">
+    <path d="M 1068 122 C 1030 56, 638 56, 606 116" fill="none" stroke="#D93829" stroke-width="3" stroke-dasharray="10 7"/>
+    <polygon points="600,126 614,115 601,109" fill="#D93829"/>
+    <text x="834" y="48" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#D93829">代码审查返工 · 最多 3 轮</text>
+  </g>
+
+  <!-- Upper Delivery Chain Arrows and 5 Risograph Emblems -->
+  <g id="delivery-chain">
+    
+    <line x1="194" y1="188" x2="292" y2="188" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="194" cy="188" r="4.5" fill="#1E4DD8"/>
+    <polygon points="302,188 290,181 290,195" fill="#1B1E38"/>
+  
+    <line x1="428" y1="188" x2="526" y2="188" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="428" cy="188" r="4.5" fill="#1E4DD8"/>
+    <polygon points="536,188 524,181 524,195" fill="#1B1E38"/>
+  
+    <line x1="662" y1="188" x2="760" y2="188" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="662" cy="188" r="4.5" fill="#1E4DD8"/>
+    <polygon points="770,188 758,181 758,195" fill="#1B1E38"/>
+  
+    <line x1="896" y1="188" x2="994" y2="188" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="896" cy="188" r="4.5" fill="#1E4DD8"/>
+    <polygon points="1004,188 992,181 992,195" fill="#1B1E38"/>
+  
+
+    <!-- 1. dev-explore (x=132, y=188): Ochre/Cobalt Crosshair Plate + Surveying Loupe -->
+    <g id="emblem-explore" transform="translate(132, 188)">
+      <polygon points="0,-52 52,0 0,52 -52,0" fill="url(#ht-indigo)"/>
+      <polygon points="0,-42 42,0 0,42 -42,0" fill="#F5F1E8" stroke="#1E4DD8" stroke-width="3"/>
+      <line x1="-30" y1="0" x2="30" y2="0" stroke="#1E4DD8" stroke-width="2"/>
+      <line x1="0" y1="-30" x2="0" y2="30" stroke="#1E4DD8" stroke-width="2"/>
+      <line x1="16" y1="16" x2="42" y2="44" stroke="#1B1E38" stroke-width="11" stroke-linecap="round"/>
+      <circle cx="-4" cy="-4" r="24" fill="#1B1E38"/>
+      <circle cx="-4" cy="-4" r="18" fill="#DDA027"/>
+      <path d="M -16 -10 A 13 13 0 0 1 6 -16" fill="none" stroke="#F5F1E8" stroke-width="3" stroke-linecap="round"/>
+    </g>
+
+    <!-- 2. dev-plan (x=366, y=188): Cobalt Blueprint Sheet + Ochre Drafting Square -->
+    <g id="emblem-plan" transform="translate(366, 188)">
+      <rect x="-46" y="-44" width="84" height="84" fill="#1E4DD8"/>
+      <rect x="-46" y="-44" width="84" height="84" fill="url(#blueprint-grid)"/>
+      <polygon points="18,-44 38,-44 38,-24" fill="#F5F1E8"/>
+      <polygon points="18,-44 38,-24 18,-24" fill="#1B1E38"/>
+      <polygon points="-36,46 -36,-30 -16,-30 -16,26 48,26 48,46" fill="#DDA027"/>
+      <rect x="-12" y="-18" width="32" height="30" fill="none" stroke="#F5F1E8" stroke-width="2"/>
+      <circle cx="38" cy="36" r="6" fill="#D93829"/>
+    </g>
+
+    <!-- 3. dev-edit (x=600, y=188): Deep Indigo Boundary Block + Ochre Frame + Check Notch -->
+    <g id="emblem-edit" transform="translate(600, 188)">
+      <rect x="-46" y="-46" width="92" height="92" fill="#1B1E38"/>
+      <rect x="-34" y="-34" width="68" height="68" fill="#F5F1E8"/>
+      <rect x="-46" y="-46" width="22" height="92" fill="#DDA027"/>
+      <rect x="-46" y="-46" width="92" height="16" fill="#1E4DD8"/>
+      <polygon points="-14,4 -4,-6 6,6 32,-20 42,-10 6,26" fill="#D93829"/>
+      <polygon points="-14,4 -4,-6 6,6 16,-4 6,26" fill="#1B1E38"/>
+    </g>
+
+    <!-- 4. dev-flow (x=834, y=188): Split-Track Railway Switch Emblem -->
+    <g id="emblem-flow" transform="translate(834, 188)">
+      <rect x="-50" y="-44" width="100" height="88" fill="url(#ht-cobalt)"/>
+      <line x1="-50" y1="-22" x2="50" y2="-22" stroke="#1B1E38" stroke-width="11"/>
+      <line x1="-50" y1="-22" x2="50" y2="-22" stroke="#F5F1E8" stroke-width="1.5"/>
+      <path d="M -46 -22 Q -4 -22 4 18 L 48 18" fill="none" stroke="#1E4DD8" stroke-width="11"/>
+      <path d="M -46 -22 Q -4 -22 4 18 L 48 18" fill="none" stroke="#F5F1E8" stroke-width="1.5"/>
+      <circle cx="-18" cy="-22" r="7" fill="#DDA027"/>
+      <circle cx="44" cy="18" r="8" fill="#D93829"/>
+    </g>
+
+    <!-- 5. dev-review (x=1068, y=188): Miniature Vermilion Arch + Indigo Seal -->
+    <g id="emblem-review" transform="translate(1068, 188)">
+      <path d="M -46 46 L -46 -46 L 46 -46 L 46 46 L 22 46 L 22 4 A 22 22 0 0 0 -22 4 L -22 46 Z" fill="#D93829"/>
+      <rect x="-46" y="4" width="24" height="42" fill="url(#ht-indigo-dense)"/>
+      <rect x="22" y="4" width="24" height="42" fill="url(#ht-indigo-dense)"/>
+      <circle cx="0" cy="22" r="19" fill="#1B1E38"/>
+      <circle cx="0" cy="22" r="11" fill="#DDA027"/>
+      <circle cx="0" cy="22" r="5" fill="#D93829"/>
+    </g>
+
+    
+    <text x="132" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1B1E38">dev-explore</text>
+    <text x="132" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">只读定位</text>
+  
+    <text x="366" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1E4DD8">dev-plan</text>
+    <text x="366" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">分档内审</text>
+  
+    <text x="600" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1B1E38">dev-edit</text>
+    <text x="600" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">边界静检</text>
+  
+    <text x="834" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1E4DD8">dev-flow</text>
+    <text x="834" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">隔离实证</text>
+  
+    <text x="1068" y="278" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#D93829">dev-review</text>
+    <text x="1068" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">独立合入</text>
+  
+  </g>
+
+  <!-- Right Feed Curve (dev-review down to Outer Loop) and Left Vermilion Escalation Curve (Outer Loop up to dev-plan) -->
+  <g id="inter-loop-conduits">
+    <!-- Subtle right feed into outer loop (pointing right into dev-govern edge) -->
+    <path d="M 1068 326 L 1068 424 Q 1068 468 1024 468 L 976 468" fill="none" stroke="#1B1E38" stroke-width="3.5"/>
+    <polygon points="962,468 977,461 977,475" fill="#1B1E38"/>
+
+    <!-- Left Vermilion Defect Escalation Curve emerging cleanly from dev-verify-tools edge (244) up into dev-plan -->
+    <path d="M 244 468 L 214 468 Q 186 468 186 440 L 186 406 Q 186 378 214 378 L 338 378 Q 366 378 366 350 L 366 338" fill="none" stroke="#D93829" stroke-width="3.5"/>
+    <polygon points="366,326 359,340 373,340" fill="#D93829"/>
+    <text x="266" y="362" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#D93829">缺陷回流建单</text>
+  </g>
+
+  <!-- Lower Outer Governance and Iterate Loop -->
+  <g id="outer-loop">
+    <!-- Halftone backing band across outer-loop emblems -->
+    <rect x="242" y="454" width="716" height="28" fill="url(#ht-ochre)" fill-opacity="0.55"/>
+
+    <!-- Gap arrows right-to-left or bidirectional? Keep natural cycle: dev-govern (910) -> dev-iterate (600) -> dev-verify-tools (290), plus verify-tools <-> iterate -->
+    <line x1="846" y1="468" x2="674" y2="468" stroke="#1B1E38" stroke-width="3.5"/>
+    <polygon points="664,468 678,461 678,475" fill="#1B1E38"/>
+    <line x1="536" y1="468" x2="364" y2="468" stroke="#1B1E38" stroke-width="3.5"/>
+    <polygon points="354,468 368,461 368,475" fill="#1B1E38"/>
+
+    <!-- 6. dev-verify-tools (x=290, y=468): Precision Gauge Dial -->
+    <g id="emblem-verify-tools" transform="translate(290, 468)">
+      <circle cx="0" cy="0" r="46" fill="#1B1E38"/>
+      <circle cx="0" cy="0" r="36" fill="#DDA027"/>
+      <path d="M -24 14 A 27 27 0 1 1 24 14" fill="none" stroke="#F5F1E8" stroke-width="3.5"/>
+      <polygon points="0,4 -4,-6 24,-22 6,4" fill="#D93829"/>
+      <circle cx="0" cy="0" r="8" fill="#1B1E38"/>
+    </g>
+
+    <!-- 7. dev-iterate (x=600, y=468): Vermilion/Indigo Twin-Arc Cycle -->
+    <g id="emblem-iterate" transform="translate(600, 468)">
+      <circle cx="0" cy="0" r="46" fill="#F5F1E8" stroke="#1B1E38" stroke-width="2.5"/>
+      <path d="M -28 -8 A 30 30 0 0 1 26 -14" fill="none" stroke="#D93829" stroke-width="10" stroke-linecap="round"/>
+      <polygon points="32,-4 18,-10 29,-22" fill="#D93829"/>
+      <path d="M 28 8 A 30 30 0 0 1 -26 14" fill="none" stroke="#1B1E38" stroke-width="10" stroke-linecap="round"/>
+      <polygon points="-32,4 -18,10 -29,22" fill="#1B1E38"/>
+      <circle cx="0" cy="0" r="10" fill="#1E4DD8"/>
+    </g>
+
+    <!-- 8. dev-govern (x=910, y=468): Cobalt Ledger Bars + Plumb-Bob -->
+    <g id="emblem-govern" transform="translate(910, 468)">
+      <rect x="-46" y="-42" width="92" height="84" rx="4" fill="#1E4DD8"/>
+      <rect x="-46" y="-42" width="16" height="84" fill="url(#ht-indigo-dense)"/>
+      <line x1="-18" y1="-20" x2="32" y2="-20" stroke="#F5F1E8" stroke-width="3"/>
+      <line x1="-18" y1="-6" x2="32" y2="-6" stroke="#F5F1E8" stroke-width="3"/>
+      <polygon points="10,-32 -10,-6 10,34" fill="#DDA027"/>
+      <polygon points="10,-32 30,-6 10,34" fill="#1B1E38"/>
+      <circle cx="-18" cy="20" r="11" fill="#D93829"/>
+    </g>
+
+    
+    <text x="290" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1B1E38">dev-verify-tools</text>
+    <text x="290" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">工具与地图</text>
+  
+    <text x="600" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#D93829">dev-iterate</text>
+    <text x="600" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">盲区补测</text>
+  
+    <text x="910" y="550" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="800" fill="#1E4DD8">dev-govern</text>
+    <text x="910" y="580" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#3D4260">体检与下沉</text>
+  
+  </g>
+</svg>

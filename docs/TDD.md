@@ -112,14 +112,14 @@ flowchart LR
 | `kit/skills/dev-explore/` | 产品层 | 只读探索与零写入按需定位（`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/dev-explore/scripts/repo-map-helpers.mjs`、`kit/skills/dev-explore/scripts/doc-locate.mjs`） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、模板初始化、多轮澄清、账本态 Critique 与切片依赖审计（`doc-plan.mjs`、`doc-plan-ops.mjs`、`doc-audit.mjs`、`doc-audit-helpers.mjs`、`doc-audit-repo.mjs`、`triage-rules.mjs`） |
 | `kit/skills/dev-edit/` | 产品层 | 改前边界核对、复用查找与词法静态门禁（`edit-gate.mjs`） |
-| `kit/skills/dev-flow/` | 产品层 | 身份探测、业务分诊、Worktree 隔离流转、实证记录、波次调度与安全清理（`flow.mjs` 及 `flow-*.mjs` 子模块） |
+| `kit/skills/dev-flow/` | 产品层 | 身份探测、业务分诊、Worktree 隔离流转、实证记录、波次调度与安全清理（`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs`、`kit/skills/dev-flow/scripts/flow-merge-claim.mjs`、`kit/skills/dev-flow/scripts/flow-start-provenance.mjs` 等 `flow-*.mjs` 子模块） |
 | `kit/skills/dev-verify-tools/` | 产品层 | 验证工具生命期、仓外 `scratch/` 试制与 `docs/feature-map.json` 免手工日期过时校验（`verify-tools.mjs`、`verify-tools-audit.mjs`） |
 | `kit/skills/dev-review/` | 产品层 | 外部 PR 扫雷、先实证与故障注入再看 diff、双门六锁审查与实时双写（`review-pack.mjs` 及 `review-*.mjs` 子模块） |
 | `kit/skills/dev-govern/` | 产品层 | 只读静态体检、三层常青文档与工作树巡检、信号聚类、倒金字塔复盘与发版筹备（`kit/skills/dev-govern/scripts/govern-audit.mjs`、`kit/skills/dev-govern/scripts/govern-retro.mjs`、`kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs` 等子模块） |
 | `kit/skills/dev-iterate/` | 产品层 | 盲区与热点识别、原生测试扩展（过 `edit-gate`）、并发压测、缺陷升级建单与有界优化循环（`iterate.mjs`、`iterate-cycle.mjs`） |
 | `assets/readme/` | 产品层 | 双语 README 浅深色自适应 SVG 图解（`hero`/`architecture`/`docs-layers`/`skills-cycle`/`workflow` 及 `-en` 副本） |
-| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（含 `scripts/dev/subcommand-parity.mjs`、`scripts/dev/fixtures-w4-harness.mjs`、`scripts/dev/injections-data-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/injections-data-trace-sync.mjs`、`scripts/dev/fixtures-w5-blind-fixes.mjs`、`scripts/dev/injections-data-w5-blind-fixes.mjs`、`scripts/dev/fixtures-w6b-kit-hygiene.mjs`、`scripts/dev/injections-data-w6b.mjs` 等） |
-| `<gitCommonDir>/project-forge-{flow,govern,verify,iterate}/` | 仓外运行时 | 四域仓外持久化目录：分别存放任务账本与 `session-state.json`、`signals.jsonl` 与基线、`slots/<slotKey>/cache.json` 与 `scratch/`、迭代循环历史状态，严禁污染工作区 |
+| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（含 `scripts/dev/subcommand-parity.mjs`、`scripts/dev/fixtures-w4-harness.mjs`、`scripts/dev/injections-data-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/injections-data-trace-sync.mjs`、`scripts/dev/fixtures-w5-blind-fixes.mjs`、`scripts/dev/injections-data-w5-blind-fixes.mjs`、`scripts/dev/fixtures-w6b-kit-hygiene.mjs`、`scripts/dev/injections-data-w6b.mjs`、`scripts/dev/fixtures-w6c-harness-gates.mjs`、`scripts/dev/injections-data-w6c.mjs` 等） |
+| `<gitCommonDir>/project-forge-{flow,govern,verify,iterate}/` | 仓外运行时 | 四域仓外持久化目录：分别存放任务账本/`session-state.json`/`planning-provenance.json`、`signals.jsonl` 与基线、`slots/<slotKey>/cache.json` 与 `scratch/`、迭代循环历史状态，严禁污染工作区 |
 
 ### 模块分层与禁引规则
 

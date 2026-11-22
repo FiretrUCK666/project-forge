@@ -433,6 +433,8 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
     const localVitest = resolveLocalNodeBin(repoRoot, 'vitest')
     const localJest = resolveLocalNodeBin(repoRoot, 'jest')
     const localTsx = resolveLocalNodeBin(repoRoot, 'tsx')
+    const [nodeMajor, nodeMinor] = process.versions.node.split('.').map((n) => Number(n) || 0)
+    const supportsNativeTs = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 6)
     if (/from\s+['"]vitest['"]/.test(content) && localVitest) {
       cmd = localVitest
       args = ['run', relPath]
@@ -445,9 +447,22 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
     } else if ((existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb'))) && resolveExecutable('bun')) {
       cmd = 'bun'
       args = ['test', abs]
-    } else if (Number(process.versions.node.split('.')[0]) === 22) {
+    } else if (nodeMajor === 22 && nodeMinor >= 6) {
       cmd = process.execPath
       args = ['--experimental-strip-types', '--test', abs]
+    } else if (!supportsNativeTs) {
+      const durationMs = Math.round(performance.now() - t0)
+      return {
+        file: posixPath(relPath),
+        ok: false,
+        exitCode: 1,
+        durationMs,
+        timedOut: false,
+        perfExceeded: perfBudgetMs > 0 && durationMs > perfBudgetMs,
+        failureKind: 'unsupported-ts-runtime',
+        stdout: '',
+        stderr: `Node ${process.versions.node} 不支持直接执行 .${ext} 测试文件且未找到本地 vitest/jest/tsx/bun 可执行文件：${relPath}`,
+      }
     }
   }
   const res = await execSafe(cmd, args, { cwd: repoRoot, timeout: timeoutMs })

@@ -2,7 +2,7 @@
  * fixtures-w5-blind-fixes.mjs —— Wave 5 真实开源仓盲测 5 项根因修复（C1..C4）正反双向行为断言。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { generateRepoMap } from '../../kit/skills/dev-explore/scripts/repo-map.mjs'
@@ -263,7 +263,7 @@ export function registerW5BlindFixesCases(cases) {
       ].join('\n'),
     })
     try {
-      // 1a. TS + vitest 项目生成 .test.ts + vitest import
+      // 1a. TS + vitest 项目生成 .test.ts + vitest import，并调度本地 vitest 执行通过
       const genVitest = await generateIterationTests(tsVitestDir, { tier: 'integration', write: true, limit: 1 })
       if (!genVitest.ok || genVitest.writtenPaths.length === 0) {
         return `C4 TS+vitest 生成失败：${JSON.stringify(genVitest)}`
@@ -276,15 +276,34 @@ export function registerW5BlindFixesCases(cases) {
       if (!vitestCode.includes("from 'vitest'") || !vitestCode.includes(': string')) {
         return `C4 TS+vitest 生成断言不符合 TS/Vitest 习惯：\n${vitestCode}`
       }
+      const binDir = join(tsVitestDir, 'node_modules', '.bin')
+      mkdirSync(binDir, { recursive: true })
+      if (process.platform === 'win32') {
+        writeFileSync(join(binDir, 'vitest.cmd'), '@echo off\r\necho VITEST_OK %*\r\n', 'utf8')
+      } else {
+        const posixBin = join(binDir, 'vitest')
+        writeFileSync(posixBin, '#!/bin/sh\necho "VITEST_OK $*"\n', 'utf8')
+        chmodSync(posixBin, 0o755)
+      }
+      const vitestRun = await runIterationSuites(tsVitestDir, { targets: [vitestFile], writeSignals: false })
+      if (!vitestRun.ok || vitestRun.passed !== 1 || !String(vitestRun.results[0]?.stdout ?? '').includes('VITEST_OK')) {
+        return `C4 TS+vitest 本地 runner 调度失败：${JSON.stringify(vitestRun)}`
+      }
 
-      // 1b. 子包 tsconfig + *.test.ts 项目生成 .test.ts 并可实际通过 node:test 跑绿
+      // 1b. 子包 tsconfig + *.test.ts 项目生成 .test.ts；Node >= 22.6 原生跑绿，Node < 22 给出明确诊断而非误跑 .ts 崩溃
       const genNodeTs = await generateIterationTests(tsNodeDir, { tier: 'integration', write: true, limit: 1 })
       if (!genNodeTs.ok || !genNodeTs.writtenPaths[0]?.endsWith('.test.ts')) {
         return `C4 子包 TS 仓未生成 .test.ts：${JSON.stringify(genNodeTs)}`
       }
+      const [nodeMajor, nodeMinor] = process.versions.node.split('.').map((n) => Number(n) || 0)
+      const supportsNativeTs = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 6)
       const tsRun = await runIterationSuites(tsNodeDir, { targets: genNodeTs.writtenPaths, writeSignals: false })
-      if (!tsRun.ok || tsRun.passed !== 1) {
-        return `C4 生成的纯 TS 测试运行失败：${JSON.stringify(tsRun)}`
+      if (supportsNativeTs) {
+        if (!tsRun.ok || tsRun.passed !== 1) {
+          return `C4 生成的纯 TS 测试运行失败：${JSON.stringify(tsRun)}`
+        }
+      } else if (tsRun.ok || tsRun.results[0]?.failureKind !== 'unsupported-ts-runtime') {
+        return `C4 Node ${process.versions.node} 缺 TS runner 时应返回 unsupported-ts-runtime 诊断：${JSON.stringify(tsRun)}`
       }
 
       // 1c. 反面：普通 JS/ESM 仓继续生成 .test.mjs

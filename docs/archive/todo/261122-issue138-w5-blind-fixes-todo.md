@@ -5,7 +5,7 @@ status: done
 created: 2026-11-22
 updated: 2026-11-22
 issue: 138
-pr: null
+pr: 139
 branch: feat/w5-blind-fixes
 owner: impl-w5
 plan_mode: autonomous

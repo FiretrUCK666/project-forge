@@ -50,7 +50,7 @@ metadata:
 
 - 结合 `kit/skills/lib/profile-sniffer.mjs` 仅探测目标仓实际存在的原生配置（如 `eslint.config.*`、`tsconfig.json`、`ruff.toml`、`Cargo.toml`、`go.mod` 与 `package.json` 声明脚本）。
 - 传 `--with-native` 时仅在目标仓已声明对应命令时按需调用；工具或配置不存在时安全跳过并记录，绝不要求全局安装第三方外部 linter 二进制。
-- 支持 `--skip-edit-gate --reason "<原因>"` 显式记账写入 `signals.jsonl` 留痕；最终合入前门禁仍须通过完整校验。
+- 支持 `--skip-edit-gate --reason "<原因>"` 显式记账写入 `signals.jsonl` 留痕；终检传 `--final` 时硬禁 `--skip-edit-gate`（`BLOCKED_SKIP_EDIT_GATE_FORBIDDEN_ON_FINAL`），且 `edit.do-not-edit` 恒为阻断项。
 
 ## 注释与架构决策记录边界
 

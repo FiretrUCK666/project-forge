@@ -111,13 +111,13 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
 
   try {
     const roots = await resolveRepoRoots(dir)
-    const pStart = await handleStart({ task: 'parent-t', slug: 'parent', case: '1', implementer: 'dev-a' }, roots)
+    const pStart = await handleStart({ task: 'parent-t', slug: 'parent', case: '2', implementer: 'dev-a' }, roots)
     if (pStart.exitCode !== 0) return `父任务 start 失败：${pStart.exitCode}`
     const pRoot = join(dir, '.worktrees', 'impl-parent-t')
     writeFileSync(join(pRoot, 'parent-file.mjs'), 'export const p = 1\n')
     gitCommitFast(pRoot, 'feat: parent work', { files: ['parent-file.mjs'] })
 
-    const cStart = await handleStart({ task: 'child-t', slug: 'child', after: 'parent-t', case: '1', implementer: 'dev-a' }, roots)
+    const cStart = await handleStart({ task: 'child-t', slug: 'child', after: 'parent-t', case: '2', implementer: 'dev-a' }, roots)
     if (cStart.exitCode !== 0) return `子任务 --after start 失败：${cStart.exitCode}`
     await seedExploredFor(dir, 'child-t')
     const cRoot = join(dir, '.worktrees', 'impl-child-t')
@@ -141,7 +141,7 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
     gitCommitFast(cRoot, 'fix: address R1', { updateOnly: true })
 
     // 模拟父分支已合入 main，main 同时有无关提交 upstream-only.mjs
-    const mergeP = gitSync(dir, ['merge', '--no-ff', 'docs/parent', '-qm', 'merge parent'])
+    const mergeP = gitSync(dir, ['merge', '--no-ff', 'fix/parent', '-qm', 'merge parent'])
     if (mergeP.status !== 0) return `合并父分支失败：${mergeP.stderr}`
     writeFileSync(join(dir, 'upstream-only.mjs'), 'export const u = 1\n')
     gitCommitFast(dir, 'chore: upstream change', { files: ['upstream-only.mjs'] })
@@ -254,9 +254,9 @@ cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调�
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resolveRepoRoots(dir)
 
-    await handleStart({ task: 'ta', slug: 'ta', case: '1', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
-    await handleStart({ task: 'tb', slug: 'tb', case: '1', files: 'src/b.mjs', implementer: 'dev-a' }, roots)
-    await handleStart({ task: 'tc', slug: 'tc', case: '1', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
+    await handleStart({ task: 'ta', slug: 'ta', case: '2', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
+    await handleStart({ task: 'tb', slug: 'tb', case: '2', files: 'src/b.mjs', implementer: 'dev-a' }, roots)
+    await handleStart({ task: 'tc', slug: 'tc', case: '2', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
     await seedExploredFor(dir, 'ta', 'tb', 'tc')
 
     const disjBad = await handleBatch({ _: ['check-disjoint'], tasks: 'ta,tc' }, roots)
@@ -428,6 +428,7 @@ cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、eq
     await runNode('compose-agents.mjs', [dir, '--no-backup'])
     let agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
       .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填完。')
+      .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none')
     writeFileSync(join(dir, 'AGENTS.md'), agents)
     if (!agents.includes('CLAUDE.md')) return 'CONVENTIONS_HINT 多行提示未正确注入'
     const brokenInit = await runNode('compose-agents.mjs', [dir, '--check'])
@@ -487,10 +488,10 @@ cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、eq
     const prdFile = JSON.parse(initPrd.stdout).file
     hydrateGeneratedDoc(join(dir, prdFile), {
       criteria: ['命令退出码为 0', '输出里含预期字段'],
-      filled: '当前缺一份可执行的治理配置',
+      filled: '当前 `README.md` 缺一份可执行的治理配置（退出码为 0）',
       extra: [
-        ['<two-way | one-way>', 'two-way'],
-        ['不做跨仓调度', '不做跨仓调度'],
+        ['<two-way | one-way>', 'two-way（可通过 `git revert` 回退）'],
+        ['不做跨仓调度', '不修改 `CLAUDE.md` 之外的跨仓调度路径'],
       ],
     })
     const prdAud = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', prdFile], { cwd: dir })

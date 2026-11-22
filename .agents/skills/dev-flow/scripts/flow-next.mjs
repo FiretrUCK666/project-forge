@@ -14,6 +14,7 @@ import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ 
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
+import { readSessionState } from '../../lib/session-state.mjs'
 import { ensureReviewToken, listTaskLedgers, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -343,7 +344,10 @@ export async function handleNext(opts, roots) {
     // 轮次只能有一个派生式（`ledger.mjs` 的 `nextReviewRound`）。
     // 按条数算会在轮次有空档时算错，而空档是正常历史。
     const round = nextReviewRound(selectedTask)
-    const { token } = ensureReviewToken(roots.mainRoot, selectedTask, round)
+    const { token } = ensureReviewToken(roots.mainRoot, selectedTask, round, {
+      reviewerId: opts['reviewer-id'] ?? null,
+      headSha: taskRuntime?.headSha ?? null,
+    })
     const excludedReviewers = collectExcludedReviewers(selectedTask.rounds, selectedTask.implementerId)
     out = {
       ...out,
@@ -379,7 +383,14 @@ export async function handleNext(opts, roots) {
     out = { ...out, handoff: handoff.fields, handoffPrompt: handoff.prompt }
   }
 
-  const payload = { ...out, hydration }
+  const orient = out.phase === 'idle' ? buildSessionOrientation(roots.mainRoot) : null
+  const sessionState = readSessionState(roots.mainRoot)
+  const payload = {
+    ...out,
+    hydration,
+    ...(sessionState ? { sessionState } : {}),
+    ...(orient ? { orientation: { docs: orient.docs, stuck: orient.stuck, nextSteps: orient.nextSteps } } : {}),
+  }
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
@@ -387,8 +398,7 @@ export async function handleNext(opts, roots) {
     process.stdout.write(`# flow next (${payload.phase} | owner=${payload.ownerRole})\n`)
     // 冷启动：没有任何任务时，光说「去 start」等于让新会话自己翻目录。
     // 把仓里已有的进度摆出来——那些信息一直都在，只是没有入口。
-    if (payload.phase === 'idle') {
-      const orient = buildSessionOrientation(roots.mainRoot)
+    if (orient) {
       process.stdout.write('\n')
       process.stdout.write(orient.text)
     }

@@ -33,7 +33,7 @@ metadata:
    - 新测试写入原生目录后，增量将新测试相对路径追加至 `docs/feature-map.json` 对应 feature 的 `testRefs`（完整保留所有既有字段不覆写；无功能地图时安全跳过）。
 4. **分片并发执行与缺陷升级闭环**：
    - `run` 按受限并发池（`--concurrency`）并行实跑原生测试套件，并可设 `--perf-budget-ms` 监控性能退化；
-   - 捕获真实失败、竞态超时或性能越阈时，**严禁在测点绕过或直接篡改业务源码**，而是经 `kit/skills/lib/escalation.mjs` 建单（`dev-plan -> dev-edit -> dev-review` 正流修复）并写入结构化信号（`defectClass`、`fingerprint`、`pyramidTier`）至 `signals.jsonl`。
+   - 捕获真实失败、竞态超时或性能越阈时，**严禁在测点绕过或直接篡改业务源码**，而是经 `kit/skills/lib/escalation.mjs` 建单（`dev-plan -> dev-edit -> dev-review` 正流修复）并写入结构化信号（`defectClass`、`fingerprint`、`pyramidTier`）至 `signals.jsonl`；`run` 结束同时输出 `[NEXT STEP]`，`cycle` 状态持久化于 `<gitCommonDir>/project-forge-flow/iterate-cycle.json`。
 5. **先最小运行复现，再评整类加固（四步通用准则）**：
    - **① 最小运行复现消误报**：静态告警、审查疑点或推测缺陷，一律先用最小可执行 PoC 证明它真实可达；复现不出来就先当误报处理，不写补丁；
    - **② 复跑证伪 + 回归防护**：修完用**同一条** PoC 复跑变绿，并把正反两面断言固化进回归用例，防止同类问题再溜进来；

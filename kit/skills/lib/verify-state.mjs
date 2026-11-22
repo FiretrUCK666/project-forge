@@ -226,28 +226,63 @@ export function detectScratchSolidificationHints({ gitCommonDir, mainRoot = proc
   return hints.sort((a, b) => b.taskCount - a.taskCount || a.featureId.localeCompare(b.featureId))
 }
 
+export function resolveVerifySlotKey(repoRoot, mainRoot) {
+  if (!repoRoot || !mainRoot || samePath(repoRoot, mainRoot)) return 'main'
+  return posixPath(relative(canonicalPath(mainRoot), canonicalPath(repoRoot))) || 'main'
+}
+
 export function readVerifyCache(gitCommonDir, mainRoot = process.cwd()) {
   const p = resolveVerifyCachePath(gitCommonDir, mainRoot)
   const raw = readJsonSafe(p)
-  if (!raw || typeof raw !== 'object') return { version: 1, tools: {} }
+  if (!raw || typeof raw !== 'object') return { version: 2, tools: {}, slots: {} }
   const tools = raw.tools && typeof raw.tools === 'object' && !Array.isArray(raw.tools) ? raw.tools : {}
-  return { version: 1, tools }
+  const slots = raw.slots && typeof raw.slots === 'object' && !Array.isArray(raw.slots) ? raw.slots : {}
+  return { version: 2, tools, slots }
 }
 
-export function writeVerifyCacheEntry(gitCommonDir, mainRoot, toolId, entry) {
+export function writeVerifyCacheEntry(gitCommonDir, mainRootOrToolId, toolIdOrEntry, maybeEntry) {
+  let mainRoot = process.cwd()
+  let toolId = mainRootOrToolId
+  let entry = toolIdOrEntry
+  if (maybeEntry !== undefined) {
+    mainRoot = mainRootOrToolId
+    toolId = toolIdOrEntry
+    entry = maybeEntry
+  }
   const p = resolveVerifyCachePath(gitCommonDir, mainRoot)
   const cur = readVerifyCache(gitCommonDir, mainRoot)
-  cur.tools[toolId] = {
+  const record = {
     featureId: entry.featureId ?? null,
-    symbolHash: entry.symbolHash,
-    moduleTreeHash: entry.moduleTreeHash,
+    symbolHash: entry.symbolHash ?? null,
+    moduleTreeHash: entry.moduleTreeHash ?? null,
+    treeHash: entry.treeHash ?? entry.moduleTreeHash ?? null,
+    ...(entry.passed !== undefined ? { passed: Boolean(entry.passed) } : {}),
     ...(entry.scriptHash !== undefined ? { scriptHash: entry.scriptHash } : {}),
     verifiedSha: entry.verifiedSha ?? null,
     passedAtCommit: entry.passedAtCommit ?? entry.verifiedSha ?? null,
     ...(entry.symbolsByFile ? { symbolsByFile: entry.symbolsByFile } : {}),
+    ...(entry.slotKey ? { slotKey: String(entry.slotKey) } : {}),
+  }
+  if (entry.slotKey) {
+    const sk = posixPath(String(entry.slotKey))
+    cur.slots[sk] = (cur.slots[sk] && typeof cur.slots[sk] === 'object') ? cur.slots[sk] : {}
+    cur.slots[sk][toolId] = record
+  } else {
+    cur.tools[toolId] = record
   }
   writeJsonAtomic(p, cur)
-  return { path: posixPath(p), entry: cur.tools[toolId] }
+  return { path: posixPath(p), entry: record }
+}
+
+export function reclaimVerifySlotCache(gitCommonDir, slotKey, mainRoot = process.cwd()) {
+  if (!gitCommonDir || !slotKey) return { reclaimed: false }
+  const sk = posixPath(String(slotKey))
+  const p = resolveVerifyCachePath(gitCommonDir, mainRoot)
+  const cur = readVerifyCache(gitCommonDir, mainRoot)
+  if (!cur.slots[sk]) return { reclaimed: false, slotKey: sk }
+  delete cur.slots[sk]
+  writeJsonAtomic(p, cur)
+  return { reclaimed: true, slotKey: sk, path: posixPath(p) }
 }
 
 async function readFileAtRefOrDisk(repoRoot, relPath, ref = null) {
@@ -327,7 +362,7 @@ function diffSymbolsByFile(prevMap = {}, curMap = {}) {
 
 /** 免手工日期过时校验与三级风险处置（`low` 告警、`medium` 转 E2E/scratch 记债、`high` 硬阻断）。 */
 export async function evaluateToolStaleness({
-  repoRoot, gitCommonDir, mainRoot = repoRoot, feature, tool, baseRef = null,
+  repoRoot, gitCommonDir, mainRoot = repoRoot, feature, tool, baseRef = null, slotKey = null,
 } = {}) {
   const riskLevel = VALID_RISK_LEVELS.includes(tool?.riskLevel) ? tool.riskLevel : 'medium'
   if (tool?.scriptPath) {
@@ -351,7 +386,8 @@ export async function evaluateToolStaleness({
   }
 
   const cache = readVerifyCache(gitCommonDir, mainRoot)
-  const baseline = cache.tools[tool.id] ?? null
+  const effSlot = slotKey ?? resolveVerifySlotKey(repoRoot, mainRoot)
+  const baseline = (effSlot ? cache.slots?.[effSlot]?.[tool.id] : null) ?? cache.tools[tool.id] ?? null
   const headRes = await gitRun(repoRoot, ['rev-parse', 'HEAD'])
   const headSha = headRes.ok ? headRes.stdout.trim() : null
   let resolvedBaseSha = null

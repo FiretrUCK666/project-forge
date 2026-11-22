@@ -11,6 +11,8 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from '../../lib/doc-slice-graph.mjs'
 import { destroyTaskScratchDir, findAffectedFeatures, readFeatureMap } from '../../lib/feature-map.mjs'
+import { computeCleanupPreviewHash, isSafeBranchDelete, verifyCleanupPreviewHash } from '../../lib/gate-enforcement.mjs'
+import { reclaimVerifySlotCache } from '../../lib/verify-state.mjs'
 import {
   canonicalPath, detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
   parseWorktreeListPorcelain, posixPath, samePath,
@@ -40,6 +42,8 @@ function isCwdInside(wtAbs) {
 }
 
 async function cleanupTaskVerifyScratch(roots, taskId, ledger, source = 'flow-cleanup') {
+  const slotKey = ledger?.worktreePath ? posixPath(ledger.worktreePath) : (ledger?.taskId ? `.worktrees/impl-${ledger.taskId}` : null)
+  if (roots.gitDir && slotKey) reclaimVerifySlotCache(roots.gitDir, slotKey, taskId)
   const fm = readFeatureMap(roots.mainRoot)
   const ledgerFiles = Array.isArray(ledger?.files) ? ledger.files : []
   const aff = fm && ledgerFiles.length > 0 ? findAffectedFeatures(fm, ledgerFiles) : null
@@ -270,15 +274,27 @@ export async function handleCleanup(opts, roots) {
     ? []
     : (onlyReviewWt ? cl.worktrees.filter((w) => w.path === ledger.reviewWorktreePath || w.path.includes('/review-')) : cl.worktrees)
   const keptWorktrees = cl.worktrees.filter((w) => !worktreesToRemove.includes(w)).map((w) => w.path)
+  const previewHash = computeCleanupPreviewHash({
+    taskId,
+    worktrees: worktreesToRemove,
+    localBranch: keepLocalBr ? null : cl.localBranch,
+    remoteBranch: keepRemoteBr ? null : cl.remoteBranch,
+  })
 
   if (!opts.confirm) {
-    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', checklist: cl }, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', previewHash, checklist: cl }, null, 2)}\n`)
     else {
-      process.stdout.write('BLOCKED_CONFIRMATION_REQUIRED: 缺少 --confirm，已拒绝执行删除。\n')
+      process.stdout.write(`BLOCKED_CONFIRMATION_REQUIRED: 缺少 --confirm，已拒绝执行删除（previewHash=${previewHash}）。\n`)
       printCleanupChecklistText(cl)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
+      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm --preview-hash ${previewHash}` }], { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.FACT }
+  }
+  const hashCheck = verifyCleanupPreviewHash(previewHash, opts['preview-hash'])
+  if (!hashCheck.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: hashCheck.code, previewHash, reason: hashCheck.reason }, null, 2)}\n`)
+    process.stderr.write(`${hashCheck.reason}\n`)
+    return { exitCode: hashCheck.exitCode }
   }
   if (ledger.role === 'contributor-fork' && cl.prState === 'OPEN' && (!keepRemoteBr || !keepLocalBr)) {
     process.stderr.write(`BLOCKED_OPEN_FORK_PR: contributor-fork 关联上游 PR #${ledger.prNumber ?? '?'} 仍为 OPEN，硬锁拒绝删除 Fork 分支。\n`)
@@ -309,9 +325,16 @@ export async function handleCleanup(opts, roots) {
 
   let deletedLocalBranch = false
   if (cl.localBranch && !keepLocalBr && cl.localBranch !== ledger.baseBranch) {
-    const isSquashOrRemoteMerged = cl.mergeState?.state === 'squash_or_rebase_merged' || cl.prState === 'MERGED'
-    const delArgs = isSquashOrRemoteMerged ? ['branch', '-D', cl.localBranch] : ['branch', '-d', cl.localBranch]
-    const delBr = await gitRun(roots.mainRoot, delArgs)
+    const delCheck = await isSafeBranchDelete(roots.mainRoot, cl.localBranch, ledger.baseBranch || 'main', {
+      remoteBranchMerged: cl.prState === 'MERGED' || ledger.prState === 'MERGED',
+      mergeState: cl.mergeState,
+    })
+    if (!delCheck.safe) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: delCheck.code, branch: cl.localBranch, reason: delCheck.reason }, null, 2)}\n`)
+      process.stderr.write(`${delCheck.reason}\n`)
+      return { exitCode: delCheck.exitCode }
+    }
+    const delBr = await gitRun(roots.mainRoot, ['branch', delCheck.deleteFlag, cl.localBranch])
     if (!delBr.ok) throw new Error(`安全删除本地分支 ${cl.localBranch} 失败（state=${cl.mergeState?.state ?? 'unknown'}）：${delBr.stderr}`)
     deletedLocalBranch = true
   }

@@ -147,16 +147,33 @@ function readProfileSafe(mainRoot) {
 async function handleBatchPlan(opts, roots) {
   const explicitTasks = Boolean(opts.tasks && String(opts.tasks).trim())
   const taskIds = parseTasksList(opts, roots.mainRoot)
-  const items = await Promise.all(taskIds.map(async (id) => {
+  const graph = buildSliceGraph(roots.mainRoot)
+  const sliceMetaByRel = new Map(graph.slices.map((s) => [s.rel, s]))
+  const items = (await Promise.all(taskIds.map(async (id) => {
     const ledger = readTaskLedger(roots.mainRoot, id)
     if (!ledger) throw new Error(`找不到任务账本：${id}`)
-    const files = await collectTaskTouchedFiles(roots.mainRoot, ledger)
-    const deps = [
+    if (ledger.prdFile && !ledger.specFile && !ledger.todoFile) return null
+    const diskSlice = sliceMetaByRel.get(ledger.specFile) ?? sliceMetaByRel.get(ledger.todoFile) ?? null
+    const files = [...new Set([
+      ...(await collectTaskTouchedFiles(roots.mainRoot, ledger)),
+      ...(diskSlice?.scopeFiles ?? []),
+    ])].sort()
+    const deps = [...new Set([
       ...(Array.isArray(ledger.dependsOn) ? ledger.dependsOn.map(String) : []),
       ...(ledger.parentTaskId ? [String(ledger.parentTaskId)] : []),
-    ]
-    return { taskId: id, files, dependsOn: deps, status: ledger.status, branch: ledger.branch }
-  }))
+      ...(diskSlice?.dependsOn ?? []),
+    ])]
+    return {
+      taskId: id,
+      slug: ledger.slug ?? id,
+      specFile: ledger.specFile ?? null,
+      todoFile: ledger.todoFile ?? null,
+      files,
+      dependsOn: deps,
+      status: ledger.status,
+      branch: ledger.branch,
+    }
+  }))).filter(Boolean)
 
   const allLedgers = listTaskLedgers(roots.mainRoot, { includeTerminal: true })
   const readySlices = explicitTasks ? [] : scanUnstartedReadySlices(roots.mainRoot, allLedgers)
@@ -170,6 +187,15 @@ async function handleBatchPlan(opts, roots) {
     totalTasks: wavePlan.totalTasks,
     parallelDispatch: wavePlan.parallelDispatch,
     readySlicesCount: readySlices.length,
+    slices: combined.map((it) => ({
+      taskId: it.taskId,
+      slug: it.slug ?? it.taskId,
+      rel: it.specFile ?? it.todoFile ?? null,
+      specFile: it.specFile ?? null,
+      todoFile: it.todoFile ?? null,
+      dependsOn: it.dependsOn ?? [],
+      scopeFiles: it.files ?? [],
+    })),
     waves,
     order: wavePlan.order,
     parallelizable: wavePlan.parallelizable,
@@ -180,7 +206,6 @@ async function handleBatchPlan(opts, roots) {
   // 只在显式要求时才算，因为交接包要读规划全文、抽验收标准与路径，成本远高于算波次；
   // 日常只看波次拓扑的人不该为它付这份开销。
   if (opts.handoff) {
-    const graph = buildSliceGraph(roots.mainRoot)
     const sliceByKey = new Map()
     for (const s of graph.slices) {
       if (!s.key) continue

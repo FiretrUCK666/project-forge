@@ -35,12 +35,13 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-    const { handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+    const { handleClaim, handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resolveRepoRoots(dir)
 
-    const s1 = await handleStart({ task: 't-w2', case: '1', slug: 'w2-gate' }, roots)
+    const s1 = await handleStart({ task: 't-w2', case: '2', slug: 'w2-gate', implementer: 'alice' }, roots)
     if (s1.exitCode !== 0) return `start t-w2 失败：${s1.exitCode}`
+    await handleClaim({ task: 't-w2', agent: 'alice' }, roots)
     await seedExploredFor(dir, 't-w2')
     const implW2 = join(dir, '.worktrees', 'impl-t-w2')
 
@@ -60,18 +61,19 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
 
     const vWeak = await handleVerify({ task: 't-w2', mode: 'gate', 'e2e-evidence': 'smoke file check ok' }, roots)
     if (vWeak.exitCode !== 0) return `verify 失败：${vWeak.exitCode}`
-    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2', 1) }, roots)
+    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'no-enforce-gates': true, 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2', 1) }, roots)
 
     const mGate = await handleMerge({ task: 't-w2', json: true }, roots)
     if (mGate.exitCode !== 4) return `门禁弱化改动未被 merge 拦截：exit=${mGate.exitCode}`
 
     // 3. 人工豁免 --human-approved 经临时 --detach 试合并入 main
-    const mApproved = await handleMerge({ task: 't-w2', 'human-approved': true, json: true }, roots)
+    const mApproved = await handleMerge({ task: 't-w2', 'human-approved': true, reason: 'human verified gate weakening', json: true }, roots)
     if (mApproved.exitCode !== 0) return `--human-approved merge 失败：exit=${mApproved.exitCode}`
 
     // 4. 反面证伪：新增测试断言（非弱化）无 --human-approved 直接合并放行
-    const s2 = await handleStart({ task: 't-w2-clean', case: '1', slug: 'w2-clean' }, roots)
+    const s2 = await handleStart({ task: 't-w2-clean', case: '2', slug: 'w2-clean', implementer: 'alice' }, roots)
     if (s2.exitCode !== 0) return `start t-w2-clean 失败：${s2.exitCode}`
+    await handleClaim({ task: 't-w2-clean', agent: 'alice' }, roots)
     await seedExploredFor(dir, 't-w2-clean')
     const implClean = join(dir, '.worktrees', 'impl-t-w2-clean')
     writeFileSync(join(implClean, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(3, 3)\n')
@@ -153,9 +155,13 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
 
   try {
     // 预先建一份 Todo，测试 start --create-issue 自动建单并联动重命名 todo 文件
-    await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 'gw-feat', '--title', 'Gateway 功能'], { cwd: dir })
+    const gwInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 'gw-feat', '--title', 'Gateway 功能', '--owner', 'planner', '--json'], { cwd: dir })
+    if (gwInit.status === 0) {
+      const gwTodo = JSON.parse(gwInit.stdout).file
+      if (gwTodo) { hydrateGeneratedDoc(join(dir, gwTodo), { filled: 'src/app.mjs', criteria: ['`src/app.mjs` ok'] }); gitCommitFast(dir, 'docs: gw todo') }
+    }
     const roots = await resolveRepoRoots(dir)
-    const stRes = await handleStart({ 'create-issue': true, title: 'Gateway 功能', slug: 'gw-feat', case: '3', json: true, _ghClient: client }, roots)
+    const stRes = await handleStart({ 'create-issue': true, title: 'Gateway 功能', slug: 'gw-feat', case: '3', 'allow-plan-bootstrap': true, json: true, _ghClient: client }, roots)
     if (stRes.exitCode !== 0) return `start --create-issue 失败：exit=${stRes.exitCode}`
     const implAbs = join(dir, '.worktrees/impl-gw-feat')
     const ledger = JSON.parse(readFileSync(join(dir, '.worktrees/.state/tasks/gw-feat.json'), 'utf8'))
@@ -212,10 +218,13 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     }
 
     // 离线/无凭据 CLI 调用绝不阻塞，且必须输出完整 delegatedPayloads 供宿主 MCP 原样双写
+    await seedExploredFor(dir, 'gw-feat')
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const gw = 2\n')
     gitCommitFast(implAbs, 'fix: gw null guard', { updateOnly: true })
+    const verGw = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'gw-feat', '--cmd', 'exit 0'], { cwd: dir })
+    if (verGw.status !== 0) return `gw-feat verify 失败：${verGw.stderr}\n${verGw.stdout}`
     const offlineRec = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-      'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z2',
+      'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--resolved', 'C1', '--reviewer-id', 'rev-z2',
       '--review-token', await issueTokenFor(dir, 'gw-feat', 2), '--json', '--evidence', '夹具实测：命令已跑，输出符合预期'
     ], { cwd: dir })
     const offlineSync = offlineRec.status === 0 ? JSON.parse(offlineRec.stdout).githubSync : null
@@ -270,9 +279,10 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const roots = await resolveRepoRoots(dir)
-    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature'], { cwd: dir })
+    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature', '--owner', 'planner'], { cwd: dir })
     if (t2Init.status !== 0) return `t2 doc-plan init 失败：${t2Init.stderr}`
-    const stRes = await handleStart({ task: 't-t2', case: '3', slug: 't2-feat' }, roots)
+    gitCommitFast(dir, 'docs: t2 todo')
+    const stRes = await handleStart({ task: 't-t2', case: '3', slug: 't2-feat', 'allow-plan-bootstrap': true }, roots)
     if (stRes.exitCode !== 0) return `Tier 2 start 失败：${stRes.exitCode}`
     const l = readTaskLedger(dir, 't-t2')
     const implAbs = join(dir, l.worktreePath)
@@ -315,13 +325,16 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleFinalize, handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-    const { handleMerge, handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+    const { handleClaim, handleMerge, handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleRecord, handleOverride } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resolveRepoRoots(dir)
 
-    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature'], { cwd: dir })
+    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature', '--owner', 'planner'], { cwd: dir })
     if (t2Init.status !== 0) return `t2 doc-plan init 失败：${t2Init.stderr}`
-    await handleStart({ task: 't-t2', case: '3', slug: 't2-feat' }, roots)
+    gitCommitFast(dir, 'docs: t2 todo')
+    const stT2 = await handleStart({ task: 't-t2', case: '3', slug: 't2-feat', implementer: 'alice', 'allow-plan-bootstrap': true }, roots)
+    if (stT2.exitCode !== 0) return `t-t2 start 失败：${stT2.exitCode}`
+    await handleClaim({ task: 't-t2', agent: 'alice' }, roots)
     await seedExploredFor(dir, 't-t2')
     const l = readTaskLedger(dir, 't-t2')
     const implAbs = join(dir, l.worktreePath)
@@ -336,7 +349,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     await handleFinalize({ task: 't-t2' }, roots)
     gitCommitFast(implAbs, 'docs: archive')
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
-    const subRes = await handleSubmit({ task: 't-t2' }, roots)
+    const subRes = await handleSubmit({ task: 't-t2', agent: 'alice' }, roots)
     if (subRes.exitCode !== 0) return `Tier 2 submit 失败：exit=${subRes.exitCode}`
     const ledgerAfterSub = readTaskLedger(dir, 't-t2')
     if (!existsSync(revAbs) || (ledgerAfterSub.reviewWorktreeHead ?? '') === l.baseSha) {
@@ -373,7 +386,8 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     if (ov !== 0) return `override 失败：${ov}`
     const mOk = await handleMerge({ task: 't-t2', 'human-approved': true, reason: 'human verified' }, roots)
     if (mOk.exitCode !== 0) return `override 后 merge 仍阻断：${mOk.exitCode}`
-    const clOk = await handleCleanup({ task: 't-t2', confirm: true }, roots)
+    const prevT2 = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-t2', '--json'], { cwd: dir })).stdout).previewHash
+    const clOk = await handleCleanup({ task: 't-t2', confirm: true, 'preview-hash': prevT2 }, roots)
     if (clOk.exitCode !== 0) return `cleanup 失败：${clOk.exitCode}`
     return true
   } finally { rmTree(dir) }
@@ -390,11 +404,12 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
     const { readTaskLedger, writeTaskLedger, resolveRepoRoots: resRoots, summarizeCommitChecks } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-    const { handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+    const { handleClaim, handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resRoots(ciDir)
-    const st = await handleStart({ task: 'ci-t', case: '2', slug: 'ci-t', 'clone-choice': 'standalone' }, roots)
+    const st = await handleStart({ task: 'ci-t', case: '2', slug: 'ci-t', implementer: 'alice', 'clone-choice': 'standalone' }, roots)
     if (st.exitCode !== 0) return `ciDir start 失败：${st.exitCode}`
+    await handleClaim({ task: 'ci-t', agent: 'alice' }, roots)
     await seedExploredFor(ciDir, 'ci-t')
     const ciImpl = join(ciDir, '.worktrees', 'impl-ci-t')
     let mergeCalls = 0
@@ -518,14 +533,14 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
   try {
     const dpOk = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
       'init', '--kind', 'todo', '--slug', 'url-test', '--title', 'URL 测试',
-      '--issue', 'https://github.com/acme/demo/issues/42', '--json',
+      '--owner', 'alice', '--issue', 'https://github.com/acme/demo/issues/42', '--json',
     ], { cwd: urlDir })
     if (dpOk.status !== 0 || !JSON.parse(dpOk.stdout).file?.includes('-issue42-')) {
       return `doc-plan --issue URL 失败：${dpOk.stdout} ${dpOk.stderr}`
     }
     const dpBad = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
       'init', '--kind', 'todo', '--slug', 'bad-url', '--title', 'Bad URL',
-      '--issue', 'https://github.com/acme/demo/pull/88',
+      '--owner', 'alice', '--issue', 'https://github.com/acme/demo/pull/88',
     ], { cwd: urlDir })
     if (dpBad.status === 0) return 'doc-plan --issue 误放行了 PR URL'
 
@@ -558,19 +573,19 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     const { resolveRepoRoots: resUrlRoots, readTaskLedger: readUrlLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart: startUrl } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleFinalize: finUrl, handleVerify: verUrl, handleSubmit: subUrl } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-    const { handleCleanup: clUrl } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+    const { handleClaim: claimUrl, handleCleanup: clUrl } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const urlRoots = await resUrlRoots(urlDir)
 
     const spInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-      'init', '--kind', 'spec', '--slug', 'note-case', '--title', 'Impl Note Case', '--json',
+      'init', '--kind', 'spec', '--slug', 'note-case', '--title', 'Impl Note Case', '--owner', 'planner', '--json',
     ], { cwd: urlDir })
     const spRel = JSON.parse(spInit.stdout).file
     const placeholderTodo = `${'TO'}DO: fill later`
-    hydrateGeneratedDoc(join(urlDir, spRel), { filled: '真实值' })
+    hydrateGeneratedDoc(join(urlDir, spRel), { filled: 'src/app.mjs 真实值（不改无关模块）' })
     const spTxt0 = readFileSync(join(urlDir, spRel), 'utf8')
     writeFileSync(join(urlDir, spRel), spTxt0
-      .replace(/^- \[ \] C1: .*$/m, '- [x] C1: verified')
-      .replace(/^- \[ \] C2: .*$/m, '- [x] C2: verified')
+      .replace(/^- \[ \] C1: .*$/m, '- [x] C1: `src/app.mjs` verified')
+      .replace(/^- \[ \] C2: .*$/m, '- [x] C2: `src/app.mjs` verified')
       .replace(/(- \*\*实际落地摘要\*\*)：.*$/m, `$1：- ${placeholderTodo}`)
       // Case 4 的规划退场要求 SPEC 已过审：这里直接改成过审态，
       // 让本用例聚焦「实现说明里的大写占位」这一条判据。
@@ -578,7 +593,9 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
       .replace(/^approved: false$/m, 'approved: true')
       .replace(/^plan_critique: pending$/m, 'plan_critique: passed'))
     gitCommitFast(urlDir, 'spec todo', { files: [spRel] })
-    await startUrl({ task: 'note-case', slug: 'note-case', case: '4' }, urlRoots)
+    const stNote = await startUrl({ task: 'note-case', slug: 'note-case', case: '4', spec: spRel, implementer: 'url-dev' }, urlRoots)
+    if (stNote.exitCode !== 0) return `note-case start 失败：${stNote.exitCode}`
+    await claimUrl({ task: 'note-case', agent: 'url-dev' }, urlRoots)
     await seedExploredFor(urlDir, 'note-case')
     const finBad = await finUrl({ task: 'note-case' }, urlRoots)
     if (finBad.exitCode === 0) {
@@ -606,7 +623,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
         async createPr({ title }) { return { ok: true, number: 99, url: 'https://github.com/acme/demo/pull/99', title } },
         async postComment(p) { postedComments.push(p); return { ok: true, id: postedComments.length, verifiedReadback: true } },
       }
-      const subRes = await subUrl({ task: 'note-case', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'url-dev' } }, client: mockSubmitClient } }, urlRoots)
+      const subRes = await subUrl({ task: 'note-case', agent: 'url-dev', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'url-dev' } }, client: mockSubmitClient } }, urlRoots)
       const noteLedger = readUrlLedger(urlDir, 'note-case')
       const noteDirtyAfterPush = gitSync(implNote, ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim()
       if (subRes.exitCode !== 0 || noteLedger?.prNumber !== 99 || noteDirtyAfterPush !== '' || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev') && c.body.includes('### 提交待审'))) {
@@ -618,7 +635,8 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     if (!existsSync(join(urlDir, '.worktrees/review-note-case'))) {
       gitSync(urlDir, ['worktree', 'add', '--detach', join(urlDir, '.worktrees/review-note-case'), 'HEAD'])
     }
-    const clOnlyRev = await clUrl({ task: 'note-case', confirm: true, 'only-review-worktree': true }, urlRoots)
+    const prevNote = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 'note-case', '--only-review-worktree', '--json'], { cwd: urlDir })).stdout).previewHash
+    const clOnlyRev = await clUrl({ task: 'note-case', confirm: true, 'preview-hash': prevNote, 'only-review-worktree': true }, urlRoots)
     if (clOnlyRev.exitCode !== 0 || existsSync(join(urlDir, '.worktrees/review-note-case')) || !existsSync(join(urlDir, '.worktrees/impl-note-case'))) {
       return `cleanup --only-review-worktree 未按粒度保留：exit=${clOnlyRev.exitCode}`
     }
@@ -630,17 +648,17 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
 }])
 
 cases.push(['doc-plan approve 移交 flow start 与静态回归（mergeAuthority / detectGateWeakeningInEntry）', async () => {
-  const apDir = tmpProject({ 'README.md': '# approve\n' })
+  const apDir = tmpProject({ 'README.md': '# approve\n', 'src/app.mjs': 'export const ok = 1\n' })
   try {
     const apInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-      'init', '--kind', 'spec', '--slug', 'app-next', '--title', 'Approve Next', '--issue', '55', '--json',
+      'init', '--kind', 'spec', '--slug', 'app-next', '--title', 'Approve Next', '--owner', 'alice', '--issue', '55', '--json',
     ], { cwd: apDir })
     const apRel = JSON.parse(apInit.stdout).file
     writeFileSync(join(apDir, apRel), readFileSync(join(apDir, apRel), 'utf8')
       .replace('<two-way | one-way>', 'two-way')
-      .replace(/<[^>]+>/g, '真实值')
-      .replace('- [ ] C1: 真实值', '- [x] C1: verified')
-      .replace('- [ ] C2: 真实值', '- [x] C2: verified'))
+      .replace(/<[^>]+>/g, '`src/app.mjs` 真实值（不改无关模块）')
+      .replace(/^- \[ \] C1:.*$/m, '- [x] C1: `src/app.mjs` verified')
+      .replace(/^- \[ \] C2:.*$/m, '- [x] C2: `src/app.mjs` verified'))
     await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', apRel, '--reviewer', 'critic-next'], { cwd: apDir })
     const apRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', apRel, '--json'], { cwd: apDir })
     const apJson = apRes.status === 0 ? JSON.parse(apRes.stdout) : null

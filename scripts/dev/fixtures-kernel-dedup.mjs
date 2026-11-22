@@ -29,7 +29,7 @@ import { pickSignalBlameFile } from '../../kit/skills/dev-flow/scripts/flow-life
 import { handleClaim } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
 import { handleRun as handleVerifyRun } from '../../kit/skills/dev-verify-tools/scripts/verify-tools.mjs'
 import { BENCH_CHECKS, computeCheckBudget } from './bench.mjs'
-import { SKILL_ROOT, gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerKernelDedupCases(cases) {
   cases.push(['C1：isInsideDir 路径前缀边界正反双向', () => {
@@ -198,6 +198,7 @@ export function registerKernelDedupCases(cases) {
         'title: Demo Spec',
         'slug: demo',
         'issue: 42',
+        'owner: arch-1',
         'status: draft',
         'related_issues: ["#42"]',
         '---',
@@ -205,10 +206,10 @@ export function registerKernelDedupCases(cases) {
         '# Demo Spec',
         '',
         '## 目标',
-        '- 透传 Issue 编号到远端同步层。',
+        '- 透传 `issueNumber` 到 `planSync` 远端同步层。',
         '',
         '## 不做什么',
-        '- 不改动 unrelated 模块。',
+        '- 不改动 `review/` 与无关模块。',
         '',
         '## 怎么算做完',
         '- [ ] C1: `critique-pass` 与 `critique-reject` 透传 `issueNumber` 且通过验证。',
@@ -523,10 +524,10 @@ export function registerKernelDedupCases(cases) {
         '# Plan Finalize',
         '',
         '## 要解决的问题',
-        '- planning 任务过审后直接 finalize 并 submit',
+        '- planning 任务在 `src/app.mjs` 过审后直接 finalize 并 submit',
         '',
         '## 本期不做',
-        '- 不跳过未批准拦截',
+        '- 不修改无关模块，不跳过 `src/app.mjs` 未批准拦截',
         '',
         '## 门型与回滚路径',
         '- two-way',
@@ -565,7 +566,7 @@ export function registerKernelDedupCases(cases) {
       // 反面：未过审/未 approve 的 planning=true 任务调用 finalize 与 submit 均必须阻断 BLOCKED_PLAN_NOT_READY
       const finUnapproved = await handleFinalize({ task: 'p-fin', 'no-tdd': true, json: true }, roots)
       if (finUnapproved.exitCode !== 3) return `未过审 planning=true finalize 未阻断 exit 3：${JSON.stringify(finUnapproved)}`
-      const subUnapproved = await handleSubmit({ task: 'p-fin', json: true }, roots)
+      const subUnapproved = await handleSubmit({ task: 'p-fin', agent: 'plan-x', json: true }, roots)
       if (subUnapproved.exitCode !== 3) return `未过审 planning=true submit 未阻断 exit 3：${JSON.stringify(subUnapproved)}`
       if (readTaskLedger(dir, 'p-fin')?.planning !== true) return '未过审 finalize 阻断后不得清除 planning 标记'
 
@@ -576,6 +577,7 @@ export function registerKernelDedupCases(cases) {
       gitCommitFast(wt, 'docs: approve p-fin')
       const clRes = await handleClaim({ task: 'p-fin', agent: 'impl-x', takeover: true, reason: 'handoff', json: true }, roots)
       if (clRes.exitCode !== 0) return `claim --takeover 失败：${clRes.exitCode}`
+      await seedExploredFor(dir, 'p-fin')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const ok = true\nexport const v = 2\n', 'utf8')
       gitSync(wt, ['add', '-A'])
       gitCommitFast(wt, 'feat: impl p-fin')

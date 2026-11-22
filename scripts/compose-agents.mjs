@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { survey } from './survey.mjs'
+import { recordStepStateSafe } from '../kit/skills/lib/session-state.mjs'
 import { flushAndExit, isMainModule, readTextSafe } from './lib/text.mjs'
 import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
 import * as protocol from './lib/protocol.mjs'
@@ -31,6 +32,7 @@ import {
   refreshRegions,
   regionBodySha,
   sectionAlreadyPresent,
+  validateDevProfileRegion,
 } from './lib/agents-sections.mjs'
 
 const { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
@@ -494,6 +496,11 @@ async function main(argv) {
       )
       bad = true
     }
+    const dpCheck = validateDevProfileRegion(existing)
+    if (!dpCheck.ok) {
+      process.stderr.write(`AGENTS.md Dev Profile 校验失败：${dpCheck.reason}\n`)
+      bad = true
+    }
     if (bad) return 1
     process.stdout.write('AGENTS.md：标记成对、没有未填占位、该有的节都在、内容与模板一致。\n')
     return 0
@@ -524,6 +531,7 @@ async function main(argv) {
     await maybePreWriteBackup(root, existing, noBackup)
     writeAtomic(agentsPath, nextText)
     writeManifestRegions(root, nextText)
+    recordStepStateSafe(root, { step: 'S4', ok: true, summary: 'agents-upgraded' })
     process.stdout.write(`已追加 ${additions.length} 节：只加不改，原有内容一个字节没动。\n`)
     process.stdout.write('接下来读代码填掉里面的「fill」标记，填完把标记行删掉。\n')
     return 0
@@ -596,10 +604,12 @@ async function main(argv) {
       }
     }
     report(agentsPath, inspect(agentsPath, rendered, removedSet), { verbose })
+    recordStepStateSafe(root, { step: 'S4', ok: true, summary: 'agents-refreshed' })
     return 0
   }
 
   report(agentsPath, info, { verbose })
+  recordStepStateSafe(root, { step: 'S4', ok: true, summary: 'agents-checked' })
   return 0
 }
 
@@ -639,6 +649,7 @@ async function generate(root, agentsPath, template, { manifest } = {}) {
     }
   }
   const fills = parseMarkers(content, 'AGENTS.md').filter((m) => m.kind === 'fill')
+  recordStepStateSafe(root, { step: 'S4', ok: true, summary: 'agents-generated' })
   process.stdout.write('已生成 AGENTS.md（按勘察到的事实填了一部分）。\n')
   if (fills.length > 0) {
     process.stdout.write(`还有 ${fills.length} 处要你读完代码后填：\n`)

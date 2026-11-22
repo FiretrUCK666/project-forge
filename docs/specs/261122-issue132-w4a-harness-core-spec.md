@@ -5,7 +5,7 @@ status: approved
 tier: L3
 created: 2026-11-22
 updated: 2026-11-22
-issue: null
+issue: 132
 pr: null
 branch: feat/w4a-harness-core
 owner: plan-harness
@@ -14,7 +14,7 @@ approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-harness-r3, round=3, sha=ff9958aa270e, summary=R3 independent critique pass: 0 blockers)"
 related_prd: ../prd/261122-w4-harness-and-evergreen-prd.md
-related_todo: ../todo/261122-w4a-harness-core-todo.md
+related_todo: ../todo/261122-issue132-w4a-harness-core-todo.md
 high_risk_paths: [kit/, scripts/dev/preflight.mjs, templates/, AGENTS.md]
 task_id: w4a-harness-core
 depends_on: []
@@ -23,7 +23,7 @@ scope_files: ["kit/skills/**", ".agents/skills/**", scripts/survey.mjs, scripts/
 
 # Wave 1: Harness 共享内核原语与多技能门禁收口 — 功能设计规范（SPEC）
 
-> 所属总控 PRD：[Wave 4 总控 PRD](../prd/261122-w4-harness-and-evergreen-prd.md) ｜ 配对 Todo：[w4a-harness-core Todo](../todo/261122-w4a-harness-core-todo.md)
+> 所属总控 PRD：[Wave 4 总控 PRD](../prd/261122-w4-harness-and-evergreen-prd.md) ｜ 配对 Todo：[w4a-harness-core Todo](../todo/261122-issue132-w4a-harness-core-todo.md)
 >
 > 总控认领范围：认领总控 `C1`、`C2`、`C3`、`C4`、`C5`（含前后半程全部 20 条审计缺口及 `dev-govern` / `verify-tools` 缓存与漂移引擎升级）。
 
@@ -148,11 +148,11 @@ flowchart LR
 
 <!-- section: acceptance -->
 <!-- criteria:start -->
-- [ ] C1: `kit/skills/lib/harness-context.mjs` (new) 落地且 `doc-plan init` 禁 `owner: null`、`flow start` 升格分支校作者隔离、`submit` 按 `hostMode` 强制 `--agent`（`single-session` 支持人类确认通道）、`commits > 0` `Case >= 2` 强制 `claimedAt`（`local-only` 无 Issue 自动记认领）、`enforceSlotBoundary` 硬拦 `Case >= 2` 主仓修改/脏态并放行 `Case 1`，通过正反用例。
-- [ ] C2: `kit/skills/lib/session-state.mjs` (new) 落地（`draft` 复用 `session-orient.mjs` 不重造扫描）、`handoff-package.mjs` 泛化 5 角色、`doc-plan init` + `flow-batch.mjs` 修复 `planned` 账本丢依赖 BUG、`S1–S4` 写步骤账本、`flow start` 移除 `autoPopulateExplored`、`plan-exit-gate` 硬阻断 `bound.length === 0`、`buildSliceGraph` 自动纳管总控 PRD、`--skip-critique-reason` 限 `single-session + --human-approved`、全扫描 `PENDING_WORDS`、去黑名单锚点检查与 `PATH_PREFIX_RE` 含 `cmd` 与 `internal`，通过正反用例。
-- [ ] C3: `kit/skills/lib/gate-enforcement.mjs` (new) 落地且 `review-pack` 默认 `enforceGates: true`、Round 2+ `unmentionedFromPrev > 0` 禁 `pass`、UI 变更必附真实 `--artifact` 或 `--visual-blocked-reason`、`verify` 启用 `edit-gate --final` 且硬拦 `do-not-edit`、`check-empirical --cmd` 追加而非覆盖、`check-fault` 验真变更、停损解锁仍校 `headSha`、`cleanup` 校验 `previewHash` 与复用 `inspectBranchMergeState` 安全删分支、`dev-govern` 轻检默认开启、`iterate-cycle` 持久化进度，通过正反用例。
-- [ ] C4: `kit/skills/lib/verify-state.mjs` 实现 `(slotKey, treeHash)` 分槽缓存；`govern-audit.mjs reconcile` 补扫 `kit/` 并报告空 `docAnchor`/`verificationTools`/`testRefs`；`govern-docs.mjs checkDocChurnStaleness` 仅由权威长青文档重置滞后计数，通过正反用例。
-- [ ] C5: 8 技能接线与 `scripts/equip.mjs .` / `scripts/compose-agents.mjs .` 同步完成；所有 `.mjs <= 800L`、`AGENTS.md < 24576B`、`SKILL.md <= 200L/16384B`；受影响既有 `fixtures-*.mjs` 与 `injections-data-*.mjs`（含 `I313`）全部升级为新硬门禁正反双向断言，新增 `fixtures-w4-harness.mjs` (new) 与 `I398–I409`，全仓 `preflight` / `gap-coverage` / `fixtures` / `bench --strict-budget` / `verify-injections` / `cli-parity` / `exit-code-parity` 全绿。
+- [x] C1: `kit/skills/lib/harness-context.mjs` (new) 落地且 `doc-plan init` 禁 `owner: null`、`flow start` 升格分支校作者隔离、`submit` 按 `hostMode` 强制 `--agent`（`single-session` 支持人类确认通道）、`commits > 0` `Case >= 2` 强制 `claimedAt`（`local-only` 无 Issue 自动记认领）、`enforceSlotBoundary` 硬拦 `Case >= 2` 主仓修改/脏态并放行 `Case 1`，通过正反用例。
+- [x] C2: `kit/skills/lib/session-state.mjs` (new) 落地（`draft` 复用 `session-orient.mjs` 不重造扫描）、`handoff-package.mjs` 泛化 5 角色、`doc-plan init` + `flow-batch.mjs` 修复 `planned` 账本丢依赖 BUG、`S1–S4` 写步骤账本、`flow start` 移除 `autoPopulateExplored`、`plan-exit-gate` 硬阻断 `bound.length === 0`、`buildSliceGraph` 自动纳管总控 PRD、`--skip-critique-reason` 限 `single-session + --human-approved`、全扫描 `PENDING_WORDS`、去黑名单锚点检查与 `PATH_PREFIX_RE` 含 `cmd` 与 `internal`，通过正反用例。
+- [x] C3: `kit/skills/lib/gate-enforcement.mjs` (new) 落地且 `review-pack` 默认 `enforceGates: true`、Round 2+ `unmentionedFromPrev > 0` 禁 `pass`、UI 变更必附真实 `--artifact` 或 `--visual-blocked-reason`、`verify` 启用 `edit-gate --final` 且硬拦 `do-not-edit`、`check-empirical --cmd` 追加而非覆盖、`check-fault` 验真变更、停损解锁仍校 `headSha`、`cleanup` 校验 `previewHash` 与复用 `inspectBranchMergeState` 安全删分支、`dev-govern` 轻检默认开启、`iterate-cycle` 持久化进度，通过正反用例。
+- [x] C4: `kit/skills/lib/verify-state.mjs` 实现 `(slotKey, treeHash)` 分槽缓存；`govern-audit.mjs reconcile` 补扫 `kit/` 并报告空 `docAnchor`/`verificationTools`/`testRefs`；`govern-docs.mjs checkDocChurnStaleness` 仅由权威长青文档重置滞后计数，通过正反用例。
+- [x] C5: 8 技能接线与 `scripts/equip.mjs .` / `scripts/compose-agents.mjs .` 同步完成；所有 `.mjs <= 800L`、`AGENTS.md < 24576B`、`SKILL.md <= 200L/16384B`；受影响既有 `fixtures-*.mjs` 与 `injections-data-*.mjs`（含 `I313`）全部升级为新硬门禁正反双向断言，新增 `fixtures-w4-harness.mjs` (new) 与 `I398–I409`，全仓 `preflight` / `gap-coverage` / `fixtures` / `bench --strict-budget` / `verify-injections` / `cli-parity` / `exit-code-parity` 全绿。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

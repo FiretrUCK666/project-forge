@@ -376,7 +376,9 @@ export function registerStageBOnboardingCases(cases) {
       for (const sec of ['项目定位', 'Dev Profile', '架构与关键不变量', '修改守则补充', '高风险路径', '改哪看哪']) {
         stdAgents = stdAgents.replace(`<!-- project-forge: begin ${sec} -->`, `<!-- project-forge: begin ${sec} customized -->`)
       }
-      stdAgents = stdAgents.replace(/^[ \t]*<!--\s*project-forge:\s*fill\b[^>]*-->[ \t]*\r?\n?/gm, '')
+      stdAgents = stdAgents
+        .replace(/^[ \t]*<!--\s*project-forge:\s*fill\b[^>]*-->[ \t]*\r?\n?/gm, '')
+        .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none')
       writeFileSync(agentsPath, stdAgents)
 
       const expSkill = join(dir, '.agents/skills/dev-explore/SKILL.md')

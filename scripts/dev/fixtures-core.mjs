@@ -275,6 +275,7 @@ cases.push(['未填占位时 --check 红；填完删掉标记后转绿', async (
     if (c1.status === 0) return '未填占位时 --check 放行了'
     const filled = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
       .replace(/<!-- project-forge: fill [^>]*-->/g, '已填写。')
+      .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none')
     writeFileSync(join(dir, 'AGENTS.md'), filled)
     const c2 = await runNode('compose-agents.mjs', [dir, '--check'])
     if (c2.status !== 0) return `填完之后 --check 仍红：${(c2.stderr || '').trim().split('\n')[0]}`

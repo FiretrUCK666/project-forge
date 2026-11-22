@@ -70,7 +70,7 @@ export function registerIssue52Cases(cases) {
       if (verRes.status !== 0) return `verify t52 失败：${verRes.stderr}`
 
       const subRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'submit', '--task', 't52', '--json',
+        'submit', '--task', 't52', '--agent', 'alice', '--json',
       ], { cwd: dir })
       if (subRes.status !== 0) return `submit t52 失败：${subRes.stderr}`
 
@@ -167,7 +167,7 @@ export function registerIssue52Cases(cases) {
     try {
       // 1. 离线 start --issue 52 写入 no-api-channel，next 卡在 needs-issue-context
       const sOff = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'c2-t', '--issue', '52', '--case', '3', '--implementer', 'alice', '--json',
+        'start', '--task', 'c2-t', '--issue', '52', '--case', '3', '--implementer', 'alice', '--allow-plan-bootstrap', '--json',
       ], { cwd: dir })
       if (sOff.status !== 0) return `离线 start --issue 52 失败：${sOff.stderr}`
       const lOff = readTaskLedger(dir, 'c2-t')
@@ -375,7 +375,12 @@ export function registerIssue52Cases(cases) {
       if (eq.status !== 0) return `equip 失败：${eq.stderr}`
       const comp = await runNode('compose-agents.mjs', [dir, '--no-backup'])
       if (comp.status !== 0) return `compose-agents 失败：${comp.stderr}`
-      writeFileSync(join(dir, 'AGENTS.md'), readFileSync(join(dir, 'AGENTS.md'), 'utf8').replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。'))
+      writeFileSync(
+        join(dir, 'AGENTS.md'),
+        readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+          .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+          .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none'),
+      )
       const chkOk = await runNode('compose-agents.mjs', [dir, '--check'])
       if (chkOk.status !== 0) return `一致仓 compose-agents --check 失败：${chkOk.stderr}`
 

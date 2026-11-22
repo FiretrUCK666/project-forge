@@ -525,7 +525,8 @@ export function registerStageBLoopCases(cases) {
             async closeIssue({ number }) { seqCalls.push(`close:${number}`); return { ok: true, state: 'CLOSED', alreadyClosed: false } },
           },
         })
-        await handleStart({ task: 'm2', slug: 'm2', issue: '15', case: '3', implementer: 'alice', json: true, _ghClient: idemClient, _ghProbe: makeProbe('pass', false) }, lRoots)
+        await handleStart({ task: 'm2', slug: 'm2', issue: '15', case: '3', implementer: 'alice', 'allow-plan-bootstrap': true, json: true, _ghClient: idemClient, _ghProbe: makeProbe('pass', false) }, lRoots)
+        await handleClaim({ task: 'm2', agent: 'alice', _ghClient: idemClient, _ghProbe: makeProbe('pass', false) }, lRoots)
         await seedExploredFor(ledgerDir, 'm2')
         const wtM2 = join(ledgerDir, '.worktrees/impl-m2')
         writeFileSync(join(wtM2, 'src/app.mjs'), 'export const ok = 2\n')
@@ -571,6 +572,7 @@ export function registerStageBLoopCases(cases) {
     gitSync(workDir, ['push', '-u', 'origin', 'main'])
     try {
       equip(workDir, { tier: 'full', noBackup: true })
+      gitCommitFast(workDir, 'equip')
       const roots = await resolveRepoRoots(workDir)
       const origOut = process.stdout.write.bind(process.stdout)
       const origErr = process.stderr.write.bind(process.stderr)
@@ -579,8 +581,9 @@ export function registerStageBLoopCases(cases) {
       try {
         const cr = await createLocalIssue({ mainRoot: workDir, title: '通用裸仓工单' })
         if (!cr.ok || cr.number !== 1) return `创建本地工单失败：${JSON.stringify(cr)}`
-        const st = await handleStart({ task: 'bare-merge', issue: '1', slug: 'bare-merge', case: '3', implementer: 'alice', json: true }, roots)
+        const st = await handleStart({ task: 'bare-merge', issue: '1', slug: 'bare-merge', case: '3', implementer: 'alice', 'allow-plan-bootstrap': true, json: true }, roots)
         if (st.exitCode !== 0) return `generic-git bare start 失败：${st.exitCode}`
+        await handleClaim({ task: 'bare-merge', agent: 'alice', json: true }, roots)
         const lg0 = readTaskLedger(workDir, 'bare-merge')
         if (!lg0 || lg0.providerId !== 'generic-git') return `bare remote 未判 providerId=generic-git：${JSON.stringify(lg0)}`
         await seedExploredFor(workDir, 'bare-merge')

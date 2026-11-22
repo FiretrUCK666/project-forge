@@ -151,7 +151,9 @@ export function registerVerifyToolsCases(cases) {
       if (stBefore) return `仓外草稿污染了主仓工作区：${stBefore}`
 
       // 3. cleanup 销毁 t-sc-1 scratch 并写第 1 条 verify.scratch-used（1 个 task 不得触发固化提示）
-      const clean1 = await withQuietIo(() => handleCleanup({ task: 't-sc-1', confirm: true, json: true }, roots))
+      const prev1 = await withQuietIo(() => handleCleanup({ task: 't-sc-1', json: true }, roots))
+      const ph1 = JSON.parse(prev1.out).previewHash
+      const clean1 = await withQuietIo(() => handleCleanup({ task: 't-sc-1', confirm: true, 'preview-hash': ph1, json: true }, roots))
       if (clean1.res.exitCode !== 0 || existsSync(d1.scratchDir)) {
         return `flow cleanup 未销毁仓外 scratch：exit=${clean1.res.exitCode}`
       }
@@ -213,7 +215,8 @@ export function registerVerifyToolsCases(cases) {
         if (initRun.status !== 0) return `首次采集基线失败 (${tid})：${initRun.stderr}`
       }
       const cache = readVerifyCache(roots.gitDir, roots.mainRoot)
-      if (!cache.tools['t-high']?.symbolHash || !cache.tools['t-high']?.moduleTreeHash) {
+      const highEntry = cache.slots?.main?.['t-high'] ?? cache.tools?.['t-high']
+      if (!highEntry?.symbolHash || !highEntry?.moduleTreeHash) {
         return `cache.json 未落盘 symbolHash/moduleTreeHash：${JSON.stringify(cache)}`
       }
       const trackedText = readFileSync(join(dir, FEATURE_MAP_REL), 'utf8')
@@ -329,9 +332,10 @@ export function registerVerifyToolsCases(cases) {
         return `review check-empirical 未拦截水话 --e2e-evidence：exit=${fluffEmp.status} out=${fluffEmp.stdout}`
       }
 
-      // 5. flow verify 同样拦截水话 --e2e-evidence
+      // 5. flow verify 同样拦截水话 --e2e-evidence（先恢复主仓干净以满足 Case >= 2 脏 main 硬门禁）
+      gitSync(dir, ['checkout', '--', 'src/core.mjs'])
       const roots = await resolveRepoRoots(dir)
-      await withQuietIo(() => handleStart({ task: 'fluff-t', case: '2', slug: 'fluff' }, roots))
+      await withQuietIo(() => handleStart({ task: 'fluff-t', case: '2', slug: 'fluff', implementer: 'dev' }, roots))
       const wtFluff = join(dir, '.worktrees', 'impl-fluff-t')
       writeFileSync(join(wtFluff, 'src/core.mjs'), 'export function calc(n) { return n + 3 }\n', 'utf8')
       gitCommitFast(wtFluff, 'feat: calc change', { updateOnly: true })
@@ -347,6 +351,7 @@ export function registerVerifyToolsCases(cases) {
       }
 
       // 6. 实质 --e2e-evidence + 实证通过 + 故障注入闭环解锁 --include-diff
+      writeFileSync(join(dir, 'src/core.mjs'), 'export function calc(n) { return n + 2 }\n', 'utf8')
       const goodEmp = await runAbsAsync(RP_SCRIPT, [
         'check-empirical', '--local', '--cmd', 'node -e "import(\'./src/caller.mjs\').then(m=>{if(m.runCalc()!==7)process.exit(1)})"',
         '--e2e-evidence', 'runCalc() via src/caller.mjs returned 7 exit=0', '--json',

@@ -198,7 +198,7 @@ export function validateArtifactsAndVisual({
     observational: observation.ok,
     blocked: blocked.ok,
     visualCheckedRaw: Boolean(visualCheckedRaw),
-    satisfiedBy: hasArtifacts ? 'artifacts' : (observation.ok ? 'observation' : (blocked.ok ? 'blocked' : null)),
+    satisfiedBy: hasArtifacts ? 'artifacts' : (blocked.ok ? 'blocked' : null),
     ...(observation.ok ? { observation: observation.text } : {}),
     ...(blocked.ok ? { blockedReason: blocked.text } : {}),
   }
@@ -209,11 +209,11 @@ export function validateArtifactsAndVisual({
 
   const placeholder = observation.code === 'BLOCKED_VISUAL_OBSERVATION_PLACEHOLDER' ? observation.reason : null
   const reason = [
-    `BLOCKED_VISUAL_EVIDENCE_REQUIRED: 变更触及界面资源（${uiFiles.slice(0, 5).join(', ')}），仅凭 --visual-checked 布尔开关不足以放行。`,
+    `BLOCKED_UI_ARTIFACT_REQUIRED: 变更触及界面资源（${uiFiles.slice(0, 5).join(', ')}），仅凭文字观察或 --visual-checked 开关不足以放行。`,
     placeholder,
-    '请至少满足一项：① 附真实非空实证附件 --artifact "<产物路径>"（可多个）；② 写下实际渲染/交互观察摘要（看了哪一屏、看到了什么）；③ 环境确实无法渲染时显式声明 --visual-blocked-reason "<阻塞原因>" 诚实报阻。',
+    '请至少满足一项：① 附真实非空截图/录像实证附件 --artifact "<产物路径>"（可多个）；② 环境确实无法渲染时显式声明 --visual-blocked-reason "<阻塞原因>" 诚实报阻。',
   ].filter(Boolean).join(' ')
-  return { ok: false, code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED', exitCode: EXIT.FACT, reason, records: normalized.records, errors: [], visual }
+  return { ok: false, code: 'BLOCKED_UI_ARTIFACT_REQUIRED', exitCode: EXIT.FACT, reason, records: normalized.records, errors: [], visual }
 }
 
 /**

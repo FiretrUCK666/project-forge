@@ -146,32 +146,34 @@ function sectionBody(lines, startIdx) {
  */
 export function analyzePendingDecisions(text) {
   const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  let found = false
+  let total = 0
+  const unresolved = []
 
   for (let i = 0; i < lines.length; i += 1) {
     const h = PENDING_HEADING_RE.exec(lines[i])
     if (!h) continue
     if (!PENDING_WORDS.test(h[1])) continue
+    found = true
 
     const { body } = sectionBody(lines, i)
     const content = body.filter((l) => l.trim() && !/^\s*<!--/.test(l))
-    // 只有一句「无」：没有遗留问题，直接放行。
     const meaningful = content.filter((l) => !/^\s*>/.test(l))
-    if (meaningful.length === 0) return { found: true, total: 0, unresolved: [] }
+    if (meaningful.length === 0) continue
     if (meaningful.length === 1 && EMPTY_SECTION_RE.test(meaningful[0].replace(/^[-*]\s*/, ''))) {
-      return { found: true, total: 0, unresolved: [] }
+      continue
     }
 
     // 逐条判：一个条目从它自己那行起，到下一个同级条目为止。
     const items = splitItems(body)
-    const unresolved = []
+    total += items.length
     for (const item of items) {
       if (DECIDED_RE.test(item.block)) continue
       unresolved.push({ line: item.line, text: item.head })
     }
-    return { found: true, total: items.length, unresolved }
   }
 
-  return { found: false, total: 0, unresolved: [] }
+  return { found, total, unresolved }
 }
 
 /**

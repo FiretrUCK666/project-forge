@@ -32,7 +32,7 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       '',
       '## 要解决的问题',
       '',
-      '- 当前缺一份可校准的实现方案。',
+      '- 当前 `src/real.mjs` 与 `src/planned.mjs` 缺一份可校准的实现方案。',
       '',
       '## 本期不做',
       '',
@@ -56,7 +56,7 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       '',
       '## 要解决的问题',
       '',
-      '- 走紧急豁免，补一份最小方案。',
+      '- 走紧急豁免，为 `src/real.mjs` 补一份最小方案。',
       '',
       '## 本期不做',
       '',
@@ -122,9 +122,13 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       return `复核后 approve 失败：${okApprove.stderr}`
     }
 
-    const exApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--skip-critique-reason', '紧急修复：停线事故，先放行评审把补丁推上去', '--json'], { cwd: dir })
+    const exBlocked = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--skip-critique-reason', '紧急修复：停线事故，先放行评审把补丁推上去', '--json'], { cwd: dir })
+    if (exBlocked.status === 0 || !/BLOCKED_CRITIQUE_REQUIRED/.test(exBlocked.stderr)) {
+      return `multi-agent 模式下 --skip-critique-reason 竟未被拦截：exit=${exBlocked.status} stderr=${exBlocked.stderr}`
+    }
+    const exApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--host-mode', 'single-session', '--human-approved', '--skip-critique-reason', '紧急修复：停线事故，先放行评审把补丁推上去', '--json'], { cwd: dir })
     if (exApprove.status !== 0 || !JSON.parse(exApprove.stdout).critiqueSkipped) {
-      return `--skip-critique-reason 豁免失败：${exApprove.stderr}`
+      return `single-session + --human-approved --skip-critique-reason 豁免失败：${exApprove.stderr}`
     }
     return true
   } finally { rmTree(dir) }
@@ -155,7 +159,7 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
   gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
   try {
     const initRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-      'init', '--kind', 'all', '--slug', '中文特性', '--title', '中文特性方案', '--json',
+      'init', '--kind', 'all', '--slug', '中文特性', '--title', '中文特性方案', '--owner', 'alice', '--json',
     ], { cwd: dir })
     if (initRes.status !== 0) return `doc-plan init all 失败：${initRes.stderr}`
     const initJson = JSON.parse(initRes.stdout)
@@ -167,11 +171,11 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
       const p = join(dir, rel)
       let txt = readFileSync(p, 'utf8')
       txt = txt.replace('<two-way | one-way>', 'two-way')
-        .replace(/<[^>]+>/g, '实际值')
-        .replace('- [ ] C1: 实际值', '- [x] C1: 验证 `src/app.mjs` 返回退出码 0')
-        .replace('- [ ] C2: 实际值', '- [x] C2: `src/app.mjs` 导出 `a` 成立')
-        .replace('<!-- 一两段说清真实用户痛点与预期可观测收益 -->', '真实用户背景。')
-        .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', '- 已在 src/app.mjs 实现并验证通过。')
+        .replace(/<[^>]+>/g, '`src/app.mjs` 实际值（不改动无关模块）')
+        .replace(/^- \[ \] C1:.*$/m, '- [x] C1: 验证 `src/app.mjs` 返回退出码 0')
+        .replace(/^- \[ \] C2:.*$/m, '- [x] C2: `src/app.mjs` 导出 `a` 成立')
+        .replace('<!-- 一两段说清真实用户痛点与预期可观测收益 -->', '真实用户背景：`src/app.mjs` 需要收敛。')
+        .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', '- 已在 `src/app.mjs` 实现并验证通过。')
       writeFileSync(p, txt)
     }
 
@@ -295,7 +299,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
 
   try {
     gitInit(dir)
-    const initAuth = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'auth', '--title', 'Auth Flow', '--json'])
+    const initAuth = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'auth', '--title', 'Auth Flow', '--owner', 'alice', '--json'])
     if (initAuth.status !== 0) return `doc-plan init pair 失败：${initAuth.stderr}`
     const authJson = JSON.parse(initAuth.stdout)
     const authSpec = authJson.files.find((f) => f.endsWith('-auth-spec.md'))
@@ -324,14 +328,14 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
     if (auditAuth.status !== 0) return `link 后 doc-plan audit . 失败：\n${auditAuth.stdout}\n${auditAuth.stderr}`
 
     // 第二组文档提交后，由 flow.mjs start --issue 77 在工作位触发协同重命名
-    const initBill = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'billing', '--title', 'Billing Flow', '--json'])).stdout)
+    const initBill = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'billing', '--title', 'Billing Flow', '--owner', 'alice', '--json'])).stdout)
     const billSpec = initBill.files.find((f) => f.endsWith('-billing-spec.md'))
     const billTodo = initBill.files.find((f) => f.endsWith('-billing-todo.md'))
     fillGeneratedDoc(join(dir, billSpec))
     fillGeneratedDoc(join(dir, billTodo))
     gitCommitFast(dir, 'add auth42 and billing docs', { name: 't', email: 't@t.t' })
 
-    const flowStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c30-bill', '--case', '3', '--slug', 'billing', '--issue', '77', '--spec', billSpec, '--todo', billTodo, '--dir', dir, '--json'])
+    const flowStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c30-bill', '--case', '3', '--slug', 'billing', '--issue', '77', '--spec', billSpec, '--todo', billTodo, '--allow-plan-bootstrap', '--dir', dir, '--json'])
     if (flowStart.status !== 0) return `flow.mjs start --issue 77 失败：${flowStart.stderr}`
     const ledger = JSON.parse(flowStart.stdout)
     const wtRoot = ledger.worktreePath ? join(dir, ledger.worktreePath) : dir
@@ -424,8 +428,9 @@ cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触
     }
 
     // 启动流转分支后只修改 src/api.mjs 并提交，检验 doc-plan triage / review-pack / flow finalize
-    const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--dir', dir, '--json'])
+    const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--implementer', 'alice', '--dir', dir, '--json'])
     if (startRes.status !== 0) return `flow.mjs start 失败：${startRes.stderr}`
+    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['claim', '--task', 'c29-t1', '--agent', 'alice', '--dir', dir])
     const c29Wt = join(dir, JSON.parse(startRes.stdout).worktreePath)
 
     writeFileSync(join(c29Wt, 'src/api.mjs'), 'export const version = 2\n')
@@ -580,8 +585,10 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
 cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传入检查勾选、保原元信息并写入 archivedPrdFile 放行 do-not-edit', async () => {
   const { parseDocFrontmatter, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+  const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
   const { handleFinalize, handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
   const { auditDoc } = await import('../../kit/skills/dev-plan/scripts/doc-plan.mjs')
+  const { seedExploredFor } = await import('./fixtures-helpers.mjs')
 
   const makeMasterRepo = (issueNum) => tmpProject({
     '.gitignore': '.worktrees/\n',
@@ -611,7 +618,7 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
       '---', 'kind: prd', 'title: "Master Plan"', 'status: active',
       'created: 2026-11-16', 'updated: 2026-11-16', 'issue: null', 'pr: null',
       'owner: alice', 'plan_critique: passed', 'related_spec: null', 'related_todo: null',
-      '---', '', '# PRD: Master Plan', '', '## 要解决的问题', '- 统一规划总纲', '', '## 本期不做', '- 不修改独立单仓接口', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '---', '', '# PRD: Master Plan', '', '## 要解决的问题', '- 统一规划 `src/app.mjs` 演进总纲', '', '## 本期不做', '- 不修改独立单仓接口', '', '## 门型与回滚路径', '- two-way；revert', '',
       '## 五、验收标准', '- [x] C1: `src/app.mjs` M1', '- [ ] C2: `src/app.mjs` M2', '',
     ].join('\n'),
     [`docs/specs/261116-issue${issueNum}-m2-spec.md`]: [
@@ -645,6 +652,8 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
       spec: 'docs/specs/261116-issue11-m2-spec.md', todo: 'docs/todo/261116-issue11-m2-todo.md',
       implementer: 'alice',
     }, roots)
+    await handleClaim({ task: 'm2', agent: 'alice' }, roots)
+    await seedExploredFor(dir, 'm2')
     const wt = join(dir, readTaskLedger(dir, 'm2').worktreePath)
 
     // 1. 默认不传 --include-master-prd：仍守 1:N 共享 PRD，不归档且 archivedPrdFile 为 null

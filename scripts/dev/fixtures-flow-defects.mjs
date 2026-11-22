@@ -190,13 +190,23 @@ export function registerFlowDefectsCases(cases) {
       writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 2\n')
       gitCommitFast(dir, 'fix one', { updateOnly: true })
 
-      // 第 2 轮：整轮 pass，但两条历史项一条都没被显式 --resolved，也没再被提及
-      const tok2 = await issueTokenFor(dir, 't-unm', 2)
-      await quiet(() => handleRecord({
+      // 第 2 轮：未处理历史项时 pass 必被阻断；changes 时不得批量置为 resolved 且未提及项单列
+      const tok2Block = await issueTokenFor(dir, 't-unm', 2)
+      const passBlocked = await quiet(() => handleRecord({
         task: 't-unm', round: '2', verdict: 'pass',
         evidence: '夹具实测：E2E 观察 OK', 'reviewer-id': 'rev-c',
-        'review-token': tok2,
+        'review-token': tok2Block, 'no-enforce-gates': true,
         'e2e-evidence': '夹具实测：页面渲染与交互已观察',
+      }, roots))
+      if (!passBlocked.includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
+        return `Round 2 未处置历史 Must-Fix 时 pass 未阻断：${passBlocked}`
+      }
+
+      const tok2 = await issueTokenFor(dir, 't-unm', 2)
+      await quiet(() => handleRecord({
+        task: 't-unm', round: '2', verdict: 'changes',
+        evidence: '夹具实测：复核增量改动', 'reviewer-id': 'rev-c',
+        'review-token': tok2,
       }, roots))
 
       const ledger = JSON.parse(readFileSync(join(ledgerDir, 't-unm.json'), 'utf8'))
@@ -235,7 +245,7 @@ export function registerFlowDefectsCases(cases) {
       await quiet(() => handleRecord({
         task: 't-res', round: '2', verdict: 'pass',
         evidence: '夹具实测：E2E 观察 OK', 'reviewer-id': 'rev-c',
-        'review-token': tokRes2,
+        'review-token': tokRes2, 'no-enforce-gates': true,
         'e2e-evidence': '夹具实测：页面渲染与交互已观察',
         resolved: ['C1'],
       }, roots))
@@ -683,10 +693,11 @@ export function registerFlowDefectsCases(cases) {
 
     // 反例：有受管文档且全部通过时仍必须「全部通过」且退 0
     const withDoc = makeDir({
+      'src/app.mjs': 'export const ok = 1\n',
       'docs/specs/261120-ok-spec.md': [
-        '---', 'kind: spec', 'title: OK', 'status: draft', 'approved: false', '---', '',
-        '# SPEC: OK', '', '## 要解决的问题', '- a', '', '## 本期不做', '- b', '',
-        '## 门型与回滚路径', '- two-way', '', '- [ ] C1: c1', '',
+        '---', 'kind: spec', 'title: OK', 'status: draft', 'owner: arch-1', 'approved: false', '---', '',
+        '# SPEC: OK', '', '## 要解决的问题', '- 更新 `src/app.mjs` 导出。', '', '## 本期不做', '- 不改 `src/app.mjs` 之外模块。', '',
+        '## 门型与回滚路径', '- two-way；git revert', '', '- [ ] C1: `node -e "process.exit(0)"` c1', '',
       ].join('\n'),
     })
     try {

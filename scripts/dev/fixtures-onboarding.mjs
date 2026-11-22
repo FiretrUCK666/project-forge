@@ -548,8 +548,12 @@ export function registerOnboardingCases(cases) {
           const ex = await handleExplore({ task: taskId }, roots)
           if (ex.exitCode !== 0) return `explore(${mode}/${role}) 失败：${ex.exitCode}`
         } else {
-          const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--json'])
+          const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--agent', 'alice', '--json'])
           if (stCli.status !== 0) return `cli start(${mode}/${role}) 失败：${stCli.stderr}`
+          if (role === 'generic-git') {
+            const clCli = runLocal(dir, flowRel, ['claim', '--task', taskId, '--agent', 'alice'])
+            if (clCli.status !== 0) return `cli claim(${mode}/${role}) 失败：${clCli.stderr}`
+          }
           const exCli = runLocal(dir, flowRel, ['explore', '--task', taskId])
           if (exCli.status !== 0) return `cli explore(${mode}/${role}) 失败：${exCli.stderr}`
         }
@@ -563,10 +567,10 @@ export function registerOnboardingCases(cases) {
         if (vRes.status !== 0) return `verify(${mode}/${role}) 失败：${vRes.stderr}`
 
         if (useMockApi) {
-          const sub = await handleSubmit({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
+          const sub = await handleSubmit({ task: taskId, agent: 'alice', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
           if (sub.exitCode !== 0) return `submit(${mode}/${role}) 失败：${sub.exitCode}`
         } else {
-          const subCli = runLocal(dir, flowRel, ['submit', '--task', taskId])
+          const subCli = runLocal(dir, flowRel, ['submit', '--task', taskId, '--agent', 'alice'])
           if (subCli.status !== 0) return `cli submit(${mode}/${role}) 失败：${subCli.stderr}`
           if (!hasReviewKit && subCli.stdout.includes('review-pack.mjs')) {
             return `no-dev-review ${role} submit 不应输出 review-pack.mjs：${subCli.stdout}`
@@ -639,6 +643,7 @@ export function registerOnboardingCases(cases) {
           task: taskId,
           case: String(caseType),
           slug: taskId,
+          implementer: 'alice',
           ...(caseType >= 4 ? { spec: 'docs/specs/261118-issue88-mx-spec.md', todo: 'docs/todo/261118-issue88-mx-todo.md' } : {}),
         }, roots)
         if (s.exitCode !== 0) return `no-dev-review high-risk(${label}) start 失败：${s.exitCode}`
@@ -674,8 +679,12 @@ export function registerOnboardingCases(cases) {
           }
         }
         const ver = await handleVerify({ task: taskId, mode: 'gate', ...(label === 'visual' ? visualBlocked : {}) }, roots)
+        if (label === 'doNotEdit') {
+          if (ver.exitCode !== 3) return `doNotEdit 在 verify 阶段未硬阻断：exit=${ver.exitCode}`
+          continue
+        }
         if (ver.exitCode !== 0) return `verify(${label}) 失败：${ver.exitCode}`
-        const sub = await handleSubmit({ task: taskId }, roots)
+        const sub = await handleSubmit({ task: taskId, agent: 'alice' }, roots)
         if (sub.exitCode !== 0) return `submit(${label}) 失败：${sub.exitCode}`
 
         const nx = await handleNext({ task: taskId, json: true }, roots)

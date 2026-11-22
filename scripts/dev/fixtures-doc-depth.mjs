@@ -38,7 +38,7 @@ export function registerDocDepthCases(cases) {
 
     try {
       const initAll = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'all', '--slug', 'go-cli', '--title', 'Go CLI 增强', '--json',
+        'init', '--kind', 'all', '--slug', 'go-cli', '--title', 'Go CLI 增强', '--owner', 'arch-1', '--json',
       ], { cwd: goDir })
       if (initAll.status !== 0) return `3 文件 Go CLI init 保留可选骨架失败：${initAll.stderr}`
       const created = JSON.parse(initAll.stdout).files
@@ -81,7 +81,7 @@ export function registerDocDepthCases(cases) {
 
       // 有 docs/TDD.md 的仓库应保留真实 `docs/TDD.md` 路径
       const initTddSpec = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'spec', '--slug', 'with-tdd', '--title', 'With TDD', '--json',
+        'init', '--kind', 'spec', '--slug', 'with-tdd', '--title', 'With TDD', '--owner', 'arch-1', '--json',
       ], { cwd: tddDir })
       if (initTddSpec.status !== 0) return `有 TDD 仓库 init spec 失败：${initTddSpec.stderr}`
       const tddSpecText = readFileSync(join(tddDir, JSON.parse(initTddSpec.stdout).file), 'utf8')
@@ -91,7 +91,7 @@ export function registerDocDepthCases(cases) {
 
       // --no-prune 保留模板全部可选节且不写 doc-shape-skipped
       const initNoPrune = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'prd', '--slug', 'full-skel', '--title', 'Full Skel', '--no-prune', '--json',
+        'init', '--kind', 'prd', '--slug', 'full-skel', '--title', 'Full Skel', '--owner', 'arch-1', '--no-prune', '--json',
       ], { cwd: goDir })
       if (initNoPrune.status !== 0) return `--no-prune init 失败：${initNoPrune.stderr}`
       const noPruneText = readFileSync(join(goDir, JSON.parse(initNoPrune.stdout).file), 'utf8')
@@ -162,7 +162,7 @@ export function registerDocDepthCases(cases) {
       }
 
       const initGo = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'all', '--slug', 'shape-go', '--title', 'Shape Go', '--json',
+        'init', '--kind', 'all', '--slug', 'shape-go', '--title', 'Shape Go', '--owner', 'arch-1', '--json',
       ], { cwd: goDir })
       if (initGo.status !== 0) return `Go 仓 init 失败：${initGo.stderr}`
       const goFiles = JSON.parse(initGo.stdout).files
@@ -207,7 +207,7 @@ export function registerDocDepthCases(cases) {
         if (!dShape.signals.ciRollout) return `${deployPath} 未触发 ciRollout：${JSON.stringify(dShape.signals)}`
       }
       const initRich = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'all', '--slug', 'rich-app', '--title', 'Rich App', '--json',
+        'init', '--kind', 'all', '--slug', 'rich-app', '--title', 'Rich App', '--owner', 'arch-1', '--json',
       ], { cwd: richDir })
       if (initRich.status !== 0) return `多面仓 init 失败：${initRich.stderr}`
       const richFiles = JSON.parse(initRich.stdout).files
@@ -220,7 +220,7 @@ export function registerDocDepthCases(cases) {
 
       // 反向保护 1：custom required_sections 在 3 文件 Go 仓仍保留 users
       const initReq = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'prd', '--slug', 'req-users', '--title', 'Req Users', '--json',
+        'init', '--kind', 'prd', '--slug', 'req-users', '--title', 'Req Users', '--owner', 'arch-1', '--json',
       ], { cwd: reqDir })
       if (initReq.status !== 0) return `自定义 required_sections init 失败：${initReq.stderr}`
       const reqPrdRel = JSON.parse(initReq.stdout).file
@@ -481,7 +481,7 @@ export function registerDocDepthCases(cases) {
 
       // 1. init --kind todo --spec 自动继承 related_prd 并回写父 SPEC related_todo，且不写脏 1:N PRD
       const initTodo = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'todo', '--slug', 'slice-a', '--title', 'Slice A Todo',
+        'init', '--kind', 'todo', '--slug', 'slice-a', '--title', 'Slice A Todo', '--owner', 'planner',
         '--spec', 'docs/specs/261118-issue91-slice-a-spec.md', '--json',
       ], { cwd: dir })
       if (initTodo.status !== 0) return `init --kind todo --spec 失败：${initTodo.stderr}`
@@ -500,7 +500,7 @@ export function registerDocDepthCases(cases) {
 
       // init --kind spec --prd 直接绑定已有 PRD
       const initSpecWithPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'spec', '--slug', 'slice-b', '--title', 'Slice B',
+        'init', '--kind', 'spec', '--slug', 'slice-b', '--title', 'Slice B', '--owner', 'arch-1',
         '--prd', 'docs/prd/261117-master-prd.md', '--json',
       ], { cwd: dir })
       if (initSpecWithPrd.status !== 0) return `init --kind spec --prd 失败：${initSpecWithPrd.stderr}`

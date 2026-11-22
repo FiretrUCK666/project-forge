@@ -234,14 +234,14 @@ export function checkCoreSubstantiveness(bodyText, docType) {
       })
       return
     }
-    if (!hasAngles && VAGUE_FLUFF_RE.test(cleaned)) {
+    if (!hasAngles && (id === 'goal' || id === 'design' || id === 'non-goals' || VAGUE_FLUFF_RE.test(cleaned))) {
       const { count } = extractTechAnchors(cleaned)
       if (count === 0) {
         errors.push({
           code: 'DOC_VAGUE_CORE_SECTION',
           line: lineNo,
           section: id,
-          message: `第 ${lineNo} 行「${label}」为空泛套话且缺乏真实技术锚点或明确排除对象`,
+          message: `第 ${lineNo} 行「${label}」缺乏真实技术锚点或明确排除对象`,
           fixHint: `请补充至少一处具体文件路径、命令、符号、参数、数值判据或明确排除对象（如不动某模块）。`,
         })
       }

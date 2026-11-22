@@ -30,7 +30,7 @@ import {
   runLowRiskDocStaticCheck, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
-import { assertSubmitOwnership, checkLifecyclePreconditions, runLifecycleGovernHook, runPreVerifyEditGateHook } from './flow-lifecycle-hooks.mjs'
+import { assertSubmitOwnership, checkLifecyclePreconditions, checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook, runPreVerifyEditGateHook } from './flow-lifecycle-hooks.mjs'
 import {
   applySubmitPostActions,
   cmdContainsSubcommand,
@@ -78,6 +78,8 @@ export async function handleFinalize(opts, roots) {
   const { taskId, ledger } = ctx
   const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)
+  const slotOk = checkTaskSlotBoundaryOrEmit(roots.mainRoot, implRoot, ledger, opts)
+  if (!slotOk.ok) return { exitCode: slotOk.exitCode }
 
   const preCheck = checkLifecyclePreconditions(ledger, opts)
   if (!preCheck.ok) {
@@ -530,6 +532,8 @@ export async function handleSubmit(opts, roots) {
   const { taskId, ledger } = ctx
   const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
   if (!existsSync(implRoot)) throw new Error(`工作区目录不存在：${implRoot}`)
+  const slotOk = checkTaskSlotBoundaryOrEmit(roots.mainRoot, implRoot, ledger, opts)
+  if (!slotOk.ok) return { exitCode: slotOk.exitCode }
 
   const op = await detectInProgressGitOp(implRoot, { wtGitDir: resolveGitDirFast(implRoot) })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突`)

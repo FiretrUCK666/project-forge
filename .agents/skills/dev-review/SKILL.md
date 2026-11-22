@@ -93,7 +93,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 
 ## 六锁防死循环收敛协议
 
-1. **实证优先与故障注入**：在独立审查 worktree 按序跑完 `check-empirical`、`check-fault --phase fail`（改坏一处核心判定并确认变红，拦截空突变 `BLOCKED_FAULT_NO_MUTATION` 与假通过 `BLOCKED_FAULT_NOT_CAUGHT`）、还原并跑 `check-fault --phase restore`（自动写入 `ledger.faultRecord` 并在 `record`/`sync` 自动读取，拦截未还原 `BLOCKED_DIRTY_FAULT_RESIDUE`），之后再按需 `--include-diff`。形式验证与运行/渲染实证优先于静态读代码，**严禁未经实证的臆测挑刺**。
+1. **实证优先与故障注入**：在独立审查 worktree 按序跑完 `check-empirical`、`check-fault --phase fail`（改坏一处可执行源码核心判定并确认变红，拦截纯注释/空行空突变 `BLOCKED_FAULT_INJECTION_NOOP`/`BLOCKED_FAULT_NO_MUTATION` 与假通过 `BLOCKED_FAULT_NOT_CAUGHT`）、还原并跑 `check-fault --phase restore`（自动写入 `ledger.faultRecord` 并在 `record`/`sync` 自动读取，拦截未还原 `BLOCKED_DIRTY_FAULT_RESIDUE`），之后再按需 `--include-diff`。形式验证与运行/渲染实证优先于静态读代码，**严禁未经实证的臆测挑刺**。
 2. **上下文隔离与切片 `C*` 隔离**：只读当前任务 SPEC/Todo 冻结验收标准 `C1..Cn`（不误拉 `1:N` 总控 PRD 全表）、diff（含 SHA256）、门禁证据与文档对齐单，不读实施闲聊；`low` 风险 PR 可选无 `--review-token` 运行 `review-pack record` 写状态单而不影响直接合入。
 3. **噪音过滤与三级分类**：只分 `Must Fix`（阻塞合入）、`Should Fix`（建议）与 `Pre-existing`（历史问题）。
    `Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败；主观代码风格偏好或未经实证验证的静态挑刺不得阻塞合入。Round 1 必须一次性列全同类问题全部位置。
@@ -104,10 +104,10 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 ```sh
 node .agents/skills/dev-review/scripts/review-pack.mjs record \
   [--task <id>] [--round <N>] --verdict pass|changes --reviewer-id <id> \
-  --review-token <由 flow next 现场签发的令牌，只能消费一次> \
+  --review-token <由 flow next 现场签发、绑定 round+reviewerId+headSha 的令牌> \
   [--must-fix <textOrJson>...] [--should-fix <text>...] [--pre-existing <text>...] \
   [--disposition "<idOrFp>:fixed|rebutted-wrong|intentional|deferred"...] \
-  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--enforce-gates] [--visual-checked]
+  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--no-enforce-gates] [--visual-checked]
 
 node .agents/skills/dev-review/scripts/review-pack.mjs override \
   [--task <id>] --human-approved --reason "<裁决理由>"

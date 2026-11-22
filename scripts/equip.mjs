@@ -34,6 +34,7 @@ import { captureMemoryRollbackSnapshot, verifyEquippedIntegrityOrRollback } from
 import { computeFileStates, EQUIP_FILE_STATES, formatEquipCheckReport, isCodeLikePath, judgeManagedFile, resolveThreeWayEquipFile } from './lib/merge3.mjs'
 import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
 import { DEFAULT_KIT_SKILLS_DIR } from '../kit/skills/lib/skill-discovery.mjs'
+import { recordStepStateSafe } from '../kit/skills/lib/session-state.mjs'
 import {
   PF_MANIFEST_REL,
   PF_MANIFEST_SCHEMA_VERSION,
@@ -743,6 +744,7 @@ async function main(argv) {
       else if (argv[k].startsWith('--base-dir=')) baseDir = resolve(argv[k].slice('--base-dir='.length))
     }
     const equipResult = equip(target, { kitDir, baseDir, dryRun, noBackup, restore, adoptCustom })
+    if (!dryRun) recordStepStateSafe(target, { step: 'S3', ok: true, summary: 'equipped' })
     let hooksResult
     if (withHooks) {
       hooksResult = installGitHooks(target, { dryRun })

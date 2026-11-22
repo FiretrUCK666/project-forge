@@ -5,18 +5,31 @@
  */
 
 import { EXIT } from '../../lib/exit-codes.mjs'
-import { existsSync } from 'node:fs'
-import { dirname, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { evaluateCritiqueOverride, parseCritiqueRounds, readPlanCritiqueEntrySync } from '../../lib/critique-rounds.mjs'
-import { DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, updateDocFrontmatter } from '../../lib/docs.mjs'
+import {
+  DOC_FRONTMATTER_KEY_ORDER, docDateTag, docIsoDate, parseDocFrontmatter,
+  renderStandardDocTemplate, resolveRepoCustomDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
+} from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
-import { posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
+import { ensureWorktreesIgnored, gitRun, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
+import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
+import { parseIssueNumbers } from '../../lib/platform.mjs'
+import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
+import { collectTddFacts } from '../../lib/tdd-facts.mjs'
+import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
 import { auditDoc, detectDocType } from './doc-audit.mjs'
 
 /** 校验 Critique/Audit/停损条件后批准 SPEC/PRD/Todo 并冻结 C1..Cn 验收指纹。 */
-export function approveSpec({ repoRoot, mainRoot = repoRoot, gitDir = null, file, skipCritiqueReason, taskId = null }) {
+export function approveSpec({
+  repoRoot, mainRoot = repoRoot, gitDir = null, file, skipCritiqueReason, taskId = null,
+  hostMode = 'multi-agent', humanApproved = false,
+}) {
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw new Error(`找不到 SPEC/PRD 文件：${file}`)
   const text = readTextSafe(abs)
@@ -64,6 +77,12 @@ export function approveSpec({ repoRoot, mainRoot = repoRoot, gitDir = null, file
       const critiqueVal = String(fm.data?.plan_critique ?? (/^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1] ?? '')).trim()
       if (!/^passed\b/i.test(critiqueVal)) {
         if (skipCritiqueReason && String(skipCritiqueReason).trim()) {
+          if (!(hostMode === 'single-session' && humanApproved)) {
+            throw Object.assign(
+              new Error(`BLOCKED_CRITIQUE_REQUIRED: ${audit.file} 在 ${hostMode} 模式下禁止用 --skip-critique-reason 跳过规划内审；仅 --host-mode single-session --human-approved 才允许跳过。`),
+              { code: 'BLOCKED_CRITIQUE_REQUIRED', exitCode: EXIT.FACT },
+            )
+          }
           // 跳过规划内审是本切片里最直接的一条后门：只校验非空，传一个占位词就能产出
           // 「已批准 + 跳过评审」。所以它和别的放行点用同一个判据，不再单独放宽。
           const reasonCheck = evaluateReleaseReason(skipCritiqueReason, { subject: '跳过规划内审的理由' })
@@ -132,7 +151,7 @@ export function supersedeSpec({ repoRoot, oldSpecPath, newSpecPath }) {
 }
 
 /** 向规划文档追加已拍板澄清记录（可选同时新增 `C<N>` 验收条款）。 */
-export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user', criterion = '' }) {
+export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user', explicitBy = undefined, criterion = '' }) {
   if (!file || !decision || !String(decision).trim()) {
     throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"')
   }
@@ -142,6 +161,16 @@ export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user
   if (raw === undefined) throw new Error(`无法读取文本文件：${file}`)
 
   const norm = raw.replace(/\r\n/g, '\n')
+  const fmCheck = parseDocFrontmatter(norm)
+  if (String(fmCheck.data?.plan_mode ?? '').trim().toLowerCase() === 'interactive') {
+    const actor = String(explicitBy ?? '').trim().toLowerCase()
+    if (actor !== 'user') {
+      throw Object.assign(
+        new Error('BLOCKED_INTERACTIVE_CLARIFY_USER_REQUIRED: plan_mode=interactive 的澄清确认必须显式传入 --by user，禁止代理自答。'),
+        { code: 'BLOCKED_INTERACTIVE_CLARIFY_USER_REQUIRED', exitCode: EXIT.USAGE },
+      )
+    }
+  }
   const today = docIsoDate()
   const byNote = by && String(by).trim() ? ` · ${String(by).trim()}` : ''
   const qText = question && String(question).trim() ? `${String(question).trim()} -> ` : ''
@@ -199,4 +228,199 @@ export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user
     updateDocFrontmatter(abs, { updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
   }
   return { file: posixPath(relative(repoRoot, abs)), entry, addedCriterion, updated: today }
+}
+
+function parseInitIssueArg(rawIssue) {
+  if (rawIssue === undefined || rawIssue === null || rawIssue === '') return null
+  const nums = parseIssueNumbers(rawIssue, { strict: true })
+  if (nums.length !== 1) throw new Error(`--issue 需要 1 个正整数 Issue 编号或 URL，收到：${rawIssue}`)
+  return nums[0]
+}
+
+export async function initDoc({
+  repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
+  taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
+  planMode = null, worktree = false, multiSpec = false, caseType = null,
+}) {
+  const effectiveKind = kind ?? type
+  if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
+    throw new Error(`--kind / --type 必须是 prd、spec、todo、tdd、pair 或 all，收到：${effectiveKind}`)
+  }
+  const safeSlug = slugify(slug)
+  const issueNum = parseInitIssueArg(issue)
+  const dateTag = docDateTag()
+  const today = docIsoDate()
+
+  let writeRoot = repoRoot
+  let existingLedger = null
+  const effTaskId = taskId ? sanitizeTaskId(taskId) : (worktree ? sanitizeTaskId(safeSlug) : null)
+  if (effTaskId) {
+    existingLedger = readTaskLedger(mainRoot, effTaskId)
+    if (existingLedger?.worktreePath && existsSync(join(mainRoot, existingLedger.worktreePath))) {
+      writeRoot = join(mainRoot, existingLedger.worktreePath)
+    }
+  }
+  let planningBranch = branch ?? existingLedger?.branch ?? null
+  let planningWorktreeRel = existingLedger?.worktreePath ?? null
+  if (worktree) {
+    if (!isGit) throw new Error('--worktree 仅支持 Git 仓库')
+    await ensureWorktreesIgnored(mainRoot, gitDir)
+    planningWorktreeRel = planningWorktreeRel || `.worktrees/impl-${effTaskId}`
+    planningBranch = planningBranch || `feat/${effTaskId}`
+    const wtAbs = join(mainRoot, planningWorktreeRel)
+    if (!existsSync(wtAbs)) {
+      const hasBr = await gitRun(mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${planningBranch}`])
+      const addArgs = hasBr.ok
+        ? ['worktree', 'add', wtAbs, planningBranch]
+        : ['worktree', 'add', '-b', planningBranch, wtAbs, 'HEAD']
+      const wtRes = await gitRun(mainRoot, addArgs)
+      if (!wtRes.ok) throw new Error(`创建规划隔离 worktree 失败：${wtRes.stderr}`)
+    }
+    writeRoot = wtAbs
+  }
+
+  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo', tdd: 'docs' }
+  const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
+  const fastHead = isGit ? readHeadFast(resolveGitDirFast(writeRoot), gitDir) : null
+  const headRes = fastHead?.oid
+    ? { ok: true, stdout: fastHead.oid }
+    : (isGit ? await gitRun(writeRoot, ['rev-parse', 'HEAD']) : { ok: false, stdout: '' })
+  const headSha = headRes.ok && headRes.stdout ? headRes.stdout.trim() : 'uncommitted'
+  let headBranch = branch ?? (fastHead?.branch ?? null)
+  if (!headBranch && isGit && !fastHead) {
+    const sym = await gitRun(writeRoot, ['symbolic-ref', '--short', 'HEAD'])
+    if (sym.ok && sym.stdout.trim()) headBranch = sym.stdout.trim()
+    else {
+      const brRes = await gitRun(writeRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+      if (brRes.ok && brRes.stdout && brRes.stdout.trim() !== 'HEAD') headBranch = brRes.stdout.trim()
+    }
+  }
+  const profile = parseAgentsProfile(writeRoot)
+  const quickCmd = profile.quickTest && profile.quickTest !== 'none'
+    ? profile.quickTest
+    : '无自动快测命令（按手动步骤实证替代）'
+  const needsShape = kindsToCreate.some((k) => k !== 'tdd')
+  const docShape = needsShape && !noPrune ? await probeWorkspaceDocShape(writeRoot) : null
+
+  let inheritedPrdAbs = relatedPrd ? resolve(writeRoot, relatedPrd) : null
+  if (!inheritedPrdAbs && relatedSpec) {
+    const parentSpecAbs = resolve(writeRoot, relatedSpec)
+    const parentRaw = readTextSafe(parentSpecAbs)
+    const parentFm = parentRaw ? parseDocFrontmatter(parentRaw) : null
+    const rawRelPrd = parentFm?.data?.related_prd
+    if (typeof rawRelPrd === 'string' && rawRelPrd.trim() && !/^(?:无|none|null)$/i.test(rawRelPrd.trim())) {
+      const candAbs = resolve(dirname(parentSpecAbs), rawRelPrd.trim())
+      if (existsSync(candAbs)) inheritedPrdAbs = candAbs
+    }
+  }
+
+  const planned = []
+  for (const k of kindsToCreate) {
+    const fileName = k === 'tdd' ? 'TDD.md' : `${dateTag}-${issueNum ? `issue${issueNum}-` : ''}${safeSlug}-${k}.md`
+    const relFile = `${dirMap[k]}/${fileName}`
+    const absFile = join(writeRoot, relFile)
+    if (existsSync(absFile) && !force) throw new Error(`目标文件已存在：${relFile}（如确需重建请加 --force）`)
+    planned.push({ kind: k, file: relFile, absFile })
+  }
+
+  const customTemplates = []
+  for (const item of planned) {
+    const relatedSpecRel = item.kind === 'todo' && relatedSpec
+      ? posixPath(relative(dirname(item.absFile), resolve(writeRoot, relatedSpec)))
+      : null
+    const relatedPrdRel = item.kind !== 'prd' && inheritedPrdAbs
+      ? posixPath(relative(dirname(item.absFile), inheritedPrdAbs))
+      : null
+    const customTpl = resolveRepoCustomDocTemplate(writeRoot, item.kind)
+    if (customTpl) customTemplates.push({ kind: item.kind, template: customTpl.rel })
+    let content
+    if (item.kind === 'tdd') {
+      const facts = await collectTddFacts(writeRoot)
+      content = buildPreFilledTdd(facts, {
+        repoRoot: writeRoot,
+        noPrune: Boolean(noPrune),
+        projectName: title,
+        today,
+        topLevelDirs: facts?.tddShape?.topLevelDirs ?? [],
+        allPaths: facts?.tddShape?.filePaths ?? [],
+      })
+    } else {
+      content = renderStandardDocTemplate({
+        kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
+        taskId, issueNum, owner, quickCmd, relatedPrdRel, relatedSpecRel,
+        pruneUnfilled: false, noPrune: Boolean(noPrune), docShape, planMode,
+        multiSpec: Boolean(multiSpec && item.kind === 'prd'),
+        caseType: Number.isInteger(caseType) ? caseType : null,
+      })
+    }
+    mkdirSync(dirname(item.absFile), { recursive: true })
+    writeAtomic(item.absFile, content)
+  }
+
+  if (planned.length > 1 || relatedSpec || relatedPrd) {
+    const syncRes = await syncDocsLifecycle(writeRoot, {
+      slugOrPath: planned[0].file,
+      issue: issueNum ?? undefined,
+      branch: planned.length > 1 ? (headBranch ?? undefined) : (branch ?? undefined),
+      owner: owner ?? undefined,
+    })
+    for (const r of syncRes.renamed ?? []) {
+      const hit = planned.find((p) => p.file === r.from)
+      if (hit) {
+        hit.file = r.to
+        hit.absFile = join(writeRoot, r.to)
+      }
+    }
+  }
+
+  let ledgerUpdated = false
+  if (milestone) {
+    for (const item of planned) {
+      if (item.kind !== 'tdd') updateDocFrontmatter(item.absFile, { milestone }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? [] })
+    }
+  }
+  if (effTaskId && !(effectiveKind === 'prd' && multiSpec)) {
+    if (isGit) await ensureWorktreesIgnored(mainRoot, gitDir)
+    await updateTaskLedger(mainRoot, effTaskId, (cur) => {
+      const next = { ...cur }
+      for (const item of planned) {
+        if (item.kind === 'prd') next.prdFile = item.file
+        else if (item.kind === 'spec') next.specFile = item.file
+        else if (item.kind === 'todo') next.todoFile = item.file
+      }
+      if (issueNum && Array.isArray(next.linkedIssues) && !next.linkedIssues.includes(issueNum)) {
+        next.linkedIssues = [...next.linkedIssues, issueNum]
+      }
+      if (milestone) next.milestone = milestone
+      if (worktree) {
+        next.isolation = 'worktree'
+        next.worktreePath = planningWorktreeRel
+        next.branch = planningBranch
+        if (!cur.status || cur.status === 'planned' || cur.status === 'planning') {
+          next.status = 'planning'
+          next.planning = true
+        }
+      }
+      return next
+    }, {
+      createIfMissing: true,
+      defaults: {
+        taskId: effTaskId, slug: safeSlug,
+        isolation: worktree ? 'worktree' : null,
+        worktreePath: worktree ? planningWorktreeRel : null,
+        branch: worktree ? planningBranch : null,
+        planning: worktree,
+        status: worktree ? 'planning' : 'planned',
+      },
+    })
+    ledgerUpdated = true
+  }
+
+  const primary = planned[planned.length - 1]
+  return {
+    type: effectiveKind, kind: effectiveKind, writeRoot, file: primary.file, absFile: primary.absFile,
+    files: planned.map((p) => p.file), created: planned.map((p) => ({ kind: p.kind, file: p.file })),
+    taskId: effTaskId, worktreePath: planningWorktreeRel, branch: planningBranch,
+    issue: issueNum, milestone: milestone ?? null, plannedAt: headSha, ledgerUpdated, customTemplates,
+  }
 }

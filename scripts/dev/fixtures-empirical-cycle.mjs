@@ -138,7 +138,7 @@ export function registerEmpiricalCycleCases(cases) {
         visualCheckedRaw: true, artifacts: [],
       })
       if (gate.ok) return 'validateVerifyPrecheck 未把裸 --visual-checked 挡下'
-      if (gate.code !== 'BLOCKED_VISUAL_EVIDENCE_REQUIRED') return `阻断码不符：${gate.code}`
+      if (gate.code !== 'BLOCKED_UI_ARTIFACT_REQUIRED') return `阻断码不符：${gate.code}`
       return true
     } finally { rmTree(dir) }
   }])
@@ -207,7 +207,7 @@ export function registerEmpiricalCycleCases(cases) {
     try {
       const ui = ['src/App.tsx']
       const bare = validateArtifactsAndVisual({ repoRoot: dir, visualFilesChanged: ui, visualCheckedRaw: true })
-      if (bare.ok || bare.code !== 'BLOCKED_VISUAL_EVIDENCE_REQUIRED') return `裸 --visual-checked 未被阻断：${JSON.stringify(bare)}`
+      if (bare.ok || bare.code !== 'BLOCKED_UI_ARTIFACT_REQUIRED') return `裸 --visual-checked 未被阻断：${JSON.stringify(bare)}`
       if (bare.visual.satisfiedBy !== null) return `裸开关竟被记为已满足：${JSON.stringify(bare.visual)}`
       if (!bare.reason.includes('--artifact') || !bare.reason.includes('--visual-blocked-reason')) {
         return `阻断说明未给出两条真实出路：${bare.reason}`
@@ -217,18 +217,18 @@ export function registerEmpiricalCycleCases(cases) {
         repoRoot: dir, visualFilesChanged: ui, visualCheckedRaw: true,
         observationSummary: SYNTHETIC_OBSERVATION_TEXTS[0],
       })
-      if (legacy.ok || legacy.code !== 'BLOCKED_VISUAL_EVIDENCE_REQUIRED') return `旧式硬编码确认串仍被放行：${JSON.stringify(legacy)}`
+      if (legacy.ok || legacy.code !== 'BLOCKED_UI_ARTIFACT_REQUIRED') return `旧式硬编码确认串仍被放行：${JSON.stringify(legacy)}`
 
       const withArtifact = validateArtifactsAndVisual({
         repoRoot: dir, visualFilesChanged: ui, visualCheckedRaw: true, artifacts: ['artifacts/report.json'],
       })
       if (!withArtifact.ok || withArtifact.visual.satisfiedBy !== 'artifacts') return `真附件未放行：${JSON.stringify(withArtifact)}`
 
-      const withObs = validateArtifactsAndVisual({
+      const obsOnly = validateArtifactsAndVisual({
         repoRoot: dir, visualFilesChanged: ui, visualCheckedRaw: true,
         observationSummary: '渲染首页后确认浅色/深色两套主题下卡片无截断，输入框聚焦态边框可见，控制台零报错',
       })
-      if (!withObs.ok || withObs.visual.satisfiedBy !== 'observation') return `实质观察未放行：${JSON.stringify(withObs)}`
+      if (obsOnly.ok || obsOnly.code !== 'BLOCKED_UI_ARTIFACT_REQUIRED') return `仅纯文字观察无 --artifact 应阻断 BLOCKED_UI_ARTIFACT_REQUIRED：${JSON.stringify(obsOnly)}`
 
       const blocked = validateArtifactsAndVisual({
         repoRoot: dir, visualFilesChanged: ui, visualCheckedRaw: false,

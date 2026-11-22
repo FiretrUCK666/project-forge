@@ -472,7 +472,6 @@ function evaluateMasterPrd(repoRoot, specDoc, { requireApproval = true, warnings
     : posixPath(join(dirname(specDoc.rel), raw.trim()))
   const prd = readPlanDoc(repoRoot, prdRelFromRoot)
   if (!prd || !prd.exists) return []
-  if (prd.data?.multi_spec !== true) return []
   if (isArchivedFinalizedPrd(prd)) return []
   const ledgerEntry = planCritique?.[prd.rel] ?? null
   return evaluateDoc({ ...prd, kind: 'prd', ledgerEntry }, { requireApproval, warnings }).map((r) => ({
@@ -509,16 +508,24 @@ export function evaluatePlanExitGate(repoRoot, {
   const requireApproval = APPROVAL_REQUIRED[num] !== false
 
   if (bound.length === 0) {
-    const gap = repoUsesPlanDocs(repoRoot)
-      ? `本仓 docs/ 下已有受管规划，但这次 Case ${num} 没有绑定任何一份（任务 ${taskId ?? slug ?? '(未命名)'}）`
-      : null
+    if (allowBootstrap) {
+      return { ok: true, blocked: false, applicable: true, reasons: [], checked, bootstrap: true }
+    }
+    const reason = {
+      code: PLAN_EXIT_BLOCK_CODE,
+      file: null,
+      message: `Case ${num} 任务 ${taskId ?? slug ?? '(未命名)'} 尚未绑定任何规划文档（SPEC/Todo），禁止未规划直接开工；请先运行 doc-plan.mjs init 并完成审核。`,
+      fixHint: '先运行 `doc-plan.mjs init` 生成规划文档、通过 Critique/Audit 并 `approve` 后再 `flow.mjs start`（紧急豁免仅限传 `--allow-plan-bootstrap`）。',
+    }
     return {
-      ok: true,
-      blocked: false,
-      applicable: false,
-      reasons: [],
+      ok: false,
+      blocked: true,
+      applicable: true,
+      code: PLAN_EXIT_BLOCK_CODE,
+      exitCode: PLAN_EXIT_EXIT_CODE,
+      reasons: [reason],
       checked,
-      ...(gap ? { warnings: [{ code: 'WARN_PLAN_NOT_BOUND', message: gap }] } : {}),
+      message: `${PLAN_EXIT_BLOCK_CODE}: ${reason.message}`,
     }
   }
   for (const doc of bound) {

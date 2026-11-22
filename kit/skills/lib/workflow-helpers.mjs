@@ -148,11 +148,11 @@ export function validatePreMergeShaAndWorktree({
       reason: `A6 合并前工作区非干净状态（dirty=${dirtyCount}, evidenceDirty=${Boolean(evidence?.dirty)}）。`,
     }
   }
-  if (!currentHead || !evidence?.headSha || evidence.headSha !== currentHead) {
+  if (!currentHead || !evidence?.headSha || evidence.headSha !== currentHead || (ledger && ledger.verifiedHead && ledger.verifiedHead !== currentHead)) {
     return {
       ok: false,
       code: 'BLOCKED_PRE_MERGE_SHA_MISMATCH',
-      reason: `A6 合并前 SHA 不一致：HEAD=${String(currentHead ?? 'null').slice(0, 8)} vs evidence.headSha=${String(evidence?.headSha ?? 'null').slice(0, 8)}。`,
+      reason: `A6 合并前 SHA 不一致：HEAD=${String(currentHead ?? 'null').slice(0, 8)} vs evidence.headSha=${String(evidence?.headSha ?? 'null').slice(0, 8)} / ledger.verifiedHead=${String(ledger?.verifiedHead ?? 'null').slice(0, 8)}。`,
     }
   }
   if (requiresReview && !stopLossActive) {
@@ -179,7 +179,9 @@ export function validatePreMergeShaAndWorktree({
  */
 export async function resolveEffectiveBaseSha(repoRoot, ledger, { gitCommonDir = null, pushRemote = 'origin' } = {}) {
   const storedBase = ledger?.baseSha ?? null
-  if (!repoRoot) return storedBase
+  if (!repoRoot || ledger?.isolation === 'in-place' || (ledger?.branch && ledger?.baseBranch && ledger.branch === ledger.baseBranch)) {
+    return storedBase
+  }
   const baseBranch = String(ledger?.baseBranch || 'main').trim() || 'main'
   const candidates = []
   const seen = new Set()

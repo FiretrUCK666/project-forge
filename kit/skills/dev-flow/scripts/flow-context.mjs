@@ -374,7 +374,6 @@ export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
       issue: ledger.linkedIssues?.[0],
       pr: ledger.prNumber ?? undefined,
       branch: ledger.branch,
-      owner: ledger.implementerId ?? undefined,
       ...overrides,
     })
     if (res.byKind?.prd) ledger.prdFile = res.byKind.prd

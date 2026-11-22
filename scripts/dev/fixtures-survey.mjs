@@ -261,7 +261,12 @@ cases.push(['规模跨档后策略变化要带依据，受管区比对能看见�
     await runNode('compose-agents.mjs', [dir, '--no-backup'])
     const first = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     if (!/## 探索策略/.test(first)) return '契约里没有「探索策略」这一节，策略没落进受管区'
-    writeFileSync(join(dir, 'AGENTS.md'), first.replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。'))
+    writeFileSync(
+      join(dir, 'AGENTS.md'),
+      first
+        .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+        .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none'),
+    )
     if ((await runNode('compose-agents.mjs', [dir, '--check'])).status !== 0) {
       return '同一份事实再比对一次就红了——策略段不是幂等的'
     }

@@ -23,7 +23,7 @@ metadata:
    - 结构：`{ version: 1, features: [{ id, name, entrypoints, modules, businessFlows, verificationTools: [{ id, kind, command, scriptPath, riskLevel, triggerHints }], testRefs }] }`。
    - **严禁写入易变局部哈希或手工时间戳**：受跟踪 JSON 只存稳定功能与入口映射；由 `repo-map.mjs --write-feature-map` 或 `verify-tools.mjs sync` 增量预填（保留既有手写条目不被覆盖）。
 2. **仓外安全命名空间 `{gitCommonDir}/project-forge-verify/`**：
-   - `cache.json`：按 `{ toolId }` 保存最近实证通过时的 `{ symbolHash, moduleTreeHash, verifiedSha, passedAtCommit }`。
+   - `cache.json`：按 `{ slots[slotKey][toolId] }` 分槽隔离保存最近实证通过时的 `{ symbolHash, moduleTreeHash, verifiedSha, passedAtCommit }`，随 `flow cleanup` 自动回收旧槽。
    - `scratch/{taskId}/`：强制托管全部一次性探针与原型脚本，严禁写入仓库树或 `.worktrees/impl-*`；`flow cleanup`/`abort` 校验路径前缀后彻底销毁，并在非空销毁前向 `signals.jsonl` 写入 `verify.scratch-used`。
 
 ## 免手工日期过时校验与三级风险处置

@@ -22,6 +22,7 @@ import { tempPathFor, writeAtomic } from './lib/fs-atomic.mjs'
 import { COMMON_SKIP_DIRS, isMacOsMetadata } from './lib/protocol.mjs'
 import { assertSafeRelPath, packTar, truncateUtf8Bytes, unpackTar } from './lib/tar.mjs'
 import { flushAndExit, isMainModule, posixPath, readJsonSafe } from './lib/text.mjs'
+import { recordStepStateSafe } from '../kit/skills/lib/session-state.mjs'
 import { readZip, writeZip } from './zip.mjs'
 
 export { packTar, truncateUtf8Bytes, unpackTar }
@@ -362,6 +363,7 @@ export function createBackup(targetDir, {
   }
 
   writeAtomic(indexPath, `${JSON.stringify(index, null, 2)}\n`)
+  if (!dryRun) recordStepStateSafe(root, { step: 'S2', ok: true, summary: `backup:${id}` })
 
   return {
     created: true,

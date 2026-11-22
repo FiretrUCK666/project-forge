@@ -10,6 +10,7 @@ import os from 'node:os'
 import path, { relative, resolve } from 'node:path'
 
 import { collectOwnerHistory, DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, stripCritiqueMeta, updateDocFrontmatter } from './docs.mjs'
+import { isValidActorName } from './harness-context.mjs'
 import { extractDocSnapshot } from './doc-substantive.mjs'
 import { resolveGitDirFast } from './git-fast.mjs'
 import { posixPath, readJsonSafe, readTextSafe, sha256Text, writeAtomic, writeJsonAtomic } from './git.mjs'
@@ -410,6 +411,12 @@ async function persistPlanCritiqueEntry({ repoRoot, mainRoot = repoRoot, gitDir 
 function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round, digest, priorRounds, strictSameSha = false }) {
   if (!reviewer || !String(reviewer).trim()) {
     throw makePlanError('MISSING_REVIEWER', EXIT.USAGE, 'critique 必须指定 --reviewer <reviewerId>')
+  }
+  if (fmPre?.hasFrontmatter && !isValidActorName(fmPre.data?.owner)) {
+    throw makePlanError(
+      'INVALID_OWNER', EXIT.USAGE,
+      `INVALID_OWNER: ${file} 的 Frontmatter owner 不得为空、null 或占位词，请先运行 doc-plan.mjs link --owner <name> 补齐。`,
+    )
   }
   // 自审要按**负责人历史**判，不只按当前 owner。
   const ownerHistory = collectOwnerHistory(fmPre.data)

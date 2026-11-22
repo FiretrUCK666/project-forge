@@ -31,9 +31,9 @@ export const INJECTIONS_REPO_ALIGNMENT = [
   },
   {
     id: 'I389',
-    what: 'doc-plan.mjs: quick-test 为 none 时恢复尖括号占位 <填写项目快测命令>',
-    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
-    alsoDropIn: ['.agents/skills/dev-plan/scripts/doc-plan.mjs'],
+    what: 'doc-plan-ops.mjs: quick-test 为 none 时恢复尖括号占位 <填写项目快测命令>',
+    file: 'kit/skills/dev-plan/scripts/doc-plan-ops.mjs',
+    alsoDropIn: ['.agents/skills/dev-plan/scripts/doc-plan-ops.mjs'],
     from: "  const quickCmd = profile.quickTest && profile.quickTest !== 'none'\n    ? profile.quickTest\n    : '无自动快测命令（按手动步骤实证替代）'",
     to: "  const quickCmd = profile.quickTest ?? '<填写项目快测命令>'",
     expect: 'C1：docs-tdd/prd/spec 模板契约与 doc-plan quick-test none 兜底',

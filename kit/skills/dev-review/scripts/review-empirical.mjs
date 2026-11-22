@@ -6,7 +6,8 @@
  */
 
 import { printNextStep } from '../../lib/cli.mjs'
-import { computeWorktreeEnv, posixPath } from '../../lib/git.mjs'
+import { computeWorktreeEnv, gitRun, posixPath } from '../../lib/git.mjs'
+import { hasExecutableCodeMutation } from '../../lib/gate-enforcement.mjs'
 import { updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead,
@@ -40,7 +41,7 @@ function hasSubstantiveStoredObservation(holder, headSha) {
 }
 
 export function computeEmpiricalRequirements({
-  diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null,
+  diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null, explicitCmds = [],
 }) {
   const allFiles = [...new Set([...(diff?.files ?? []).map((f) => f.file), ...(diff?.untracked ?? [])])]
   const isEmptyDiff = allFiles.length === 0
@@ -67,7 +68,9 @@ export function computeEmpiricalRequirements({
   })
   const { autoCommands: profileAutoCmds, hasDevProfileTestCmds } = collectDevProfileEmpiricalCmds(effectiveProfile)
   const toolAutoCmds = (reviewContext?.healthyToolCommands ?? []).filter(Boolean)
-  const autoCommands = profileAutoCmds.length > 0 ? profileAutoCmds : toolAutoCmds
+  const extraCmds = (Array.isArray(explicitCmds) ? explicitCmds : [explicitCmds]).map((s) => String(s ?? '').trim()).filter(Boolean)
+  const baseAuto = profileAutoCmds.length > 0 ? profileAutoCmds : toolAutoCmds
+  const autoCommands = [...new Set([...baseAuto, ...extraCmds])]
   const runtimeTouched = (behavioralGate?.runtimeFilesTouched?.length ?? 0) > 0
   const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
   const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
@@ -315,11 +318,11 @@ export async function handleCheckEmpirical(ctx) {
     })
   }
 
-  const requirements = computeEmpiricalRequirements({
-    diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext: ctx.reviewContext ?? null,
-  })
   const explicitCmds = (opts.cmd ?? []).map((s) => String(s).trim()).filter(Boolean)
-  const commandsToRun = explicitCmds.length > 0 ? explicitCmds : requirements.autoCommands
+  const requirements = computeEmpiricalRequirements({
+    diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext: ctx.reviewContext ?? null, explicitCmds,
+  })
+  const commandsToRun = requirements.autoCommands
   const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
 
   const evInput = resolveAndValidateE2eEvidenceInput(opts)
@@ -597,6 +600,17 @@ export async function handleCheckFault(ctx) {
         opts, code: 'BLOCKED_FAULT_NO_MUTATION',
         payload: { status: 'BLOCKED_FAULT_NO_MUTATION', code: 'BLOCKED_FAULT_NO_MUTATION', exitCode: EXIT.FACT, mode, round, headSha, baselineFingerprint, workspaceFingerprint: currentFingerprint, error: msg },
         textLines: ['BLOCKED_FAULT_NO_MUTATION', msg],
+      })
+    }
+    const diffCheck = await gitRun(reviewRoot, ['diff', '--unified=0', 'HEAD'])
+    const untrackedCode = dirtyEntries.filter((e) => e.xy === '??').map((e) => e.file).filter((f) => /\.(?:mjs|cjs|js|ts|tsx|jsx|vue|svelte|py|go|rs|java|kt|kts|rb|php|cs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1)$/i.test(f))
+    const mut = hasExecutableCodeMutation(diffCheck.ok ? diffCheck.stdout : '', untrackedCode)
+    if (!mut.hasMutation) {
+      const msg = 'BLOCKED_FAULT_INJECTION_NOOP: 故障注入 diff 仅含注释、空白或非可执行变更，禁止以空故障绕过故障注入门禁。'
+      return emitGateBlock({
+        opts, code: 'BLOCKED_FAULT_INJECTION_NOOP',
+        payload: { status: 'BLOCKED_FAULT_INJECTION_NOOP', code: 'BLOCKED_FAULT_INJECTION_NOOP', exitCode: EXIT.FACT, mode, round, headSha, baselineFingerprint, workspaceFingerprint: currentFingerprint, error: msg },
+        textLines: ['BLOCKED_FAULT_INJECTION_NOOP', msg],
       })
     }
 

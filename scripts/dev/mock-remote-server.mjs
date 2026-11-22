@@ -125,6 +125,7 @@ export function startMockRemoteServer() {
       }
       if (req.method === 'PATCH') {
         if (body.state) it.state = String(body.state).toUpperCase() === 'CLOSED' ? 'CLOSED' : 'OPEN'
+        if (body.body !== undefined) it.body = String(body.body)
         if (body.milestone !== undefined) it.milestone = state.milestones.get(Number(body.milestone)) ?? { number: Number(body.milestone) }
         return json(res, 200, it)
       }

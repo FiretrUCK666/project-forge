@@ -18,7 +18,7 @@ import {
   posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
+import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import {
   classifyTestFileTier, detectOptionalNativeCheckers, detectTestTierMetadata,
@@ -144,12 +144,13 @@ function collectSiblingReuseHints(workRoot, targetFiles) {
   return hints
 }
 
-function isLegalArchiveMove(entry, deletedFiles = new Set()) {
+function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived = new Set()) {
   const rel = posixPath(entry?.file ?? '')
   if (!rel.startsWith('docs/archive/')) return false
   const st = String(entry?.status ?? '')
   if (/^R/i.test(st)) return true
   if (/^A/i.test(st)) {
+    if (ownArchived.has(rel)) return true
     const origRel = rel.replace(/^docs\/archive\//, 'docs/')
     if (deletedFiles.has(origRel)) return true
   }
@@ -264,9 +265,23 @@ export async function runEditGate(opts = {}) {
   const highRiskHits = []
   const checkedFiles = dedupEntries.map((e) => e.file)
 
+  let taskLedger = taskId ? readTaskLedger(mainRoot, taskId) : null
+  if (!taskLedger && isGit) {
+    const wtRel = roots.isWorktree ? posixPath(relative(mainRoot, workTreeRoot)) : null
+    const br = readHeadFast(resolveGitDirFast(workTreeRoot), gitDir)?.branch ?? null
+    if (wtRel || (br && !['main', 'master'].includes(br))) {
+      taskLedger = listTaskLedgers(mainRoot, { includeTerminal: false }).find((l) => (wtRel && l.worktreePath === wtRel) || (br && l.branch === br)) ?? null
+    }
+  }
+  const ownArchived = new Set(
+    taskLedger?.finalized
+      ? [taskLedger.archivedTodoFile, taskLedger.archivedSpecFile, taskLedger.archivedPrdFile].filter(Boolean).map((p) => posixPath(p))
+      : [],
+  )
+
   for (const entry of dedupEntries) {
     const rel = entry.file
-    if (!isLegalArchiveMove(entry, deletedFiles) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
+    if (!isLegalArchiveMove(entry, deletedFiles, ownArchived) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
       const hit = { ruleId: 'edit.do-not-edit', defectClass: 'stale-contract', severity: 'high', file: rel, line: 1, message: `目标文件命中 AGENTS.md do-not-edit 禁改路径：${rel}`, fixHint: '停止修改受保护归档/生成目录；若属合法任务归档请走 flow.mjs finalize。' }
       blockers.push(hit)
     }

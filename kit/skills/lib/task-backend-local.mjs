@@ -29,6 +29,7 @@ import {
   releaseLocalIssue,
   removeLocalIssueLabel,
   resolveEffectiveCommonGitDir,
+  updateLocalIssue,
 } from './local-issues.mjs'
 import { readDecisions } from './profile.mjs'
 
@@ -258,6 +259,16 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
     createLocalIssue({ mainRoot, gitDir, title, body, labels, assignees, milestone })
   )
   const localGetIssue = async (arg, maybeNumber) => getLocalIssue({ mainRoot, gitDir, number: normalizeIssueArgs(arg, maybeNumber).number })
+  const localUpdateIssueBody = async ({ taskId, repo, number, body } = {}) => {
+    const num = number !== undefined && number !== null ? Number(number) : null
+    if (num && Number.isInteger(num) && num > 0 && getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
+      return updateLocalIssue({ mainRoot, gitDir, number: num, patch: { body } })
+    }
+    const eventPath = await appendBackendEvent(mainRoot, gitDir, taskId ?? (num ? `ref-${num}` : 'shared'), {
+      backend: kind, action: 'update-issue-body', repo: repo ?? null, number: num, body,
+    })
+    return { ok: true, local: true, mode: modeLabel, number: num, eventPath }
+  }
   const localListIssues = async ({ state = 'open' } = {}) => listLocalIssues({ mainRoot, gitDir, state })
   const localCloseIssue = async (arg, maybeNumber) => {
     const norm = (arg && typeof arg === 'object') ? arg : { number: maybeNumber ?? arg }
@@ -302,7 +313,7 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
 
   return {
     localClaimTask, localReleaseTask, localPostComment, localAddLabels, localRemoveLabel,
-    localSyncStateLabel, localCreateIssue, localGetIssue, localListIssues, localCloseIssue, localListComments,
+    localSyncStateLabel, localCreateIssue, localGetIssue, localUpdateIssueBody, localListIssues, localCloseIssue, localListComments,
   }
 }
 
@@ -325,6 +336,7 @@ export class GenericRemoteBackend {
   syncStateLabel(args) { return this._local.localSyncStateLabel(args) }
   createIssue(args) { return this._local.localCreateIssue(args) }
   getIssue(arg, maybeNumber) { return this._local.localGetIssue(arg, maybeNumber) }
+  updateIssueBody(args) { return this._local.localUpdateIssueBody(args) }
   listIssues(args) { return this._local.localListIssues(args) }
   closeIssue(arg, maybeNumber) { return this._local.localCloseIssue(arg, maybeNumber) }
   listComments(arg, maybeNumber) { return this._local.localListComments(arg, maybeNumber) }
@@ -470,6 +482,7 @@ export class LocalOnlyBackend {
   syncStateLabel(args) { return this._local.localSyncStateLabel(args) }
   createIssue(args) { return this._local.localCreateIssue(args) }
   getIssue(arg, maybeNumber) { return this._local.localGetIssue(arg, maybeNumber) }
+  updateIssueBody(args) { return this._local.localUpdateIssueBody(args) }
   listIssues(args) { return this._local.localListIssues(args) }
   closeIssue(arg, maybeNumber) { return this._local.localCloseIssue(arg, maybeNumber) }
   listComments(arg, maybeNumber) { return this._local.localListComments(arg, maybeNumber) }

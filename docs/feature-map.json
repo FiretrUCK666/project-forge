@@ -367,7 +367,9 @@
         "scripts/dev/fixtures-doc-shapes.mjs",
         "scripts/dev/fixtures-docs.mjs",
         "scripts/dev/fixtures-w4-harness.mjs",
-        "scripts/dev/injections-data-w4-harness.mjs"
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-trace-sync.mjs",
+        "scripts/dev/injections-data-trace-sync.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
@@ -499,7 +501,9 @@
         "docs/archive/specs/261120-issue113-flow-truth-spec.md",
         "docs/archive/specs/261120-issue116-w25-flow-defects-spec.md",
         "scripts/dev/fixtures-w4-harness.mjs",
-        "scripts/dev/injections-data-w4-harness.mjs"
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-trace-sync.mjs",
+        "scripts/dev/injections-data-trace-sync.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",

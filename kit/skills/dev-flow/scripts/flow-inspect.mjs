@@ -447,6 +447,7 @@ export async function handleStart(opts, roots) {
     const specIssuePre = readSpecIssueInt(existsSync(existingWorkRootPre) ? existingWorkRootPre : roots.mainRoot, existing.specFile)
       ?? readSpecIssueInt(roots.mainRoot, existing.specFile)
     if (specIssuePre && !linkedIssues.includes(specIssuePre)) linkedIssues.push(specIssuePre)
+    const newlyBoundIssues = linkedIssues.filter((n) => !(existing.linkedIssues ?? []).includes(n))
     if (linkedIssues.length > 0) existing.linkedIssues = [...new Set([...(existing.linkedIssues ?? []), ...linkedIssues])]
     const nextPrNo = effectiveExternalPr ?? prNumber ?? null
     if (nextPrNo && existing.prNumber !== nextPrNo) {
@@ -500,7 +501,7 @@ export async function handleStart(opts, roots) {
     }
     const existingWorkRoot = existing.worktreePath ? resolve(roots.mainRoot, existing.worktreePath) : roots.mainRoot
     if ((existing.linkedIssues ?? []).length > 0 && existsSync(existingWorkRoot)) {
-      await syncTaskDocsSafe(existingWorkRoot, existing)
+      await syncTaskDocsSafe(existingWorkRoot, existing, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, newlyBoundIssues, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
     }
     if (milestoneVal && !existing.milestone) existing.milestone = milestoneVal
     await updateTaskLedger(roots.mainRoot, existing.taskId, (cur) => ({ ...(cur ?? existing), ...existing }), { createIfMissing: true })
@@ -693,7 +694,7 @@ export async function handleStart(opts, roots) {
       ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     applyLocalAutoClaim(ledger, { role, isPlanning, implementerId, opts })
-    if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
+    if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
@@ -762,7 +763,7 @@ export async function handleStart(opts, roots) {
   if (specIssueWt && !ledger.linkedIssues.includes(specIssueWt)) {
     ledger.linkedIssues = [...ledger.linkedIssues, specIssueWt]
   }
-  if (ledger.linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger)
+  if (ledger.linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
   await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   if (opts.json) {

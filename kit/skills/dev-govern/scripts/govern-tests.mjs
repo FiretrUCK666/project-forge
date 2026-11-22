@@ -165,7 +165,13 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
 
     const isExplicitTestFile = /\.(?:test|spec)\.[^/]+$|_test\.[^/]+$|^test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$/i.test(f.name)
       || testDeclCount > 0
-    if (isExplicitTestFile && !ASSERTION_RE.test(codeOnlyText)) {
+    const isGoTest = /\.go$/i.test(f.name)
+    const hasGoUnitTestFunc = isGoTest && /\bfunc\s+Test[A-Z0-9_]\w*\s*\(/.test(codeOnlyText)
+    const hasGoBenchOrExampleFunc = isGoTest && /\bfunc\s+(?:Benchmark|Example)[A-Z0-9_]\w*\s*\(/.test(codeOnlyText)
+    const isGoBenchOrExampleOnly = isGoTest && !hasGoUnitTestFunc && (
+      /_(?:bench|example)_test\.go$/i.test(f.name) || hasGoBenchOrExampleFunc
+    )
+    if (isExplicitTestFile && !isGoBenchOrExampleOnly && !ASSERTION_RE.test(codeOnlyText)) {
       addFinding(findings, {
         id: `tests.zero-assertion.${f.rel}`,
         category: 'tests',

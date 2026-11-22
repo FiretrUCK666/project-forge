@@ -5,7 +5,8 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { EXIT } from './exit-codes.mjs'
 import { gitRun, gitStatusPorcelainZ, inspectBranchMergeState, readTextSafe, withFileLock } from './git.mjs'
@@ -317,6 +318,65 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
   }
 }
 
+function resolveLocalBareRemotePath(mainRoot, rawUrl) {
+  const s = String(rawUrl ?? '').trim()
+  if (!s) return null
+  let localPath = null
+  if (/^file:\/\//i.test(s)) {
+    try { localPath = fileURLToPath(s) } catch { return null }
+  } else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && !/^[^/\\@]+@[^:]+:/i.test(s)) {
+    localPath = resolve(mainRoot, s)
+  }
+  if (!localPath || !existsSync(localPath)) return null
+  return localPath
+}
+
+async function tryLocalBareFastForwardMerge({ mainRoot, remote, targetBranch, base, ledger, humanApproved }) {
+  if (!targetBranch || !ledger?.reviewPassed) return null
+  const decisions = readDecisions(readTextSafe(join(mainRoot, 'AGENTS.md')) ?? '')
+  if (!decisions.has('no-branch-protection') && !decisions.has('solo-fast-forward')) return null
+
+  const urlRes = await gitRun(mainRoot, ['remote', 'get-url', remote])
+  const localBarePath = urlRes.ok ? resolveLocalBareRemotePath(mainRoot, urlRes.stdout) : null
+  if (!localBarePath) return null
+  const bareRes = await gitRun(localBarePath, ['rev-parse', '--is-bare-repository'])
+  if (!bareRes.ok || bareRes.stdout.trim() !== 'true') return null
+
+  const baseRefRes = await gitRun(mainRoot, ['rev-parse', '--verify', `refs/remotes/${remote}/${base}`])
+  if (!baseRefRes.ok || !baseRefRes.stdout.trim()) return null
+  const baseSha = baseRefRes.stdout.trim()
+
+  const remoteBranchRes = await gitRun(mainRoot, ['rev-parse', '--verify', `refs/remotes/${remote}/${targetBranch}`])
+  const localBranchRes = remoteBranchRes.ok ? remoteBranchRes : await gitRun(mainRoot, ['rev-parse', '--verify', `refs/heads/${targetBranch}`])
+  if (!localBranchRes.ok || !localBranchRes.stdout.trim()) return null
+  const targetSha = localBranchRes.stdout.trim()
+  if (ledger.reviewPassedHead && ledger.reviewPassedHead !== targetSha) return null
+
+  const ancRes = await gitRun(mainRoot, ['merge-base', '--is-ancestor', baseSha, targetSha])
+  if (!ancRes.ok) return null
+
+  const pushRes = await gitRun(mainRoot, ['push', remote, `${targetSha}:refs/heads/${base}`])
+  if (!pushRes.ok) return null
+  await gitRun(mainRoot, ['fetch', '--prune', '--quiet', remote])
+
+  const curHeadRes = await gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+  const curBranch = curHeadRes.ok ? curHeadRes.stdout.trim() : ''
+  if (curBranch === base) {
+    const st = await gitStatusPorcelainZ(mainRoot)
+    if (st.ok && st.entries.length === 0) {
+      await gitRun(mainRoot, ['merge', '--ff-only', `${remote}/${base}`])
+    }
+  } else {
+    await gitRun(mainRoot, ['fetch', remote, `${base}:${base}`])
+  }
+
+  return {
+    ok: true, merged: true, fetched: true, localBareFastForward: true,
+    mergeState: 'fast-forward', humanApproved: Boolean(humanApproved),
+    state: 'MERGED', branch: targetBranch, into: base, mergedSha: targetSha,
+  }
+}
+
 export class GenericRemoteBackend {
   constructor({ targetRepo = null, pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null } = {}) {
     this.kind = 'generic-git'
@@ -419,7 +479,8 @@ export class GenericRemoteBackend {
   async mergePr({ humanApproved = false, ledger, branch, baseBranch } = {}) {
     const targetBranch = branch ?? ledger?.branch ?? null
     const base = baseBranch ?? ledger?.baseBranch ?? 'main'
-    const fetchRes = await gitRun(this.mainRoot, ['fetch', '--prune', '--quiet', 'origin'])
+    const remote = this.pushRemote || 'origin'
+    const fetchRes = await gitRun(this.mainRoot, ['fetch', '--prune', '--quiet', remote])
     const fetched = fetchRes.ok
     if (!fetched && !humanApproved) {
       return {
@@ -440,7 +501,6 @@ export class GenericRemoteBackend {
       }
     }
     // 核对远端引用，不是本地分支：本地那条可能还停在合并前，拿它判等于用旧快照回答新问题。
-    const remote = 'origin'
     const baseRef = fetched ? `${remote}/${base}` : base
     const targetRef = targetBranch ? (fetched ? `${remote}/${targetBranch}` : targetBranch) : undefined
     const state = await inspectBranchMergeState(this.mainRoot, {
@@ -450,6 +510,10 @@ export class GenericRemoteBackend {
     })
     const mergedStates = new Set(['merged', 'squash_or_rebase_merged', 'no_own_commits'])
     if (!mergedStates.has(state.state)) {
+      const ffMerged = await tryLocalBareFastForwardMerge({
+        mainRoot: this.mainRoot, remote, targetBranch, base, ledger, humanApproved,
+      })
+      if (ffMerged) return ffMerged
       return {
         ok: false, blocked: true, code: 'BLOCKED_REMOTE_NOT_MERGED', exitCode: EXIT.FACT,
         fetched, mergeState: state.state, ownCommits: state.ownCommits,

@@ -478,6 +478,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
     : resolveRequiredGates(policy?.riskTier ?? 'medium', profile)
 
   const validGates = []
+  const rejectedCustomGates = []
   for (const name of ['gate', 'full', 'smoke', 'quick']) {
     const g = evidence.gates?.[name]
     if (!g) continue
@@ -485,22 +486,30 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
     if (g.dirty === true || g.exitCode !== 0 || g.partial === true) continue
     if (g.status !== 'skipped-explicit-none' && (g.errorOnly === true || g.executed === false || g.succeeded === false)) continue
     const cfgCmd = configuredCmdForTier(profile, name)
-    if (g.customCmd === true && cfgCmd && !isEquivalentConcurrentCommand(g.cmd, cfgCmd)) continue
+    if (g.customCmd === true && cfgCmd && !isEquivalentConcurrentCommand(g.cmd, cfgCmd)) {
+      rejectedCustomGates.push({ name, cmd: g.cmd, configuredCmd: cfgCmd })
+      continue
+    }
     validGates.push({ name, rank: GATE_TIER_RANK[name] ?? 0, gate: g })
   }
+  const formatRejectedReason = (rej) => `已运行自定义 --cmd（"${rej.cmd}"），但与配置的 ${rej.name} 命令（"${rej.configuredCmd}"）不一致而被拒收（仅允许等价命令或追加并发标志）。`
 
   if (policy?.smokeRequired && policy?.riskTier !== 'low' && !isProfileExplicitNone(profile, 'smoke-verify')) {
     const hasSmokeGate = validGates.some((v) => v.name === 'smoke') && evidence.smokeVerifiedOnHead !== false
     if (!hasSmokeGate) {
       const noCfg = !profile?.smokeVerify
+      const rejSmoke = rejectedCustomGates.find((r) => r.name === 'smoke')
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
         exitCode: EXIT.FACT,
         requiredTier: 'smoke',
-        reason: noCfg
-          ? '运行时代码改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none：请在 AGENTS.md 补齐 smoke-verify，或运行 verify --mode smoke --cmd "<端到端命令>" --e2e-evidence "<运行观察>"。'
-          : `运行时代码改动禁止仅用 full/gate（单测）顶替 smoke-verify，当前 HEAD 缺少 smoke 执行实证（已通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]）。`,
+        ...(rejectedCustomGates.length > 0 ? { rejectedCustomGates } : {}),
+        reason: rejSmoke
+          ? formatRejectedReason(rejSmoke)
+          : (noCfg
+              ? '运行时代码改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none：请在 AGENTS.md 补齐 smoke-verify，或运行 verify --mode smoke --cmd "<端到端命令>" --e2e-evidence "<运行观察>"。'
+              : `运行时代码改动禁止仅用 full/gate（单测）顶替 smoke-verify，当前 HEAD 缺少 smoke 执行实证（已通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]）。`),
       }
     }
     const rawObsSummary = evidence.e2eObservation?.summary ?? ''
@@ -532,14 +541,18 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
     const minRank = GATE_TIER_RANK[requiredTier] ?? 1
     if (!validGates.some((v) => v.rank >= minRank)) {
       const onlyPartial = Boolean(evidence.gates?.quick?.partial && (!headSha || evidence.gates.quick.headSha === headSha))
+      const rejTier = rejectedCustomGates.find((r) => r.name === requiredTier || (GATE_TIER_RANK[r.name] ?? 0) >= minRank) ?? rejectedCustomGates[0]
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
         exitCode: EXIT.FACT,
         requiredTier,
-        reason: onlyPartial
-          ? `仅有单文件快测（quick --target=${evidence.gates.quick.target}），不足以满足 ${policy?.riskTier} 风险所需的 ${requiredTier} 全量门禁。`
-          : `${policy?.riskTier ?? 'medium'} 风险变更要求通过 ${requiredTier}（或更高级）门禁，当前仅通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]。`,
+        ...(rejectedCustomGates.length > 0 ? { rejectedCustomGates } : {}),
+        reason: rejTier
+          ? `${formatRejectedReason(rejTier)}（当前已通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]）`
+          : (onlyPartial
+              ? `仅有单文件快测（quick --target=${evidence.gates.quick.target}），不足以满足 ${policy?.riskTier} 风险所需的 ${requiredTier} 全量门禁。`
+              : `${policy?.riskTier ?? 'medium'} 风险变更要求通过 ${requiredTier}（或更高级）门禁，当前仅通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]。`),
       }
     }
     return { ok: true, code: null, exitCode: EXIT.OK }
@@ -553,6 +566,15 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
         exitCode: EXIT.FACT,
         reason: `仅有单文件快测（quick --target=${evidence.gates.quick.target}），请运行不带 --target 的全量 verify。`,
+      }
+    }
+    if (rejectedCustomGates.length > 0) {
+      return {
+        ok: false,
+        code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
+        exitCode: EXIT.FACT,
+        rejectedCustomGates,
+        reason: formatRejectedReason(rejectedCustomGates[0]),
       }
     }
     if (!explicitCmdUsed && evidence.exitCode !== 0) {

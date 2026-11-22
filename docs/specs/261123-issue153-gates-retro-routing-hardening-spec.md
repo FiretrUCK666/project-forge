@@ -5,7 +5,7 @@ status: approved
 tier: L3
 created: 2026-11-23
 updated: 2026-11-23
-issue: null
+issue: 153
 pr: null
 branch: feat/gates-retro-routing-hardening
 owner: coordinator
@@ -14,7 +14,7 @@ approved: true
 implemented: false
 plan_critique: "passed (reviewer=critique-pr2-r2, round=2, sha=17f8278144c2, summary=Round 2 pass: BLOCKER-1 (doc-plan-ops skipApproved/override ledger trail + plan-exit-gate + fixtures-flow-truth/docs/w4 compatibility) and BLOCKER-2 (GenericRemoteBackend.mergePr name and conventional unmerged remote blocking) are resolved; fixtures worker TMPDIR isolation, <=760/800 line split guard, AGENTS.md < 24KB, and skill boundary constraints are consistent with source.)"
 related_prd: null
-related_todo: ../todo/261123-gates-retro-routing-hardening-todo.md
+related_todo: ../todo/261123-issue153-gates-retro-routing-hardening-todo.md
 high_risk_paths: [kit/, templates/]
 ---
 
@@ -30,7 +30,7 @@ high_risk_paths: [kit/, templates/]
 | 分支 / Issue / PR | `feat/gates-retro-routing-hardening` / 未关联 / 未关联 |
 | 负责人 / 内审状态 | coordinator / `pending` |
 | 规划态 | `autonomous` |
-| 关联 Todo | `docs/todo/261123-gates-retro-routing-hardening-todo.md` |
+| 关联 Todo | `docs/todo/261123-issue153-gates-retro-routing-hardening-todo.md` |
 
 - **变更一句话**：精准收紧 `static-gates`/`edit-gate`/`doc-audit`/`govern`/`workflow-policy`/`plan-exit-gate` 与 `task-backend-local`，打通 `--should-fix` -> `signals.jsonl` -> `govern-retro` -> `flow-next` `lastRetro` 闭环，强化 `AGENTS.md`/skill 浅提示词隔离路由，并根治 `fixtures` 临时目录泄漏。
 
@@ -119,11 +119,11 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `detectGateWeakeningInEntry` 对删 39 条断言并新增 `assert True` 判定为 `severity: 'deterministic'` 并导致 `review-gates` `gateWeakened: true` 硬阻断；同时识别 `assertEqual`/`assertNoError` 等 camelCase 断言。
-- [ ] C2: `edit-gate` 对已跟踪文件的历史 `// workaround` 旧注释零误拦，对新建文件与 diff 新增无工单 `hack/workaround` 正常拦截；`flow.mjs finalize` 归档后 `edit-gate --changed --final` 不再误拦 `docs/archive/`；`doc-plan init --kind pair` 产出成对文件直接通过 `doc-audit`。
-- [ ] C3: `review-ledger` 记录 `shouldFixList` 自动写入 `signals.jsonl` 且 `govern-retro` 统计该聚类；`flow.mjs next` 消费 `govern-state.json` 的 `lastRetro` 并输出逾期/复发提醒；`doc-plan-ops` 批准写入 `planCritique.override` 留痕，`plan-exit-gate` 拒绝无账本授权的裸 YAML `plan_critique: skipped`。
-- [ ] C4: `govern-audit` 对 `testdata/*.pem`（测试夹具/取舍豁免）与 Go `_bench_test.go`/`_example_test.go` 零误报；`workflow-policy` 自定义不匹配 `--cmd` 明示拒收原因；`GenericRemoteBackend.mergePr` 对满足显式单人快进策略的本地裸仓可完成审后快进合入而常规未合远端仍阻断。
-- [ ] C5: `fixtures.mjs --jobs 6` 注入 worker 隔离 `TMPDIR` 并全数清零，跑完不向系统 Temp 目录残留 `pf-*` 临时目录；所有 `.mjs` <= 800 行且 `AGENTS.md` 体积 `< 24KB`；`equip --check`、`compose-agents --check`、`preflight`、`fixtures --jobs 6`、`verify-injections --jobs 4`、`e2e-zip-harness`、`govern-audit --strict` 全绿。
+- [x] C1: `detectGateWeakeningInEntry` 对删 39 条断言并新增 `assert True` 判定为 `severity: 'deterministic'` 并导致 `review-gates` `gateWeakened: true` 硬阻断；同时识别 `assertEqual`/`assertNoError` 等 camelCase 断言。
+- [x] C2: `edit-gate` 对已跟踪文件的历史 `// workaround` 旧注释零误拦，对新建文件与 diff 新增无工单 `hack/workaround` 正常拦截；`flow.mjs finalize` 归档后 `edit-gate --changed --final` 不再误拦 `docs/archive/`；`doc-plan init --kind pair` 产出成对文件直接通过 `doc-audit`。
+- [x] C3: `review-ledger` 记录 `shouldFixList` 自动写入 `signals.jsonl` 且 `govern-retro` 统计该聚类；`flow.mjs next` 消费 `govern-state.json` 的 `lastRetro` 并输出逾期/复发提醒；`doc-plan-ops` 批准写入 `planCritique.override` 留痕，`plan-exit-gate` 拒绝无账本授权的裸 YAML `plan_critique: skipped`。
+- [x] C4: `govern-audit` 对 `testdata/*.pem`（测试夹具/取舍豁免）与 Go `_bench_test.go`/`_example_test.go` 零误报；`workflow-policy` 自定义不匹配 `--cmd` 明示拒收原因；`GenericRemoteBackend.mergePr` 对满足显式单人快进策略的本地裸仓可完成审后快进合入而常规未合远端仍阻断。
+- [x] C5: `fixtures.mjs --jobs 6` 注入 worker 隔离 `TMPDIR` 并全数清零，跑完不向系统 Temp 目录残留 `pf-*` 临时目录；所有 `.mjs` <= 800 行且 `AGENTS.md` 体积 `< 24KB`；`equip --check`、`compose-agents --check`、`preflight`、`fixtures --jobs 6`、`verify-injections --jobs 4`、`e2e-zip-harness`、`govern-audit --strict` 全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -137,6 +137,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：在 `kit/skills/lib/static-gates.mjs` 实现 `TAUTOLOGY_ASSERT_RE` 恒真断言拦截、批量删减断言升级 `deterministic` 与 camelCase 断言识别；`edit-gate.mjs` 对既有修改文件按 diff 新增行检查并放行当前任务 `docs/archive/` 归档（配合 `flow-lifecycle-finalize.mjs` `git add`）；`doc-audit.mjs` + `doc-audit-helpers.mjs` 修正 `./` 与 `../` 边界解析；打通 `--should-fix` -> `signals.jsonl` -> `govern-retro.mjs` -> `flow-next.mjs` `lastRetro`；抽离 `kit/skills/lib/critique-store.mjs` 并实现 `approveSpec` `skipApproved` 账本留痕与 `plan-exit-gate.mjs` / `intake-triage.mjs` 防绕过校验；补齐 `credential-scan.mjs` / `govern-checks.mjs` / `govern-tests.mjs`、`workflow-policy.mjs`、`flow-lifecycle.mjs`、`task-backend-local.mjs`、`templates/agents-project.md`、`dev-iterate/SKILL.md`、`dev-govern/SKILL.md` 及 `fixtures*.mjs` 隔离防泄漏。
+- **与草案的差异**：为保持 `kit/skills/lib/critique-rounds.mjs` 低于 800 行预算（712 行），将规划审查持久化读写拆至 `kit/skills/lib/critique-store.mjs` 并从 `critique-rounds.mjs` 重新导出以保持现有调用兼容；新增回归夹具命名为按功能域划定的 `scripts/dev/fixtures-gates-retro-routing.mjs`。
+- **关联同步文件**：`AGENTS.md`（22,272 字节 < 24KB）、`.agents/skills/`（`equip.mjs .` 全量同步，含新增 `lib/critique-store.mjs`）、`scripts/dev/fixtures-flow-truth.mjs`、`scripts/dev/injections-data-workflow.mjs`。

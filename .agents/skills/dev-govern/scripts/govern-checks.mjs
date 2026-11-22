@@ -19,7 +19,8 @@ import {
 } from '../../lib/static-gates.mjs'
 import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 import {
-  NPMRC_FILE_RE, SAFE_ENV_RE, SECRET_FILE_RE, isSensitiveSecretFile, matchSecretContentLine,
+  ENV_FILE_RE, NPMRC_FILE_RE, SAFE_ENV_RE, SECRET_FILE_RE, TEST_FIXTURE_PATH_RE,
+  isSensitiveSecretFile, matchSecretContentLine,
 } from '../../lib/credential-scan.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES } from '../../lib/tool-owned.mjs'
 import { auditUnignoredOutputDirs, inspectManifest, inspectWorktrees } from './govern-checks-hygiene.mjs'
@@ -160,20 +161,28 @@ export function walkFiles(root, scopeRel = '') {
   return files
 }
 
-export function auditSecurity(files, trackedSet, findings) {
+export function auditSecurity(files, trackedSet, findings, opts = {}) {
+  const secretsArePlaceholders = Boolean(opts?.secretsArePlaceholders)
   for (const f of files) {
+    const isTestFixturePath = TEST_FIXTURE_PATH_RE.test(f.rel)
     if (SECRET_FILE_RE.test(f.name) && !SAFE_ENV_RE.test(f.name)) {
-      const npmrcInfo = NPMRC_FILE_RE.test(f.name) ? readTextStrictInfo(f.full) : null
-      if (!NPMRC_FILE_RE.test(f.name) || isSensitiveSecretFile(f.name, npmrcInfo?.text)) {
+      const secretFileInfo = (NPMRC_FILE_RE.test(f.name) || ENV_FILE_RE.test(f.name)) ? readTextStrictInfo(f.full) : null
+      if (!secretsArePlaceholders && isSensitiveSecretFile(f.name, secretFileInfo?.text, f.rel)) {
         const tracked = trackedSet.has(f.rel)
         addFinding(findings, {
           id: `sec.secret-file.${f.rel}`,
           category: 'security',
-          severity: tracked ? 'critical' : 'high',
+          severity: isTestFixturePath ? 'info' : (tracked ? 'critical' : 'high'),
           file: f.rel,
-          title: `${tracked ? 'Tracked' : 'Present'} sensitive credential file: ${f.rel}`,
-          detail: tracked ? 'File is tracked by git history.' : 'Sensitive file exists on disk; verify it is ignored.',
-          action: tracked ? 'Rotate credential, remove from git tracking, and add pattern to .gitignore.' : 'Verify .gitignore covers this pattern.',
+          title: isTestFixturePath
+            ? `Test fixture credential-like file (downgraded): ${f.rel}`
+            : `${tracked ? 'Tracked' : 'Present'} sensitive credential file: ${f.rel}`,
+          detail: isTestFixturePath
+            ? 'File matches SECRET_FILE_RE inside a test/fixture path.'
+            : (tracked ? 'File is tracked by git history.' : 'Sensitive file exists on disk; verify it is ignored.'),
+          action: isTestFixturePath
+            ? 'Keep placeholder-only fixtures in testdata/fixtures or declare `secrets-are-placeholders` in AGENTS.md.'
+            : (tracked ? 'Rotate credential, remove from git tracking, and add pattern to .gitignore.' : 'Verify .gitignore covers this pattern.'),
         })
       }
     }
@@ -186,18 +195,20 @@ export function auditSecurity(files, trackedSet, findings) {
     const lines = getLinesCached(f.full, info) ?? []
     for (let idx = 0; idx < lines.length; idx += 1) {
       const line = lines[idx]
-      for (const pat of matchSecretContentLine(line)) {
-        addFinding(findings, {
-          id: `sec.token.${f.rel}:${idx + 1}`,
-          category: 'security',
-          severity: trackedSet.has(f.rel) ? 'critical' : 'high',
-          file: f.rel,
-          line: idx + 1,
-          title: `Possible ${pat.label} in ${f.rel}:${idx + 1}`,
-          detail: 'Secret-like literal detected (value redacted).',
-          action: 'Rotate secret and load via environment variables or credential manager.',
-        })
-        break
+      if (!secretsArePlaceholders) {
+        for (const pat of matchSecretContentLine(line)) {
+          addFinding(findings, {
+            id: `sec.token.${f.rel}:${idx + 1}`,
+            category: 'security',
+            severity: isTestFixturePath ? 'info' : (trackedSet.has(f.rel) ? 'critical' : 'high'),
+            file: f.rel,
+            line: idx + 1,
+            title: `Possible ${pat.label} in ${f.rel}:${idx + 1}`,
+            detail: 'Secret-like literal detected (value redacted).',
+            action: 'Rotate secret and load via environment variables or credential manager.',
+          })
+          break
+        }
       }
       if (CODE_EXT_RE.test(f.name) && !TEST_FILE_RE.test(f.rel)) {
         if (/\bNODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]0['"]/.test(line)) {

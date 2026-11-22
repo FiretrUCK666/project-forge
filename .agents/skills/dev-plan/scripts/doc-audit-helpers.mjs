@@ -4,7 +4,11 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 doc-audit.mjs 调用以控制单文件体积。
  */
 
+import { existsSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
+
 import { PLACEHOLDER_TEXT_RE } from '../../lib/doc-substantive.mjs'
+import { isInsideDir, posixPath } from '../../lib/git.mjs'
 
 const ANGLE_PLACEHOLDER_RE = /<([^>\n]{1,60})>/g
 export const PATH_PREFIX_RE = /^(?:src|lib|kit|scripts|tests?|spec|app|apps|packages|pkg|cmd|internal|docs|templates|references|\.github)\//
@@ -97,4 +101,36 @@ export function candHasNewAnnotation(strippedLine, rawCand) {
     'i',
   )
   return nearNewRe.test(strippedLine)
+}
+
+/** 解析正文相对路径候选：对 `./` 与 `../` 先按文档目录解析并校验不出 `repoRoot`（`./` 兼容回退仓根）。 */
+export function resolveDocBodyPathCandidate({ repoRoot, absDoc, rawCand, declaredNewFiles = new Set(), declaredNewDirs = new Set() }) {
+  const cleanNoSlash = String(rawCand ?? '').replace(/\/+$/, '')
+  const isDotRel = rawCand.startsWith('./') || rawCand.startsWith('../')
+  if (!isDotRel) {
+    return {
+      insideRepo: true,
+      cleanRel: cleanNoSlash,
+      parentRel: posixPath(dirname(cleanNoSlash)),
+      exists: existsSync(join(repoRoot, cleanNoSlash)) || declaredNewFiles.has(cleanNoSlash) || declaredNewDirs.has(cleanNoSlash),
+    }
+  }
+  const docResolved = resolve(dirname(absDoc), cleanNoSlash)
+  if (!isInsideDir(docResolved, repoRoot)) {
+    return { insideRepo: false, cleanRel: cleanNoSlash, parentRel: null, exists: false }
+  }
+  const relFromRoot = posixPath(relative(repoRoot, docResolved)).replace(/^\.\//, '')
+  const existsAtDoc = existsSync(docResolved) || declaredNewFiles.has(relFromRoot) || declaredNewDirs.has(relFromRoot)
+  if (!existsAtDoc && rawCand.startsWith('./')) {
+    const rootCand = cleanNoSlash.replace(/^\.\//, '')
+    if (existsSync(join(repoRoot, rootCand)) || declaredNewFiles.has(rootCand) || declaredNewDirs.has(rootCand)) {
+      return { insideRepo: true, cleanRel: rootCand, parentRel: posixPath(dirname(rootCand)), exists: true }
+    }
+  }
+  return {
+    insideRepo: true,
+    cleanRel: relFromRoot,
+    parentRel: posixPath(dirname(relFromRoot)),
+    exists: existsAtDoc,
+  }
 }

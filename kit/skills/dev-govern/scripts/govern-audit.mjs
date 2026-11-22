@@ -16,10 +16,10 @@ import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import {
   canonicalPath, gitRun, gitRunBuffer, isMacOsJunkPath, isMainModule,
-  posixPath, resolveDefaultBranch, resolveRepoRoots, samePath, writeAtomic,
+  posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots, samePath, writeAtomic,
 } from '../../lib/git.mjs'
 import { readGitIndexPathsFast, readHeadFast } from '../../lib/git-fast.mjs'
-import { parseDevProfile } from '../../lib/profile.mjs'
+import { parseDevProfile, readDecisions } from '../../lib/profile.mjs'
 import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
 import {
   addFinding, auditDeadcode, auditHygiene, auditPerf, auditSecurity,
@@ -298,12 +298,15 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   try {
     const devProfile = parseDevProfile(workTreeRoot)
     const rawAgentsMeta = parseRawAgentsMeta(workTreeRoot)
+    const agentsRootForDecisions = existsSync(join(workTreeRoot, 'AGENTS.md')) ? workTreeRoot : mainRoot
+    const agentsDecisions = readDecisions(readTextSafe(join(agentsRootForDecisions, 'AGENTS.md')) ?? '')
+    const secretsArePlaceholders = agentsDecisions.has('secrets-are-placeholders')
     const rawFindings = []
     let testsMeta = { ciRunSteps: [], testInventory: null }
 
     const skipFullForEmptyChanged = fastChangedMode && opts.quiet && preChangedSet && preChangedSet.size === 0
     if (runLiveAudit && !skipFullForEmptyChanged) {
-      if (catSet.has('security')) auditSecurity(scopedFiles, trackedSet, rawFindings)
+      if (catSet.has('security')) auditSecurity(scopedFiles, trackedSet, rawFindings, { secretsArePlaceholders })
       if (catSet.has('deadcode')) auditDeadcode(scopedFiles, rawFindings)
       if (catSet.has('tests') && (!opts.quiet || opts.saveBaseline)) testsMeta = auditTests(workTreeRoot, files, devProfile, rawAgentsMeta, rawFindings)
       if (catSet.has('perf') && (!opts.quiet || opts.saveBaseline)) auditPerf(workTreeRoot, scopedFiles, rawFindings)

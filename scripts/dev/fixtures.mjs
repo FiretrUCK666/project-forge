@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { cpus, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -134,8 +134,12 @@ function buildDispatchOrder(allCases) {
 const WORKER_TASK_TIMEOUT_MS = 180000
 const WORKER_MSG_PREFIX = '__PF_W__:'
 
-function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, caseNames = [], caseCosts = []) {
+function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, runnerTempRoot, caseNames = [], caseCosts = []) {
   return new Promise((done) => {
+    const workerBkRoot = join(runnerTempRoot, 'bk')
+    const workerTmpRoot = join(runnerTempRoot, 'tmp')
+    mkdirSync(workerBkRoot, { recursive: true })
+    mkdirSync(workerTmpRoot, { recursive: true })
     let cursor = 0
     let passed = 0
     const failures = []
@@ -145,6 +149,7 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, ca
 
     const cleanupWorkers = (sig) => {
       for (const ch of activeChildren) killProcessTree(ch, false)
+      try { rmSync(runnerTempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
       process.exit(sig === 'SIGINT' ? 130 : 143)
     }
     const onSigTerm = () => cleanupWorkers('SIGTERM')
@@ -164,6 +169,8 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, ca
     for (let i = 0; i < lanes; i += 1) {
       const tag = `w-${i}`
       const traceFile = join(workerBkRoot, `${tag}.trace`)
+      const workerTempDir = join(workerTmpRoot, tag)
+      mkdirSync(workerTempDir, { recursive: true })
       const child = spawn(process.execPath, [scriptPath, '--worker'], {
         env: {
           ...process.env,
@@ -171,6 +178,9 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, ca
           PF_BACKUP_DIR: join(workerBkRoot, tag),
           PF_FIXTURE_WORKER: '1',
           PF_TRACE_FILE: traceFile,
+          TMPDIR: workerTempDir,
+          TEMP: workerTempDir,
+          TMP: workerTempDir,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
@@ -395,7 +405,7 @@ async function main() {
         process.stderr.write(`\n行为断言：${totalPassed} 通过 / ${allFailures.length} 失败（--domain ${domain}）。\n`)
         return 1
       } finally {
-        try { rmSync(workerBkRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
+        try { rmSync(workerBkRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 }) } catch { /* ignore */ }
       }
     }
     let passed = 0
@@ -496,7 +506,7 @@ async function main() {
       process.stderr.write(`\n行为断言：${totalPassed} 通过 / ${allFailures.length} 失败。\n`)
       return 1
     } finally {
-      try { rmSync(workerBkRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
+      try { rmSync(workerBkRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 }) } catch { /* ignore */ }
     }
   }
 

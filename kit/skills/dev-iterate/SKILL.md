@@ -28,6 +28,7 @@ metadata:
 2. **严守原生测试目录与极速 `quick-test` 边界**：
    - 依据 `kit/skills/lib/test-inventory.mjs` 探测目标仓原生集成/回归/E2E/性能测试目录与栈命名惯例落盘，**严禁将生成的测试放入 `.agents/`**；
    - 新生成的重型回归/集成/性能测试**绝不污染目标仓极速 `quick-test` 单测白名单**；
+   - **探索转写改强制隔离**：从只读探索转入任何文件写改（仅补测试按 Case 2/3 路由），必先走 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack` 独立审查合入，严禁在主仓直接落盘；
    - 落盘前必须通过 `edit-gate` / 静态反作弊门禁（拦截零断言、纯 Mock 自证、单测 `>= 1s` 硬等待、压制注释、`> 800` 行膨胀及过程编号文件名）。
 3. **增量回挂功能地图 `testRefs`**：
    - 新测试写入原生目录后，增量将新测试相对路径追加至 `docs/feature-map.json` 对应 feature 的 `testRefs`（完整保留所有既有字段不覆写；无功能地图时安全跳过）。

@@ -121,6 +121,7 @@ export {
   splitDiffByFile,
   stripCodeCommentsLines,
   summarizeHunkChanges,
+  TAUTOLOGY_ASSERT_RE,
   TEST_CASE_RE,
   TEST_FILE_RE,
   TEST_SKIP_RE,

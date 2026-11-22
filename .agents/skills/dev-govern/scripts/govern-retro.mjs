@@ -38,6 +38,7 @@ function collectLedgerStats(ledgers) {
   const stopLossTasks = []
   const queueConflictTasks = []
   const fileCounts = new Map()
+  let shouldFixCount = 0
 
   for (const ledger of ledgers) {
     const tid = ledger.taskId
@@ -50,6 +51,13 @@ function collectLedgerStats(ledgers) {
       for (const m of r.mustFix ?? []) {
         const f = posixPath(m?.file ?? '').trim()
         if (f) fileCounts.set(f, (fileCounts.get(f) ?? 0) + 1)
+      }
+      for (const sf of r.shouldFix ?? []) {
+        shouldFixCount += 1
+        const sfText = typeof sf === 'string' ? sf : String(sf?.summary ?? sf?.file ?? '')
+        const fm = /(?:^|[\s`('"])([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{1,8})(?:[:：#L]|[\s`)'",]|$)/.exec(sfText)
+        const sfFile = typeof sf === 'object' && sf?.file ? posixPath(sf.file).trim() : (fm ? posixPath(fm[1]).trim() : '')
+        if (sfFile) fileCounts.set(sfFile, (fileCounts.get(sfFile) ?? 0) + 1)
       }
       for (const d of r.dispositions ?? []) {
         const kind = String(d?.disposition ?? '').toLowerCase()
@@ -65,6 +73,7 @@ function collectLedgerStats(ledgers) {
   const falsePositiveRate = disp.total > 0 ? Number((falsePositiveCount / disp.total).toFixed(4)) : 0
   return {
     dispositionSummary: { ...disp, falsePositiveCount, falsePositiveRate },
+    shouldFixCount,
     stopLossTasks,
     queueConflictTasks,
     ledgerFileCounts: fileCounts,
@@ -397,6 +406,7 @@ export function buildRetroReport({
     defaultAgentsWriteDisabled: true,
     signalCount: signals.length,
     ledgerCount: ledgers.length,
+    shouldFixCount: lStats.shouldFixCount,
     repeatedFailures,
     dispositionSummary: ds,
     hotspots,

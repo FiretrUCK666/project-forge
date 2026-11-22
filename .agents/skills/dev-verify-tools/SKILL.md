@@ -7,7 +7,7 @@ description: |
   触发词：验证工具、功能地图、feature-map、缺校验工具、建一个验证流、跑验证工具、
   工具过时、清理僵尸工具、体检验证工具库、verify-tools。
 metadata:
-  intent: 验证工具创造 / 自动复用与过时校验 / 体检清理
+  intent: 加验证脚本 / 跑端到端验证 / 维护功能地图 / 过时校验与清理
   script: "`node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs` (`audit` / `run` / `create`)"
   order: 48
   fallback: 在仓外临时目录编写一次性探针脚本实测受波及业务流，验证完毕后清理临时产物（未装配 dev-verify-tools 技能）

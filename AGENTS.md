@@ -11,17 +11,17 @@
 | 用户自然语言意图 | 加载本地 Skill | 先跑引擎脚本（按需传参） |
 | --- | --- | --- |
 | 理解项目 / 梳理架构 / 找模块入口 / 按需定位文档与符号 | `.agents/skills/dev-explore/SKILL.md` | `node .agents/skills/dev-explore/scripts/doc-locate.mjs` / `repo-map.mjs` |
-| 新需求 / 做新功能 / 跨模块改造 / 澄清拍板 / 写方案与拆任务 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs triage` / `init` / `audit` |
-| 已定案开工 / 明确局部修缺陷 / 查任务状态 / 启动隔离工作位 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
+| 新需求 / 加功能 / 跨模块改造 / 澄清拍板 / 写方案与拆任务 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs triage` / `init` / `audit` |
+| 已定案开工 / 修 bug / 改错别字 / 接着做 / 查任务状态 / 启动隔离工作位 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
 | 改码规范 / 改前边界核对与静态自检 | `.agents/skills/dev-edit/SKILL.md` | `node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --json` |
 | 实施者归档 / 实证 / 推分支提 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
-| 本地预审 / 独立双门审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
-| 审查者合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
+| 本地预审 / 审 PR / 独立双门审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
+| 审查者合并 PR / 清理分支 / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
 | 外部 Issue・PR 业务分诊 / 里程碑管理 / 裸粘贴链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs intake` / `inspect <URL...>` / `milestone` |
-| 验证工具创造 / 自动复用与过时校验 / 体检清理 | `.agents/skills/dev-verify-tools/SKILL.md` | `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs` (`audit` / `run` / `create`) |
-| 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` (`audit` / `reconcile` / `retro`) |
-| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run` / `cycle`) |
-| 首次规范化接管 / 升级工具包 / 交棒退场 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
+| 加验证脚本 / 跑端到端验证 / 维护功能地图 / 过时校验与清理 | `.agents/skills/dev-verify-tools/SKILL.md` | `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs` (`audit` / `run` / `create`) |
+| 代码体检 / 清技术债 / 更新长青文档 / 同步功能地图与架构文档 / 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` (`audit` / `reconcile` / `retro`) |
+| 补测试 / 扩展回归・集成・E2E・性能测试 / 盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run` / `cycle`) |
+| 首次规范化接管 / 规范项目 / 初始化 / 标准化配置 / 升级规范与本地技能 / 交棒清理 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: end 意图路由 -->
 
 <!-- project-forge: begin 行事总纲 -->

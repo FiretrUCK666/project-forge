@@ -6,7 +6,7 @@ description: |
   清理过期 worktree、检查 deadcode、安全扫描、治理计划、批量提 Issue、技术债盘点、
   规则下沉、园艺聚类、sample 抽检、arch-rules 检查、release-prep、发版筹备、汇总更新日志。
 metadata:
-  intent: 代码体检 / 清技术债 / retro 复盘下沉
+  intent: 代码体检 / 清技术债 / 更新长青文档 / 同步功能地图与架构文档 / 复盘下沉
   script: "`node .agents/skills/dev-govern/scripts/govern-audit.mjs` (`audit` / `reconcile` / `retro`)"
   order: 50
   fallback: 手工运行项目测试与 git status / git worktree list 检查工作区干净状态（未装配 dev-govern 技能）

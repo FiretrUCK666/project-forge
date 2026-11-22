@@ -5,7 +5,7 @@ description: |
   触发词：做功能、需求规划、写方案、写设计文档、写 PRD、写 SPEC、写 Todo、拆任务、
   需求分流、立项、先出方案、文档自检、implement feature、plan feature、write spec、triage task。
 metadata:
-  intent: 新需求 / 做新功能 / 跨模块改造 / 澄清拍板 / 写方案与拆任务
+  intent: 新需求 / 加功能 / 跨模块改造 / 澄清拍板 / 写方案与拆任务
   script: "`node .agents/skills/dev-plan/scripts/doc-plan.mjs triage` / `init` / `audit`"
   order: 20
   fallback: 按改动影响面人工分级（L3 改契约先写 docs/specs/ 与 docs/todo/，完成后用 git mv 归档；未装配 dev-plan 技能）

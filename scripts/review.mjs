@@ -30,7 +30,7 @@ import {
 } from './lib/review-helpers.mjs'
 
 import { findUnexecutableArtifacts } from './lib/artifact-executors.mjs'
-import { readDecisionMap, readDecisions, resolveAuthoritativeTddPath } from '../kit/skills/lib/profile.mjs'
+import { parseAgentsProfile, readDecisionMap, readDecisions, resolveAuthoritativeTddPath } from '../kit/skills/lib/profile.mjs'
 
 export { readDecisionMap, readDecisions }
 
@@ -291,6 +291,22 @@ export async function reviewProject(targetDir, { scopes } = {}) {
           + '这不是「结构完整」，是这一面没验', {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
+        const kitInstalled = Boolean(
+          facts.kit?.installed
+          || facts.kit?.manifestExists
+          || facts.kit?.present
+          || (facts.kit?.installedSkills?.length ?? 0) > 0,
+        )
+        if (kitInstalled) {
+          const parsedProfile = parseAgentsProfile(root)
+          if (!parsedProfile.hasDevProfile) {
+            add(finding('missing', 'agents', 'agents.handwritten-missing-dev-profile',
+              `${facts.docs.agents.file} 为手写契约且已装配 \`.agents/skills/\`，但缺少有效 Dev Profile——`
+              + '本地技能需要读取 quick-test / full-test / smoke-verify / merge-gate（或显式 none）；请补齐 `## Dev Profile` 块或运行 `node scripts/compose-agents.mjs .` 同步模板', {
+                ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+              }))
+          }
+        }
       } else if (contract.health.missing.length > 0) {
         add(finding('missing', 'agents', 'agents.missing-sections',
           `${facts.docs.agents.file} 缺 ${contract.health.missing.length} 节（条件为真却没有）：${contract.health.missing.join('、')}——跑一次不带参数的 compose-agents 就会补上`, {

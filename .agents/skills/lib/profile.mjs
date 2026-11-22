@@ -341,8 +341,11 @@ export function parseAgentsProfile(repoRoot) {
   const agentsPath = join(repoRoot, 'AGENTS.md')
   const text = readTextSafe(agentsPath)
   const explicitNone = new Set()
+  const declaredKeys = new Set()
   const profile = {
     hasAgents: text !== undefined,
+    hasDevProfile: false,
+    declaredProfileKeys: [],
     quickTest: undefined,
     fullTest: undefined,
     smokeVerify: undefined,
@@ -372,14 +375,20 @@ export function parseAgentsProfile(repoRoot) {
       if (activeListKey) {
         if (/^[-*]\s+/.test(trimmed) && /^\s+[-*]/.test(line)) {
           const item = stripWrapQuotes(stripInlineYamlComment(trimmed.replace(/^[-*]\s+/, '')))
+          const activeRawKey = activeListKey === 'highRisk' ? 'high-risk' : activeListKey === 'doNotEdit' ? 'do-not-edit' : 'arch-rules'
           if (isExplicitNoneValue(item)) {
-            explicitNone.add(activeListKey === 'highRisk' ? 'high-risk' : activeListKey === 'doNotEdit' ? 'do-not-edit' : 'arch-rules')
+            explicitNone.add(activeRawKey)
+            if (activeListKey !== 'evergreenDocs') declaredKeys.add(activeRawKey)
           } else if (item && !isAnglePlaceholder(item)) {
             if (activeListKey === 'archRules') {
               const parsed = parseArchRuleItem(item)
-              if (parsed) profile.archRules.push(parsed)
+              if (parsed) {
+                profile.archRules.push(parsed)
+                declaredKeys.add('arch-rules')
+              }
             } else {
               profile[activeListKey].push(item)
+              if (activeListKey !== 'evergreenDocs') declaredKeys.add(activeRawKey)
             }
           }
           continue
@@ -410,11 +419,13 @@ export function parseAgentsProfile(repoRoot) {
         const cleaned = stripWrapQuotes(rawVal)
         if (isExplicitNoneValue(cleaned)) {
           explicitNone.add(key)
+          declaredKeys.add(key)
           if (key === 'quick-test') profile.quickTest = undefined
           else if (key === 'full-test') profile.fullTest = undefined
           else if (key === 'smoke-verify') profile.smokeVerify = undefined
           else profile.mergeGate = undefined
         } else if (!isAnglePlaceholder(cleaned)) {
+          declaredKeys.add(key)
           if (key === 'quick-test') profile.quickTest = cleaned
           else if (key === 'full-test') profile.fullTest = cleaned
           else if (key === 'smoke-verify') profile.smokeVerify = cleaned
@@ -428,14 +439,19 @@ export function parseAgentsProfile(repoRoot) {
         activeListKey = targetProp
       } else if (isExplicitNoneValue(rawVal)) {
         explicitNone.add(key)
+        declaredKeys.add(key)
       } else if (targetProp === 'archRules') {
         for (const item of parseListValue(rawVal)) {
           const parsed = parseArchRuleItem(item)
-          if (parsed) profile.archRules.push(parsed)
+          if (parsed) {
+            profile.archRules.push(parsed)
+            declaredKeys.add(key)
+          }
         }
       } else {
         for (const item of parseListValue(rawVal)) {
           profile[targetProp].push(item)
+          declaredKeys.add(key)
         }
       }
     }
@@ -456,6 +472,9 @@ export function parseAgentsProfile(repoRoot) {
       profile.mergeAuthority = 'human'
     }
   }
+
+  profile.declaredProfileKeys = [...declaredKeys]
+  profile.hasDevProfile = ['quick-test', 'full-test', 'smoke-verify', 'merge-gate'].some((k) => declaredKeys.has(k))
 
   profile.highRisk = [...new Set(profile.highRisk)]
   profile.doNotEdit = [...new Set(profile.doNotEdit)]

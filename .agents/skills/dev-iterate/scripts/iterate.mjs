@@ -18,6 +18,7 @@ import {
   COMMON_SKIP_DIRS, execSafe, gitRun, isMacOsJunkPath, isMainModule,
   posixPath, readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
+import { resolveExecutable } from '../../lib/exec.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
@@ -313,7 +314,9 @@ export async function buildIterationPlan(repoRoot, {
         ? `${stem.replace(/-/g, '_')}_${cleanTier}_test.go`
         : nativeTarget.stack === 'rust'
           ? `${stem.replace(/-/g, '_')}_${cleanTier}.rs`
-          : `${stem}.${cleanTier}.test.mjs`
+          : (nativeTarget.isTypeScript || nativeTarget.ext === '.ts'
+              ? `${stem}.${cleanTier}.test.ts`
+              : `${stem}.${cleanTier}.test.mjs`)
     const plannedTestFile = posixPath(`${nativeTarget.dirRel}/${fileName}`)
     return {
       ...c,
@@ -405,6 +408,11 @@ export async function generateIterationTests(repoRoot, {
   }
 }
 
+function resolveLocalNodeBin(repoRoot, binName) {
+  const candidate = join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${binName}.cmd` : binName)
+  return existsSync(candidate) ? candidate : null
+}
+
 async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfBudgetMs = 0 } = {}) {
   const abs = join(repoRoot, relPath)
   const ext = relPath.split('.').pop()?.toLowerCase() ?? ''
@@ -420,6 +428,27 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
   } else if (ext === 'rs') {
     cmd = 'cargo'
     args = ['test', '--test', basename(relPath, '.rs')]
+  } else if (['ts', 'tsx', 'mts', 'cts'].includes(ext)) {
+    const content = readTextSafe(abs) ?? ''
+    const localVitest = resolveLocalNodeBin(repoRoot, 'vitest')
+    const localJest = resolveLocalNodeBin(repoRoot, 'jest')
+    const localTsx = resolveLocalNodeBin(repoRoot, 'tsx')
+    if (/from\s+['"]vitest['"]/.test(content) && localVitest) {
+      cmd = localVitest
+      args = ['run', relPath]
+    } else if (localJest && !/from\s+['"]node:test['"]/.test(content)) {
+      cmd = localJest
+      args = [relPath]
+    } else if (localTsx) {
+      cmd = localTsx
+      args = ['--test', abs]
+    } else if ((existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb'))) && resolveExecutable('bun')) {
+      cmd = 'bun'
+      args = ['test', abs]
+    } else if (Number(process.versions.node.split('.')[0]) === 22) {
+      cmd = process.execPath
+      args = ['--experimental-strip-types', '--test', abs]
+    }
   }
   const res = await execSafe(cmd, args, { cwd: repoRoot, timeout: timeoutMs })
   const durationMs = Math.round(performance.now() - t0)

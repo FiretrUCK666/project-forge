@@ -83,9 +83,9 @@ flowchart LR
   FMap -. "工具与流映射" .-> KitLib
 ```
 
-产品层内部按四层单向依赖组织，共享底层原语统一收敛在 `kit/skills/lib/` 作为唯一真源（共 `80` 个 `.mjs` 模块），`scripts/lib/` 仅在安装期复用或做薄重导出，禁止反向被 `kit/` 引用：
+产品层内部按四层单向依赖组织，共享底层原语统一收敛在 `kit/skills/lib/` 作为唯一真源（共 `81` 个 `.mjs` 模块），`scripts/lib/` 仅在安装期复用或做薄重导出，禁止反向被 `kit/` 引用：
 
-1. **L1 基础原语层**：`kit/skills/lib/exec.mjs`、`kit/skills/lib/git-core.mjs`、`kit/skills/lib/git-worktree-env.mjs`、`kit/skills/lib/git.mjs`、`kit/skills/lib/git-index-fast.mjs`、`kit/skills/lib/git-fast-objects.mjs`、`kit/skills/lib/git-fast.mjs`、`kit/skills/lib/git-status-fast.mjs`、`kit/skills/lib/markdown-scan.mjs`、`kit/skills/lib/command-lex.mjs`、`kit/skills/lib/symbol-index.mjs`、`kit/skills/lib/no-changelog-voice.mjs`、`kit/skills/lib/cli.mjs`、以及顶层 `scripts/zip.mjs`、`scripts/backup.mjs`。提供跨平台无弹窗命令执行、Worktree 共享环境计算、`withFileLock` 并发文件锁、零子进程 Git 对象与状态解析、命令分词、AST/正则符号索引、履历体检测、围栏感知 Markdown 扫描及纯内置 `node:zlib` 的 `.zip` 快照读写。
+1. **L1 基础原语层**：`kit/skills/lib/exec.mjs`、`kit/skills/lib/git-core.mjs`、`kit/skills/lib/git-worktree-env.mjs`、`kit/skills/lib/git.mjs`、`kit/skills/lib/git-index-fast.mjs`、`kit/skills/lib/git-fast-objects.mjs`、`kit/skills/lib/git-fast.mjs`、`kit/skills/lib/git-status-fast.mjs`、`kit/skills/lib/markdown-scan.mjs`、`kit/skills/lib/command-lex.mjs`、`kit/skills/lib/symbol-index.mjs`、`kit/skills/lib/no-changelog-voice.mjs`、`kit/skills/lib/credential-scan.mjs`、`kit/skills/lib/cli.mjs`、以及顶层 `scripts/zip.mjs`、`scripts/backup.mjs`。提供跨平台无弹窗命令执行、Worktree 共享环境计算、`withFileLock` 并发文件锁、零子进程 Git 对象与状态解析、命令分词、AST/正则符号索引、履历体检测、凭据/`.npmrc` 内容扫描、围栏感知 Markdown 扫描及纯内置 `node:zlib` 的 `.zip` 快照读写。
 2. **L2 环境、文档与拓扑抽象层**：
    - **平台、拓扑与能力抽象**：`kit/skills/lib/platform-probe.mjs`、`kit/skills/lib/platform-registry.mjs`、`kit/skills/lib/platform.mjs`、`kit/skills/lib/github-parse.mjs`、`kit/skills/lib/github-labels.mjs`、`kit/skills/lib/github-client.mjs`、`kit/skills/lib/local-issues.mjs`、`kit/skills/lib/task-backend.mjs`、`kit/skills/lib/task-backend-local.mjs`、`kit/skills/lib/issue-template-hydrate.mjs`、`kit/skills/lib/pr-template-hydrate.mjs`、`kit/skills/lib/task-graph.mjs`、`kit/skills/lib/intake-triage.mjs`、`kit/skills/lib/profile-sniffer.mjs`、`kit/skills/lib/profile.mjs`、`kit/skills/lib/skill-discovery.mjs`、`kit/skills/lib/tool-owned.mjs`、`kit/skills/lib/test-inventory.mjs`、`kit/skills/lib/doc-locator.mjs`、`kit/skills/lib/session-orient.mjs`、`kit/skills/lib/signals.mjs`。
    - **文档、TDD 与模板原语**：`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-frontmatter.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/lib/doc-template-render.mjs`、`kit/skills/lib/doc-facts.mjs`、`kit/skills/lib/doc-renumber.mjs`、`kit/skills/lib/doc-requirements.mjs`、`kit/skills/lib/doc-shape.mjs`、`kit/skills/lib/doc-substantive.mjs`、`kit/skills/lib/doc-toc.mjs`、`kit/skills/lib/doc-verify.mjs`、`kit/skills/lib/doc-comments.mjs`、`kit/skills/lib/tdd-facts.mjs`、`kit/skills/lib/tdd-shape.mjs`、`kit/skills/lib/tdd-scaffold.mjs`。
@@ -107,7 +107,7 @@ flowchart LR
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（含 `claims.mjs` 路径与脚本真实性回查）与交棒四档退出码净度扫描 |
 | `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 校验原子自更新（含 `15` 分钟失败冷却与回滚）与双语 README 目录锚点同步 |
 | `scripts/lib/` | 产品层 | 安装期与升级专用库（`33` 个模块）：含 `protocol.mjs`、`template.mjs`、`render.mjs`、`claims.mjs`、`merge3.mjs`、`equip-bootstrap.mjs`、`equip-integrity.mjs`、`artifact-executors.mjs`、`starter-templates.mjs`、`agents-defaults.mjs`、`agents-sections.mjs`、`review-helpers.mjs`、`navigation.mjs`、`markdown.mjs`、`fs-atomic.mjs`、`text.mjs`、`update-net.mjs`、`update-ops.mjs`、9 个 `survey-*.mjs` 及 `platform/` 下 5 个适配器模块 |
-| `kit/skills/lib/` | 产品层 | 8 个内置技能共享的零依赖运行内核（`80` 个单职责模块，含 `shared.mjs` 统一重导出、`harness-context.mjs`、`session-state.mjs`、`gate-enforcement.mjs`、`platform-registry.mjs` 与 `overlay.mjs`） |
+| `kit/skills/lib/` | 产品层 | 8 个内置技能共享的零依赖运行内核（`81` 个单职责模块，含 `shared.mjs` 统一重导出、`credential-scan.mjs`、`harness-context.mjs`、`session-state.mjs`、`gate-enforcement.mjs`、`platform-registry.mjs` 与 `overlay.mjs`） |
 | `kit/skills/templates/` | 产品层 | 四层规划与架构模板单源（`4` 份）：`docs-prd.md`、`docs-spec.md`、`docs-todo.md`、`docs-tdd.md` |
 | `kit/skills/dev-explore/` | 产品层 | 只读探索与零写入按需定位（`repo-map.mjs`、`doc-locate.mjs`，`2` 个脚本） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、模板初始化、多轮澄清、账本态 Critique 与切片依赖审计（`doc-plan.mjs`、`doc-plan-ops.mjs`、`doc-audit.mjs`、`doc-audit-helpers.mjs`、`doc-audit-repo.mjs`、`triage-rules.mjs`，共 `6` 个脚本） |
@@ -118,7 +118,7 @@ flowchart LR
 | `kit/skills/dev-govern/` | 产品层 | 只读静态体检、三层常青文档与工作树巡检、信号聚类、倒金字塔复盘与发版筹备（`govern-audit.mjs`、`govern-retro.mjs` 及 `7` 个子模块，共 `9` 个脚本） |
 | `kit/skills/dev-iterate/` | 产品层 | 盲区与热点识别、原生测试扩展（过 `edit-gate`）、并发压测、缺陷升级建单与有界优化循环（`iterate.mjs`、`iterate-cycle.mjs`，共 `2` 个脚本） |
 | `assets/readme/` | 产品层 | 双语 README 浅深色自适应 SVG 图解（`10` 份：`hero`/`architecture`/`docs-layers`/`skills-cycle`/`workflow` 及 `-en` 副本） |
-| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（`96` 个自用测试与门禁文件，含 `fixtures-w4-harness.mjs`、`injections-data-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/injections-data-trace-sync.mjs` 等） |
+| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（`98` 个自用测试与门禁文件，含 `fixtures-w4-harness.mjs`、`injections-data-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/injections-data-trace-sync.mjs`、`scripts/dev/fixtures-w5-blind-fixes.mjs`、`scripts/dev/injections-data-w5-blind-fixes.mjs` 等） |
 | `<gitCommonDir>/project-forge-{flow,govern,verify,iterate}/` | 仓外运行时 | 四域仓外持久化目录：分别存放任务账本与 `session-state.json`、`signals.jsonl` 与基线、`slots/<slotKey>/cache.json` 与 `scratch/`、迭代循环历史状态，严禁污染工作区 |
 
 ### 模块分层与禁引规则
@@ -417,8 +417,8 @@ flowchart TD
 | --- | --- | --- |
 | `scripts/dev/preflight.mjs` | 入口预算、引用可达性、模板零残留、7 键单源、`arch-rules`、套件行数、参数与退出码对拍、写路径联网守卫、Mermaid `16/12`、自举与端到端冒烟（支持 `--changed`） | 每次提交前；退出码 `0` |
 | `scripts/dev/gap-coverage.mjs` | `survey` 全部缺口规则在 `review.mjs` 与参考文档中的配对覆盖 | 改动勘察或体检规则后；`0` 遗漏 |
-| `scripts/dev/fixtures.mjs` | 全功能域正反双向行为断言（含身份、装配、v3 三方融合、平台注册表、工作流、规划波次、实证循环、治理演进、`fixtures-w4-harness.mjs` 与 `scripts/dev/fixtures-trace-sync.mjs`） | 每次改动判定或工作流后；`0` 失败 |
-| `scripts/dev/verify-injections.mjs` | 在整树隔离副本上逐条注入退化故障（含 `injections-data-w4-harness.mjs` 与 `scripts/dev/injections-data-trace-sync.mjs`），验证对应检查必红、还原后全绿 | 高风险改动与发版前；全部故障可捕获 |
+| `scripts/dev/fixtures.mjs` | 全功能域正反双向行为断言（含身份、装配、v3 三方融合、平台注册表、工作流、规划波次、实证循环、治理演进、`fixtures-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs` 与 `scripts/dev/fixtures-w5-blind-fixes.mjs`） | 每次改动判定或工作流后；`0` 失败 |
+| `scripts/dev/verify-injections.mjs` | 在整树隔离副本上逐条注入退化故障（含 `injections-data-w4-harness.mjs`、`scripts/dev/injections-data-trace-sync.mjs` 与 `scripts/dev/injections-data-w5-blind-fixes.mjs`），验证对应检查必红、还原后全绿 | 高风险改动与发版前；全部故障可捕获 |
 | `scripts/dev/merge-gate.mjs` | 从 `.github/workflows/check.yml` 单源派生全链路静态与重型校验，并行只读池 + 串行重锁步骤 | 合入前实跑；四档互斥全过 |
 | `scripts/dev/bench.mjs` | 同轮校准单位负载 `unitMs` 校验（默认模式）与 `--strict-budget` `1x` 绝对上限（如 `survey(self) <= 250ms`、`backup.zip(1000 files) <= 250ms`），无环境变量倍率开关 | 改动扫描、流转或备份逻辑后；零超时 |
 | `scripts/dev/e2e-zip-harness.mjs` | 基于真实 `git archive --format=zip HEAD` 解压包，多进程隔离驱动本地 HTTP/bare 远端跑通生命周期与演进场景 | CI 矩阵与发版前；退出码 `0` |

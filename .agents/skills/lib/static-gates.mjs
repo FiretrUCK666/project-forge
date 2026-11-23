@@ -11,7 +11,9 @@ import { join, posix as pathPosix, resolve } from 'node:path'
 import { CODE_EXT_RE, matchGlob } from './git-core.mjs'
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
 import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
-import { classifyDeclarativeDataFile, isGeneratedSourceHeader } from './static-gates-comment-hygiene.mjs'
+import {
+  classifyDeclarativeDataFile, classifyOversizedFile, isGeneratedSourceHeader, isGitAttributesGenerated,
+} from './static-gates-comment-hygiene.mjs'
 
 export { CODE_EXT_RE, matchGlob }
 import {
@@ -73,7 +75,20 @@ export const GATE_WORKFLOW_FILE_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)
 export const GATE_SHELL_OR_SCRIPT_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|package\.json|Makefile|justfile|Taskfile\.ya?ml)$|\.(?:sh|bash|ps1)$/i
 export const GATE_SKIP_RE = /(?:^|[^\w.])(?:(?:it|test|describe|context|suite)\.(?:skip|only)\s*\(|(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(|@(?:pytest\.mark\.skip(?:if)?|unittest\.skip|Disabled|Ignore)\b|#\[\s*ignore\b|\bt\.Skip(?:f|Now)?\s*\(|\[(?:Fact|Theory)\s*\([^\)]*\bSkip\s*=)|\bDISABLED_[A-Za-z0-9_]+|\{\s*(?:skip|only)\s*:\s*true\b/
 export const ASSERTION_RE = /\b(?:[Aa]ssert(?:\.\w+)?|[Ee]xpect|[Ss]hould|pytest\.raises|t\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals?|NotEquals?|DeepEqual|NoError|Error|Contains|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\b\s*(?:\(|!|\.)|\b[Aa]ssert\s+/
-export const TAUTOLOGY_ASSERT_RE = /\bassert\s+(?:True|true)\b(?:\s*(?:,|;|$))|\bassert\s*\(\s*(?:True|true)\s*\)|\bexpect\s*\(\s*(?:true|false)\s*\)\s*\.\s*(?:toBe|toEqual|toStrictEqual|to\.(?:be|equal|eql))\s*\(\s*(?:true|false)\s*\)|\bexpect\s*\(\s*true\s*\)\s*\.\s*toBeTruthy\s*\(\s*\)|\bassert\.(?:ok|isTrue)\s*\(\s*true\s*(?:,|\))|\bassertTrue\s*\(\s*true\s*(?:,|\))|\bassert(?:Equal|Equals|StrictEqual|DeepEqual)\s*\(\s*(?:true\s*,\s*true|false\s*,\s*false)\s*(?:,|\))|\bassert\.(?:strictEqual|equal|deepStrictEqual|deepEqual)\s*\(\s*(?:true\s*,\s*true|false\s*,\s*false)\s*(?:,|\))|\bassert_eq!\s*\(\s*(?:true\s*,\s*true|false\s*,\s*false)\s*(?:,|\))/
+const TAUT_ATOM = "(?:-?\\d+(?:\\.\\d+)?|'(?:[^'\\\\]|\\\\.)*'|\"(?:[^\"\\\\]|\\\\.)*\"|`(?:[^`\\\\]|\\\\.)*`|\\b(?:true|false|True|False|null|None|nil|undefined)\\b|[A-Za-z_$][A-Za-z0-9_$.]*)"
+const TAUT_TRUTHY = "(?:true|True|[1-9]\\d*(?:\\.\\d+)?|0?\\.\\d*[1-9]\\d*|'(?:[^'\\\\]|\\\\.)+'|\"(?:[^\"\\\\]|\\\\.)+\"|`(?:[^`\\\\]|\\\\.)+`)"
+export const TAUTOLOGY_ASSERT_RE = new RegExp([
+  `\\bassert\\s+(?:True|true)\\b(?:\\s*(?:,|;|$))`,
+  `\\bassert\\s*\\(\\s*${TAUT_TRUTHY}\\s*(?:,|\\))`,
+  `\\bassert\\s*\\(?\\s*(${TAUT_ATOM})\\s*===?\\s*\\1\\s*\\)?\\s*(?:,|;|$)`,
+  `\\bexpect\\s*\\(\\s*(${TAUT_ATOM})\\s*\\)\\s*\\.\\s*(?:toBe|toEqual|toStrictEqual|to\\.(?:be|equal|eql))\\s*\\(\\s*\\2\\s*(?:,|\\))`,
+  `\\bexpect\\s*\\(\\s*${TAUT_TRUTHY}\\s*\\)\\s*\\.\\s*toBeTruthy\\s*\\(\\s*\\)`,
+  `\\bassert\\.(?:ok|isTrue)\\s*\\(\\s*${TAUT_TRUTHY}\\s*(?:,|\\))`,
+  `\\bassertTrue\\s*\\(\\s*${TAUT_TRUTHY}\\s*(?:,|\\))`,
+  `\\bassert(?:Equal|Equals|StrictEqual|DeepEqual)\\s*\\(\\s*(?:[A-Za-z_$][A-Za-z0-9_$.]*\\s*,\\s*)?(${TAUT_ATOM})\\s*,\\s*\\3\\s*(?:,|\\))`,
+  `\\bassert\\.(?:strictEqual|equal|deepStrictEqual|deepEqual)\\s*\\(\\s*(${TAUT_ATOM})\\s*,\\s*\\4\\s*(?:,|\\))`,
+  `\\bassert_eq!\\s*\\(\\s*(${TAUT_ATOM})\\s*,\\s*\\5\\s*(?:,|\\))`,
+].join('|'))
 export const GATE_ASSERTION_RE = ASSERTION_RE
 export const TEST_CASE_RE = /(?<![.\w$])(?:it|test|describe|context|suite)(?:\.(?:skip|only|todo))?\s*\(|(?<![.\w$])(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]|@(?:Test|ParameterizedTest)\b|\[(?:Fact|Theory)\b/
 export const TEST_SKIP_RE = GATE_SKIP_RE
@@ -684,8 +699,8 @@ export async function detectGateWeakening(implRoot, baseRef, baseBranch, opts = 
   return findings
 }
 
-/** 扫描源码增行中的履历注释、借口压制、注释死代码、自动生成头标豁免、纯声明式数据降级与大文件/紧文件指标。 */
-export function scanStructuralHygiene({ fileRel, lines = [], fullText = null, fullLineCount = 0, warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES, skipFixtureCheck = false }) {
+/** 扫描源码增行中的履历注释、借口压制、注释死代码、自动生成头标豁免、纯声明式/类型契约降级与大文件/紧文件指标。 */
+export function scanStructuralHygiene({ fileRel, lines = [], fullText = null, fullLineCount = 0, warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES, skipFixtureCheck = false, gitAttributesText = '' }) {
   const rel = posixPath(fileRel)
   const ext = rel.split('.').pop()?.toLowerCase() ?? ''
   const isFixture = FIXTURE_FILE_RE.test(rel)
@@ -693,7 +708,12 @@ export function scanStructuralHygiene({ fileRel, lines = [], fullText = null, fu
   const effectiveFullText = typeof fullText === 'string' && fullText.length > 0
     ? fullText
     : (Array.isArray(lines) && lines.length >= fullLineCount && lines.length > 0 ? rawJoined : '')
-  const generatedExempt = Boolean(!rel.startsWith('kit/skills/') && effectiveFullText && isGeneratedSourceHeader(effectiveFullText, ext))
+  const generatedExempt = Boolean(
+    !rel.startsWith('kit/skills/') && (
+      (gitAttributesText && isGitAttributesGenerated(gitAttributesText, rel))
+      || (effectiveFullText && isGeneratedSourceHeader(effectiveFullText, ext))
+    ),
+  )
   const views = buildLexedViews(rawJoined, ext)
   const tombstoneComments = []
   const excuseSuppressions = []
@@ -719,15 +739,21 @@ export function scanStructuralHygiene({ fileRel, lines = [], fullText = null, fu
   }
   const deadCodeBlocks = (isFixture || generatedExempt) ? [] : detectCommentedDeadCodeBlocks(views).map((b) => ({ file: rel, line: b.startLine, endLine: b.endLine, length: b.length, excerpt: b.excerpt }))
   const isCheckableSrc = (skipFixtureCheck || !isTestOrFixtureFile(rel)) && !rel.endsWith('.min.js') && !generatedExempt
-  const declMeta = (isCheckableSrc && fullLineCount > warnLines && effectiveFullText)
-    ? classifyDeclarativeDataFile({ fullText: effectiveFullText, ext, fullLineCount, warnLines })
+  const oversizedClass = (isCheckableSrc && fullLineCount > warnLines)
+    ? classifyOversizedFile({ fileRel: rel, fullText: effectiveFullText, ext, fullLineCount, warnLines, gitAttributesText })
     : null
+  const declMeta = oversizedClass?.category === 'declarative-data'
+    ? oversizedClass
+    : (isCheckableSrc && fullLineCount > warnLines && effectiveFullText
+      ? classifyDeclarativeDataFile({ fullText: effectiveFullText, ext, fullLineCount, warnLines })
+      : null)
   const declarativeDataFile = declMeta ? { file: rel, ...declMeta } : null
-  const godFile = (isCheckableSrc && !declarativeDataFile && fullLineCount > warnLines)
+  const downgraded = Boolean(oversizedClass?.downgrade) || Boolean(declarativeDataFile)
+  const godFile = (isCheckableSrc && !downgraded && fullLineCount > warnLines)
     ? { file: rel, lines: fullLineCount, severity: fullLineCount > highLines ? 'high' : 'warn' }
     : null
-  const nearLimitFile = (isCheckableSrc && !declarativeDataFile && fullLineCount >= nearLimitLines && fullLineCount <= warnLines)
+  const nearLimitFile = (isCheckableSrc && !downgraded && fullLineCount >= nearLimitLines && fullLineCount <= warnLines)
     ? { file: rel, lines: fullLineCount, limit: warnLines }
     : null
-  return { generatedExempt, declarativeDataFile, tombstoneComments, excuseSuppressions, deadCodeBlocks, godFile, nearLimitFile }
+  return { generatedExempt, oversizedClass, declarativeDataFile, tombstoneComments, excuseSuppressions, deadCodeBlocks, godFile, nearLimitFile }
 }

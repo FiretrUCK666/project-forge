@@ -61,6 +61,83 @@ function isPureLocalOrNoCiRepo(repoRoot) {
   }
 }
 
+const CLASS_DECL_LINE_RE = /^\s*(?:public\s+|internal\s+|private\s+|protected\s+|abstract\s+|final\s+|export\s+(?:default\s+)?)*class\s+/
+
+function extractTestClassInheritance(codeOnlyText, ext) {
+  const definedClasses = []
+  const allParents = []
+  const pushParent = (raw, arr) => {
+    const clean = String(raw ?? '').trim().replace(/<.*$/, '').replace(/\(.*$/, '').trim()
+    if (!clean || clean === 'object') return
+    const shortName = clean.split(/[.:]/).pop()
+    if (shortName && !arr.includes(shortName)) arr.push(shortName)
+    if (clean !== shortName && !arr.includes(clean)) arr.push(clean)
+  }
+  const addDef = (name, parents) => {
+    definedClasses.push({ name, parents })
+    for (const p of parents) if (!allParents.includes(p)) allParents.push(p)
+  }
+
+  if (ext === 'py') {
+    for (const m of codeOnlyText.matchAll(/^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*:/gm)) {
+      const parents = []
+      for (const seg of (m[2] ?? '').split(',')) pushParent(seg, parents)
+      addDef(m[1], parents)
+    }
+  } else if (ext === 'kt' || ext === 'kts' || ext === 'cs') {
+    for (const m of codeOnlyText.matchAll(/\bclass\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>]*>)?(?:\s*\([^)]*\))?(?:\s*:\s*([A-Za-z_][A-Za-z0-9_.,\s<>()]*))?/gm)) {
+      const parents = []
+      for (const seg of (m[2] ?? '').split(',')) pushParent(seg, parents)
+      addDef(m[1], parents)
+    }
+  } else if (ext === 'rb') {
+    for (const m of codeOnlyText.matchAll(/^\s*class\s+([A-Za-z_][A-Za-z0-9_:]*)(?:\s*<\s*([A-Za-z_][A-Za-z0-9_:]*))?/gm)) {
+      const parents = []
+      if (m[2]) pushParent(m[2], parents)
+      addDef(m[1].split('::').pop(), parents)
+    }
+  } else {
+    for (const m of codeOnlyText.matchAll(/\bclass\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*<[^>]*>)?(?:\s+extends\s+([A-Za-z_$][A-Za-z0-9_$.]*))?/gm)) {
+      const parents = []
+      if (m[2]) pushParent(m[2], parents)
+      addDef(m[1], parents)
+    }
+  }
+  return { definedClasses, allParents }
+}
+
+function resolveInheritedTestCapabilities(parents, classIndex) {
+  let hasAssertions = false
+  let hasTests = false
+  const queue = [...(parents ?? [])]
+  const visited = new Set()
+  let depth = 0
+  while (queue.length > 0 && depth < 32) {
+    depth += 1
+    const name = queue.shift()
+    if (!name || visited.has(name)) continue
+    visited.add(name)
+    const entries = classIndex.get(name)
+    if (!entries) continue
+    for (const ent of entries) {
+      if (ent.hasAssertions) hasAssertions = true
+      if (ent.hasTests) hasTests = true
+      for (const p of ent.parents) if (!visited.has(p)) queue.push(p)
+    }
+  }
+  return { hasAssertions, hasTests }
+}
+
+function hasClassLevelSkipMarker(codeLines) {
+  for (let i = 0; i < codeLines.length; i += 1) {
+    if (!TEST_SKIP_RE.test(codeLines[i])) continue
+    for (let j = i; j <= Math.min(codeLines.length - 1, i + 2); j += 1) {
+      if (CLASS_DECL_LINE_RE.test(codeLines[j])) return true
+    }
+  }
+  return false
+}
+
 export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings) {
   const codeFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && !TEST_FILE_RE.test(f.rel))
   const testFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && TEST_FILE_RE.test(f.rel))
@@ -119,18 +196,33 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
   const tierCounts = { unit: 0, integration: 0, e2e: 0 }
   let totalTestLines = 0
 
+  const parsedTestFiles = []
+  const testClassIndex = new Map()
   for (const f of testFiles) {
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
     const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
     const lines = info.text.split('\n')
+    const codeLines = stripCodeCommentsLines(info.text, ext)
+    const codeOnlyText = codeLines.join('\n')
+    const classInfo = extractTestClassInheritance(codeOnlyText, ext)
+    const hasAssertions = ASSERTION_RE.test(codeOnlyText)
+    const hasTests = TEST_CASE_RE.test(codeOnlyText) || /\bdef\s+test_/.test(codeOnlyText) || /@(?:Test|ParameterizedTest)\b/.test(codeOnlyText)
+    for (const cls of classInfo.definedClasses) {
+      if (!testClassIndex.has(cls.name)) testClassIndex.set(cls.name, [])
+      testClassIndex.get(cls.name).push({ file: f.rel, parents: cls.parents, hasAssertions, hasTests })
+    }
+    parsedTestFiles.push({ f, info, ext, lines, codeLines, codeOnlyText, classInfo })
+  }
+
+  for (const item of parsedTestFiles) {
+    const { f, info, ext, lines, codeLines, codeOnlyText, classInfo } = item
     totalTestLines += lines.length
     const { tier: fileTier } = classifyTestFileTier(f.rel, info.text, tierMeta)
     tierCounts[fileTier] = (tierCounts[fileTier] ?? 0) + 1
     const isUnitTier = fileTier === 'unit'
-    const codeLines = stripCodeCommentsLines(info.text, ext)
-    const codeOnlyText = codeLines.join('\n')
     const isMetaFixtureHarness = isMetaTestHarness(f.rel, info.text)
+    const inherited = resolveInheritedTestCapabilities(classInfo.allParents, testClassIndex)
 
     let actualSkipCount = 0
     let testDeclCount = 0
@@ -152,7 +244,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
       }
     }
 
-    if (actualSkipCount > 0 && testDeclCount <= actualSkipCount) {
+    if (actualSkipCount > 0 && testDeclCount <= actualSkipCount && (!inherited.hasTests || hasClassLevelSkipMarker(codeLines))) {
       addFinding(findings, {
         id: `tests.all-skipped.${f.rel}`,
         category: 'tests',
@@ -171,7 +263,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
     const isGoBenchOrExampleOnly = isGoTest && !hasGoUnitTestFunc && (
       /_(?:bench|example)_test\.go$/i.test(f.name) || hasGoBenchOrExampleFunc
     )
-    if (isExplicitTestFile && !isGoBenchOrExampleOnly && !ASSERTION_RE.test(codeOnlyText)) {
+    if (isExplicitTestFile && !isGoBenchOrExampleOnly && !ASSERTION_RE.test(codeOnlyText) && !inherited.hasAssertions) {
       addFinding(findings, {
         id: `tests.zero-assertion.${f.rel}`,
         category: 'tests',

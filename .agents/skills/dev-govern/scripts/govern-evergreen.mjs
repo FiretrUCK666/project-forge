@@ -5,12 +5,13 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块与 kit/skills/lib/）。
  */
 
-import { existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 
-import { isInsideDir, posixPath } from '../../lib/git.mjs'
+import { DEFAULT_WALK_SKIP_DIRS, isInsideDir, isMacOsJunkPath, posixPath } from '../../lib/git.mjs'
 import { findChangelogVoice } from '../../lib/no-changelog-voice.mjs'
 import { discoverEvergreenDocs } from '../../lib/profile.mjs'
+import { CODE_EXT_RE } from '../../lib/static-gates.mjs'
 import { addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
 const REPO_PATH_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|sh|ps1|rs|go|java|kt|cs|json|ya?ml|toml|lock|txt|cfg|ini|md)$/i
@@ -143,4 +144,86 @@ export function checkEvergreenAuthorityDocs(repoRoot, files, agentsText, authori
     })
   }
   return discovered
+}
+
+const MODULE_MANIFEST_RE = /^(?:package\.json|pyproject\.toml|setup\.py|setup\.cfg|Cargo\.toml|go\.mod|pom\.xml|build\.gradle(?:\.kts)?|Gemfile|composer\.json|pubspec\.yaml|Package\.swift|mix\.exs|CMakeLists\.txt|.*\.(?:csproj|fsproj)|SKILL\.md)$/i
+
+function dirHasCodeOrManifest(dirAbs, depth = 0) {
+  if (depth > 8) return false
+  let entries
+  try { entries = readdirSync(dirAbs, { withFileTypes: true }) } catch { return false }
+  const subDirs = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || isMacOsJunkPath(entry.name)) continue
+    if (entry.isFile()) {
+      if (CODE_EXT_RE.test(entry.name) || MODULE_MANIFEST_RE.test(entry.name)) return true
+    } else if (entry.isDirectory() && !DEFAULT_WALK_SKIP_DIRS.has(entry.name)) {
+      subDirs.push(join(dirAbs, entry.name))
+    }
+  }
+  for (const sub of subDirs) {
+    if (dirHasCodeOrManifest(sub, depth + 1)) return true
+  }
+  return false
+}
+
+/** 扫描仓库代码模块目录，过滤无代码文件且无包清单的非代码目录（如示例 src/assembly、src/media、src/site）。 */
+export function discoverCodeModules(repoRoot) {
+  const modules = []
+  const seen = new Set()
+  const containerRoots = ['src', 'lib', 'scripts', 'packages', 'apps', 'services', 'app', 'cmd', 'internal', 'pkg', 'kit/skills']
+  for (const cr of containerRoots) {
+    const abs = join(repoRoot, cr)
+    if (!existsSync(abs)) continue
+    let entries
+    try { entries = readdirSync(abs, { withFileTypes: true }) } catch { continue }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || isMacOsJunkPath(entry.name)) continue
+      const p = `${cr}/${entry.name}`
+      if (entry.isDirectory()) {
+        if (entry.name === 'dev') continue
+        if (cr === 'src' && /^(?:test|tests|__tests__|it)$/i.test(entry.name)) continue
+        if (!dirHasCodeOrManifest(join(abs, entry.name))) continue
+        if (!seen.has(p)) { seen.add(p); modules.push({ name: entry.name, path: p }) }
+      } else if (entry.isFile() && CODE_EXT_RE.test(entry.name)) {
+        if (!seen.has(p)) { seen.add(p); modules.push({ name: entry.name, path: p }) }
+      }
+    }
+  }
+  return modules
+}
+
+/** 解析 Markdown 相对链接目标存在性（支持 VitePress 根路由及 `.github/*.md` 仓库根目录回退）。 */
+export function markdownTargetExists(repoRoot, fromFileAbs, decoded, vitePressRoots = []) {
+  if (decoded.startsWith('/')) {
+    const route = decoded.replace(/^\/+/, '').replace(/\/+$/, '')
+    const candidates = [route, `${route}.md`, `${route}/index.md`]
+    if (/\.html$/i.test(route)) {
+      const stem = route.replace(/\.html$/i, '')
+      candidates.push(`${stem}.md`, `${stem}/index.md`)
+    }
+    for (const vpRoot of ['', ...vitePressRoots]) {
+      const prefix = vpRoot ? `${vpRoot}/` : ''
+      for (const c of candidates) {
+        if (c && existsSync(join(repoRoot, `${prefix}${c}`))) return true
+      }
+    }
+    return false
+  }
+  const directAbs = resolve(dirname(fromFileAbs), decoded)
+  if (existsSync(directAbs)) return true
+  if (/\.html$/i.test(decoded)) {
+    const mdAlt = resolve(dirname(fromFileAbs), decoded.replace(/\.html$/i, '.md'))
+    if (existsSync(mdAlt)) return true
+  }
+  const fromRel = posixPath(relative(repoRoot, fromFileAbs))
+  if (fromRel === '.github' || fromRel.startsWith('.github/')) {
+    const repoFallback = resolve(repoRoot, decoded)
+    if (isInsideDir(repoFallback, repoRoot) && existsSync(repoFallback)) return true
+    if (/\.html$/i.test(decoded)) {
+      const repoMdAlt = resolve(repoRoot, decoded.replace(/\.html$/i, '.md'))
+      if (isInsideDir(repoMdAlt, repoRoot) && existsSync(repoMdAlt)) return true
+    }
+  }
+  return false
 }

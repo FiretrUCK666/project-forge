@@ -19,7 +19,9 @@ import { readDecisions, resolveAuthoritativeTddPath } from '../../lib/profile.mj
 import { CODE_EXT_RE, isTestOrFixtureFile, matchGlob } from '../../lib/static-gates.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, addFinding, readTextStrictInfo } from './govern-checks.mjs'
-import { checkEvergreenAuthorityDocs, discoverEvergreenAuthorityDocs } from './govern-evergreen.mjs'
+import {
+  checkEvergreenAuthorityDocs, discoverCodeModules, discoverEvergreenAuthorityDocs, markdownTargetExists,
+} from './govern-evergreen.mjs'
 
 export { discoverEvergreenAuthorityDocs }
 
@@ -46,31 +48,6 @@ function detectVitePressRoots(repoRoot) {
   }
   if (existsSync(join(repoRoot, 'docs'))) roots.add('docs')
   return [...roots]
-}
-
-function markdownTargetExists(repoRoot, fromFileAbs, decoded, vitePressRoots = []) {
-  if (decoded.startsWith('/')) {
-    const route = decoded.replace(/^\/+/, '').replace(/\/+$/, '')
-    const candidates = [route, `${route}.md`, `${route}/index.md`]
-    if (/\.html$/i.test(route)) {
-      const stem = route.replace(/\.html$/i, '')
-      candidates.push(`${stem}.md`, `${stem}/index.md`)
-    }
-    for (const vpRoot of ['', ...vitePressRoots]) {
-      const prefix = vpRoot ? `${vpRoot}/` : ''
-      for (const c of candidates) {
-        if (c && existsSync(join(repoRoot, `${prefix}${c}`))) return true
-      }
-    }
-    return false
-  }
-  const directAbs = resolve(dirname(fromFileAbs), decoded)
-  if (existsSync(directAbs)) return true
-  if (/\.html$/i.test(decoded)) {
-    const mdAlt = resolve(dirname(fromFileAbs), decoded.replace(/\.html$/i, '.md'))
-    if (existsSync(mdAlt)) return true
-  }
-  return false
 }
 
 function isRootReadmeRel(rel) {
@@ -182,29 +159,6 @@ function checkAgentsPathsAndRefs(repoRoot, agentsText, devProfile, defaultBranch
       }
     }
   }
-}
-
-function discoverCodeModules(repoRoot) {
-  const modules = []
-  const seen = new Set()
-  const containerRoots = ['src', 'lib', 'scripts', 'packages', 'apps', 'services', 'app', 'cmd', 'internal', 'pkg', 'kit/skills']
-  for (const cr of containerRoots) {
-    const abs = join(repoRoot, cr)
-    if (!existsSync(abs)) continue
-    let entries
-    try { entries = readdirSync(abs, { withFileTypes: true }) } catch { continue }
-    for (const entry of entries) {
-      if (entry.name.startsWith('.') || isMacOsJunkPath(entry.name)) continue
-      const p = `${cr}/${entry.name}`
-      if (entry.isDirectory()) {
-        if (entry.name === 'dev') continue
-        if (!seen.has(p)) { seen.add(p); modules.push({ name: entry.name, path: p }) }
-      } else if (entry.isFile() && CODE_EXT_RE.test(entry.name)) {
-        if (!seen.has(p)) { seen.add(p); modules.push({ name: entry.name, path: p }) }
-      }
-    }
-  }
-  return modules
 }
 
 function decodeUriSafe(raw) {

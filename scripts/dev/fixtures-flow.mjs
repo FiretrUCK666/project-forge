@@ -26,7 +26,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     'package.json': '{"name":"flow-w2","version":"1.0.0"}\n',
     'scripts/smoke.mjs': 'import { existsSync } from "node:fs"\nconst f = process.argv[process.argv.indexOf("--file") + 1]\nif (!existsSync(f)) process.exit(2)\n',
     'src/ok.mjs': 'export const ok = 1\n',
-    'test/ok.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(1, 1)\nassert.equal(2, 2)\n',
+    'test/ok.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(gotA, 1)\nassert.equal(gotB, 2)\n',
   })
   gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
 
@@ -76,7 +76,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     await handleClaim({ task: 't-w2-clean', agent: 'alice' }, roots)
     await seedExploredFor(dir, 't-w2-clean')
     const implClean = join(dir, '.worktrees', 'impl-t-w2-clean')
-    writeFileSync(join(implClean, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(3, 3)\n')
+    writeFileSync(join(implClean, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.strictEqual(res.ok, true)\n')
     gitCommitFast(implClean, 'add assertion', { updateOnly: true })
     const vClean = await handleVerify({ task: 't-w2-clean', mode: 'full' }, roots)
     if (vClean.exitCode !== 0) return `clean verify 失败：${vClean.exitCode}`

@@ -544,7 +544,7 @@ export function registerW6cHarnessGatesCases(cases) {
       }
 
       const initRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'todo', '--slug', 'prov-demo', '--title', 'Prov Demo', '--task', 'prov-t', '--owner', 'plan-w6', '--json',
+        'init', '--kind', 'todo', '--slug', 'prov-demo', '--title', 'Prov Demo', '--task', 'prov-t', '--owner', 'plan-w6', '--in-place', '--json',
       ], { cwd: dir })
       if (initRes.status !== 0) return `doc-plan init 失败：${initRes.stderr || initRes.stdout}`
       const initJson = JSON.parse(initRes.stdout)

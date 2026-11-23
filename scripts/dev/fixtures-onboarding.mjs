@@ -578,15 +578,6 @@ export function registerOnboardingCases(cases) {
         }
 
         const nx = JSON.parse(runLocal(dir, flowRel, ['next', '--task', taskId, '--json']).stdout)
-        if (role === 'contributor-fork') {
-          if (nx.phase !== 'awaiting-upstream-merge') {
-            return `${mode} contributor-fork submit 后应立即进入 awaiting-upstream-merge，实际=${nx.phase}`
-          }
-          const mBlockedFork = await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-          if (mBlockedFork.exitCode === 0) return `${mode} contributor-fork 禁止自合却退出 0`
-          continue
-        }
-
         if (hasReviewKit) {
           if (nx.phase !== 'needs-review') return `full-kit ${role} 应进入 needs-review，实际=${nx.phase}`
           const mUnreviewed = useMockApi
@@ -602,8 +593,15 @@ export function registerOnboardingCases(cases) {
           }, roots)
           if (rec !== 0) return `full-kit ${role} review record 失败：${rec}`
         } else {
-          const expectedPhase = role === 'generic-git' ? 'awaiting-remote-mr' : 'ready-to-merge'
+          const expectedPhase = role === 'contributor-fork' ? 'awaiting-upstream-merge' : (role === 'generic-git' ? 'awaiting-remote-mr' : 'ready-to-merge')
           if (nx.phase !== expectedPhase) return `no-dev-review ${role} 应进入 ${expectedPhase}，实际=${nx.phase}`
+        }
+        if (role === 'contributor-fork') {
+          const nxFork = hasReviewKit ? JSON.parse(runLocal(dir, flowRel, ['next', '--task', taskId, '--json']).stdout) : nx
+          if (nxFork.phase !== 'awaiting-upstream-merge') return `${mode} contributor-fork 应进入 awaiting-upstream-merge，实际=${nxFork.phase}`
+          const mBlockedFork = await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
+          if (mBlockedFork.exitCode === 0) return `${mode} contributor-fork 禁止自合却退出 0`
+          continue
         }
 
         if (role === 'generic-git') {

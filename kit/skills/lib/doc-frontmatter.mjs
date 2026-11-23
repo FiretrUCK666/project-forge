@@ -324,6 +324,7 @@ export function stripCritiqueMeta(text) {
     high_risk_paths: Array.isArray(fm.data?.high_risk_paths) ? fm.data.high_risk_paths : [],
   }
   const volatileLineRe = /^(?:-\s+)?(?:Plan Critique|Status|Issue|PR|Updated|Branch|Owner|Related\s+(?:SPEC|PRD|Todo)|plan_critique|critique_anchors|critique_rounds|critique_override|critique_findings|updated|issue|pr|status|related_prd|related_spec|related_todo|approved|implemented|done_at|branch|owner)\s*:/i
+  const volatileTableRowRe = /^\|\s*(?:当前状态|建单\s*\/\s*更新|分支\s*\/\s*基线|负责人\s*\/\s*审批|关联\s*Issue[^|]*|归档时间)\s*\|/i
   const kept = []
   let inFence = false
   let inImplNote = false
@@ -331,9 +332,14 @@ export function stripCritiqueMeta(text) {
     if (/^\s*(?:```|~~~)/.test(rawLine)) inFence = !inFence
     if (!inFence && /^##\s+实现说明\s*$/.test(rawLine.trim())) { inImplNote = true; continue }
     if (!inFence && inImplNote && /^##\s+/.test(rawLine.trim())) inImplNote = false
-    if (inImplNote || volatileLineRe.test(rawLine.trim())) continue
+    if (inImplNote || volatileLineRe.test(rawLine.trim()) || (!inFence && volatileTableRowRe.test(rawLine.trim()))) continue
     kept.push(inFence ? rawLine : rawLine.replace(/^(\s*-\s*)\[[xX]\](\s+C\d+\s*[:：])/, '$1[ ]$2'))
   }
-  const cleanBody = kept.join('\n').replace(/(\bdocs\/(?:prd|specs|todo)\/\d{6})-issue\d+-/gi, '$1-').trim()
+  const cleanBody = kept
+    .join('\n')
+    .replace(/(\.\.\/)archive\/(prd|specs|todo)\//gi, '$1$2/')
+    .replace(/\bdocs\/archive\/(prd|specs|todo)\//gi, 'docs/$1/')
+    .replace(/(\bdocs\/(?:prd|specs|todo)\/\d{6})-issue\d+-/gi, '$1-')
+    .trim()
   return `${JSON.stringify(stableMeta)}\n${cleanBody}`
 }

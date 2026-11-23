@@ -13,6 +13,7 @@ import { collectExcludedReviewers } from '../../lib/critique-rounds.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, readJsonSafe } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
+import { buildPlanHandoff, evaluatePlanNextState } from '../../lib/plan-next.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
 import { readSessionState } from '../../lib/session-state.mjs'
 import { ensureReviewToken, listTaskLedgers, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
@@ -426,7 +427,29 @@ export async function handleNext(opts, roots) {
     // 多任务消歧时没有单一对象，跳过后面的交接包即可。
   }
 
-  if (opts.handoff && selectedTask) {
+  if (out.phase === 'planning' && selectedTask) {
+    const planRoot = selectedTask.worktreePath ? resolve(roots.mainRoot, selectedTask.worktreePath) : roots.mainRoot
+    const planState = await evaluatePlanNextState({
+      repoRoot: existsSync(planRoot) ? planRoot : roots.mainRoot,
+      mainRoot: roots.mainRoot,
+      gitDir: roots.gitDir,
+      isGit: roots.isGit,
+      taskId: selectedTask.taskId,
+      ledger: selectedTask,
+    })
+    out = {
+      ...out,
+      ownerRole: planState.ownerRole ?? out.ownerRole,
+      nextAction: planState.nextAction ?? out.nextAction,
+      command: planState.command ?? out.command,
+      blockingReasons: [...new Set([...(out.blockingReasons ?? []), ...(planState.blockingReasons ?? [])])],
+      planState,
+    }
+    if (opts.handoff) {
+      const ph = buildPlanHandoff({ state: planState, deliveryMode: planState.deliveryMode })
+      out = { ...out, handoff: ph.fields, handoffPrompt: ph.prompt }
+    }
+  } else if (opts.handoff && selectedTask) {
     const handoff = buildHandoff({
       mainRoot: roots.mainRoot,
       ledger: selectedTask,

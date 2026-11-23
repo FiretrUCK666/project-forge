@@ -15,8 +15,16 @@ import {
   resolveHostMode,
 } from '../../lib/harness-context.mjs'
 import { recordMountedDepsInLedger } from '../../lib/ledger.mjs'
+import { findBlockingTriageDowngrade, markTriageConsumed, readSessionState } from '../../lib/session-state.mjs'
 import { validateStartProvenanceAndRole } from './flow-start-provenance.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
+
+export function checkStartTriageDowngrade(mainRoot, { taskId = null, slug = null, caseType, summary = '', reason = '' } = {}) {
+  const sess = readSessionState(mainRoot)
+  return findBlockingTriageDowngrade(sess, { taskId, slug, summary, nextCase: caseType, reason })
+}
+
+export { markTriageConsumed as markStartTriageConsumed }
 
 export function checkStartAuthorSeparation(rootDir, docRels = [], implementerId, opts = {}) {
   const res = validateStartProvenanceAndRole({
@@ -77,6 +85,7 @@ export function emitBlockedStart(opts, payload) {
 
 export async function promotePlanningToStarted({
   roots, existing, existingWorkRootPre, slug, taskId, opts, runStartPlanGate,
+  role = null, providerId = null, baseBranch = null, baseSha = null,
 }) {
   const gateRoot = existsSync(existingWorkRootPre) ? existingWorkRootPre : roots.mainRoot
   const nextCase = opts.case !== undefined ? Number(opts.case) : existing.caseType
@@ -106,6 +115,11 @@ export async function promotePlanningToStarted({
     existing.agent = String(candidateImpl).trim()
   }
 
+  if (role && (existing.role === 'local-only' || !existing.role)) existing.role = role
+  if (providerId && (existing.providerId === 'none' || !existing.providerId)) existing.providerId = providerId
+  if (baseBranch && !existing.baseBranch) existing.baseBranch = baseBranch
+  if (baseSha && !existing.baseSha) existing.baseSha = baseSha
+  existing.caseType = nextCase
   existing.status = 'started'
   existing.planning = false
   if (existing.worktreePath && !existing.depsMode && existsSync(existingWorkRootPre)) {

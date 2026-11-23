@@ -155,7 +155,7 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
 
   try {
     // 预先建一份 Todo，测试 start --create-issue 自动建单并联动重命名 todo 文件
-    const gwInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 'gw-feat', '--title', 'Gateway 功能', '--owner', 'planner', '--json'], { cwd: dir })
+    const gwInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 'gw-feat', '--title', 'Gateway 功能', '--owner', 'planner', '--in-place', '--json'], { cwd: dir })
     if (gwInit.status === 0) {
       const gwTodo = JSON.parse(gwInit.stdout).file
       if (gwTodo) { hydrateGeneratedDoc(join(dir, gwTodo), { filled: 'src/app.mjs', criteria: ['`src/app.mjs` ok'] }); gitCommitFast(dir, 'docs: gw todo') }
@@ -288,7 +288,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const roots = await resolveRepoRoots(dir)
-    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature', '--owner', 'planner'], { cwd: dir })
+    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature', '--owner', 'planner', '--in-place'], { cwd: dir })
     if (t2Init.status !== 0) return `t2 doc-plan init 失败：${t2Init.stderr}`
     gitCommitFast(dir, 'docs: t2 todo')
     const stRes = await handleStart({ task: 't-t2', case: '3', slug: 't2-feat', 'allow-plan-bootstrap': true }, roots)
@@ -338,7 +338,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     const { handleRecord, handleOverride } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resolveRepoRoots(dir)
 
-    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature', '--owner', 'planner'], { cwd: dir })
+    const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature', '--owner', 'planner', '--in-place'], { cwd: dir })
     if (t2Init.status !== 0) return `t2 doc-plan init 失败：${t2Init.stderr}`
     gitCommitFast(dir, 'docs: t2 todo')
     const stT2 = await handleStart({ task: 't-t2', case: '3', slug: 't2-feat', implementer: 'alice', 'allow-plan-bootstrap': true }, roots)
@@ -586,7 +586,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     const urlRoots = await resUrlRoots(urlDir)
 
     const spInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-      'init', '--kind', 'spec', '--slug', 'note-case', '--title', 'Impl Note Case', '--owner', 'planner', '--json',
+      'init', '--kind', 'spec', '--slug', 'note-case', '--title', 'Impl Note Case', '--owner', 'planner', '--in-place', '--json',
     ], { cwd: urlDir })
     const spRel = JSON.parse(spInit.stdout).file
     const placeholderTodo = `${'TO'}DO: fill later`

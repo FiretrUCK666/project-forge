@@ -482,7 +482,7 @@ export function registerDocDepthCases(cases) {
       // 1. init --kind todo --spec 自动继承 related_prd 并回写父 SPEC related_todo，且不写脏 1:N PRD
       const initTodo = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'todo', '--slug', 'slice-a', '--title', 'Slice A Todo', '--owner', 'planner',
-        '--spec', 'docs/specs/261118-issue91-slice-a-spec.md', '--json',
+        '--spec', 'docs/specs/261118-issue91-slice-a-spec.md', '--in-place', '--json',
       ], { cwd: dir })
       if (initTodo.status !== 0) return `init --kind todo --spec 失败：${initTodo.stderr}`
       const todoRel = JSON.parse(initTodo.stdout).file
@@ -501,7 +501,7 @@ export function registerDocDepthCases(cases) {
       // init --kind spec --prd 直接绑定已有 PRD
       const initSpecWithPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'spec', '--slug', 'slice-b', '--title', 'Slice B', '--owner', 'arch-1',
-        '--prd', 'docs/prd/261117-master-prd.md', '--json',
+        '--prd', 'docs/prd/261117-master-prd.md', '--in-place', '--json',
       ], { cwd: dir })
       if (initSpecWithPrd.status !== 0) return `init --kind spec --prd 失败：${initSpecWithPrd.stderr}`
       const specBRel = JSON.parse(initSpecWithPrd.stdout).file

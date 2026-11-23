@@ -195,10 +195,10 @@ export function registerStageBLoopCases(cases) {
     try {
       equip(dir, { tier: 'full', noBackup: true })
       const spInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'spec', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer',
+        'init', '--kind', 'spec', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place',
       ], { cwd: dir })
       const tdInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'todo', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer',
+        'init', '--kind', 'todo', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place',
       ], { cwd: dir })
       if (spInit.status !== 0 || tdInit.status !== 0) {
         return `doc-plan init 失败：sp=${spInit.stderr}, td=${tdInit.stderr}`

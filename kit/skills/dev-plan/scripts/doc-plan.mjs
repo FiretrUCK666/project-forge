@@ -8,6 +8,7 @@
  *   clarify        --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]
  *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name> --owner-reason "<原因>"] [--status <s>] [--json]
  *   audit          [--file <docPath> | .] [--json]
+ *   next           [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]
  *   critique-scope    --file <docPath> [--reviewer <id>] [--round <n>] [--json]
  *   critique-pass     --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--json]
  *   critique-reject   --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--findings <t>...] [--json]
@@ -24,6 +25,7 @@ import { join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { buildContextBrief, formatContextBriefLines } from '../../lib/context-brief.mjs'
+import { buildPlanHandoff, evaluatePlanNextState } from '../../lib/plan-next.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { resolveHostMode, resolveNonEmptyActor, validateDocOwnerValue } from '../../lib/harness-context.mjs'
@@ -129,8 +131,9 @@ function printHelp() {
     '用法：node .agents/skills/dev-plan/scripts/doc-plan.mjs <子命令> [选项]',
     '',
     '子命令：',
+    '  next               [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]',
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--json]',
-    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--owner <name>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--single-session] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree] [--no-prune] [--json]',
+    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--owner <name>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--single-session] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
     '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O> --owner-reason "<变更原因>"] [--status <S>] [--milestone <m>] [--json]',
     '  audit              [--file <docPath> | .] [--json]',
@@ -155,7 +158,7 @@ async function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'multi-spec', 'single-session'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'single-session', 'handoff', 'plan-only'],
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
@@ -173,6 +176,35 @@ async function main(argv) {
   const mainRoot = roots.isGit ? roots.mainRoot : roots.cwd
 
   try {
+    if (sub === 'next') {
+      const state = await evaluatePlanNextState({
+        repoRoot,
+        mainRoot,
+        gitDir: roots.gitDir,
+        isGit: roots.isGit,
+        taskId: opts.task ?? null,
+        file: opts.file ?? opts._[0] ?? null,
+        planOnly: Boolean(opts['plan-only']),
+        auditDocFn: auditDoc,
+      })
+      const payload = opts.handoff
+        ? (() => {
+            const h = buildPlanHandoff({ state, deliveryMode: state.deliveryMode })
+            return { ...state, handoff: h.fields, handoffPrompt: h.prompt }
+          })()
+        : state
+      if (cli.json) {
+        process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+      } else {
+        process.stdout.write(`# doc-plan next (${payload.phase} | owner=${payload.ownerRole})\n`)
+        if (payload.doc?.file) process.stdout.write(`- 文档: ${payload.doc.file} | worktree=${payload.interruptedWorktree?.worktreePath ?? 'in-place'}\n`)
+        process.stdout.write(`- 下一步: ${payload.nextAction}\n`)
+        if (payload.handoffPrompt) process.stdout.write(`\n${payload.handoffPrompt}`)
+        printNextStep([{ skill: 'dev-plan', text: payload.command }], { repoRoot: mainRoot })
+      }
+      return 0
+    }
+
     if (sub === 'triage') {
       const summary = opts.summary ?? opts._.join(' ')
       if (!summary) throw new Error('triage 需要传入 --summary "<需求描述>"')
@@ -266,6 +298,7 @@ async function main(argv) {
         relatedPrd: opts.prd, milestone: opts.milestone, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
         planMode: resolveCliPlanMode(opts['plan-mode']),
         worktree: Boolean(opts.worktree),
+        inPlace: Boolean(opts['in-place']),
         multiSpec: Boolean(opts['multi-spec']),
         caseType: opts.case !== undefined ? Number(opts.case) : null,
       })
@@ -408,9 +441,13 @@ async function main(argv) {
           const fn = parseDocFilename(res.file)
           const slugVal = fn?.slug ?? 'task'
           const statusLow = String(fm.data?.status ?? '').toLowerCase()
+          const isTerminalDoc = ['done', 'archived', 'superseded', 'dropped', 'implemented'].includes(statusLow)
+            || posixPath(res.file).startsWith('docs/archive/')
           const fileRefs = [...new Set(docText.match(/`[^`\n]+\/[A-Za-z0-9_.-]+\.[A-Za-z0-9]+`/g) ?? [])]
           const isNonTrivialTodo = Boolean(fm.data?.related_spec) || fileRefs.length >= 3 || /^- \[[ xX]\] C3\b/m.test(docText)
-          if (res.docType === 'prd' && !['active', 'done', 'dropped'].includes(statusLow)) {
+          if (isTerminalDoc) {
+            // 已归档或终态文档不再引导新建隔离实施，避免对历史产物误导开工
+          } else if (res.docType === 'prd' && !['active', 'done', 'dropped'].includes(statusLow)) {
             printNextStep([{ skill: 'dev-plan', text: `PRD 须经独立只读 Plan Critique 后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
           } else if (res.docType === 'tdd') {
             printNextStep([{ skill: 'dev-plan', text: `TDD 架构基线须经独立架构 Critique 确认与 AGENTS.md 模块边界、arch-rules 对齐【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })

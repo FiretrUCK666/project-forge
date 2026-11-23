@@ -474,7 +474,7 @@ cases.push(['零教学泄漏(CONVENTIONS_HINT 清除)、maskVolatile(I65)、--ad
     if ((await runNode('equip.mjs', [dir, '--check'])).status !== 0) return '二次定制重采用后 --check 未通过'
 
     // 3. doc-plan 自定义模板 + SELF_CRITIQUE_REJECTED + PRD/TDD 内审指引
-    const initSpec = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'spec', '--slug', 'custom-sec', '--title', 'Custom Sec Spec', '--owner', 'alice', '--json'], { cwd: dir })
+    const initSpec = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'spec', '--slug', 'custom-sec', '--title', 'Custom Sec Spec', '--owner', 'alice', '--in-place', '--json'], { cwd: dir })
     if (initSpec.status !== 0) return `doc-plan init 失败：${initSpec.stderr}`
     const specFile = JSON.parse(initSpec.stdout).file
     const specText = readFileSync(join(dir, specFile), 'utf8').replace('<第一条可判定的标准>', '真实可执行标准')
@@ -486,7 +486,7 @@ cases.push(['零教学泄漏(CONVENTIONS_HINT 清除)、maskVolatile(I65)、--ad
       return `critique-pass 未触发 SELF_CRITIQUE_REJECTED 拦截 owner===reviewer 自审：exit=${selfCrit.status} err=${selfCrit.stderr}`
     }
 
-    const initPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'prd', '--slug', 'p1', '--title', 'PRD 1', '--owner', 'alice', '--json'], { cwd: dir })
+    const initPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'prd', '--slug', 'p1', '--title', 'PRD 1', '--owner', 'alice', '--in-place', '--json'], { cwd: dir })
     const prdFile = JSON.parse(initPrd.stdout).file
     hydrateGeneratedDoc(join(dir, prdFile), {
       criteria: ['命令退出码为 0', '输出里含预期字段'],

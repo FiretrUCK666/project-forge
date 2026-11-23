@@ -6,12 +6,36 @@
  */
 
 import { EXIT } from './exit-codes.mjs'
-import { buildMultiTaskWavePlan, buildSliceGraph, scanUnstartedReadySlices } from './doc-slice-graph.mjs'
+import { buildMultiTaskWavePlan, buildSliceGraph, collectPlanDocs, scanUnstartedReadySlices } from './doc-slice-graph.mjs'
 import { posixPath } from './git-core.mjs'
-import { nextReviewRound } from './ledger.mjs'
+import { classifyTaskLiveness, nextReviewRound } from './ledger.mjs'
 
 const CLOSED_STATUSES = new Set(['submitted', 'local-ready', 'awaiting-upstream-merge', 'merged', 'aborted'])
 const TERMINAL_SPEC_STATUSES = new Set(['implemented', 'done', 'superseded', 'dropped', 'archived'])
+
+/** 从未启动切片元数据推导所属 Case 档位（独立 Todo 归 Case 3，SPEC 归 Case 4）。 */
+export function caseTypeOfSlice(slice) {
+  const explicit = Number(slice?.caseType)
+  if (Number.isInteger(explicit) && explicit >= 1 && explicit <= 5) return explicit
+  if (slice?.kind === 'todo' && !slice?.specFile) return 3
+  return 4
+}
+
+function findInFlightPlanOrMaster(repoRoot) {
+  if (!repoRoot) return null
+  try {
+    const docs = collectPlanDocs(repoRoot).filter((d) => !d.archived)
+    const active = docs.filter((d) => !TERMINAL_SPEC_STATUSES.has(String(d.data?.status ?? 'draft').trim().toLowerCase()))
+    const draftDoc = active.find((d) => {
+      const st = String(d.data?.status ?? 'draft').trim().toLowerCase()
+      return (d.kind === 'spec' || d.kind === 'todo') && (st === 'draft' || st === 'pending')
+    })
+    if (draftDoc) return { kind: 'draft', doc: draftDoc }
+    const masterPrd = active.find((d) => d.kind === 'prd' && (d.data?.multi_spec === true || ['draft', 'pending', 'active'].includes(String(d.data?.status ?? 'draft').trim().toLowerCase())))
+    if (masterPrd) return { kind: 'master', doc: masterPrd }
+  } catch { /* ignore unreadable docs */ }
+  return null
+}
 
 /** 剥离合法并发参数（`--jobs` / `-j` / `--maxWorkers` / `--workers` / `--bail` / `--config.verify-deps-before-run`）。 */
 export function normalizeConcurrentVerifyCommand(cmd) {
@@ -131,18 +155,61 @@ function enrichActiveTasksFromSliceSpecs(activeTasks = [], repoRoot = null) {
 export function evaluateNextState({
   activeTasks = [],
   allLedgers = activeTasks,
+  pendingCleanupTasks = [],
   selectedTask = null,
   taskRuntime = null,
   multiTaskFiles = null,
   repoRoot = null,
 } = {}) {
+  const liveActiveTasks = []
+  const cleanupBucket = Array.isArray(pendingCleanupTasks) ? [...pendingCleanupTasks] : []
+  const seenCleanup = new Set(cleanupBucket.map((c) => c?.taskId).filter(Boolean))
+  for (const t of Array.isArray(activeTasks) ? activeTasks : []) {
+    const liveness = classifyTaskLiveness(t, { repoRoot })
+    if (liveness === 'active') {
+      liveActiveTasks.push(t)
+    } else if (liveness === 'terminal-pending-cleanup' && t?.taskId && !seenCleanup.has(t.taskId)) {
+      seenCleanup.add(t.taskId)
+      cleanupBucket.push({ taskId: t.taskId, status: t.status, branch: t.branch ?? null, worktreePath: t.worktreePath ?? null })
+    }
+  }
+
   if (!selectedTask) {
     const readySlices = repoRoot ? scanUnstartedReadySlices(repoRoot, allLedgers) : []
-    const enrichedActive = enrichActiveTasksFromSliceSpecs(activeTasks, repoRoot)
+    const enrichedActive = enrichActiveTasksFromSliceSpecs(liveActiveTasks, repoRoot)
     if (enrichedActive.length === 0) {
       const wavePlan = readySlices.length > 0 ? buildMultiTaskWavePlan(readySlices) : null
       const parallelDispatch = Boolean(wavePlan?.parallelDispatch)
       const firstReady = wavePlan?.order?.[0] ?? null
+      const firstSlice = firstReady ? (readySlices.find((s) => s.taskId === firstReady) ?? readySlices[0]) : null
+      const inFlightPlan = !firstReady ? findInFlightPlanOrMaster(repoRoot) : null
+      if (inFlightPlan) {
+        const doc = inFlightPlan.doc
+        const isMaster = inFlightPlan.kind === 'master'
+        return {
+          taskId: null,
+          phase: 'planning',
+          ownerRole: 'coordinator',
+          parallelDispatch: false,
+          readySlices,
+          ...(cleanupBucket.length > 0 ? { pendingCleanupTasks: cleanupBucket } : {}),
+          nextAction: isMaster
+            ? `检测到在途总控 PRD（${doc.rel}），请继续拆解或推进切片规划（而非重新 triage）。`
+            : `检测到在途 draft 规划文档（${doc.rel}），请推进规划审计与内审（而非重新 triage）。`,
+          command: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" next --file "${doc.rel}" --handoff`,
+          blockingReasons: [],
+          worktreePath: null,
+          reviewWorktreePath: null,
+          policy: null,
+          coordinatorGuidance: {
+            delegateImpl: false,
+            delegateFreshReview: false,
+            note: `发现未完结规划 ${doc.rel}，按 doc-plan next 续推。`,
+          },
+          compactContext: null,
+          candidates: [],
+        }
+      }
       return {
         taskId: null,
         phase: 'idle',
@@ -150,6 +217,7 @@ export function evaluateNextState({
         parallelDispatch,
         readySlices,
         ...(wavePlan ? { wavePlan, waves: wavePlan.waves } : {}),
+        ...(cleanupBucket.length > 0 ? { pendingCleanupTasks: cleanupBucket } : {}),
         nextAction: parallelDispatch
           ? `检测到 ${wavePlan.waves[0].tasks.length} 个无冲突就绪切片（${wavePlan.parallelizable.join(', ')}），主会话仅纯调度并行派发隔离实施子代理。`
           : (firstReady
@@ -158,7 +226,7 @@ export function evaluateNextState({
         command: parallelDispatch
           ? 'node ".agents/skills/dev-flow/scripts/flow.mjs" batch plan --json'
           : (firstReady
-              ? `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${firstReady} --case 4`
+              ? `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${firstReady} --case ${caseTypeOfSlice(firstSlice)}`
               : 'node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug>'),
         blockingReasons: [],
         worktreePath: null,
@@ -181,13 +249,14 @@ export function evaluateNextState({
     const waveSummary = wavePlan.waves
       .map((w) => `Wave ${w.wave}(${w.canParallel ? '可并行' : '串行'}): ${w.tasks.map((t) => t.taskId).join(',')}`)
       .join(' -> ')
-    const firstTask = wavePlan.order[0] ?? activeTasks[0].taskId
+    const firstTask = wavePlan.order[0] ?? liveActiveTasks[0].taskId
     return {
       taskId: null,
       phase: 'ambiguous',
       ownerRole: 'coordinator',
       parallelDispatch,
       readySlices,
+      ...(cleanupBucket.length > 0 ? { pendingCleanupTasks: cleanupBucket } : {}),
       nextAction: parallelDispatch
         ? `检测到 Wave 1 有 ${wavePlan.waves[0].tasks.length} 个可并行任务/就绪切片（${wavePlan.parallelizable.join(', ')}）：${waveSummary}。主会话保持纯调度并并行派发。`
         : `检测到 ${combined.length} 个任务/切片，按波次顺序推进：${waveSummary}。`,
@@ -206,7 +275,7 @@ export function evaluateNextState({
         note: `共 ${wavePlan.waves.length} 波次（Wave 1：${wavePlan.parallelizable.join(', ') || firstTask}；parallelDispatch=${parallelDispatch}）。`,
       },
       compactContext: null,
-      candidates: activeTasks.map((t) => ({ taskId: t.taskId, status: t.status, branch: t.branch ?? null, worktreePath: t.worktreePath ?? null })),
+      candidates: liveActiveTasks.map((t) => ({ taskId: t.taskId, status: t.status, branch: t.branch ?? null, worktreePath: t.worktreePath ?? null })),
     }
   }
 
@@ -229,9 +298,14 @@ export function evaluateNextState({
   const finalizeStale = Boolean(needsFinalize && (!t.finalized || (t.finalizedHead && currentHead && t.finalizedHead !== currentHead && rt.nonDocChangesAfterFinalize)))
   const stopLossActive = Boolean((t.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t.humanApprovedStopLoss)
   const reviewCoversHead = Boolean(t.reviewPassed === true && (!currentHead || t.reviewPassedHead === currentHead) && (!lastRound || !currentHead || lastRound.headSha === currentHead))
-  const unavailIssues = Array.isArray(t.issueContextUnavailable)
+  const skipLocalIssueLoop = t.role === 'local-only'
+    || t.role === 'generic-git'
+    || t.providerId === 'none'
+    || t.providerId === 'generic-git'
+  const rawUnavailIssues = Array.isArray(t.issueContextUnavailable)
     ? t.issueContextUnavailable.map(Number).filter((n) => Number.isInteger(n) && n > 0)
     : []
+  const unavailIssues = skipLocalIssueLoop ? [] : rawUnavailIssues
   const ack = t.issueContextAck
   const ackedSet = new Set(Array.isArray(ack?.issues) ? ack.issues.map(Number).filter(Boolean) : [])
   const hasValidIssueAck = Boolean(
@@ -414,7 +488,7 @@ export function evaluateNextState({
   let parallelFields = {}
   if (phase.startsWith('needs-') && repoRoot) {
     const readySlices = scanUnstartedReadySlices(repoRoot, allLedgers)
-    const combined = [...activeTasks, ...readySlices]
+    const combined = [...liveActiveTasks, ...readySlices]
     const wavePlan = combined.length > 0 ? buildMultiTaskWavePlan(combined, multiTaskFiles) : null
     parallelFields = {
       parallelDispatch: Boolean(wavePlan?.parallelDispatch),
@@ -432,6 +506,7 @@ export function evaluateNextState({
     command,
     blockingReasons,
     warnings,
+    ...(cleanupBucket.length > 0 ? { pendingCleanupTasks: cleanupBucket } : {}),
     ...parallelFields,
     worktreePath: t.worktreePath ?? null,
     reviewWorktreePath: t.reviewWorktreePath ?? null,
@@ -449,7 +524,7 @@ export function evaluateNextState({
       caseType: t.caseType,
       role: t.role,
       branch: t.branch ?? null,
-      baseBranch: t.baseBranch ?? 'main',
+      baseBranch: t.baseBranch ?? null,
       headSha: currentHead,
       riskTier: policy?.riskTier ?? 'medium',
       requiredGates: policy?.requiredGates ?? [],

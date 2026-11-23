@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { EXIT } from './exit-codes.mjs'
-import { gitRun, gitStatusPorcelainZ, inspectBranchMergeState, readTextSafe, withFileLock } from './git.mjs'
+import { gitRun, gitStatusPorcelainZ, inspectBranchMergeState, readTextSafe, resolveDefaultBranch, withFileLock } from './git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from './git-fast.mjs'
 import { parsePfStateTags } from './github-client.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
@@ -478,7 +478,14 @@ export class GenericRemoteBackend {
    */
   async mergePr({ humanApproved = false, ledger, branch, baseBranch } = {}) {
     const targetBranch = branch ?? ledger?.branch ?? null
-    const base = baseBranch ?? ledger?.baseBranch ?? 'main'
+    const base = baseBranch ?? ledger?.baseBranch ?? await resolveDefaultBranch(this.mainRoot, { strict: true })
+    if (!base) {
+      return {
+        ok: false, blocked: true, code: 'BLOCKED_MISSING_DEFAULT_BRANCH', exitCode: EXIT.FACT,
+        fetched: false, humanApproved: false,
+        message: 'BLOCKED_MISSING_DEFAULT_BRANCH: 无法解析仓库真实默认分支，无法核验远端合流状态。',
+      }
+    }
     const remote = this.pushRemote || 'origin'
     const fetchRes = await gitRun(this.mainRoot, ['fetch', '--prune', '--quiet', remote])
     const fetched = fetchRes.ok
@@ -502,9 +509,23 @@ export class GenericRemoteBackend {
     }
     // 核对远端引用，不是本地分支：本地那条可能还停在合并前，拿它判等于用旧快照回答新问题。
     const baseRef = fetched ? `${remote}/${base}` : base
-    const targetRef = targetBranch ? (fetched ? `${remote}/${targetBranch}` : targetBranch) : undefined
+    let targetRef = targetBranch ? (fetched ? `${remote}/${targetBranch}` : targetBranch) : undefined
+    let targetHeadSha
+    if (fetched && targetBranch) {
+      const remoteTargetRes = await gitRun(this.mainRoot, ['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${targetBranch}`])
+      if (!remoteTargetRes.ok) {
+        // 远端合并后可能已自动删除远程分支：回退用已提交 SHA 或本地跟踪提交对照远端主干核验四态
+        targetRef = undefined
+        targetHeadSha = ledger?.lastSubmittedHead || ledger?.verifiedHead || undefined
+        if (!targetHeadSha) {
+          const localRes = await gitRun(this.mainRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${targetBranch}`])
+          if (localRes.ok && localRes.stdout.trim()) targetHeadSha = localRes.stdout.trim()
+        }
+      }
+    }
     const state = await inspectBranchMergeState(this.mainRoot, {
       branch: targetRef,
+      headSha: targetHeadSha,
       defaultBranch: baseRef,
       gitDir: this.gitDir,
     })
@@ -529,7 +550,7 @@ export class GenericRemoteBackend {
 }
 
 export class LocalOnlyBackend {
-  constructor({ mainRoot = process.cwd(), gitDir = null, baseBranch = 'main' } = {}) {
+  constructor({ mainRoot = process.cwd(), gitDir = null, baseBranch = null } = {}) {
     this.kind = 'local-only'
     this.mainRoot = mainRoot
     this.gitDir = gitDir
@@ -604,7 +625,16 @@ export class LocalOnlyBackend {
     policy = null, changedFiles = [], runVerify = true, trialMerger = null,
   } = {}) {
     const root = mrArg ?? this.mainRoot
-    const targetBase = bbArg ?? ledger?.baseBranch ?? this.baseBranch ?? 'main'
+    const targetBase = bbArg ?? ledger?.baseBranch ?? this.baseBranch ?? await resolveDefaultBranch(root, { strict: true })
+    if (!targetBase) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_MISSING_DEFAULT_BRANCH',
+        exitCode: EXIT.FACT,
+        message: 'BLOCKED_MISSING_DEFAULT_BRANCH: 仓库缺少可用的默认基线分支（严禁擅自创建 main），请先确认或创建基线分支后再合并。',
+      }
+    }
     if (typeof trialMerger === 'function') {
       const res = await trialMerger({ mainRoot: root, ledger, baseBranch: targetBase, profile, evidence, policy, changedFiles, runVerify })
       if (res?.ok && ledger?.taskId) {
@@ -626,8 +656,13 @@ export class LocalOnlyBackend {
     const fastBaseSha = resolveRefShaFast(fastGitDir, baseRef)
     const baseRes = fastBaseSha ? { ok: true, stdout: fastBaseSha } : await gitRun(root, ['rev-parse', '--verify', '--quiet', baseRef])
     if (!baseRes.ok) {
-      const up = await gitRun(root, ['update-ref', baseRef, branchSha])
-      return { ok: up.ok, localMerge: up.ok, merged: up.ok, into: targetBase, mergedSha: branchSha }
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_MISSING_DEFAULT_BRANCH',
+        exitCode: EXIT.FACT,
+        message: `BLOCKED_MISSING_DEFAULT_BRANCH: 基线分支 ${targetBase} 不存在（禁止擅自 update-ref 造旁支），请先检查默认分支。`,
+      }
     }
     const fastHeadBr = readHeadFast(fastGitDir)?.branch ?? null
     const curMainRes = fastHeadBr ? { ok: true, stdout: fastHeadBr } : await gitRun(root, ['symbolic-ref', '--short', 'HEAD'])

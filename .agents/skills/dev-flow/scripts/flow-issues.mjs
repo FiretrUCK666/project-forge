@@ -360,7 +360,12 @@ export async function handleIssue(opts, roots) {
       role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
     })
     const res = await backend.getIssue({ repo: targetRepo, number: num })
-    if (!res.ok) throw new Error(`读取工单 #${num} 失败：${res.error ?? 'not-found'}`)
+    if (!res.ok) {
+      if (!useRemoteGh) {
+        throw new Error(`本地 .git/issues 未找到工单 #${num}（跨机克隆不携带仓外 .git 状态，请直接查阅仓库内 docs/specs 或 docs/todo 文档）`)
+      }
+      throw new Error(`读取工单 #${num} 失败：${res.error ?? 'not-found'}`)
+    }
     if (opts.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
     else {
       process.stdout.write(`#${res.number} [${res.state}] ${res.title}\n`)

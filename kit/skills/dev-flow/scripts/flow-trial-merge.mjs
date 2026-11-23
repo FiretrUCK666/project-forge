@@ -7,7 +7,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { execShellCommand, gitRun, gitStatusPorcelainZ, readTextSafe } from '../../lib/git.mjs'
+import { execShellCommand, gitRun, gitStatusPorcelainZ, readTextSafe, resolveDefaultBranch } from '../../lib/git.mjs'
 import { isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone, resolveTierCommand } from '../../lib/profile.mjs'
@@ -71,13 +71,23 @@ async function cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel, { prune = false } 
 export async function runTrialMerge({
   mainRoot,
   ledger,
-  baseBranch = 'main',
+  baseBranch = null,
   profile = null,
   evidence = null,
   policy = null,
   changedFiles = [],
   runVerify = true,
 } = {}) {
+  const targetBase = baseBranch ?? ledger?.baseBranch ?? await resolveDefaultBranch(mainRoot, { strict: true })
+  if (!targetBase) {
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_MISSING_DEFAULT_BRANCH',
+      exitCode: EXIT.FACT,
+      message: 'BLOCKED_MISSING_DEFAULT_BRANCH: 仓库缺少可用的默认基线分支（禁止擅自创建 main），请先确认基线分支。',
+    }
+  }
   const mainSt = await gitStatusPorcelainZ(mainRoot)
   if (!mainSt.ok || mainSt.entries.length > 0) {
     return {
@@ -90,7 +100,7 @@ export async function runTrialMerge({
   }
 
   const branch = ledger?.branch
-  if (!branch) return { ok: true, localBranchMissing: true, into: baseBranch }
+  if (!branch) return { ok: true, localBranchMissing: true, into: targetBase }
   const fastGitDir = resolveGitDirFast(mainRoot)
   const fastBranchSha = resolveRefShaFast(fastGitDir, `refs/heads/${branch}`)
   const brRes = fastBranchSha
@@ -101,7 +111,7 @@ export async function runTrialMerge({
   }
   const branchSha = brRes.stdout.trim()
 
-  const baseRefName = `refs/heads/${baseBranch}`
+  const baseRefName = `refs/heads/${targetBase}`
   const fastBaseSha = resolveRefShaFast(fastGitDir, baseRefName)
   const fastHead = readHeadFast(fastGitDir)
   const [baseRes, curMainRes] = await Promise.all([
@@ -111,25 +121,26 @@ export async function runTrialMerge({
   const curMainBranch = curMainRes.ok ? curMainRes.stdout.trim() : ''
 
   if (!baseRes.ok) {
-    if (curMainBranch === branch && baseBranch === branch) {
-      return { ok: true, localBranchCurrent: true, branch, into: baseBranch, mergedSha: branchSha }
+    if (curMainBranch === branch && targetBase === branch) {
+      return { ok: true, localBranchCurrent: true, branch, into: targetBase, mergedSha: branchSha }
     }
-    const up = await gitRun(mainRoot, ['update-ref', baseRefName, branchSha])
-    if (!up.ok) throw new Error(`创建基线分支 ${baseBranch} 失败：${up.stderr}`)
-    if (curMainBranch === baseBranch) {
-      await gitRun(mainRoot, ['merge', '--ff-only', '--no-edit', branchSha])
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_MISSING_DEFAULT_BRANCH',
+      exitCode: EXIT.FACT,
+      message: `BLOCKED_MISSING_DEFAULT_BRANCH: 基线分支 ${targetBase} 不存在（禁止擅自 update-ref 造旁支），请先检查默认分支。`,
     }
-    return { ok: true, localMerge: true, initialBranchCreated: true, branch, into: baseBranch, mergedSha: branchSha }
   }
 
   const oldBaseSha = baseRes.stdout.trim()
   if (branchSha === oldBaseSha) {
-    return { ok: true, alreadyMerged: true, branch, into: baseBranch, mergedSha: oldBaseSha }
+    return { ok: true, alreadyMerged: true, branch, into: targetBase, mergedSha: oldBaseSha }
   }
   const fastAnc = isAncestorLinearFast(fastGitDir, branchSha, oldBaseSha)
   const isAncOk = fastAnc !== null ? fastAnc : (await gitRun(mainRoot, ['merge-base', '--is-ancestor', branchSha, oldBaseSha])).ok
   if (isAncOk) {
-    return { ok: true, alreadyMerged: true, branch, into: baseBranch, mergedSha: oldBaseSha }
+    return { ok: true, alreadyMerged: true, branch, into: targetBase, mergedSha: oldBaseSha }
   }
 
   const safeId = sanitizeTaskId(ledger.taskId)
@@ -213,7 +224,7 @@ export async function runTrialMerge({
         recoveryPacket: {
           code: 'BLOCKED_TRIAL_MERGE_CONFLICT',
           branch,
-          baseBranch,
+          baseBranch: targetBase,
           conflictFiles: extracted.conflictFiles,
           conflictHunks: extracted.conflictHunks,
           commands: [
@@ -221,7 +232,7 @@ export async function runTrialMerge({
             'GIT_EDITOR=true git rebase --continue',
           ],
         },
-        message: `BLOCKED_TRIAL_MERGE_CONFLICT: 临时试合 ${branch} 到 ${baseBranch} 存在冲突：${errDetail}`,
+        message: `BLOCKED_TRIAL_MERGE_CONFLICT: 临时试合 ${branch} 到 ${targetBase} 存在冲突：${errDetail}`,
       }
     }
     const fastMergedHead = readHeadFast(resolveGitDirFast(tmpAbs))?.oid ?? null
@@ -260,9 +271,9 @@ export async function runTrialMerge({
     await cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel)
   }
 
-  if (curMainBranch === baseBranch) {
+  if (curMainBranch === targetBase) {
     const ffRes = await gitRun(mainRoot, ['merge', '--ff-only', '-q', mergedSha])
-    if (!ffRes.ok) throw new Error(`试合通过但推进主干 ${baseBranch} (merge --ff-only) 失败：${ffRes.stderr}`)
+    if (!ffRes.ok) throw new Error(`试合通过但推进主干 ${targetBase} (merge --ff-only) 失败：${ffRes.stderr}`)
   } else {
     const casRes = await gitRun(mainRoot, ['update-ref', baseRefName, mergedSha, oldBaseSha])
     if (!casRes.ok) throw new Error(`试合通过但 CAS 更新 ${baseRefName} 失败：${casRes.stderr}`)
@@ -273,7 +284,7 @@ export async function runTrialMerge({
     localMerge: true,
     trialMerged: true,
     branch,
-    into: baseBranch,
+    into: targetBase,
     oldBaseSha,
     mergedSha,
   }

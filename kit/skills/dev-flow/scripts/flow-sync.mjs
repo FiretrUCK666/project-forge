@@ -34,11 +34,12 @@ export async function handleSync(opts = {}, roots) {
     return { exitCode: EXIT.FACT }
   }
 
-  const fastPrevHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
-  const headRes = fastPrevHead ? { ok: true, stdout: fastPrevHead } : await gitRun(implRoot, ['rev-parse', 'HEAD'])
+  const fastHeadSha = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
+  const headRes = fastHeadSha ? { ok: true, stdout: fastHeadSha } : await gitRun(implRoot, ['rev-parse', 'HEAD'])
   const prevHeadSha = headRes.ok ? headRes.stdout.trim() : null
   const oldBaseSha = ledger.baseSha ?? null
-  const oldBaseBranch = ledger.baseBranch ?? 'main'
+  const resolvedDefault = await resolveDefaultBranch(roots.mainRoot, { strict: true })
+  const oldBaseBranch = ledger.baseBranch ?? resolvedDefault
 
   const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
@@ -61,7 +62,7 @@ export async function handleSync(opts = {}, roots) {
     gitDir: roots.gitDir,
   })
 
-  const defaultBranch = ledger.stackTargetBase ?? (await resolveDefaultBranch(roots.mainRoot)) ?? 'main'
+  const defaultBranch = ledger.stackTargetBase ?? resolvedDefault
   let targetBaseBranch = opts.onto ? String(opts.onto).trim() : oldBaseBranch
   let parentMerged = false
   if (!opts.onto && (ledger.parentTaskId || ledger.parentBranch)) {

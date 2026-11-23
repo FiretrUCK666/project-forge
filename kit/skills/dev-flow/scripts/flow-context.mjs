@@ -116,6 +116,8 @@ export async function fetchIssueContextList({
           })
           continue
         }
+        out.push({ number: num, fetched: false, localOnly: true, reason: 'local-issue-missing-cross-machine', title: null, summary: null })
+        continue
       }
       out.push({ number: num, fetched: false, reason: 'no-api-channel', title: null, summary: null })
       continue
@@ -134,7 +136,7 @@ export async function fetchIssueContextList({
       out.push({ number: num, fetched: false, reason: normalizeContextFetchReason(null, error), title: null, summary: null })
     }
   }
-  const unavail = out.filter((x) => !x.fetched).map((x) => x.number)
+  const unavail = out.filter((x) => !x.fetched && !x.localOnly).map((x) => x.number)
   return { issueContext: out, issueContextUnavailable: unavail }
 }
 

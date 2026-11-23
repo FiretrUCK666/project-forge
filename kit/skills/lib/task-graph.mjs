@@ -8,7 +8,7 @@ import { EXIT } from './exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { gitRun, inspectBranchMergeState } from './git.mjs'
+import { gitRun, inspectBranchMergeState, resolveDefaultBranch } from './git.mjs'
 import { readTaskLedger } from './ledger.mjs'
 import { parseBodyRelations, parseFlowInputs, parseIssueNumbers, parsePrNumber } from './platform.mjs'
 
@@ -320,7 +320,7 @@ export function assertNoDuplicatePrForTask({ ledger, graph, branchOpenPrs = [] }
 }
 
 /** 堆叠 PR 父分支/父 PR 未合并前，硬阻断子任务提前合入。 */
-export async function checkStackedParentMerged(mainRoot, ledger, { backend = null, targetRepo = null, defaultBranch = 'main' } = {}) {
+export async function checkStackedParentMerged(mainRoot, ledger, { backend = null, targetRepo = null, defaultBranch = null } = {}) {
   if (!ledger?.parentTaskId && !ledger?.parentBranch) return { blocked: false }
   const parentLedger = ledger.parentTaskId ? readTaskLedger(mainRoot, ledger.parentTaskId) : null
   if (parentLedger && (['merged', 'cleaned'].includes(parentLedger.status) || parentLedger.prState === 'MERGED')) {
@@ -335,8 +335,8 @@ export async function checkStackedParentMerged(mainRoot, ledger, { backend = nul
   }
 
   const parentBranch = ledger.parentBranch ?? parentLedger?.branch ?? null
-  const stackTarget = ledger.stackTargetBase ?? parentLedger?.baseBranch ?? defaultBranch ?? 'main'
-  if (parentBranch && existsSync(join(mainRoot, '.git'))) {
+  const stackTarget = ledger.stackTargetBase ?? parentLedger?.baseBranch ?? defaultBranch ?? await resolveDefaultBranch(mainRoot, { strict: true })
+  if (parentBranch && stackTarget && existsSync(join(mainRoot, '.git'))) {
     const st = await inspectBranchMergeState(mainRoot, {
       branch: parentBranch,
       headSha: parentLedger?.finalizedHead ?? parentLedger?.verifiedHead ?? null,

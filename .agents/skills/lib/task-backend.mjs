@@ -256,7 +256,7 @@ export { GitHubBackend as GitHubTaskBackend }
 /** 根据身份角色与 HostingProvider 注册表分发构造统一的 17 方法 TaskBackend。 */
 export function createTaskBackend({
   role = 'local-only', providerId = 'none', targetRepo = null, client = null,
-  pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null, baseBranch = 'main',
+  pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null, baseBranch = null,
 } = {}) {
   if (role === 'local-only' || providerId === 'none') {
     return new LocalOnlyBackend({ mainRoot, gitDir, baseBranch })

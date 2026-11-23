@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: Round-5 规划连续性与协作门禁架构收敛
-status: active
+status: done
 created: 2026-11-23
 updated: 2026-11-23
 issue: null
@@ -11,7 +11,7 @@ owner: planner-r5-pr1
 previous_owners: [impl-r5-pr1]
 plan_mode: autonomous
 approved: false
-done_at: null
+done_at: 2026-11-23
 task_id: r5-plan-flow
 planned_at: b9b4bd6be8689da28e717c1657c54ec151841bac
 related_prd: null

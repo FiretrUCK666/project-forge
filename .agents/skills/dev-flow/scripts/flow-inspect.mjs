@@ -12,7 +12,7 @@ import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import {
   applyLocalAutoClaim, checkStartAuthorSeparation, checkStartMainCleanAndSlot,
-  emitBlockedStart, promotePlanningToStarted,
+  checkStartTriageDowngrade, emitBlockedStart, markStartTriageConsumed, promotePlanningToStarted,
 } from './flow-start-helpers.mjs'
 import { workTypePrefix } from '../../lib/escalation.mjs'
 import {
@@ -38,7 +38,6 @@ import {
   parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveIdentityLayers, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { checkTriageDowngrade, readSessionState } from '../../lib/session-state.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import {
   assertNoDuplicatePrForTask, checkUnresolvedDependencies, resolveExternalCollaborationGraph,
@@ -320,8 +319,7 @@ export async function handleStart(opts, roots) {
     return { exitCode: EXIT.FACT }
   }
   if (opts.case !== undefined) {
-    const sess = readSessionState(roots.mainRoot)
-    const down = checkTriageDowngrade({ previousCase: sess?.triage?.caseType, nextCase: caseType, reason: opts.reason })
+    const down = checkStartTriageDowngrade(roots.mainRoot, { taskId: prelimTaskId, slug: opts.slug, caseType, summary: opts.title ?? '', reason: opts.reason })
     if (!down.ok) return emitBlockedStart(opts, down)
   }
 
@@ -460,12 +458,15 @@ export async function handleStart(opts, roots) {
     if ((existing.status === 'planning' || existing.planning === true) && !isPlanning) {
       const promo = await promotePlanningToStarted({
         roots, existing, existingWorkRootPre, slug, taskId, opts, runStartPlanGate,
+        role, providerId, baseBranch: state.defaultBranch || 'main', baseSha: state.head,
       })
       if (promo.blocked) return { exitCode: promo.exitCode }
     } else if (isPlanning && (existing.status === 'planning' || existing.status === 'planned')) {
       existing.status = 'planning'
       existing.planning = true
     }
+    if (!isPlanning && existing.role === 'local-only' && role !== 'local-only') { existing.role = role; existing.providerId = providerId }
+    if (!existing.baseSha && state.head) existing.baseSha = state.head
     const existingFetchedCount = (existing.issueContext ?? []).filter((x) => x?.fetched).length
     const needIssueRefresh = (existing.linkedIssues ?? []).length > 0 && (
       (existing.issueContextUnavailable ?? []).length > 0
@@ -699,6 +700,7 @@ export async function handleStart(opts, roots) {
     applyLocalAutoClaim(ledger, { role, isPlanning, implementerId, opts })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+    markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
@@ -768,6 +770,7 @@ export async function handleStart(opts, roots) {
   }
   if (ledger.linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
   await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+  markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)

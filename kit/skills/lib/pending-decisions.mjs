@@ -125,7 +125,8 @@ export { DECIDED_RE }
 /** 章节标题里认「这是待拍板那一节」。 */
 const PENDING_HEADING_RE = /^#{2,4}\s*(?:[一二三四五六七八九十百]+[、.]\s*)?([^\n]*)$/
 
-const PENDING_WORDS = /(?:待拍板|未决问题|待确认事项|开放问题|待定事项|open\s+questions?)/i
+const PENDING_WORDS = /(?:待拍板|未决问题|待确认|待决定|开放问题|待定事项|仍待.*?拍板|open\s+questions?|pending\s+decisions?)/i
+const INLINE_UNRESOLVED_RE = /(?:仍待定|（待拍板[^）]*）|\(待拍板[^)]*\)|（待定[^）]*）|\(待定[^)]*\)|待拍板\s*[:：]\s*(?!(?:无|没有)(?=$|[\s，,。.；;）)])|none\b)|待确认\s*[:：]\s*(?!(?:无|没有)(?=$|[\s，,。.；;）)])|none\b)|\bTBD\b)/i
 
 /** 遇到下一个同级或更高级标题就结束。 */
 function sectionBody(lines, startIdx) {
@@ -139,7 +140,7 @@ function sectionBody(lines, startIdx) {
 }
 
 /**
- * 从文档里抽出待拍板事项，并判断哪些还没消解。
+ * 从文档里抽出待拍板事项，并判断哪些还没消解（含章节标题变体与正文/表格内隐式待拍板文本）。
  *
  * @param {string} text 文档全文
  * @returns {{ found: boolean, total: number, unresolved: Array<{line: number, text: string}> }}
@@ -149,6 +150,7 @@ export function analyzePendingDecisions(text) {
   let found = false
   let total = 0
   const unresolved = []
+  const coveredLines = new Set()
 
   for (let i = 0; i < lines.length; i += 1) {
     const h = PENDING_HEADING_RE.exec(lines[i])
@@ -156,7 +158,8 @@ export function analyzePendingDecisions(text) {
     if (!PENDING_WORDS.test(h[1])) continue
     found = true
 
-    const { body } = sectionBody(lines, i)
+    const { body, endIdx } = sectionBody(lines, i)
+    for (let k = i; k < endIdx; k += 1) coveredLines.add(k)
     const content = body.filter((l) => l.trim() && !/^\s*<!--/.test(l))
     const meaningful = content.filter((l) => !/^\s*>/.test(l))
     if (meaningful.length === 0) continue
@@ -165,11 +168,26 @@ export function analyzePendingDecisions(text) {
     }
 
     // 逐条判：一个条目从它自己那行起，到下一个同级条目为止。
-    const items = splitItems(body)
+    const items = splitItems(body, i + 1)
     total += items.length
     for (const item of items) {
-      if (DECIDED_RE.test(item.block)) continue
+      if (DECIDED_RE.test(item.block) && !INLINE_UNRESOLVED_RE.test(item.block)) continue
       unresolved.push({ line: item.line, text: item.head })
+    }
+  }
+
+  let inFence = false
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
+    if (inFence || coveredLines.has(i)) continue
+    const trimmed = line.trim()
+    if (!trimmed || /^\s*(?:>|<!--)/.test(trimmed) || /^---+$/.test(trimmed)) continue
+    if (DECIDED_RE.test(trimmed) && !INLINE_UNRESOLVED_RE.test(trimmed)) continue
+    if (INLINE_UNRESOLVED_RE.test(trimmed)) {
+      found = true
+      total += 1
+      unresolved.push({ line: i + 1, text: trimmed.slice(0, 120) })
     }
   }
 
@@ -180,9 +198,10 @@ export function analyzePendingDecisions(text) {
  * 把整节切成条目。顶级列表项（`- ` / `1. `）各算一条，缩进续行与子项归到上一条。
  *
  * @param {string[]} body
+ * @param {number} baseLineOffset 1-based line offset of body[0]
  * @returns {Array<{line: number, head: string, block: string}>}
  */
-function splitItems(body) {
+function splitItems(body, baseLineOffset = 1) {
   const out = []
   let cur = null
   // 有列表项时，节首那段说明文字（「以下八项是产品级取舍」）不是一件事项；
@@ -194,12 +213,12 @@ function splitItems(body) {
     const isTop = /^(?:[-*]|\d+[.、)])\s+/.test(line)
     if (isTop) {
       if (cur) out.push(cur)
-      cur = { line: i + 1, head: line.replace(/^(?:[-*]|\d+[.、)])\s+/, '').slice(0, 120), block: line }
+      cur = { line: baseLineOffset + i, head: line.replace(/^(?:[-*]|\d+[.、)])\s+/, '').slice(0, 120), block: line }
       continue
     }
     if (cur) cur.block += `\n${line}`
     else if (!hasList && line.trim()) {
-      cur = { line: i + 1, head: line.trim().slice(0, 120), block: line }
+      cur = { line: baseLineOffset + i, head: line.trim().slice(0, 120), block: line }
     }
   }
   if (cur) out.push(cur)

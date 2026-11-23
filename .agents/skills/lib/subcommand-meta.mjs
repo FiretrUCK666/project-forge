@@ -36,6 +36,7 @@ export const SUBCOMMAND_META = Object.freeze({
   'doc-plan': Object.freeze({
     file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
     subcommands: Object.freeze([
+      entry('next', false),
       entry('triage', false),
       entry('init', true),
       entry('clarify', true),

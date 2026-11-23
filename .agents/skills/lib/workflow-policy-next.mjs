@@ -304,7 +304,10 @@ export function evaluateNextState({
   } else if (rt.dirty > 0) {
     phase = 'implementing'
     ownerRole = 'implementer'
-    nextAction = '实施工作位存在未提交改动，完成后提交并继续 finalize/verify'
+    const actorHint = t.claimedBy ?? t.implementerId
+    nextAction = actorHint && actorHint !== 'local-agent'
+      ? `隔离工作位存在未提交改动（原认领者：${actorHint}）；优先唤醒原 implementer 续做，若原会话中断则新派 implementer 带 --takeover 接手（严禁协调者直接代改代提）`
+      : '实施工作位存在未提交改动，完成后提交并继续 finalize/verify'
     command = `git -C "${t.worktreePath ?? '.'}" status`
   } else if (unackedIssues.length > 0) {
     phase = 'needs-issue-context'
@@ -366,16 +369,16 @@ export function evaluateNextState({
     ownerRole = 'implementer'
     nextAction = '实证已锁定当前 HEAD，由实施者执行 submit 推送并提 PR/同步审查工作位'
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId}`
-  } else if (t.role === 'contributor-fork') {
-    phase = 'awaiting-upstream-merge'
-    ownerRole = 'human'
-    nextAction = '等待上游维护者合并 PR，合并前严禁删除 Fork 分支'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${t.taskId}`
   } else if (policy?.independentReviewRequired !== false && !reviewCoversHead) {
     phase = 'needs-review'
     ownerRole = 'reviewer'
     nextAction = `请新建独立审查子代理执行 Round ${nextRound} 审查（禁止复用旧上下文）`
     command = `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${t.taskId} --round ${nextRound}`
+  } else if (t.role === 'contributor-fork') {
+    phase = 'awaiting-upstream-merge'
+    ownerRole = 'human'
+    nextAction = '独立审查已通过，等待上游维护者合并 PR，合并前严禁删除 Fork 分支'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${t.taskId}`
   } else if (t.role === 'generic-git') {
     phase = 'awaiting-remote-mr'
     ownerRole = 'human'

@@ -115,7 +115,7 @@ export function registerW4HarnessCases(cases) {
       if (rBad.status === 0) return `owner: null 应阻断，实际 exit=${rBad.status}`
 
       const rGood = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'todo', '--slug', 'good-owner', '--title', 'Good Owner', '--owner', 'arch-1', '--dir', dir, '--json',
+        'init', '--kind', 'todo', '--slug', 'good-owner', '--title', 'Good Owner', '--owner', 'arch-1', '--dir', dir, '--in-place', '--json',
       ], { cwd: dir })
       if (rGood.status !== 0) return `合法 --owner init 失败：${rGood.stderr || rGood.stdout}`
       const parsed = JSON.parse(rGood.stdout)
@@ -312,7 +312,7 @@ export function registerW4HarnessCases(cases) {
 
       // init --multi-spec 创建总控 PRD
       const prdInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'prd', '--slug', 'master-x', '--title', 'Master X', '--owner', 'arch-1', '--multi-spec', '--dir', dir, '--json',
+        'init', '--kind', 'prd', '--slug', 'master-x', '--title', 'Master X', '--owner', 'arch-1', '--multi-spec', '--dir', dir, '--in-place', '--json',
       ], { cwd: dir })
       if (prdInit.status !== 0) return `init --multi-spec 失败：${prdInit.stderr || prdInit.stdout}`
       const prdFile = JSON.parse(prdInit.stdout).file

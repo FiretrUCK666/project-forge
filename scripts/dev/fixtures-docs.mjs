@@ -159,7 +159,7 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
   gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
   try {
     const initRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-      'init', '--kind', 'all', '--slug', '中文特性', '--title', '中文特性方案', '--owner', 'alice', '--json',
+      'init', '--kind', 'all', '--slug', '中文特性', '--title', '中文特性方案', '--owner', 'alice', '--in-place', '--json',
     ], { cwd: dir })
     if (initRes.status !== 0) return `doc-plan init all 失败：${initRes.stderr}`
     const initJson = JSON.parse(initRes.stdout)
@@ -299,7 +299,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
 
   try {
     gitInit(dir)
-    const initAuth = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'auth', '--title', 'Auth Flow', '--owner', 'alice', '--json'])
+    const initAuth = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'auth', '--title', 'Auth Flow', '--owner', 'alice', '--in-place', '--json'])
     if (initAuth.status !== 0) return `doc-plan init pair 失败：${initAuth.stderr}`
     const authJson = JSON.parse(initAuth.stdout)
     const authSpec = authJson.files.find((f) => f.endsWith('-auth-spec.md'))
@@ -328,7 +328,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
     if (auditAuth.status !== 0) return `link 后 doc-plan audit . 失败：\n${auditAuth.stdout}\n${auditAuth.stderr}`
 
     // 第二组文档提交后，由 flow.mjs start --issue 77 在工作位触发协同重命名
-    const initBill = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'billing', '--title', 'Billing Flow', '--owner', 'alice', '--json'])).stdout)
+    const initBill = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'billing', '--title', 'Billing Flow', '--owner', 'alice', '--in-place', '--json'])).stdout)
     const billSpec = initBill.files.find((f) => f.endsWith('-billing-spec.md'))
     const billTodo = initBill.files.find((f) => f.endsWith('-billing-todo.md'))
     fillGeneratedDoc(join(dir, billSpec))

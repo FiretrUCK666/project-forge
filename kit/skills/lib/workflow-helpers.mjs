@@ -257,14 +257,14 @@ export function analyzeIssueDependencies(issueItems = []) {
 
 /** 构造 `flow.mjs submit` 结束时的下一步唯一合法动作（未装配 dev-review 时不引导 review-pack.mjs）。 */
 export function buildSubmitNextSteps({ taskId, role, policy, nextRound = 1, hasDevReview = true } = {}) {
-  if (role === 'contributor-fork') {
-    return ['当前处于 awaiting-upstream-merge，请等待上游维护者合并；合并前严禁删除该 Fork 分支。']
-  }
   if (hasDevReview && policy?.independentReviewRequired !== false) {
     return [{
       skill: 'dev-review',
       text: `【须派发独立审查子代理/新会话，严禁在当前实现上下文自跑】node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${taskId} --round ${nextRound}`,
     }]
+  }
+  if (role === 'contributor-fork') {
+    return ['当前处于 awaiting-upstream-merge，请等待上游维护者合并；合并前严禁删除该 Fork 分支。']
   }
 
   const approveFlag = policy?.humanApprovalRequired ? ' --human-approved --reason "<确认原因>"' : ''

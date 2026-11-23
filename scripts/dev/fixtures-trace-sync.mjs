@@ -61,7 +61,7 @@ export function registerTraceSyncCases(cases) {
 
       const pairRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'pair', '--slug', 'pair-sync', '--title', 'Pair Sync',
-        '--issue', String(locNum), '--task', 'pair-sync', '--owner', 'arch-1', '--json',
+        '--issue', String(locNum), '--task', 'pair-sync', '--owner', 'arch-1', '--in-place', '--json',
       ], { cwd: dir })
       if (pairRes.status !== 0) return `doc-plan init pair 失败：${pairRes.stderr}`
       const pairParsed = JSON.parse(pairRes.stdout)
@@ -146,7 +146,7 @@ export function registerTraceSyncCases(cases) {
 
       const newSpecInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'spec', '--slug', 'pair-sync-v2', '--title', 'Pair Sync V2',
-        '--issue', String(locNum), '--owner', 'arch-1', '--json',
+        '--issue', String(locNum), '--owner', 'arch-1', '--in-place', '--json',
       ], { cwd: dir })
       if (newSpecInit.status !== 0) return `新 SPEC init 失败：${newSpecInit.stderr}`
       const newSpecRel = JSON.parse(newSpecInit.stdout).file
@@ -220,7 +220,7 @@ export function registerTraceSyncCases(cases) {
 
       const specInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'spec', '--slug', 'late-link', '--title', 'Late Link Feature',
-        '--task', 'late-link', '--owner', 'arch-1', '--json',
+        '--task', 'late-link', '--owner', 'arch-1', '--in-place', '--json',
       ], { cwd: dir })
       if (specInit.status !== 0) return `late-link spec init 失败：${specInit.stderr}`
       const specRel = JSON.parse(specInit.stdout).file
@@ -267,7 +267,7 @@ export function registerTraceSyncCases(cases) {
 
       const startInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'spec', '--slug', 'late-start', '--title', 'Late Start',
-        '--task', 'late-start', '--owner', 'arch-1', '--json',
+        '--task', 'late-start', '--owner', 'arch-1', '--in-place', '--json',
       ], { cwd: dir })
       const lateSpecRel = JSON.parse(startInit.stdout).file
       const lateSpecAbs = join(dir, lateSpecRel)

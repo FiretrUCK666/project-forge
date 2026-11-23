@@ -109,7 +109,7 @@ export function registerRepoAlignmentCases(cases) {
       gitSync(dir, ['add', '.'])
       gitSync(dir, ['commit', '-m', 'init'])
       const initRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'todo', '--slug', 'quick-none', '--title', 'Quick None Test', '--owner', 'arch-1', '--json',
+        'init', '--kind', 'todo', '--slug', 'quick-none', '--title', 'Quick None Test', '--owner', 'arch-1', '--in-place', '--json',
       ], { cwd: dir })
       if (initRes.status !== 0) return `doc-plan init todo 失败：${initRes.stderr}`
       const created = JSON.parse(initRes.stdout)

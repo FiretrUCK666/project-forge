@@ -546,16 +546,34 @@ export async function handleSubmit(opts, roots) {
     return { exitCode: EXIT.FACT }
   }
 
-  const pushRes = await gitRun(implRoot, ['push', '-u', pushRemote, ledger.branch])
-  if (!pushRes.ok) throw new Error(`推送到 ${pushRemote}/${ledger.branch} 失败：${pushRes.stderr}`)
+  const isGenericGit = ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || !targetRepo
+  let deferredPush = Boolean(opts.offline && isGenericGit)
+  let deferredPushReason = opts.offline ? '显式指定 --offline 离线审校' : null
+  if (!deferredPush) {
+    const pushRes = await gitRun(implRoot, ['push', '-u', pushRemote, ledger.branch])
+    if (!pushRes.ok) {
+      const errTxt = String(pushRes.stderr ?? '')
+      const isNetworkDown = /(?:unable to access|could not resolve host|timed out|connection refused|handshake|ssl|tls|failed to connect|network is unreachable|repository .* not found)/i.test(errTxt)
+      if (isGenericGit && isNetworkDown) {
+        deferredPush = true
+        deferredPushReason = errTxt.trim().split(/\r?\n/)[0].slice(0, 180)
+      } else {
+        throw new Error(`推送到 ${pushRemote}/${ledger.branch} 失败：${pushRes.stderr}`)
+      }
+    }
+  }
 
-  if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || !targetRepo) {
+  if (isGenericGit) {
     await postLocalLifecycleComments({ targetRepo, pushRemote, actionFallback: 'submitted' })
     ledger.status = 'submitted'
+    ledger.deferredPush = deferredPush
+    ledger.deferredPushReason = deferredPushReason
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, head: currentHead, pushRemote, reviewSlotSync }, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, deferredPush, deferredPushReason, head: currentHead, pushRemote, reviewSlotSync }, null, 2)}\n`)
     else {
-      process.stdout.write(`submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
+      process.stdout.write(deferredPush
+        ? `submit 完成（generic-git 离线/延迟推送模式：${deferredPushReason}，本地已就绪 @ ${currentHead?.slice(0, 7)}，合前须手工推送并在远端合并后带 --remote-merged）。\n`
+        : `submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
       printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }

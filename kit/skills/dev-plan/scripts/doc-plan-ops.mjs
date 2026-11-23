@@ -15,7 +15,7 @@ import {
   renderStandardDocTemplate, resolveRepoCustomDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
-import { ensureWorktreesIgnored, gitRun, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
+import { canonicalPath, ensureWorktreesIgnored, gitRun, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { readTaskLedger, recordPlanningProvenance, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { parseIssueNumbers } from '../../lib/platform.mjs'
@@ -266,7 +266,7 @@ function parseInitIssueArg(rawIssue) {
 export async function initDoc({
   repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
   taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
-  planMode = null, worktree = false, multiSpec = false, caseType = null,
+  planMode = null, worktree = false, inPlace = false, multiSpec = false, caseType = null,
 }) {
   const effectiveKind = kind ?? type
   if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
@@ -279,16 +279,33 @@ export async function initDoc({
 
   let writeRoot = repoRoot
   let existingLedger = null
-  const effTaskId = taskId ? sanitizeTaskId(taskId) : (worktree ? sanitizeTaskId(safeSlug) : null)
+  let effTaskId = taskId ? sanitizeTaskId(taskId) : (worktree ? sanitizeTaskId(safeSlug) : null)
   if (effTaskId) {
     existingLedger = readTaskLedger(mainRoot, effTaskId)
     if (existingLedger?.worktreePath && existsSync(join(mainRoot, existingLedger.worktreePath))) {
       writeRoot = join(mainRoot, existingLedger.worktreePath)
     }
   }
+  let effWorktree = Boolean(worktree)
+  if (!effWorktree && !inPlace && isGit && effectiveKind !== 'tdd' && canonicalPath(writeRoot) === canonicalPath(mainRoot)) {
+    const curHead = readHeadFast(resolveGitDirFast(mainRoot), gitDir)
+    let curBranch = curHead?.branch ?? null
+    if (!curBranch) {
+      const sym = await gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+      if (sym.ok && sym.stdout.trim()) curBranch = sym.stdout.trim()
+    }
+    if (curBranch === 'main' || curBranch === 'master') {
+      const cnt = await gitRun(mainRoot, ['rev-list', '--count', '-n', '1', 'HEAD'])
+      if (cnt.ok && Number(cnt.stdout.trim()) > 0) {
+        effWorktree = true
+        if (!effTaskId) effTaskId = sanitizeTaskId(safeSlug)
+      }
+    }
+  }
+
   let planningBranch = branch ?? existingLedger?.branch ?? null
   let planningWorktreeRel = existingLedger?.worktreePath ?? null
-  if (worktree) {
+  if (effWorktree) {
     if (!isGit) throw new Error('--worktree 仅支持 Git 仓库')
     await ensureWorktreesIgnored(mainRoot, gitDir)
     planningWorktreeRel = planningWorktreeRel || `.worktrees/impl-${effTaskId}`
@@ -418,7 +435,7 @@ export async function initDoc({
         next.linkedIssues = [...next.linkedIssues, issueNum]
       }
       if (milestone) next.milestone = milestone
-      if (worktree) {
+      if (effWorktree) {
         next.isolation = 'worktree'
         next.worktreePath = planningWorktreeRel
         next.branch = planningBranch
@@ -432,11 +449,11 @@ export async function initDoc({
       createIfMissing: true,
       defaults: {
         taskId: effTaskId, slug: safeSlug,
-        isolation: worktree ? 'worktree' : null,
-        worktreePath: worktree ? planningWorktreeRel : null,
-        branch: worktree ? planningBranch : null,
-        planning: worktree,
-        status: worktree ? 'planning' : 'planned',
+        isolation: effWorktree ? 'worktree' : null,
+        worktreePath: effWorktree ? planningWorktreeRel : null,
+        branch: effWorktree ? planningBranch : null,
+        planning: effWorktree,
+        status: effWorktree ? 'planning' : 'planned',
       },
     })
     ledgerUpdated = true

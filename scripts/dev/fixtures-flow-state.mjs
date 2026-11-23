@@ -426,7 +426,7 @@ export function registerFlowStateCases(cases) {
 
     try {
       // 1. 统一模板链路：init --kind all -> 填充 -> audit 0 错（含 Todo 断点与遗留决策非尖括号默认）
-      const initAll = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'all', '--slug', 'u-c5', '--title', 'Unified C5', '--owner', 'alice', '--json'], { cwd: dir })).stdout)
+      const initAll = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'all', '--slug', 'u-c5', '--title', 'Unified C5', '--owner', 'alice', '--in-place', '--json'], { cwd: dir })).stdout)
       for (const rel of initAll.files) {
         let t = readFileSync(join(dir, rel), 'utf8')
           .replace('<two-way | one-way>', 'two-way')

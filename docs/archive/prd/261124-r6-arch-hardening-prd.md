@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: Round-6 与本仓全检单源架构根治
-status: active
+status: done
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -21,12 +21,12 @@ case_type: 4
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 关联 Issue / PR | 未关联 / 未关联 |
 | 提出方 / 负责人 | plan-r6-arch |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联设计 / 任务单 | 按 `r6a` / `r6b` / `r6c` / `r6d` 四份切片 `SPEC + Todo` 认领 `C1..C16` |
+| 关联设计 / 任务单 | `docs/archive/specs/261124-r6d-skills-contract-debloat-spec.md` / `docs/archive/todo/261124-r6d-skills-contract-debloat-todo.md` |
 
 - **目标读者**：实现者、审查者与后续接手人
 
@@ -60,7 +60,7 @@ case_type: 4
   - `docs/archive/specs/261124-r6a-single-source-state-spec.md`（单源默认分支、任务活性、运行时快照与跨平台四态 CAS 闭环；PR #162 已合入归档）
   - `docs/archive/specs/261124-r6b-plan-index-antiblue-spec.md`（唯一规划索引、指针简报协议、长聊 `preInit` 与客观防退化；PR #161 已合入归档）
   - `docs/archive/specs/261124-r6c-iterate-unified-gates-spec.md`（`dev-iterate` 确定性重构、跨门禁统一与 `review-pack` 提速去重；PR #163 已合入归档）
-  - `docs/specs/261124-r6d-skills-contract-debloat-spec.md`（默认分支收口、`cli-parity` 扩面、冲突去重与全仓装配）
+  - `docs/archive/specs/261124-r6d-skills-contract-debloat-spec.md`（默认分支收口、`cli-parity` 扩面、冲突去重与全仓装配）
 
 ### 明确不做（Non-Goals）
 

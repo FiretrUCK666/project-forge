@@ -324,7 +324,7 @@ export function stripCritiqueMeta(text) {
     high_risk_paths: Array.isArray(fm.data?.high_risk_paths) ? fm.data.high_risk_paths : [],
   }
   const volatileLineRe = /^(?:-\s+)?(?:Plan Critique|Status|Issue|PR|Updated|Branch|Owner|Related\s+(?:SPEC|PRD|Todo)|plan_critique|critique_anchors|critique_rounds|critique_override|critique_findings|updated|issue|pr|status|related_prd|related_spec|related_todo|approved|implemented|done_at|branch|owner)\s*:/i
-  const volatileTableRowRe = /^\|\s*(?:当前状态|建单\s*\/\s*更新|分支\s*\/\s*基线|负责人\s*\/\s*审批|关联\s*Issue[^|]*|归档时间)\s*\|/i
+  const volatileTableRowRe = /^\|\s*(?:当前状态|建单\s*\/\s*更新|创建\s*\/\s*更新|更新日期|Updated|分支\s*\/\s*基线|分支\s*\/\s*Issue\s*\/\s*PR|负责人\s*\/\s*(?:审批|内审状态)|内审状态|关联\s*Issue[^|]*|关联\s*PRD\s*\/\s*Todo|关联设计\s*\/\s*任务单|关联文档|归档时间)\s*\|/i
   const kept = []
   let inFence = false
   let inImplNote = false

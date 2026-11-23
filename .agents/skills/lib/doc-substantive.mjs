@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
+import { readPlanCritiqueEntrySync } from './critique-store.mjs'
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { prepareExecInvocation } from './exec.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
@@ -436,6 +437,18 @@ export function checkDocRegression(baselineSnap, currentSnap, baselineSource = n
     }
   }
 
+  const baseCriteria = Number(baselineSnap.criteriaCount ?? 0) || 0
+  const curCriteria = Number(currentSnap?.criteriaCount ?? 0) || 0
+  if (baseCriteria > 0 && curCriteria < baseCriteria) {
+    errors.push({
+      code: 'DOC_REGRESSION_CRITERIA_DROPPED',
+      line: 1,
+      section: 'acceptance',
+      message: `跨轮退化：基线冻结的验收标准从 ${baseCriteria} 条缩水至 ${curCriteria} 条（禁止静默删减 C* 条目）`,
+      fixHint: '恢复被删减的 C* 验收条目；若确需变更范围请在澄清记录说明或拆单。',
+    })
+  }
+
   const resolvedByCount = Math.max(0, (currentSnap.pendingResolved ?? 0) - (baselineSnap.pendingResolved ?? 0))
   const resolvedByClear = Math.max(0, (baselineSnap.pendingUnresolved ?? 0) - (currentSnap.pendingUnresolved ?? 0))
 
@@ -477,8 +490,8 @@ export function readGitHeadFileSync(repoRoot, relPath) {
   }
 }
 
-/** 按优先级解析跨轮基线快照：`baselineText` -> `frontmatter.critique_anchors` -> `HEAD:<relDoc>`。 */
-export function resolveBaselineSnapshotSync({ repoRoot, relDoc, fmData = null, baselineText = null }) {
+/** 按优先级解析跨轮基线快照：`baselineText` -> `frontmatter.critique_anchors` -> `HEAD:<relDoc>` -> `plan-critique-state.json`。 */
+export function resolveBaselineSnapshotSync({ repoRoot, mainRoot = repoRoot, gitDir = null, taskId = null, relDoc, fmData = null, baselineText = null }) {
   if (typeof baselineText === 'string' && baselineText.trim()) {
     return { snap: extractDocSnapshot(baselineText), source: 'baseline-text' }
   }
@@ -489,6 +502,15 @@ export function resolveBaselineSnapshotSync({ repoRoot, relDoc, fmData = null, b
   const headText = readGitHeadFileSync(repoRoot, relDoc)
   if (typeof headText === 'string' && headText.trim()) {
     return { snap: extractDocSnapshot(headText), source: 'git-head' }
+  }
+  if (repoRoot && relDoc) {
+    try {
+      const { entry } = readPlanCritiqueEntrySync({ repoRoot, mainRoot, gitDir, taskId, fmData, relDoc })
+      const ledgerAnchors = parseCritiqueAnchors(entry?.anchors)
+      if (ledgerAnchors) {
+        return { snap: ledgerAnchors, source: 'plan-critique-state' }
+      }
+    } catch { /* ignore sidecar read error */ }
   }
   return { snap: null, source: null }
 }

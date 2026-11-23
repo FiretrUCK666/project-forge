@@ -12,7 +12,8 @@ import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mj
 import { evaluateCritiqueOverride, parseCritiqueRounds, persistPlanCritiqueEntrySync, readPlanCritiqueEntrySync } from '../../lib/critique-rounds.mjs'
 import {
   DOC_FRONTMATTER_KEY_ORDER, docDateTag, docIsoDate, parseDocFrontmatter,
-  renderStandardDocTemplate, resolveRepoCustomDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
+  renderStandardDocTemplate, resolveRepoCustomDocTemplate, serializeDocFrontmatter,
+  slugify, syncDocsLifecycle, syncPlanDocBodyMeta, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { canonicalPath, ensureWorktreesIgnored, gitRun, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
@@ -20,6 +21,8 @@ import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { readTaskLedger, recordPlanningProvenance, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { parseIssueNumbers } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { buildDuplicatePlanDocError, findDuplicatePlanDocs, indexPlanDocs } from '../../lib/plan-index.mjs'
+import { consumePreInitNotes, readPreInitState, resolveInheritedTriagePlanMode } from '../../lib/session-state.mjs'
 import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
 import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
@@ -126,14 +129,57 @@ export function approveSpec({
   const nextStatus = docType === 'todo'
     ? (['draft', 'pending'].includes(curStatus) ? 'active' : curStatus)
     : (docType === 'prd' ? 'active' : 'approved')
+  const today = docIsoDate()
   const hasPlaceholder = /^- \[[ xX]\] C\d+:\s*<[^>]+>/m.test(workingText)
   if (fm.hasFrontmatter) {
-    const patch = { status: nextStatus, updated: docIsoDate() }
+    const patch = { status: nextStatus, updated: today }
     if (docType === 'spec' || docType === 'todo') patch.approved = true
     if (skippedCritiqueValue) patch.plan_critique = skippedCritiqueValue
     updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
+    const afterFm = readTextSafe(abs) ?? workingText
+    const parsedAfter = parseDocFrontmatter(afterFm)
+    const syncedBody = syncPlanDocBodyMeta(parsedAfter.body.replace(/^\n+/, ''), parsedAfter.data, {
+      status: nextStatus,
+      today,
+      critiquePassed: Boolean(parsedAfter.data?.approved === true || /^passed/i.test(String(parsedAfter.data?.plan_critique ?? ''))),
+    })
+    const keyOrder = [...(DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? []), ...parsedAfter.keyOrder, ...Object.keys(parsedAfter.data)]
+    writeAtomic(abs, `${serializeDocFrontmatter(parsedAfter.data, keyOrder)}\n${syncedBody.endsWith('\n') ? syncedBody : `${syncedBody}\n`}`)
   } else {
-    writeAtomic(abs, workingText.replace(/^((?:-\s+)?Status:\s*)\S+(\s*)$/mi, `$1${nextStatus}$2`))
+    const updatedLegacy = workingText.replace(/^((?:-\s+)?Status:\s*)\S+(\s*)$/mi, `$1${nextStatus}$2`)
+    writeAtomic(abs, syncPlanDocBodyMeta(updatedLegacy, { status: nextStatus, updated: today }, { status: nextStatus, today }))
+  }
+
+  const activatedTodos = []
+  if (docType === 'spec') {
+    const allDocs = indexPlanDocs(repoRoot, { includeArchive: false, includeWorktrees: false, managedOnly: true })
+    const relSpec = posixPath(relative(repoRoot, abs))
+    const specTaskId = fm.data?.task_id ? String(fm.data.task_id).trim() : null
+    const specIssue = Number(fm.data?.issue) > 0 ? Number(fm.data.issue) : null
+    const linkedTodoAbs = typeof fm.data?.related_todo === 'string' && !/^(?:null|none|无)$/i.test(fm.data.related_todo.trim())
+      ? resolve(dirname(abs), fm.data.related_todo.trim())
+      : null
+
+    for (const d of allDocs) {
+      if (d.kind !== 'todo' || d.inert) continue
+      const todoRelSpec = typeof d.data?.related_spec === 'string' && !/^(?:null|none|无)$/i.test(d.data.related_spec.trim())
+        ? posixPath(relative(repoRoot, resolve(dirname(d.abs), d.data.related_spec.trim())))
+        : null
+      const matched = todoRelSpec === relSpec
+        || (linkedTodoAbs && canonicalPath(d.abs) === canonicalPath(linkedTodoAbs))
+        || (specTaskId && d.taskId === specTaskId)
+        || (specIssue && d.issue === specIssue)
+      if (!matched) continue
+      if (['draft', 'pending'].includes(d.status)) {
+        updateDocFrontmatter(d.abs, { status: 'active', updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.todo })
+        const rawTodo = readTextSafe(d.abs) ?? ''
+        const todoFm = parseDocFrontmatter(rawTodo)
+        const syncedTodoBody = syncPlanDocBodyMeta(todoFm.body.replace(/^\n+/, ''), todoFm.data, { status: 'active', today })
+        const todoKeyOrder = [...DOC_FRONTMATTER_KEY_ORDER.todo, ...todoFm.keyOrder, ...Object.keys(todoFm.data)]
+        writeAtomic(d.abs, `${serializeDocFrontmatter(todoFm.data, todoKeyOrder)}\n${syncedTodoBody.endsWith('\n') ? syncedTodoBody : `${syncedTodoBody}\n`}`)
+        activatedTodos.push(d.rel)
+      }
+    }
   }
   if (skipApprovalEntry) {
     persistPlanCritiqueEntrySync({
@@ -155,6 +201,7 @@ export function approveSpec({
   const fingerprint = criteria.length > 0 ? criteriaFingerprint(criteria) : null
   return {
     file: posixPath(relative(repoRoot, abs)), previousStatus: curStatus, status: nextStatus, critiqueSkipped,
+    activatedTodos,
     criteriaCount: criteria.length,
     criteriaFingerprint: fingerprint,
     warning: hasPlaceholder ? '检测到仍有占位描述 <...>，动手实现前请替换成真实可判定条件' : null,
@@ -263,6 +310,77 @@ function parseInitIssueArg(rawIssue) {
   return nums[0]
 }
 
+function applyPreInitToDocContent(content, preInit, kind, today) {
+  if (!preInit || kind === 'tdd') return content
+  let text = String(content ?? '').replace(/\r\n/g, '\n')
+
+  if (Array.isArray(preInit.decisions) && preInit.decisions.length > 0) {
+    const entries = preInit.decisions.map((d) => `- 已确认（${today} · pre-init）：${d}`)
+    const lines = text.split('\n')
+    const secIdx = lines.findIndex((l) => /^##\s+澄清与补充记录(?:\s|$)/.test(l))
+    if (secIdx >= 0) {
+      let endIdx = lines.length
+      for (let i = secIdx + 1; i < lines.length; i += 1) {
+        if (/^##\s+/.test(lines[i])) { endIdx = i; break }
+      }
+      const existing = lines.slice(secIdx + 1, endIdx).filter((l) => !/^\s*-\s*（本轮无额外澄清补充/.test(l))
+      while (existing.length > 0 && !existing[0].trim()) existing.shift()
+      while (existing.length > 0 && !existing[existing.length - 1].trim()) existing.pop()
+      lines.splice(secIdx + 1, endIdx - secIdx - 1, '', ...existing, ...entries, '')
+      text = lines.join('\n')
+    }
+  }
+
+  if (Array.isArray(preInit.exclusions) && preInit.exclusions.length > 0) {
+    const joined = preInit.exclusions.join('；')
+    if (/^- \*\*(?:本期不做|明确不做|非目标)\*\*\s*[:：]/m.test(text)) {
+      text = text.replace(/^(- \*\*(?:本期不做|明确不做|非目标)\*\*\s*[:：]\s*)(.*)$/m, (_, p, cur) => {
+        const cleanCur = cur.trim()
+        const isPlaceholder = !cleanCur || /^(?:<[^>]+>|<!--[\s\S]*?-->|无|none)$/i.test(cleanCur)
+        return `${p}${isPlaceholder ? joined : `${cleanCur}；${joined}`}`
+      })
+    } else if (/^###\s*明确不做（Non-Goals）/m.test(text)) {
+      text = text.replace(/(^###\s*明确不做（Non-Goals）[^\n]*\n+)([\s\S]*?)(?=^#{2,3}\s|<!-- \/section|$)/m, (_, hdr, body) => {
+        const cleanBody = body.replace(/^-\s*<[^>]+>\s*\n?/gm, '').trim()
+        const bullets = preInit.exclusions.map((e) => `- ${e}`).join('\n')
+        return `${hdr}${cleanBody ? `${cleanBody}\n${bullets}` : bullets}\n\n`
+      })
+    }
+  }
+
+  if (Array.isArray(preInit.anchors) && preInit.anchors.length > 0) {
+    const formatted = preInit.anchors.map((a) => (a.includes('`') ? a : `\`${a}\``)).join('、')
+    if (/^- \*\*(?:影响路径|要改什么)\*\*\s*[:：]/m.test(text)) {
+      text = text.replace(/^(- \*\*(?:影响路径|要改什么)\*\*\s*[:：]\s*)(.*)$/m, (_, p, cur) => {
+        const cleanCur = cur.trim()
+        const isPlaceholder = !cleanCur || /^(?:<[^>]+>|<!--[\s\S]*?-->|待补齐)$/i.test(cleanCur)
+        return `${p}${isPlaceholder ? formatted : `${cleanCur}、${formatted}`}`
+      })
+    } else if (/^###\s*本次要做（In Scope）/m.test(text)) {
+      text = text.replace(/(^###\s*本次要做（In Scope）[^\n]*\n+)([\s\S]*?)(?=^#{2,3}\s|<!-- \/section|$)/m, (_, hdr, body) => {
+        const cleanBody = body.trim()
+        return `${hdr}${cleanBody ? `${cleanBody}\n` : ''}- 讨论锚点：${formatted}\n\n`
+      })
+    }
+  }
+
+  if (Array.isArray(preInit.openQuestions) && preInit.openQuestions.length > 0) {
+    const qLines = preInit.openQuestions.map((q) => `- 待确认：${q}`).join('\n')
+    if (/^##\s+(?:[一二三四五六七八九十\d]+[、.]\s*)?待拍板问题/m.test(text)) {
+      text = text.replace(/(^##\s+(?:[一二三四五六七八九十\d]+[、.]\s*)?待拍板问题[^\n]*\n+)([\s\S]*?)(?=^##\s|<!-- \/section|$)/m, (_, hdr, body) => {
+        const cleaned = body.replace(/^\s*-\s*待确认\s*[:：]\s*无\s*\n?/gm, '').trimEnd()
+        return `${hdr}${cleaned ? `${cleaned}\n` : ''}${qLines}\n\n`
+      })
+    } else if (/^-\s*\*\*待拍板事项\*\*\s*[:：]/m.test(text)) {
+      text = text.replace(/^-\s*\*\*待拍板事项\*\*\s*[:：]\s*无\s*$/m, `- **待拍板事项**：\n${qLines}`)
+    } else if (/^##\s+澄清与补充记录/m.test(text)) {
+      text = text.replace(/^##\s+澄清与补充记录/m, `## 待拍板问题\n\n${qLines}\n\n## 澄清与补充记录`)
+    }
+  }
+
+  return text.endsWith('\n') ? text : `${text}\n`
+}
+
 export async function initDoc({
   repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
   taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
@@ -276,6 +394,20 @@ export async function initDoc({
   const issueNum = parseInitIssueArg(issue)
   const dateTag = docDateTag()
   const today = docIsoDate()
+  const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
+
+  if (effectiveKind !== 'tdd' && !force) {
+    const duplicates = findDuplicatePlanDocs(repoRoot, {
+      mainRoot,
+      slug: safeSlug,
+      issue: issueNum,
+      kinds: kindsToCreate,
+      includeWorktrees: true,
+    })
+    if (duplicates.length > 0) {
+      throw buildDuplicatePlanDocError(duplicates, { slug: safeSlug, issue: issueNum })
+    }
+  }
 
   let writeRoot = repoRoot
   let existingLedger = null
@@ -323,7 +455,6 @@ export async function initDoc({
   }
 
   const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo', tdd: 'docs' }
-  const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
   const fastHead = isGit ? readHeadFast(resolveGitDirFast(writeRoot), gitDir) : null
   const headRes = fastHead?.oid
     ? { ok: true, stdout: fastHead.oid }
@@ -366,6 +497,9 @@ export async function initDoc({
     planned.push({ kind: k, file: relFile, absFile })
   }
 
+  planMode = planMode ?? resolveInheritedTriagePlanMode(mainRoot, { taskId: effTaskId, slug: safeSlug })
+  const pendingPreInit = effectiveKind !== 'tdd' ? readPreInitState(mainRoot) : null
+
   const customTemplates = []
   for (const item of planned) {
     const relatedSpecRel = item.kind === 'todo' && relatedSpec
@@ -395,10 +529,17 @@ export async function initDoc({
         multiSpec: Boolean(multiSpec && item.kind === 'prd'),
         caseType: Number.isInteger(caseType) ? caseType : null,
       })
+      if (pendingPreInit) {
+        content = applyPreInitToDocContent(content, pendingPreInit, item.kind, today)
+      }
     }
     mkdirSync(dirname(item.absFile), { recursive: true })
     writeAtomic(item.absFile, content)
   }
+
+  const absorbedPreInit = pendingPreInit
+    ? consumePreInitNotes(mainRoot, { taskId: effTaskId ?? safeSlug, slug: safeSlug })
+    : null
 
   if (planned.length > 1 || relatedSpec || relatedPrd) {
     const syncRes = await syncDocsLifecycle(writeRoot, {
@@ -472,5 +613,7 @@ export async function initDoc({
     files: planned.map((p) => p.file), created: planned.map((p) => ({ kind: p.kind, file: p.file })),
     taskId: effTaskId, worktreePath: planningWorktreeRel, branch: planningBranch,
     issue: issueNum, milestone: milestone ?? null, plannedAt: headSha, ledgerUpdated, customTemplates,
+    planMode: planMode ?? null,
+    absorbedPreInit,
   }
 }

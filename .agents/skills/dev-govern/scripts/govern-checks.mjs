@@ -10,14 +10,15 @@ import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import {
-  DEFAULT_WALK_SKIP_DIRS, gitRun, isMacOsJunkPath, posixPath,
+  DEFAULT_WALK_SKIP_DIRS, gitRun, isMacOsJunkPath, posixPath, readTextSafe,
 } from '../../lib/git.mjs'
+import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, ISSUE_REF_RE, JUSTIFICATION_ANCHOR_RE,
   RUST_ALLOW_RE, TEST_FILE_RE, TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
   extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode, scanStructuralHygiene,
 } from '../../lib/static-gates.mjs'
-import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
+import { resolveOversizedExemption, scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 import {
   ENV_FILE_RE, NPMRC_FILE_RE, SAFE_ENV_RE, SECRET_FILE_RE, TEST_FIXTURE_PATH_RE,
   isSensitiveSecretFile, matchSecretContentLine,
@@ -254,6 +255,8 @@ export function auditSecurity(files, trackedSet, findings, opts = {}) {
   }
 }
 
+const ZERO_BYTE_EXEMPT_NAMES = new Set(['.gitkeep', '__init__.py', 'py.typed', '.nojekyll'])
+
 export function auditDeadcode(files, findings) {
   for (const f of files) {
     if (BACKUP_FILE_RE.test(f.name)) {
@@ -266,7 +269,7 @@ export function auditDeadcode(files, findings) {
         action: 'Review and remove obsolete backup file.',
       })
     }
-    if (f.size === 0 && f.name !== '.gitkeep' && f.name !== '__init__.py') {
+    if (f.size === 0 && !ZERO_BYTE_EXEMPT_NAMES.has(f.name)) {
       addFinding(findings, {
         id: `dead.empty.${f.rel}`,
         category: 'deadcode',
@@ -376,6 +379,10 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
   const changedSet = opts?.changedFilesSet instanceof Set ? opts.changedFilesSet : null
   const home = homedir().replace(/\\/g, '/')
   const homeRe = home.length > 4 ? new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : undefined
+  const gitAttributesText = readTextSafe(join(workRoot, '.gitattributes'), 64 * 1024) ?? ''
+  const agentsText = readTextSafe(join(workRoot, 'AGENTS.md'), 64 * 1024) ?? ''
+  const forgeHooksConfig = loadForgeHooksConfig(mainRoot, workRoot)?.config ?? null
+  const oversizedNonExemptFiles = []
   const codeRelList = []
 
   for (const f of files) {
@@ -432,18 +439,22 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
       if (!isTestOrFixtureFile(f.rel) && !f.name.endsWith('.min.js') && lines.length > GOD_FILE_WARN_LINES) {
         const structCheck = scanStructuralHygiene({
           fileRel: f.rel, lines, fullText: info.text, fullLineCount: lines.length,
-          warnLines: GOD_FILE_WARN_LINES, highLines: GOD_FILE_HIGH_LINES, skipFixtureCheck: true,
+          warnLines: GOD_FILE_WARN_LINES, highLines: GOD_FILE_HIGH_LINES, skipFixtureCheck: true, gitAttributesText,
         })
         if (structCheck.godFile) {
-          const isHigh = lines.length > GOD_FILE_HIGH_LINES
-          addFinding(findings, {
-            id: `hygiene.god-file.${f.rel}`,
-            category: 'hygiene',
-            severity: isHigh ? 'high' : 'medium',
-            file: f.rel,
-            title: `Oversized source file (${lines.length} lines > ${isHigh ? GOD_FILE_HIGH_LINES : GOD_FILE_WARN_LINES}): ${f.rel}`,
-            action: 'Split cohesive responsibilities into smaller focused modules rather than expanding a god file.',
-          })
+          const exempt = resolveOversizedExemption({ fileRel: f.rel, agentsText, forgeHooksConfig })
+          if (!exempt.exempt) {
+            const isHigh = lines.length > GOD_FILE_HIGH_LINES
+            oversizedNonExemptFiles.push({ rel: f.rel, lines: lines.length })
+            addFinding(findings, {
+              id: `hygiene.god-file.${f.rel}`,
+              category: 'hygiene',
+              severity: isHigh ? 'high' : 'medium',
+              file: f.rel,
+              title: `Oversized source file (${lines.length} lines > ${isHigh ? GOD_FILE_HIGH_LINES : GOD_FILE_WARN_LINES}): ${f.rel}`,
+              action: 'Split cohesive responsibilities into smaller focused modules rather than expanding a god file.',
+            })
+          }
         }
       }
 
@@ -498,6 +509,39 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
             title: `Broken comment path \`${bp.path}\` at ${f.rel}:${bp.line}`,
             detail: bp.raw,
             action: 'Update or remove stale backticked path references in comments.',
+          })
+        }
+      }
+    }
+  }
+
+  if (isGit && oversizedNonExemptFiles.length > 0) {
+    const targetPaths = oversizedNonExemptFiles.map((x) => x.rel)
+    const logRes = await gitRun(workRoot, ['log', '-n', '60', '--name-only', '--format=format:__COMMIT__', '--', ...targetPaths.slice(0, 40)])
+    if (logRes.ok && logRes.stdout) {
+      const touchesByFile = new Map(targetPaths.map((p) => [p, 0]))
+      let seenInCommit = new Set()
+      for (const rawLine of logRes.stdout.split('\n')) {
+        const line = rawLine.trim()
+        if (!line) continue
+        if (line === '__COMMIT__') { seenInCommit = new Set(); continue }
+        const clean = posixPath(line)
+        if (touchesByFile.has(clean) && !seenInCommit.has(clean)) {
+          seenInCommit.add(clean)
+          touchesByFile.set(clean, touchesByFile.get(clean) + 1)
+        }
+      }
+      for (const item of oversizedNonExemptFiles) {
+        const touches = touchesByFile.get(item.rel) ?? 0
+        if (touches >= 3) {
+          addFinding(findings, {
+            id: `hygiene.god-file-churn-escalation.${item.rel}`,
+            category: 'hygiene',
+            severity: 'high',
+            file: item.rel,
+            title: `High-churn oversized brownfield file (${item.lines} lines, touched ${touches}x in recent git log): ${item.rel}`,
+            detail: `File exceeds ${GOD_FILE_WARN_LINES} lines and changed ${touches} times across recent commits without decomposition.`,
+            action: `Tier 1 architecture cleanup: decompose ${item.rel} into cohesive responsibility modules before adding more changes.`,
           })
         }
       }

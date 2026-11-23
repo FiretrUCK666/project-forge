@@ -8,8 +8,10 @@
 import { existsSync } from 'node:fs'
 import { dirname, posix, resolve } from 'node:path'
 
+import { matchGlob } from './git-core.mjs'
 import { isInsideDir, posixPath } from './git.mjs'
 import { buildLexedViews } from './static-gates-lexer.mjs'
+import { extractSymbols } from './symbol-index.mjs'
 
 const BACKTICK_SPAN_RE = /`([^`\n]{2,140})`/g
 const PATH_LINE_ANCHOR_RE = /(?::\d+(?:-\d+)?|#L\d+(?:-L\d+)?)$/
@@ -106,27 +108,68 @@ export function scanBrokenCommentPaths({ repoRoot, fileRel, text, headText = nul
   return broken
 }
 
-const GENERATED_HEADER_RE = /(?:^|\s)@generated\b|\bauto-?generated\b|\bautomatically\s+generated\b|\bmachine[- ]generated\b|\bcode\s+generated\b[^\n]*\bdo\s+not\s+edit\b|\bdo\s+not\s+edit\b[^\n]*\bgenerated\b|\bDO NOT EDIT\b|^\s*do\s+not\s+edit(?:\s*[.!:-]|$)/i
+const GENERATED_HEADER_RE = /(?:^|\s)@generated\b|\bauto-?generated\b|\bautomatically\s+generated\b|\bmachine[- ]generated\b|\bcode\s+generated\s+by\b|\bgenerated\s+by\b|\bDO NOT EDIT\b|^\s*do\s+not\s+edit(?:\s*[.!:-]|$)|(?:protobuf|protocol\s+buffer|openapi|swagger|graphql|prisma)\b[^\n]*\bgenerated\b|\bgenerated\b[^\n]*\b(?:protobuf|protocol\s+buffer|openapi|swagger|graphql|prisma)\b/i
 const GENERATED_CASE_SENSITIVE_DO_NOT_EDIT = /\bDO NOT EDIT\b/
 
+function matchesGeneratedCommentText(comment) {
+  if (!comment) return false
+  if (GENERATED_CASE_SENSITIVE_DO_NOT_EDIT.test(comment)) return true
+  if (/\bdo\s+not\s+edit\b/i.test(comment) && !/^\s*do\s+not\s+edit(?:\s*[.!:-]|$)|\bgenerated\b/i.test(comment)) {
+    return false
+  }
+  return GENERATED_HEADER_RE.test(comment)
+}
+
 /**
- * 识别跨语言自动生成源码头标（必须位于前 20 行真实注释头部，严禁被字符串字面量或文件尾部注释伪装）。
+ * 识别跨语言自动生成源码头标（必须位于前 25 行真实注释头部，严禁被字符串字面量或文件尾部注释伪装）。
  */
 export function isGeneratedSourceHeader(text, ext = '') {
   const raw = String(text ?? '')
   if (!raw) return false
-  const head20 = raw.replace(/\r\n/g, '\n').split('\n').slice(0, 20).join('\n')
-  const views = buildLexedViews(head20, String(ext ?? '').toLowerCase())
+  const extNorm = String(ext ?? '').toLowerCase()
+  const head25Lines = raw.replace(/\r\n/g, '\n').split('\n').slice(0, 25)
+  const views = buildLexedViews(head25Lines.join('\n'), extNorm)
   for (let i = 0; i < views.commentLines.length; i += 1) {
     const comment = String(views.commentLines[i] ?? '').trim()
-    if (!comment) continue
-    if (GENERATED_CASE_SENSITIVE_DO_NOT_EDIT.test(comment)) return true
-    if (/\bdo\s+not\s+edit\b/i.test(comment) && !/^\s*do\s+not\s+edit(?:\s*[.!:-]|$)|\bgenerated\b/i.test(comment)) {
-      continue
+    if (matchesGeneratedCommentText(comment)) return true
+  }
+  if (extNorm === 'sql' || extNorm === 'lua' || extNorm === 'hs') {
+    for (const line of head25Lines) {
+      const m = /^\s*--(.*)$/.exec(line)
+      if (m && matchesGeneratedCommentText(m[1].trim())) return true
     }
-    if (GENERATED_HEADER_RE.test(comment)) return true
   }
   return false
+}
+
+/**
+ * 解析 `.gitattributes` 中的 `linguist-generated` 声明（按 gitattributes 末条命中优先）。
+ */
+export function isGitAttributesGenerated(gitAttributesText, fileRel) {
+  const raw = String(gitAttributesText ?? '')
+  const rel = posixPath(fileRel).replace(/^\.\//, '').replace(/^\/+/, '')
+  if (!raw || !rel) return false
+  const base = posix.basename(rel)
+  let matchedGenerated = false
+  for (const line of raw.replace(/\r\n/g, '\n').split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const tokens = trimmed.split(/\s+/)
+    if (tokens.length < 2) continue
+    const pat = posixPath(tokens[0]).replace(/^\.\//, '').replace(/^\/+/, '')
+    if (!pat) continue
+    let attrState = null
+    for (const attr of tokens.slice(1)) {
+      if (attr === 'linguist-generated' || attr === 'linguist-generated=true') attrState = true
+      else if (attr === '-linguist-generated' || attr === 'linguist-generated=false') attrState = false
+    }
+    if (attrState === null) continue
+    const hit = pat.includes('/')
+      ? matchGlob(rel, pat)
+      : (matchGlob(base, pat) || matchGlob(rel, `**/${pat}`))
+    if (hit) matchedGenerated = attrState
+  }
+  return matchedGenerated
 }
 
 const CONTROL_FLOW_TOKEN_RE = /\b(?:if|else|for|while|do|switch|case|try|catch|finally|throw|return|yield|await|break|continue|goto|match|select|when|elif|except|raise|loop|defer|function|class|def|fn|func|lambda|proc|sub|impl)\b/g
@@ -191,4 +234,290 @@ export function classifyDeclarativeDataFile({ fullText, ext = '', fullLineCount 
     return null
   }
   return { lines: fullLineCount, literalRatio, controlFlowCount }
+}
+
+const DOC_OVERSIZED_EXT_RE = /^(?:md|mdx|rst|txt)$/i
+const TYPE_DECL_FILE_RE = /\.(?:d\.[cm]?ts|pyi|proto|graphql|gql)$/i
+const TYPE_CONTRACT_EXT_RE = /^(?:ts|mts|cts|tsx|rs|go|java|kt|kts|cs|swift|py)$/i
+const SQL_DDL_RE = /\b(?:CREATE|ALTER|DROP|TRUNCATE|INSERT|COMMENT|GRANT|TABLE|INDEX|VIEW|SCHEMA|TYPE|CONSTRAINT|FOREIGN\s+KEY|PRIMARY\s+KEY)\b/i
+const TYPE_DEF_KEYWORD_RE = /\b(?:interface|type|enum|struct|record|protocol|typedef)\b/
+const RUNTIME_ARROW_DECL_RE = /^\s*(?:export\s+)?(?:const|let|var)\s+[^:=]+=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/
+
+function classifyTypeContractOrDdl({ fileRel, fullText, extNorm, fullLineCount }) {
+  if (TYPE_DECL_FILE_RE.test(fileRel)) return 'type-declaration-file'
+  if (extNorm === 'sql') {
+    return SQL_DDL_RE.test(fullText) ? 'sql-ddl-or-migration' : null
+  }
+  if (!fullText || !TYPE_CONTRACT_EXT_RE.test(extNorm)) return null
+  const views = buildLexedViews(fullText, extNorm)
+  let nonEmpty = 0
+  for (const rawLine of views.codeNoLiteralLines) {
+    const line = String(rawLine ?? '').trim()
+    if (!line) continue
+    nonEmpty += 1
+    const lineNoPropKeys = line.replace(/\b[A-Za-z_$][A-Za-z0-9_$]*\??\s*:/g, ':')
+    CONTROL_FLOW_TOKEN_RE.lastIndex = 0
+    if (CONTROL_FLOW_TOKEN_RE.test(lineNoPropKeys)) { CONTROL_FLOW_TOKEN_RE.lastIndex = 0; return null }
+    if (/=>\s*\{/.test(line) || RUNTIME_ARROW_DECL_RE.test(line) || /\bnew\s+[A-Z]/.test(line)) return null
+  }
+  if (nonEmpty < Math.min(20, Math.floor(fullLineCount * 0.25))) return null
+  if (!TYPE_DEF_KEYWORD_RE.test(views.codeNoLiteralsText)) return null
+  return 'pure-type-contract'
+}
+
+/**
+ * 零配置自适应超限文件分类器：自动识别并降级 `doc`、`generated`（含 `.gitattributes` 与前 25 行头标）、
+ * `declarative-data` 与 `type-contract-or-ddl`，无需人工白名单或锁定特定文档文件名。
+ */
+export function classifyOversizedFile({
+  fileRel = '', fullText = '', ext = '', fullLineCount = 0, warnLines = 800, gitAttributesText = '',
+} = {}) {
+  const rel = posixPath(fileRel).replace(/^\.\//, '')
+  const extNorm = String(ext || rel.split('.').pop() || '').toLowerCase()
+  const lineCount = Number(fullLineCount) || 0
+  if (lineCount <= warnLines) return null
+
+  if (DOC_OVERSIZED_EXT_RE.test(extNorm)) {
+    return { category: 'doc', downgrade: true, lines: lineCount, reason: 'documentation-file' }
+  }
+  if (isGitAttributesGenerated(gitAttributesText, rel)) {
+    return { category: 'generated', downgrade: true, lines: lineCount, reason: 'gitattributes-linguist-generated' }
+  }
+  if (fullText && isGeneratedSourceHeader(fullText, extNorm)) {
+    return { category: 'generated', downgrade: true, lines: lineCount, reason: 'generated-header' }
+  }
+  const decl = classifyDeclarativeDataFile({ fullText, ext: extNorm, fullLineCount: lineCount, warnLines })
+  if (decl) {
+    return { category: 'declarative-data', downgrade: true, ...decl, reason: 'declarative-data-table' }
+  }
+  const typeReason = classifyTypeContractOrDdl({ fileRel: rel, fullText, extNorm, fullLineCount: lineCount })
+  if (typeReason) {
+    return { category: 'type-contract-or-ddl', downgrade: true, lines: lineCount, reason: typeReason }
+  }
+  return { category: 'code', downgrade: false, lines: lineCount, reason: 'executable-code' }
+}
+
+const EXEMPT_NONE_RE = /^(?:none|null|n\/a|不适用|无|-)$/i
+
+function extractOversizedPatternsFromAgents(agentsText) {
+  if (typeof agentsText !== 'string' || !agentsText) return []
+  const lines = agentsText.replace(/\r\n/g, '\n').split('\n')
+  const patterns = []
+  let inTradeoffs = false
+  for (const line of lines) {
+    if (/^##\s+取舍(?:\s|$|[（(:：])/.test(line.trim())) { inTradeoffs = true; continue }
+    if (inTradeoffs && /^#{1,2}\s+/.test(line)) break
+    if (!inTradeoffs) continue
+    const m = /^\s*(?:[-*]\s*)?`?oversized-allow`?\s*[:：]\s*(.+)$/.exec(line)
+    if (!m) continue
+    const val = m[1].split(/[（(]/)[0].trim()
+    for (const seg of val.split(/[,，\s]+/)) {
+      const clean = seg.trim().replace(/^`+|`+$/g, '')
+      if (clean && !EXEMPT_NONE_RE.test(clean)) patterns.push(clean)
+    }
+  }
+  return patterns
+}
+
+function extractOversizedPatternsFromHooks(forgeHooksConfig) {
+  if (!forgeHooksConfig || typeof forgeHooksConfig !== 'object') return []
+  const raw = forgeHooksConfig['oversized-allow'] ?? forgeHooksConfig.oversizedAllow
+  if (!raw) return []
+  const out = []
+  const pushPat = (p) => {
+    const clean = String(p ?? '').trim().replace(/^`+|`+$/g, '')
+    if (clean && !EXEMPT_NONE_RE.test(clean)) out.push(clean)
+  }
+  if (typeof raw === 'string') {
+    for (const seg of raw.split(/[,，\s]+/)) pushPat(seg)
+  } else if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item === 'string') pushPat(item)
+      else if (item && typeof item === 'object') pushPat(item.pattern ?? item.file ?? item.glob)
+    }
+  }
+  return out
+}
+
+/**
+ * 解析经审查确认的窄范围超限架构豁免（仅读取 AGENTS.md「## 取舍」或 forge-hooks 配置，绝不读取源码行内自豁免注释）。
+ */
+export function resolveOversizedExemption({ fileRel = '', agentsText = null, forgeHooksConfig = null } = {}) {
+  const rel = posixPath(fileRel).replace(/^\.\//, '')
+  if (!rel) return { exempt: false }
+  for (const pat of extractOversizedPatternsFromAgents(agentsText)) {
+    if (matchGlob(rel, pat)) return { exempt: true, source: 'agents-tradeoffs', pattern: pat }
+  }
+  for (const pat of extractOversizedPatternsFromHooks(forgeHooksConfig)) {
+    if (matchGlob(rel, pat)) return { exempt: true, source: 'forge-hooks', pattern: pat }
+  }
+  return { exempt: false }
+}
+
+/**
+ * 为超限或紧文件生成确定性的语义拆分与同目录复用指引。
+ */
+export function buildSplitReuseGuidance({ fileRel = '', fullText = '', ext = '', siblingReuse = [] } = {}) {
+  const rel = posixPath(fileRel).replace(/^\.\//, '')
+  const extNorm = String(ext || rel.split('.').pop() || 'mjs').toLowerCase()
+  const dir = posix.dirname(rel)
+  const base = posix.basename(rel, `.${extNorm}`)
+  const suggestedPathPattern = dir === '.' ? `${base}-<responsibility>.${extNorm}` : `${dir}/${base}-<responsibility>.${extNorm}`
+  const sym = fullText ? extractSymbols(fullText, extNorm) : { supported: false, symbols: [] }
+  const extractableSymbols = sym.supported ? sym.symbols.slice(0, 6) : []
+  const parts = [`按单一职责拆分为语义模块（如 ${suggestedPathPattern}，禁止 -partN/-misc/-extra/-overflow/-rest 机械拆分）`]
+  if (extractableSymbols.length > 0) parts.push(`可抽离导出/顶层符号：${extractableSymbols.join(', ')}`)
+  if (siblingReuse.length > 0) {
+    parts.push(`优先复用同目录模块：${siblingReuse.slice(0, 3).map((s) => `${s.file}(${s.symbols.slice(0, 3).join(',')})`).join(' | ')}`)
+  }
+  parts.push('若确有不可拆架构依据并经独立审查确认，由维护者在 AGENTS.md「## 取舍」或 .agents/forge-hooks.json 登记 oversized-allow')
+  return { file: rel, suggestedPathPattern, extractableSymbols, fixHint: `${parts.join('；')}。` }
+}
+
+const MECHANICAL_SPLIT_NAME_RE = /(?:^|\/)[^/]+(?:-part\d+|-(?:misc|extra|overflow|rest|part[a-z]))\.[^/]+$/i
+
+/** 拦截新增垃圾桶/机械分段文件名（如 `-part2.mjs`、`-misc.ts`、`-overflow.js`）。 */
+export function checkMechanicalSplitName(fileRel) {
+  const rel = posixPath(fileRel).replace(/^\.\//, '')
+  if (!rel || !MECHANICAL_SPLIT_NAME_RE.test(rel)) return null
+  return {
+    ruleId: 'edit.mechanical-split-name',
+    defectClass: 'file-bloat',
+    severity: 'high',
+    file: rel,
+    line: 1,
+    message: `检测到机械分段/垃圾桶文件名（禁止为规避行数上限而按序号或 misc 拆分）：${rel}`,
+    fixHint: '按真实职责边界命名拆分模块（如 `<domain>-parser.mjs`），禁止 `-partN`/`-misc`/`-extra`/`-overflow`/`-rest` 后缀。',
+  }
+}
+
+const JS_TS_IMPORT_EXT_RE = /\.(?:m?[jt]sx?|c[jt]s)$/i
+const REL_IMPORT_RE = /\b(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"](\.[^'"]+)['"]|\b(?:import|require)\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g
+const TYPE_ONLY_STMT_RE = /^\s*(?:import|export)\s+type\s+/
+
+function extractLocalRelativeTargets(relFile, text, knownFilesSet) {
+  const ext = posixPath(relFile).toLowerCase().split('.').pop() ?? ''
+  const codeLines = buildLexedViews(String(text ?? ''), ext).codeLines
+  const stripped = codeLines.join('\n')
+  const curDir = posix.dirname(posixPath(relFile))
+  const targets = []
+  REL_IMPORT_RE.lastIndex = 0
+  let m
+  while ((m = REL_IMPORT_RE.exec(stripped)) !== null) {
+    const stmt = m[0]
+    if (TYPE_ONLY_STMT_RE.test(stmt)) continue
+    const spec = (m[1] ?? m[2] ?? '').trim()
+    if (!spec || !spec.startsWith('.')) continue
+    const line = stripped.slice(0, m.index ?? 0).split('\n').length
+    const base = posix.normalize(curDir === '.' ? spec : `${curDir}/${spec}`)
+    const cands = [
+      base, `${base}.mjs`, `${base}.js`, `${base}.ts`, `${base}.tsx`, `${base}.jsx`,
+      `${base}.mts`, `${base}.cts`, `${base}.cjs`,
+      `${base}/index.mjs`, `${base}/index.js`, `${base}/index.ts`, `${base}/index.tsx`,
+    ]
+    const resolved = cands.find((c) => knownFilesSet.has(c))
+    if (resolved && resolved !== relFile) targets.push({ target: resolved, line, specifier: spec })
+  }
+  return targets
+}
+
+/** 解析变更 JS/TS 文件间本地相对导入，阻断新引入的 2 节点双向循环依赖（`A -> B -> A`）。 */
+export function detectNewCircularImports({ changedFilesMap, baseTextMap = new Map() } = {}) {
+  if (!(changedFilesMap instanceof Map) || changedFilesMap.size < 2) return []
+  const jsFiles = [...changedFilesMap.keys()].filter((f) => JS_TS_IMPORT_EXT_RE.test(f)).sort()
+  if (jsFiles.length < 2) return []
+  const knownSet = new Set(jsFiles)
+  const curEdges = new Map()
+  for (const f of jsFiles) {
+    const list = extractLocalRelativeTargets(f, changedFilesMap.get(f), knownSet)
+    const map = new Map()
+    for (const item of list) if (!map.has(item.target)) map.set(item.target, item)
+    curEdges.set(f, map)
+  }
+
+  const baseEdges = new Map()
+  const getBaseTargets = (f) => {
+    if (baseEdges.has(f)) return baseEdges.get(f)
+    const bt = baseTextMap.get(f)
+    const set = bt ? new Set(extractLocalRelativeTargets(f, bt, knownSet).map((x) => x.target)) : new Set()
+    baseEdges.set(f, set)
+    return set
+  }
+
+  const blockers = []
+  for (let i = 0; i < jsFiles.length; i += 1) {
+    const a = jsFiles[i]
+    const aMap = curEdges.get(a)
+    for (let j = i + 1; j < jsFiles.length; j += 1) {
+      const b = jsFiles[j]
+      const bMap = curEdges.get(b)
+      const ab = aMap.get(b)
+      const ba = bMap.get(a)
+      if (!ab || !ba) continue
+      if (getBaseTargets(a).has(b) && getBaseTargets(b).has(a)) continue
+      blockers.push({
+        ruleId: 'edit.circular-import',
+        defectClass: 'arch-boundary',
+        severity: 'high',
+        file: a,
+        line: ab.line,
+        peerFile: b,
+        peerLine: ba.line,
+        message: `检测到新引入的双向循环导入：${a}:${ab.line} <-> ${b}:${ba.line}`,
+        fixHint: `将 ${a} 与 ${b} 的共享契约/原语下沉到独立底层模块，保持单向依赖，禁止拆出循环互导模块。`,
+      })
+    }
+  }
+  return blockers
+}
+
+function countLineMetrics(text, ext) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n')
+  const lines = normalized.split('\n')
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  let blankLines = 0
+  let nonEmptyLines = 0
+  for (const line of lines) {
+    if (line.trim() === '') blankLines += 1
+    else nonEmptyLines += 1
+  }
+  const views = buildLexedViews(normalized, ext)
+  let semicolonJoins = 0
+  for (const codeLine of views.codeNoLiteralLines) {
+    if (!codeLine.includes(';') || /\bfor\s*\(/.test(codeLine)) continue
+    const segs = codeLine.split(';').filter((s) => s.trim().length > 0).length
+    if (segs >= 2) semicolonJoins += segs - 1
+  }
+  return { blankLines, nonEmptyLines, semicolonJoins }
+}
+
+/** 拦截对原 >730 行文件通过批量删空行或分号拼行制造的虚假缩行作弊。 */
+export function detectLineSquashCheat({
+  fileRel = '', ext = '', baseText = null, currentText = '', baseLineCount = 0, currentLineCount = 0,
+} = {}) {
+  const rel = posixPath(fileRel).replace(/^\.\//, '')
+  if (!baseText || typeof baseText !== 'string' || baseLineCount <= 730 || currentLineCount >= baseLineCount) return null
+  const extNorm = String(ext || rel.split('.').pop() || '').toLowerCase()
+  const baseM = countLineMetrics(baseText, extNorm)
+  const curM = countLineMetrics(currentText, extNorm)
+  const blankLineDrop = baseM.blankLines - curM.blankLines
+  const nonEmptyDrop = baseM.nonEmptyLines - curM.nonEmptyLines
+  const semicolonJump = curM.semicolonJoins - baseM.semicolonJoins
+  const wipedBlanksWithoutRefactor = blankLineDrop >= 25 && nonEmptyDrop < Math.max(15, Math.floor(blankLineDrop * 0.5))
+  const squashedBySemicolon = semicolonJump >= 10
+  if (!wipedBlanksWithoutRefactor && !squashedBySemicolon) return null
+  return {
+    ruleId: 'edit.line-squash-cheat',
+    defectClass: 'file-bloat',
+    severity: 'high',
+    file: rel,
+    line: 1,
+    baseLines: baseLineCount,
+    lines: currentLineCount,
+    blankLineDrop,
+    nonEmptyDrop,
+    semicolonJump,
+    message: `检测到对紧/大文件的虚假压行缩减（${baseLineCount} -> ${currentLineCount} 行，空行减少 ${blankLineDrop}，非空行净减 ${nonEmptyDrop}，分号拼行增量 +${semicolonJump}）：${rel}`,
+    fixHint: '禁止通过批量删除空行或分号并句压低行数；请将真实职责拆分为独立内聚模块。',
+  }
 }

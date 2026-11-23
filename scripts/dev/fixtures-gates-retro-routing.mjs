@@ -55,10 +55,10 @@ async function captureJson(fn) {
 export function registerGatesRetroRoutingCases(cases) {
   // ── C1: 静态门禁精准化 ────────────────────────────────────────────────────
   cases.push(['C1 正反双向：同义反复断言 + 批量删断言升 deterministic + camelCase 识别', async () => {
-    for (const taut of ['assert True', 'assert true', 'assert(true)', 'expect(true).toBe(true)', 'assert.ok(true)', 'assertTrue(true)']) {
+    for (const taut of ['assert True', 'assert true', 'assert(true)', 'expect(true).toBe(true)', 'assert.ok(true)', 'assertTrue(true)', 'assert.equal(3, 3)']) {
       if (!TAUTOLOGY_ASSERT_RE.test(taut)) return `TAUTOLOGY_ASSERT_RE 未命中同义反复：${taut}`
     }
-    for (const real of ['assert.equal(3, 3)', 'expect(res.ok).toBe(true)', 'assertEqual(t, got, want)']) {
+    for (const real of ['assert.equal(res.code, 3)', 'expect(res.ok).toBe(true)', 'assertEqual(t, got, want)']) {
       if (TAUTOLOGY_ASSERT_RE.test(real)) return `TAUTOLOGY_ASSERT_RE 误伤非恒真断言：${real}`
     }
     for (const camel of ['assertEqual(t, a, b)', 'assertNoError(err)', 'assertError(err)', 'assertDeepEqual(got, want)', 'assertNotEqual(a, b)', 'assertContains(s, sub)']) {

@@ -22,19 +22,19 @@ metadata:
 2. **改前查相邻复用**：扫描同目录及共享层导出符号，优先合入既有主干与共享原语，不复制粘贴双轨逻辑。
 3. **改后立即执行门禁（`--mode verify` / `standalone`）**：对本次改动文件执行词法去噪扫描，零阻塞项后进入 `flow.mjs verify` 与提审。
 
-## 八项词法与命名静态拦截规则
+## 词法与反机械拆分静态拦截规则
 
 所有内容检查先经 `kit/skills/lib/static-gates-lexer.mjs` 剥离注释与字符串/正则字面量，分别在「纯代码视图」与「注释视图」求值，杜绝规则定义与字符串常量误报：
 
 | 检查项 | 作用域 | 阻断判据 |
 | --- | --- | --- |
 | 禁改区保护 | 全部改动文件 | 命中 `AGENTS.md` `do-not-edit` 路径即硬阻断 |
-| 过程工件文件名拦截 | 代码/测试/脚本文件名 | 拦截以 `issue<数字>`、`pr<数字>`、`stage<字母>`、`wave<数字>` 命名的长期源码/测试/脚本（文档目录 `docs/{prd,specs,todo,archive}/` 与常规业务词如 `local-issues`、`review-pr`、`v2/` 豁免） |
+| 过程工件与机械拆分命名 | 代码/测试/脚本文件名 | 拦截 `issue<数字>`/`pr<数字>`/`stage<字母>`/`wave<数字>` 及新增 `-partN`/`-misc`/`-extra`/`-overflow`/`-rest` 垃圾桶拆分名（`edit.mechanical-split-name`） |
 | 压制与借口标记 | 非夹具源码注释/属性 | 拦截无正当锚点（`pf-allow:` / `justification:`）或无关联追踪单号（`edit.hack-without-issue`）的 `HACK`、`WORKAROUND`、`TEMP`、`@ts-ignore`、`@ts-nocheck`、`eslint-disable`、`# type: ignore`、`# noqa`、`#[allow(` |
 | 履历墓碑与死代码块 | 非夹具源码注释 | 拦截历史变更履历注释与连续 `>=4` 行（含 `>=3` 行代码特征）注释死代码块 |
-| `arch-rules` 越界导入 | 纯代码视图 | 解析 JS/TS/Py/Go/Java/Kotlin/Rust 导入语句并对照 `AGENTS.md` `arch-rules` 阻断反向依赖 |
+| `arch-rules` 与循环导入 | 纯代码视图 | 解析导入对照 `arch-rules` 阻断反向依赖，并阻断变更 JS/TS 文件新引入的 2 节点双向循环导入（`edit.circular-import`） |
 | 单测反作弊 | 非夹具测试文件 | 阻断零断言测试、`>=5` mock 且仅查调用次数的纯 Mock 自证、单测 `>=1000ms` 硬编码等待与非无头 UI 测试 |
-| 文件膨胀控制 | 非测试非夹具源码 | `> 800` 行硬阻断；`730-800` 行输出紧文件拆分建议 |
+| 自适应超限与防压行 | 源码与非运行逻辑文件 | `> 800` 行由零配置分类器自动降级 `generated`（前 25 行头标或 `.gitattributes` `linguist-generated=true`）、`declarative-data`、`type-contract-or-ddl`（`.d.ts`/纯类型契约/`.sql`）与 `doc`；业务源码超限输出语义拆分与复用指引并阻断虚假删空行/分号拼行缩行（`edit.line-squash-cheat`）。仅确有不可拆架构依据并经独立审查确认者，方可在 `AGENTS.md`「## 取舍」或 `.agents/forge-hooks.json` 登记 `oversized-allow:`（严禁行内注释自豁免） |
 | 注释路径与临时绕过校验 | 变更代码注释 | 拦截未绑定 `#<issue>` 单号的 `HACK`/`WORKAROUND`/`TEMP`（`edit.hack-without-issue`）及注释中不存在的反引号路径（`edit.broken-comment-path`） |
 
 ## 无预设工具运行时实证分级策略

@@ -71,8 +71,8 @@ export const INJECTIONS_W6B = [
     what: 'C19 static-gates-comment-hygiene: isGeneratedSourceHeader 放宽至全文件导致尾部注释伪装自动生成源码',
     file: 'kit/skills/lib/static-gates-comment-hygiene.mjs',
     alsoDropIn: ['.agents/skills/lib/static-gates-comment-hygiene.mjs'],
-    from: "  const head20 = raw.replace(/\\r\\n/g, '\\n').split('\\n').slice(0, 20).join('\\n')",
-    to: "  const head20 = raw.replace(/\\r\\n/g, '\\n')",
+    from: "  const head25Lines = raw.replace(/\\r\\n/g, '\\n').split('\\n').slice(0, 25)",
+    to: "  const head25Lines = raw.replace(/\\r\\n/g, '\\n').split('\\n')",
     expect: 'W6B C12 + C19：edit-gate --base/游离 HEAD 兼容、自动生成源码豁免与纯声明式数据降级',
   },
   {

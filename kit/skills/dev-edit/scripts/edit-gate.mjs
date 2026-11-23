@@ -19,6 +19,7 @@ import {
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
+import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import {
   classifyTestFileTier, detectOptionalNativeCheckers, detectTestTierMetadata,
@@ -28,7 +29,10 @@ import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
   checkProcessArtifactFilename, countTextLines, evaluateArchRules, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
-import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
+import {
+  buildSplitReuseGuidance, checkMechanicalSplitName, classifyOversizedFile, detectLineSquashCheat,
+  detectNewCircularImports, resolveOversizedExemption, scanBrokenCommentPaths,
+} from '../../lib/static-gates-comment-hygiene.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 
@@ -333,6 +337,12 @@ export async function runEditGate(opts = {}) {
     ].filter(Boolean).map((p) => posixPath(p)),
   )
 
+  const gitAttributesText = readTextSafe(join(workTreeRoot, '.gitattributes'), 64 * 1024) ?? ''
+  const agentsText = readTextSafe(join(workTreeRoot, 'AGENTS.md'), 64 * 1024) ?? ''
+  const forgeHooksConfig = loadForgeHooksConfig(mainRoot, workTreeRoot)?.config ?? null
+  const ratchetInfo = await resolveCompareBaseSha(workTreeRoot, isGit, defaultBranch, taskLedger, opts.base)
+  const gitBaseRef = ratchetInfo.baseRef || 'HEAD'
+
   for (const entry of dedupEntries) {
     const rel = entry.file
     if (!isLegalArchiveMove(entry, deletedFiles, ownArchived) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
@@ -343,6 +353,12 @@ export async function runEditGate(opts = {}) {
       const procNameHit = checkProcessArtifactFilename(rel)
       if (procNameHit) blockers.push(procNameHit)
     }
+    const isMarkedNew = entry.status === '??' || /^A/i.test(String(entry.status ?? ''))
+    const isNewlyAdded = isMarkedNew || (!isGit ? !existsSync(join(workTreeRoot, rel)) : !(await gitRun(workTreeRoot, ['cat-file', '-e', `${gitBaseRef}:${rel}`])).ok)
+    if (isNewlyAdded) {
+      const mechHit = checkMechanicalSplitName(rel)
+      if (mechHit) blockers.push(mechHit)
+    }
     if (highRiskGlobs.some((pat) => matchGlob(rel, pat))) {
       highRiskHits.push(rel)
       warnings.push({ ruleId: 'edit.high-risk-path', severity: 'medium', file: rel, message: `目标文件落入 high-risk 高风险路径（合并前须独立审查与故障注入）：${rel}` })
@@ -350,36 +366,56 @@ export async function runEditGate(opts = {}) {
   }
 
   const nativeCheckers = detectOptionalNativeCheckers(workTreeRoot)
+  const findSiblingsFor = (hints, rel) => {
+    const d = posixPath(dirname(rel))
+    const key = d === '.' ? '' : d
+    return hints.find((h) => h.dir === (key || '.'))?.siblings ?? []
+  }
 
   if (mode === 'pre-edit') {
+    const reuseHints = collectSiblingReuseHints(workTreeRoot, checkedFiles)
+    const splitGuidance = []
     for (const rel of checkedFiles) {
       const abs = join(workTreeRoot, rel)
       if (!existsSync(abs) || !CODE_EXT_RE.test(rel) || FIXTURE_FILE_RE.test(rel) || TEST_FILE_RE.test(rel)) continue
       const txt = readTextSafe(abs, 512 * 1024)
       if (!txt) continue
       const lineCount = countTextLines(txt)
+      const ext = rel.split('.').pop()?.toLowerCase() ?? ''
       if (lineCount > 800) {
-        warnings.push({ ruleId: 'edit.existing-oversized', severity: 'medium', file: rel, lines: lineCount, message: `目标文件当前已有 ${lineCount} 行（> 800 行上限），请先拆分模块再继续扩展：${rel}` })
+        const cls = classifyOversizedFile({ fileRel: rel, fullText: txt, ext, fullLineCount: lineCount, warnLines: 800, gitAttributesText })
+        const exempt = resolveOversizedExemption({ fileRel: rel, agentsText, forgeHooksConfig })
+        if (cls?.downgrade) {
+          warnings.push({ ruleId: 'edit.oversized-downgraded', severity: 'low', file: rel, lines: lineCount, category: cls.category, message: `超限文件自动降级放行（${cls.category}，${lineCount} 行）：${rel}` })
+        } else if (exempt.exempt) {
+          warnings.push({ ruleId: 'edit.oversized-exempt', severity: 'low', file: rel, lines: lineCount, source: exempt.source, message: `超限文件命中审查豁免（${exempt.source}，${lineCount} 行）：${rel}` })
+        } else {
+          const g = buildSplitReuseGuidance({ fileRel: rel, fullText: txt, ext, siblingReuse: findSiblingsFor(reuseHints, rel) })
+          splitGuidance.push(g)
+          warnings.push({ ruleId: 'edit.existing-oversized', severity: 'medium', file: rel, lines: lineCount, message: `目标文件当前已有 ${lineCount} 行（> 800 行上限），请先拆分模块再继续扩展：${rel}`, fixHint: g.fixHint })
+        }
       } else if (lineCount >= NEAR_LIMIT_LINES) {
+        const g = buildSplitReuseGuidance({ fileRel: rel, fullText: txt, ext, siblingReuse: findSiblingsFor(reuseHints, rel) })
+        splitGuidance.push(g)
         nearLimitFiles.push({ file: rel, lines: lineCount, limit: 800 })
-        warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: lineCount, message: `目标文件处于紧文件区（${lineCount}/800 行），新增逻辑建议抽离独立模块：${rel}` })
+        warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: lineCount, message: `目标文件处于紧文件区（${lineCount}/800 行），新增逻辑建议抽离独立模块：${rel}`, fixHint: g.fixHint })
       }
     }
-    const reuseHints = collectSiblingReuseHints(workTreeRoot, checkedFiles)
     const ok = blockers.length === 0
     return {
       ok, mode, exitCode: ok ? EXIT.OK : EXIT.FACT, repoRoot: posixPath(workTreeRoot),
-      checkedFiles, blockers, violations: blockers, warnings, nearLimitFiles, highRiskHits, reuseHints, nativeCheckers,
+      checkedFiles, blockers, violations: blockers, warnings, nearLimitFiles, highRiskHits, reuseHints, splitGuidance, nativeCheckers,
       summary: { checked: checkedFiles.length, blockers: blockers.length, warnings: warnings.length },
     }
   }
 
   const tierMeta = detectTestTierMetadata(workTreeRoot, checkedFiles)
-  const ratchetInfo = await resolveCompareBaseSha(workTreeRoot, isGit, defaultBranch, taskLedger, opts.base)
   const enableCommentPathCheck = opts.changed === true || !(
     (Array.isArray(opts.files) && opts.files.length > 0) || (typeof opts.files === 'string' && opts.files.trim())
   )
   const codeRelList = []
+  const changedFilesMap = new Map()
+  const baseTextMap = new Map()
   let diffChunks = null
   if (isGit && ratchetInfo.baseRef && dedupEntries.some((e) => CODE_EXT_RE.test(e.file))) {
     const diffRes = await gitRunBuffer(workTreeRoot, ['--no-optional-locks', 'diff', '--unified=3', '--no-ext-diff', '--no-color', ratchetInfo.baseRef])
@@ -390,20 +426,32 @@ export async function runEditGate(opts = {}) {
 
   for (const entry of dedupEntries) {
     const rel = entry.file
-    if (!CODE_EXT_RE.test(rel)) continue
     const abs = join(workTreeRoot, rel)
     if (!existsSync(abs)) continue
+    if (!CODE_EXT_RE.test(rel)) {
+      if (/\.(?:md|mdx|rst|txt|sql)$/i.test(rel)) {
+        const docTxt = readTextSafe(abs, 512 * 1024)
+        const docLines = docTxt ? countTextLines(docTxt) : 0
+        if (docLines > 800) {
+          const cls = classifyOversizedFile({ fileRel: rel, fullText: docTxt, fullLineCount: docLines, warnLines: 800, gitAttributesText })
+          if (cls?.downgrade) warnings.push({ ruleId: 'edit.oversized-downgraded', severity: 'low', file: rel, lines: docLines, category: cls.category, message: `非运行逻辑文件超出 800 行（${cls.category}，${docLines} 行），已自动降级放行：${rel}` })
+        }
+      }
+      continue
+    }
     const txt = readTextSafe(abs, 512 * 1024)
     if (txt === undefined) continue
     codeRelList.push(rel)
+    changedFilesMap.set(rel, txt)
 
     const isNewEntry = entry.status === '??' || /^A/i.test(String(entry.status ?? ''))
+    const ext = rel.split('.').pop()?.toLowerCase() ?? ''
     const fileChunk = (!isNewEntry && diffChunks && diffChunks.has(rel)) ? diffChunks.get(rel) : null
     const lines = fileChunk !== null
       ? summarizeHunkChanges(fileChunk).added
       : txt.replace(/\r\n/g, '\n').split('\n')
     const fullLineCount = countTextLines(txt)
-    const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullText: txt, fullLineCount, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES })
+    const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullText: txt, fullLineCount, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES, gitAttributesText })
 
     for (const s of hyg.excuseSuppressions) {
       const isIssueMissing = s.kind === 'missing-issue-link'
@@ -453,61 +501,59 @@ export async function runEditGate(opts = {}) {
     for (const db of hyg.deadCodeBlocks) {
       blockers.push({ ruleId: 'edit.dead-code-block', defectClass: 'dead-code', severity: 'high', file: rel, line: db.line, endLine: db.endLine, excerpt: db.excerpt, message: `检测到连续注释死代码块（${db.length} 行）：${rel}:${db.line}-${db.endLine}`, fixHint: '直接删除废弃注释代码块，依靠版本历史追溯。' })
     }
-    if (hyg.godFile) {
-      let baseText = null
-      if (isGit && ratchetInfo.baseRef) {
-        if (ratchetInfo.baseRef === 'HEAD') {
-          baseText = await loadHeadText()
-        } else {
-          const baseShow = await gitRun(workTreeRoot, ['show', `${ratchetInfo.baseRef}:${rel}`])
-          if (baseShow.ok) baseText = baseShow.stdout
-        }
-      }
-      const baseLineCount = baseText !== null ? countTextLines(baseText) : null
-      let isUntouchedOnMain = false
-      if (!ratchetInfo.hasBranchBase && baseText !== null && isGit) {
-        const diffHead = await gitRun(workTreeRoot, ['--no-optional-locks', 'diff', '--quiet', 'HEAD', '--', rel])
-        isUntouchedOnMain = diffHead.ok
-      }
-      if (baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {
-        const netGrowth = fullLineCount - baseLineCount
-        if (netGrowth > BROWNFIELD_GROWTH_LIMIT) {
-          blockers.push({
-            ruleId: 'edit.file-oversized-growth',
-            defectClass: 'file-bloat',
-            severity: 'high',
-            file: rel,
-            line: fullLineCount,
-            lines: fullLineCount,
-            baseLines: baseLineCount,
-            netGrowth,
-            message: `存量大文件单次净增超限（基线 ${baseLineCount} 行 -> 当前 ${fullLineCount} 行，净增 +${netGrowth} > ${BROWNFIELD_GROWTH_LIMIT} 行棘轮上限）：${rel}`,
-            fixHint: `存量 >800 行文件单次净增不得超过 ${BROWNFIELD_GROWTH_LIMIT} 行；请将新增逻辑拆分到独立模块。`,
-          })
-        } else {
-          warnings.push({
-            ruleId: 'edit.existing-oversized',
-            severity: 'medium',
-            file: rel,
-            lines: fullLineCount,
-            baseLines: baseLineCount,
-            netGrowth,
-            message: `存量大文件局部修改放行（基线 ${baseLineCount} 行 -> 当前 ${fullLineCount} 行，净增 ${netGrowth >= 0 ? `+${netGrowth}` : netGrowth} <= ${BROWNFIELD_GROWTH_LIMIT} 行棘轮上限）：${rel}`,
-          })
-        }
+    let baseText = null
+    if (!isNewEntry && isGit && ratchetInfo.baseRef) {
+      if (ratchetInfo.baseRef === 'HEAD') {
+        baseText = await loadHeadText()
       } else {
-        blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 800 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: '按单一职责拆分为内聚子模块，保持每个源文件 <= 800 行。' })
+        const showBase = await gitRun(workTreeRoot, ['show', `${ratchetInfo.baseRef}:${rel}`])
+        baseText = showBase.ok ? showBase.stdout : null
+      }
+      if (typeof baseText === 'string') baseTextMap.set(rel, baseText)
+    }
+    const baseLineCount = baseText !== null ? countTextLines(baseText) : null
+    if (baseText !== null && baseLineCount > NEAR_LIMIT_LINES) {
+      const squashHit = detectLineSquashCheat({ fileRel: rel, ext, baseText, currentText: txt, baseLineCount, currentLineCount: fullLineCount })
+      if (squashHit) blockers.push(squashHit)
+    }
+    if (hyg.godFile) {
+      const exempt = resolveOversizedExemption({ fileRel: rel, agentsText, forgeHooksConfig })
+      if (exempt.exempt) {
+        warnings.push({ ruleId: 'edit.oversized-exempt', severity: 'low', file: rel, lines: fullLineCount, source: exempt.source, message: `超限文件命中审查豁免（${exempt.source}，${fullLineCount} 行）：${rel}` })
+      } else {
+        const sibs = findSiblingsFor(collectSiblingReuseHints(workTreeRoot, [rel]), rel)
+        const guidance = buildSplitReuseGuidance({ fileRel: rel, fullText: txt, ext, siblingReuse: sibs })
+        let isUntouchedOnMain = false
+        if (!ratchetInfo.hasBranchBase && baseText !== null && isGit) {
+          isUntouchedOnMain = (await gitRun(workTreeRoot, ['--no-optional-locks', 'diff', '--quiet', 'HEAD', '--', rel])).ok
+        }
+        if (baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {
+          const netGrowth = fullLineCount - baseLineCount
+          if (netGrowth > BROWNFIELD_GROWTH_LIMIT) {
+            blockers.push({
+              ruleId: 'edit.file-oversized-growth', defectClass: 'file-bloat', severity: 'high', file: rel,
+              line: fullLineCount, lines: fullLineCount, baseLines: baseLineCount, netGrowth,
+              message: `存量大文件单次净增超限（基线 ${baseLineCount} 行 -> 当前 ${fullLineCount} 行，净增 +${netGrowth} > ${BROWNFIELD_GROWTH_LIMIT} 行棘轮上限）：${rel}`,
+              fixHint: guidance.fixHint,
+            })
+          } else {
+            warnings.push({
+              ruleId: 'edit.existing-oversized', severity: 'medium', file: rel, lines: fullLineCount, baseLines: baseLineCount, netGrowth,
+              message: `存量大文件局部修改放行（基线 ${baseLineCount} 行 -> 当前 ${fullLineCount} 行，净增 ${netGrowth >= 0 ? `+${netGrowth}` : netGrowth} <= ${BROWNFIELD_GROWTH_LIMIT} 行棘轮上限）：${rel}`,
+            })
+          }
+        } else {
+          blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 800 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: guidance.fixHint })
+        }
       }
     } else if (hyg.declarativeDataFile) {
       warnings.push({
-        ruleId: 'edit.declarative-data-file',
-        severity: 'low',
-        file: rel,
-        lines: fullLineCount,
-        literalRatio: hyg.declarativeDataFile.literalRatio,
-        controlFlowCount: hyg.declarativeDataFile.controlFlowCount,
+        ruleId: 'edit.declarative-data-file', severity: 'low', file: rel, lines: fullLineCount,
+        literalRatio: hyg.declarativeDataFile.literalRatio, controlFlowCount: hyg.declarativeDataFile.controlFlowCount,
         message: `纯声明式数据源码超出 800 行（${fullLineCount} 行，字面量占比 ${Math.round(hyg.declarativeDataFile.literalRatio * 100)}%，控制流 ${hyg.declarativeDataFile.controlFlowCount}），已降级放行（建议按领域拆表或外置 JSON）：${rel}`,
       })
+    } else if (hyg.oversizedClass?.downgrade) {
+      warnings.push({ ruleId: 'edit.oversized-downgraded', severity: 'low', file: rel, lines: fullLineCount, category: hyg.oversizedClass.category, message: `超限文件自动降级放行（${hyg.oversizedClass.category}，${fullLineCount} 行）：${rel}` })
     } else if (hyg.nearLimitFile) {
       nearLimitFiles.push(hyg.nearLimitFile)
       warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: fullLineCount, message: `紧文件预警（${fullLineCount}/800 行），建议提前规划模块拆分：${rel}` })
@@ -520,6 +566,10 @@ export async function runEditGate(opts = {}) {
         blockers.push(hit)
       }
     }
+  }
+
+  for (const cyc of detectNewCircularImports({ changedFilesMap, baseTextMap })) {
+    blockers.push(cyc)
   }
 
   const archRes = evaluateArchRules(workTreeRoot, codeRelList, archRules)

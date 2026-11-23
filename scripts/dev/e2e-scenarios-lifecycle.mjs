@@ -422,7 +422,7 @@ async function runScenarioH(pkgRoot, sandbox, baseEnv, helpers) {
   const remoteIssNum = migJson.migrated.find((m) => m.remoteNumber).remoteNumber
 
   const planH = join(repoH, '.agents', 'skills', 'dev-plan', 'scripts', 'doc-plan.mjs')
-  assertOk(runNodeScript(planH, ['init', '--kind', 'todo', '--slug', 'h2-remote', '--title', 'H2 Remote', '--issue', String(remoteIssNum), '--owner', 'planner-h2'], repoH, baseEnv), 'Scenario H h2 init todo')
+  assertOk(runNodeScript(planH, ['init', '--kind', 'todo', '--slug', 'h2-remote', '--title', 'H2 Remote', '--issue', String(remoteIssNum), '--owner', 'planner-h2', '--in-place'], repoH, baseEnv), 'Scenario H h2 init todo')
   runGit(repoH, ['add', '-A'])
   runGit(repoH, ['commit', '-qm', 'docs: add h2 todo'])
 

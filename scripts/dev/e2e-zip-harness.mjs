@@ -329,7 +329,7 @@ async function runScenarioE(pkgRoot, sandbox, env) {
   const revE = join(repoE, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
   const govE = join(repoE, '.agents', 'skills', 'dev-govern', 'scripts', 'govern-audit.mjs')
 
-  const initRes = runNodeScript(planE, ['init', '--kind', 'spec', '--slug', 'child1', '--title', 'Child One', '--owner', 'alice', '--json'], repoE, env)
+  const initRes = runNodeScript(planE, ['init', '--kind', 'spec', '--slug', 'child1', '--title', 'Child One', '--owner', 'alice', '--in-place', '--json'], repoE, env)
   assertOk(initRes, 'Scenario E doc-plan init spec')
   const specRel = JSON.parse(initRes.stdout).file
   const specClean = readFileSync(join(repoE, specRel), 'utf8')

@@ -8,7 +8,7 @@ issue: null
 pr: null
 owner: plan-r6-arch
 plan_mode: interactive
-plan_critique: "passed (reviewer=critic-r6-arch, round=1, sha=87ceed89e328, summary=核查 C1..C16 覆盖、Wave 1/Wave 2 分波边界、A1/A2/A3 拍板、无魔数比率与无硬压字节死线均与真实源码及 4 份子 SPEC 对齐)"
+plan_critique: "passed (reviewer=critic-r6d-refresh, round=2, sha=278b92ac4bac, summary=r6a/r6b/r6c已合入归档且stripCritiqueMeta升级后独立复核通过)"
 related_spec: null
 related_todo: null
 multi_spec: true
@@ -57,9 +57,9 @@ case_type: 4
 ### 本次要做（In Scope）
 
 - 拆分为 4 片正交切片（Wave 1 并行 A/B/C 真零依赖，Wave 2 收尾 D）：
-  - `docs/specs/261124-r6a-single-source-state-spec.md`（单源默认分支、任务活性、运行时快照与跨平台四态 CAS 闭环）
-  - `docs/specs/261124-r6b-plan-index-antiblue-spec.md`（唯一规划索引、指针简报协议、长聊 `preInit` 与客观防退化）
-  - `docs/specs/261124-r6c-iterate-unified-gates-spec.md`（`dev-iterate` 确定性重构、跨门禁统一与 `review-pack` 提速去重）
+  - `docs/archive/specs/261124-r6a-single-source-state-spec.md`（单源默认分支、任务活性、运行时快照与跨平台四态 CAS 闭环；PR #162 已合入归档）
+  - `docs/archive/specs/261124-r6b-plan-index-antiblue-spec.md`（唯一规划索引、指针简报协议、长聊 `preInit` 与客观防退化；PR #161 已合入归档）
+  - `docs/archive/specs/261124-r6c-iterate-unified-gates-spec.md`（`dev-iterate` 确定性重构、跨门禁统一与 `review-pack` 提速去重；PR #163 已合入归档）
   - `docs/specs/261124-r6d-skills-contract-debloat-spec.md`（默认分支收口、`cli-parity` 扩面、冲突去重与全仓装配）
 
 ### 明确不做（Non-Goals）

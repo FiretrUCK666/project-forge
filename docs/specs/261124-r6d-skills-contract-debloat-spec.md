@@ -12,7 +12,7 @@ owner: plan-r6-arch
 plan_mode: interactive
 approved: true
 implemented: false
-plan_critique: "passed (reviewer=critic-r6-arch, round=1, sha=d26c144c4e32, summary=核查 C13..C16、Wave 2 收口剩余 4 处默认分支调用、cli-parity 扩面、先解绑 preflight-contract-rules.mjs 复制强锁再去重（无硬压字节/文件数/行数死线）、完整落地 A1/A2/A3 与外部调研松绑及全套交付门禁均真实自洽)"
+plan_critique: "passed (reviewer=critic-r6d-refresh, round=2, sha=a9fa28b4d88f, summary=stripCritiqueMeta升级后按Wave1实际基线独立复核r6d Spec通过)"
 related_prd: ../prd/261124-r6-arch-hardening-prd.md
 related_todo: ../todo/261124-r6d-skills-contract-debloat-todo.md
 high_risk_paths: [SKILL.md, AGENTS.md, templates/, kit/, scripts/lib/]
@@ -27,11 +27,11 @@ depends_on: [r6a-single-source-state, r6b-plan-index-antiblue, r6c-iterate-unifi
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/r6-arch-plan` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-r6-arch / `pending` |
+| 负责人 / 内审状态 | plan-r6-arch / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
 | 关联 PRD / Todo | `../prd/261124-r6-arch-hardening-prd.md` / `../todo/261124-r6d-skills-contract-debloat-todo.md` |
 

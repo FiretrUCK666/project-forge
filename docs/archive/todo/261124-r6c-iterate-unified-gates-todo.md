@@ -1,19 +1,19 @@
 ---
 kind: todo
 title: dev-iterate 确定性重构与跨门禁单源统一
-status: active
+status: done
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
-pr: null
-branch: feat/r6-arch-plan
+pr: 163
+branch: feat/r6c-iterate-unified-gates
 owner: plan-r6-arch
 plan_mode: interactive
 approved: true
-done_at: null
+done_at: 2026-11-24
 task_id: r6c-iterate-unified-gates
 planned_at: 1853e2257b47936b97aed07377c98d2d7a117bb8
-related_prd: ../prd/261124-r6-arch-hardening-prd.md
+related_prd: ../../prd/261124-r6-arch-hardening-prd.md
 related_spec: ../specs/261124-r6c-iterate-unified-gates-spec.md
 ---
 
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-r6c-iterate-unified-gates-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / 基线 | `feat/r6-arch-plan` @ `1853e22` |
+| 分支 / 基线 | `feat/r6c-iterate-unified-gates` @ `1853e22` |
 | 任务编号 | `r6c-iterate-unified-gates` |
-| 负责人 / 审批 | plan-r6-arch / `false` |
+| 负责人 / 审批 | plan-r6-arch / `true` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-r6c-iterate-unified-gates-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / #163 / `docs/archive/specs/261124-r6c-iterate-unified-gates-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -43,10 +43,10 @@ related_spec: ../specs/261124-r6c-iterate-unified-gates-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C9: 修复 `iterate.mjs` 漏导 `printNextStep`、`extractSymbols` 参数错位、`resolveNativeTestDir` 漏传与 `slugTestToken` 边界；抽象多栈 `resolveTestRunner` 并区分 `missing-runner`。
-- [ ] C10: 净化 `signals.jsonl` 推荐、统一 `configuredTestEntries` 与 `fixtures-*.mjs` 识别、`generate --write` 隔离拦截、落实 A2 默认 `--escalate: true`（支持 `--no-escalate`）及 `cycle` 持久化累加停损。
-- [ ] C11: 跨门禁统一 `countTextLines`、`isLegalArchiveMove` 与 `resolveOversizedExemption`；修复 `edit-gate` `reviewWorktreePath` 与终态归档；保留 `check-empirical` 在 `--include-diff` 之前而将 `check-fault` 收敛至 `record`；JSON 仅存 1 份 `contextBrief` 且 `evaluateToolStaleness` 提速至 `<500ms`；`verify-tools` `scratch/` 豁免。
-- [ ] C12: 修复 `review-ledger.mjs` Round 3 `--reason`、透传 `baseLedger.rebuts`、低风险单会话记录与 `generic-git` `awaiting-remote-mr` 指引，并通过正反夹具与故障注入。
+- [x] C9: 修复 `iterate.mjs` 漏导 `printNextStep`、`extractSymbols` 参数错位、`resolveNativeTestDir` 漏传与 `slugTestToken` 边界；抽象多栈 `resolveTestRunner` 并区分 `missing-runner`。
+- [x] C10: 净化 `signals.jsonl` 推荐、统一 `configuredTestEntries` 与 `fixtures-*.mjs` 识别、`generate --write` 隔离拦截、落实 A2 默认 `--escalate: true`（支持 `--no-escalate`）及 `cycle` 持久化累加停损。
+- [x] C11: 跨门禁统一 `countTextLines`、`isLegalArchiveMove` 与 `resolveOversizedExemption`；修复 `edit-gate` `reviewWorktreePath` 与终态归档；保留 `check-empirical` 在 `--include-diff` 之前而将 `check-fault` 收敛至 `record`；JSON 仅存 1 份 `contextBrief` 且 `evaluateToolStaleness` 提速至 `<500ms`；`verify-tools` `scratch/` 豁免。
+- [x] C12: 修复 `review-ledger.mjs` Round 3 `--reason`、透传 `baseLedger.rebuts`、低风险单会话记录与 `generic-git` `awaiting-remote-mr` 指引，并通过正反夹具与故障注入。
 
 ## 执行步骤
 
@@ -64,7 +64,7 @@ related_spec: ../specs/261124-r6c-iterate-unified-gates-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（接手人先查本行与关联分支最新提交）
+- **当前状态**：`已完成 (done)`（接手人先查本行与关联分支最新提交）
 - **待拍板事项**：无
 - **下一步第一件事**：在隔离 `.worktrees/impl-r6c-iterate-unified-gates` 先写 `scripts/dev/fixtures-r6c-gates.mjs` (new) 复现 Red 用例。
 
@@ -75,5 +75,13 @@ related_spec: ../specs/261124-r6c-iterate-unified-gates-spec.md
 ## 完成后的记录
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/equip.mjs .` -> `141` 文件校验 `integrityCheck.ok: true`，`equip.mjs . --check` 通过
+  - `node scripts/dev/preflight.mjs` -> 0 项失败（41 项读数），`gap-coverage.mjs` -> 21 条各有处置
+  - `node scripts/dev/fixtures.mjs --jobs 6` -> 全量行为断言通过（含 `fixtures-r6c-gates.mjs` 4 组双向回归）
+  - `node scripts/dev/verify-injections.mjs --jobs 4` -> 392 条判据全部抓到（含 `I500..I503`）
+  - `node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --task r6c-iterate-unified-gates --json` -> `exit=0, blockers=[], violations=[]`
+  - `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .` -> `Test Files: 100 | Dirs: scripts/dev(94), scripts(5), .agents/skills(1)`
+  - `node .agents/skills/dev-iterate/scripts/iterate.mjs plan .` -> 5 个候选全部指向现存源码（无归档/已删/文档热点）
+  - 协调者 `#734` 授权同步修改的非 `scope_files` 测试文件：`scripts/dev/e2e-scenarios-evolution.mjs`（Scenario L `generate --write` 先验证 `main` exit 3 后转隔离 worktree）、`scripts/dev/blind-run-matrix.mjs`（同样转隔离 worktree 执行）、`scripts/dev/fixtures-w6c-context-brief.mjs`（改用单源 `rpJson.contextBrief` 并反向断言无重复）
+- **文档同步检查**：本切片不改对外用户手册与 `docs/TDD.md`（留归 Wave 2 `r6d`）；总控 PRD 保持活跃，`r6c` Todo/SPEC 随 `finalize` 成对归档。
+- **遗留问题**：无（`edit-gate`/`review-context`/`govern-state` `isDefaultBranch` 切换按计划留归 Wave 2 `r6d`）。

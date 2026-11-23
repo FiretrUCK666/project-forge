@@ -587,6 +587,25 @@ export async function evaluatePassBlockers({
     if (!visualProbe.ok) blockers.push(visualProbe.reason)
   }
 
+  if (receipt?.faultInjectedAndFailed && !receipt?.faultRestoredClean) {
+    blockers.push('存在未还原复绿的故障注入残留（请还原代码并运行 review-pack.mjs check-fault --phase restore）')
+  }
+  if (
+    hasAgentsProfile && pol && profile
+    && (receipt?.mechanicalPackSeen || receipt?.empiricalVerified)
+    && pol.faultInjectionRequired
+    && (pol.runtimeFilesTouched?.length ?? 0) > 0
+    && !isProfileExplicitNone(profile, 'smoke-verify')
+  ) {
+    const faultCycleOk = Boolean(
+      (receipt?.faultInjectedAndFailed && receipt?.faultRestoredClean)
+      || (ledger?.faultRecord?.restoredAt && (!headSha || headSha === 'UNBORN' || ledger.faultRecord.headSha === headSha)),
+    )
+    if (!faultCycleOk) {
+      blockers.push('高风险/单向门变更尚未完成两阶段故障注入闭环（请运行 review-pack.mjs check-fault --phase fail 与 --phase restore）')
+    }
+  }
+
   if (enforceGates) {
     if (!ledger?.verifiedHead || (headSha && headSha !== 'UNBORN' && ledger.verifiedHead !== headSha)) {
       blockers.push(`--enforce-gates: verifiedHead (${String(ledger?.verifiedHead ?? 'null').slice(0, 7)}) 与当前 HEAD (${String(headSha ?? '').slice(0, 7)}) 不一致`)

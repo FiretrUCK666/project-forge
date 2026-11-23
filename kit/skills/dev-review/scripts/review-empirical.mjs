@@ -248,8 +248,6 @@ export function evaluateIncludeDiffGate({
   if (!mechanicalDone) missingSteps.push('mechanical-pack')
   if (!empiricalDone) missingSteps.push('check-empirical')
   if (staticDocBlock) missingSteps.push('static-doc-check')
-  if (requirements.faultRequired && !faultFailDone) missingSteps.push('check-fault:fail')
-  if (requirements.faultRequired && !faultRestoreDone) missingSteps.push('check-fault:restore')
   if (requirements.visualCheckRequired && !visualDone) missingSteps.push('visual-check')
   if (requirements.e2eObservationRequired && !e2eObservationDone && (!requirements.visualCheckRequired || visualDone)) {
     missingSteps.push('e2e-observation')

@@ -198,7 +198,7 @@ export function detectRuntimeCapabilities({ reviewRoot, mainRoot, gitDir, effect
  * - 执行免手工日期过时检查与跨 `>=2` PR `verify.scratch-used` 固化提示；
  * - 产出可执行实证任务单（无论有无预设工具均要求先跑业务流实证再 `--include-diff`）。
  */
-export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff, effectiveProfile, baseRef, task }) {
+export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff, effectiveProfile, baseRef, headSha = null, task }) {
   const changedFiles = [...new Set([...(diff?.files ?? []).map((f) => posixPath(f.file)), ...(diff?.untracked ?? []).map((f) => posixPath(f))])].sort()
   const runtimeChanged = changedFiles.filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f))
   const taskId = task?.taskId ?? 'review-probe'
@@ -248,13 +248,29 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
     }
   }
 
-  const toolChecks = []
-  for (const { feature, tool } of matchedToolsRaw) {
-    const staleness = await evaluateToolStaleness({
-      repoRoot: reviewRoot, gitCommonDir: gitDir, mainRoot, feature, tool, baseRef,
-    })
-    toolChecks.push({ featureId: feature.id, featureName: feature.name, tool, staleness })
+  let resolvedBaseSha = null
+  let effectiveHeadSha = headSha
+  if (matchedToolsRaw.length > 0) {
+    if (!effectiveHeadSha) {
+      const hr = await gitRun(reviewRoot, ['--no-optional-locks', 'rev-parse', 'HEAD'])
+      effectiveHeadSha = hr.ok ? hr.stdout.trim() : null
+    }
+    if (baseRef) {
+      const br = await gitRun(reviewRoot, ['--no-optional-locks', 'rev-parse', '--verify', baseRef])
+      if (br.ok) resolvedBaseSha = br.stdout.trim()
+    }
   }
+  const changedFilesSet = new Set(changedFiles)
+  const precomputed = { headSha: effectiveHeadSha, resolvedBaseSha }
+  const toolChecks = await Promise.all(
+    matchedToolsRaw.map(async ({ feature, tool }) => {
+      const staleness = await evaluateToolStaleness({
+        repoRoot: reviewRoot, gitCommonDir: gitDir, mainRoot, feature, tool, baseRef,
+        skipFingerprintOnUnbaselined: true, changedFilesSet, precomputed,
+      })
+      return { featureId: feature.id, featureName: feature.name, tool, staleness }
+    }),
+  )
   const healthyTools = toolChecks.filter((t) => t.staleness.status === 'fresh' || t.staleness.status === 'unbaselined' || (t.staleness.status === 'stale' && t.tool.riskLevel === 'low'))
   const staleMediumTools = toolChecks.filter((t) => t.staleness.status === 'stale' && t.tool.riskLevel === 'medium')
   const staleHighRiskTools = toolChecks.filter((t) => (t.staleness.status === 'stale' && t.tool.riskLevel === 'high') || t.staleness.status === 'missing-script')
@@ -300,20 +316,12 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
     excludeFiles: [task?.specFile, task?.todoFile, task?.prdFile].filter(Boolean),
     profile: effectiveProfile,
   })
-  const evergreenContext = {
-    evergreenToc: contextBrief.evergreenToc,
-    otherEvergreenDocs: contextBrief.otherEvergreenDocs,
-    totalEvergreenDocs: contextBrief.totalEvergreenDocs,
-    relatedSlices: contextBrief.relatedSlices,
-    featureMap: contextBrief.featureMap,
-  }
 
   return {
     featureMapSource,
     warnings,
     changedFilesCount: changedFiles.length,
     runtimeFilesCount: runtimeChanged.length,
-    evergreenContext,
     contextBrief,
     matchedFeatures: matchedFeatures.map((f) => ({
       id: f.id,
@@ -372,7 +380,7 @@ export function formatReviewContextLines(rc) {
   }
   for (const item of rc.empiricalTaskOrder.actionItems) lines.push(`  * ${item}`)
   for (const h of rc.solidificationHints ?? []) lines.push(`  - [${h.code}] ${h.suggestion}`)
-  const brief = rc.evergreenContext ?? rc.contextBrief
+  const brief = rc.contextBrief ?? rc.evergreenContext
   if (brief) {
     lines.push(...formatContextBriefLines(brief, {
       title: '  Evergreen Docs & Context Brief:',

@@ -10,7 +10,10 @@ import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
+import { CODE_EXT_RE } from './git-core.mjs'
 import { canonicalPath, posixPath, readTextSafe, sha256Text, withFileLock } from './git.mjs'
+import { isTestOrFixtureFile } from './static-gates.mjs'
+import { isToolOwnedPath } from './tool-owned.mjs'
 
 export const DEFECT_CLASSES = Object.freeze([
   'suppression-bypass',
@@ -167,7 +170,22 @@ function worktreeMatches(evWt, filterWt) {
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
 }
 
-/** 读取并解析 `signals.jsonl`（支持按 `{ taskId, branch, worktree }` 隔离过滤）。 */
+/** 判断 signal 关联目标是否为仓库内现存的有效源码文件（排除文档/归档/工具文件/已删文件/测试夹具）。 */
+export function isActionableSignalCodeTarget(target, repoRoot = null) {
+  const rel = posixPath(String(target ?? '')).replace(/^\.\//, '').trim()
+  if (!rel || isToolOwnedPath(rel) || isTestOrFixtureFile(rel)) return false
+  if (/^(?:docs\/archive\/|node_modules\/|dist\/|build\/|\.worktrees\/)/i.test(rel)) return false
+  if (!CODE_EXT_RE.test(rel)) return false
+  if (repoRoot && !existsSync(join(repoRoot, rel))) return false
+  return true
+}
+
+/** 过滤出针对有效源码目标的信号事件。 */
+export function filterActionableCodeSignals(events = [], repoRoot = null) {
+  return (events ?? []).filter((ev) => isActionableSignalCodeTarget(ev?.targetArtifact || ev?.file, repoRoot))
+}
+
+/** 读取并解析 `signals.jsonl`（支持按 `{ taskId, branch, worktree, codeOnly, repoRoot }` 隔离过滤）。 */
 export function readSignalsJsonl(stateDirOrRoots, filter = {}) {
   const stateDir = typeof stateDirOrRoots === 'string'
     ? stateDirOrRoots
@@ -179,6 +197,8 @@ export function readSignalsJsonl(stateDirOrRoots, filter = {}) {
   const wantTask = filter?.taskId ? String(filter.taskId).trim() : null
   const wantBranch = filter?.branch ? String(filter.branch).trim() : null
   const wantWorktree = filter?.worktree ? String(filter.worktree).trim() : null
+  const codeOnly = Boolean(filter?.codeOnly)
+  const repoRoot = filter?.repoRoot ?? (typeof stateDirOrRoots === 'object' ? stateDirOrRoots?.mainRoot ?? null : null)
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
@@ -189,6 +209,7 @@ export function readSignalsJsonl(stateDirOrRoots, filter = {}) {
       if (wantTask && ev.taskId !== wantTask) continue
       if (wantBranch && ev.branch !== wantBranch) continue
       if (wantWorktree && !worktreeMatches(ev.worktree, wantWorktree)) continue
+      if (codeOnly && !isActionableSignalCodeTarget(ev.targetArtifact || ev.file, repoRoot)) continue
       events.push(ev)
     } catch { /* ignore corrupt partial line */ }
   }

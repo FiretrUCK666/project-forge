@@ -16,7 +16,7 @@ import {
 } from '../../lib/profile-sniffer.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
-  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, isMetaTestHarness, stripCodeCommentsLines,
+  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, isMetaTestHarness, isTestOrFixtureFile, stripCodeCommentsLines,
 } from '../../lib/static-gates.mjs'
 import {
   cmdCoversTestFile, collectConfiguredTestEntries, collectTestInventory, expandVerificationCommands,
@@ -139,8 +139,6 @@ function hasClassLevelSkipMarker(codeLines) {
 }
 
 export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings) {
-  const codeFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && !TEST_FILE_RE.test(f.rel))
-  const testFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && TEST_FILE_RE.test(f.rel))
   const discovery = discoverWorkspacePackages(repoRoot, files.map((f) => f.rel))
 
   const { steps: ciSteps, ciConfigFiles } = parseWorkflowCiSteps(repoRoot)
@@ -151,9 +149,12 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
   const hasRunnerConfig = ciSteps.length > 0 || hasProfileRunners
   const expandedCommands = hasRunnerConfig ? expandVerificationCommands(repoRoot, ciSteps, devProfile, discovery) : []
   const { configuredTestEntries, hasExecutableRunner } = collectConfiguredTestEntries(repoRoot, files, expandedCommands)
+  const configuredSet = new Set(configuredTestEntries)
+  const codeFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && !isTestOrFixtureFile(f.rel) && !configuredSet.has(f.rel))
+  const testFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && TEST_FILE_RE.test(f.rel))
   const testInventory = collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConfigFiles, devProfile, discovery, configuredTestEntries)
 
-  if (codeFiles.length > 0 && testFiles.length === 0 && configuredTestEntries.length === 0 && !hasExecutableRunner) {
+  if (codeFiles.length > 0 && testInventory.totalTestFiles === 0 && configuredTestEntries.length === 0 && !hasExecutableRunner) {
     addFinding(findings, {
       id: 'tests.missing-suite',
       category: 'tests',

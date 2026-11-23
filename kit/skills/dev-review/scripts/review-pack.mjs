@@ -493,7 +493,7 @@ async function main(argv = process.argv.slice(2)) {
     const behavioralGate = assessBehavioralGate({
       diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories, evidence, receipt,
     })
-    const structuralGate = assessStructuralGate({ reviewRoot, diff, devProfile: effectiveProfile, parity })
+    const structuralGate = assessStructuralGate({ reviewRoot, mainRoot, diff, devProfile: effectiveProfile, parity })
     const doorAssessment = assessDoor({
       reviewRoot, mainRoot, diff, devProfile: effectiveProfile, hrHits, parity, task, gateWeakenedHits,
     })
@@ -512,7 +512,7 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     const reviewContext = await assembleReviewContext({
-      reviewRoot, mainRoot, gitDir: roots.gitDir, diff, effectiveProfile, baseRef, task,
+      reviewRoot, mainRoot, gitDir: roots.gitDir, diff, effectiveProfile, baseRef, headSha, task,
     })
 
     const includeDiff = Boolean(opts['include-diff'])
@@ -596,6 +596,7 @@ async function main(argv = process.argv.slice(2)) {
       opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate, empiricalGate, reviewContext,
     })
 
+    const { contextBrief, ...reviewContextRest } = reviewContext ?? {}
     const pack = {
       status: opts['untrusted-scan'] && untrustedWarnings.length === 0 ? 'UNTRUSTED_SCAN_PASS' : 'PACK_READY',
       mode,
@@ -638,8 +639,8 @@ async function main(argv = process.argv.slice(2)) {
       behavioralGate,
       structuralGate,
       doorAssessment,
-      reviewContext,
-      contextBrief: reviewContext?.contextBrief ?? null,
+      reviewContext: reviewContextRest,
+      contextBrief: contextBrief ?? null,
       empiricalGate,
       untrustedWarnings,
       untrustedAdvisories,

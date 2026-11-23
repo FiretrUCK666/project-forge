@@ -27,7 +27,7 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
+  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isLegalArchiveMove, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 import {
   buildSplitReuseGuidance, checkMechanicalSplitName, classifyOversizedFile, detectLineSquashCheat,
@@ -197,19 +197,6 @@ function collectSiblingReuseHints(workRoot, targetFiles) {
   return hints
 }
 
-function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived = new Set()) {
-  const rel = posixPath(entry?.file ?? '')
-  if (!rel.startsWith('docs/archive/')) return false
-  const st = String(entry?.status ?? '')
-  if (/^R/i.test(st)) return true
-  if (/^(?:A|\?\?|M)/i.test(st)) {
-    if (ownArchived.has(rel)) return true
-    const origRel = rel.replace(/^docs\/archive\//, 'docs/')
-    if (deletedFiles.has(origRel)) return true
-  }
-  return false
-}
-
 async function runOptionalNativeChecks(workRoot, nativeInfo) {
   const results = []
   if (!nativeInfo?.hasNativeConfig) {
@@ -292,12 +279,13 @@ export async function runEditGate(opts = {}) {
   const highRiskGlobs = devProfile['high-risk'] ?? []
   const archRules = devProfile['arch-rules'] ?? []
 
-  let taskLedger = taskId ? readTaskLedger(mainRoot, taskId) : null
+  const allLedgers = isGit || taskId ? listTaskLedgers(mainRoot, { includeTerminal: true }) : []
+  let taskLedger = taskId ? (readTaskLedger(mainRoot, taskId) ?? allLedgers.find((l) => l.taskId === taskId) ?? null) : null
   if (!taskLedger && isGit) {
     const wtRel = roots.isWorktree ? posixPath(relative(mainRoot, workTreeRoot)) : null
     const br = readHeadFast(resolveGitDirFast(workTreeRoot), gitDir)?.branch ?? null
     if (wtRel || (br && !['main', 'master'].includes(br))) {
-      taskLedger = listTaskLedgers(mainRoot, { includeTerminal: false }).find((l) => (wtRel && l.worktreePath === wtRel) || (br && l.branch === br)) ?? null
+      taskLedger = allLedgers.find((l) => (wtRel && (l.worktreePath === wtRel || l.reviewWorktreePath === wtRel)) || (br && l.branch === br)) ?? null
     }
   }
 
@@ -326,16 +314,25 @@ export async function runEditGate(opts = {}) {
   const nearLimitFiles = []
   const highRiskHits = []
   const checkedFiles = dedupEntries.map((e) => e.file)
-  const ownArchived = new Set(
-    [
-      taskLedger?.archivedTodoFile,
-      taskLedger?.archivedSpecFile,
-      taskLedger?.archivedPrdFile,
-      ...(Array.isArray(taskLedger?.archivedDocs) ? taskLedger.archivedDocs : []),
-      ...[taskLedger?.todoFile, taskLedger?.specFile, taskLedger?.prdFile]
-        .filter((p) => typeof p === 'string' && posixPath(p).startsWith('docs/archive/')),
-    ].filter(Boolean).map((p) => posixPath(p)),
-  )
+  const ownArchived = new Set()
+  const addLedgerArchived = (ldg) => {
+    for (const p of [
+      ldg?.archivedTodoFile, ldg?.archivedSpecFile, ldg?.archivedPrdFile,
+      ...(Array.isArray(ldg?.archivedDocs) ? ldg.archivedDocs : []),
+      ...[ldg?.todoFile, ldg?.specFile, ldg?.prdFile].filter((x) => typeof x === 'string' && posixPath(x).startsWith('docs/archive/')),
+    ]) { if (p) ownArchived.add(posixPath(p)) }
+  }
+  addLedgerArchived(taskLedger)
+  if (taskLedger) {
+    const taskIssues = new Set((taskLedger.linkedIssues ?? []).map((x) => String(x?.number ?? x)).filter(Boolean))
+    const taskPrds = new Set([taskLedger.prdFile, taskLedger.archivedPrdFile].filter(Boolean).map((x) => posixPath(x)))
+    for (const sib of allLedgers) {
+      const sibIssues = (sib.linkedIssues ?? []).map((x) => String(x?.number ?? x)).filter(Boolean)
+      const sharesIssue = sibIssues.some((n) => taskIssues.has(n))
+      const sharesPrd = [sib.prdFile, sib.archivedPrdFile].filter(Boolean).some((x) => taskPrds.has(posixPath(x)))
+      if (sharesIssue || sharesPrd) addLedgerArchived(sib)
+    }
+  }
 
   const gitAttributesText = readTextSafe(join(workTreeRoot, '.gitattributes'), 64 * 1024) ?? ''
   const agentsText = readTextSafe(join(workTreeRoot, 'AGENTS.md'), 64 * 1024) ?? ''
@@ -560,9 +557,11 @@ export async function runEditGate(opts = {}) {
     }
 
     const isMetaHarness = isMetaTestHarness(rel, txt)
+    const exemptZeroProbe = Boolean(opts.exemptZeroAssertion) || /(?:^|\/)scratch\//i.test(rel)
     if (TEST_FILE_RE.test(rel) && !FIXTURE_FILE_RE.test(rel) && !isMetaHarness) {
       const { tier } = classifyTestFileTier(rel, txt, tierMeta)
       for (const hit of scanTestAntiCheat({ fileRel: rel, text: txt, assertionRe: ASSERTION_RE, testCaseRe: TEST_CASE_RE, isNonUnit: tier !== 'unit' })) {
+        if (exemptZeroProbe && hit.ruleId === 'edit.test-zero-assertion') continue
         blockers.push(hit)
       }
     }

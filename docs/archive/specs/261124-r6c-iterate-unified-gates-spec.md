@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: dev-iterate 确定性重构与跨门禁单源统一
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
-pr: null
-branch: feat/r6-arch-plan
+pr: 163
+branch: feat/r6c-iterate-unified-gates
 owner: plan-r6-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r6-arch, round=1, sha=99a7f12efb41, summary=核查 C9..C12、iterate/test-inventory 多栈 Runner、A2 默认 --escalate、countTextLines/isLegalArchiveMove/resolveOversizedExemption 单源统一、保留 check-empirical 先行而仅将 check-fault 收口至 record、review-pack 单份 contextBrief 与 <500ms 提速、review-ledger 三锁及 Wave 1 隔离均真实自洽)"
-related_prd: ../prd/261124-r6-arch-hardening-prd.md
+related_prd: ../../prd/261124-r6-arch-hardening-prd.md
 related_todo: ../todo/261124-r6c-iterate-unified-gates-todo.md
 high_risk_paths: [kit/skills/lib/, kit/skills/dev-edit/scripts/, kit/skills/dev-review/scripts/, kit/skills/dev-govern/scripts/]
 task_id: r6c-iterate-unified-gates
@@ -27,13 +27,13 @@ depends_on: []
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / Issue / PR | `feat/r6-arch-plan` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-r6-arch / `pending` |
+| 分支 / Issue / PR | `feat/r6c-iterate-unified-gates` / 未关联 / #163 |
+| 负责人 / 内审状态 | plan-r6-arch / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | `../prd/261124-r6-arch-hardening-prd.md` / `../todo/261124-r6c-iterate-unified-gates-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261124-r6-arch-hardening-prd.md` / `docs/archive/todo/261124-r6c-iterate-unified-gates-todo.md` |
 
 - **变更一句话**：修复 `dev-iterate` 导入崩溃、多栈运行器与 `cycle` 持久化断点，落实用户拍板 A2（`--escalate` 默认开启），统一 `edit-gate`、`review-pack`、`govern-audit` 与 `verify-tools` 的行数/豁免/归档单源口径，收敛 `check-fault` 锁到 `record --verdict pass`（保持 `check-empirical` 在 `--include-diff` 之前），并将 `review-pack` 去重提速至 `<500ms`（认领总控 PRD `C9`、`C10`、`C11`、`C12`）。
 
@@ -121,10 +121,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C9: `iterate.mjs run` 非 `--json` 无 `ReferenceError`，`--focus` 正确抽取符号，`.venv` `pytest`、`mvn test`、`vitest`/`tap`/`node --test` 正确分发且缺运行器返回 `missing-runner`；`slugTestToken` 保留 `prd` 不误变 `flow`。
-- [ ] C10: `iterate.mjs plan . --json` 过滤非代码与归档 PRD；`govern-audit.mjs audit . --json` 不再输出 `Test Files: 0`；`generate --write` 隔离拦截；`iterate.mjs run` 默认 `--escalate: true` 且支持 `--no-escalate`；`cycle` 累加轮次并按停损建单。
-- [ ] C11: 800 行含结尾换行与 `.gitattributes` `linguist-generated` 大文件在 `edit-gate`、`review-pack`、`govern-audit` 判定一致；`review` worktree 无 `--task` 放行合法归档；`check-empirical` 保持先于 `--include-diff` 而 `check-fault` 收敛到 `record --verdict pass`；`review-pack --json` 仅含 1 份 `contextBrief` 且耗时 `<500ms`；`verify-tools create` `scratch/` 探针豁免零断言校验。
-- [ ] C12: `review-ledger.mjs` Round 3 首次停损缺 `--reason` 阻断、`rebuts` 完整继承 `baseLedger.rebuts`、低风险单会话与 `generic-git` `awaiting-remote-mr` 正常；`node scripts/dev/fixtures.mjs --domain r6c-gates` 与 `verify-injections.mjs --jobs 4` 全绿。
+- [x] C9: `iterate.mjs run` 非 `--json` 无 `ReferenceError`，`--focus` 正确抽取符号，`.venv` `pytest`、`mvn test`、`vitest`/`tap`/`node --test` 正确分发且缺运行器返回 `missing-runner`；`slugTestToken` 保留 `prd` 不误变 `flow`。
+- [x] C10: `iterate.mjs plan . --json` 过滤非代码与归档 PRD；`govern-audit.mjs audit . --json` 不再输出 `Test Files: 0`；`generate --write` 隔离拦截；`iterate.mjs run` 默认 `--escalate: true` 且支持 `--no-escalate`；`cycle` 累加轮次并按停损建单。
+- [x] C11: 800 行含结尾换行与 `.gitattributes` `linguist-generated` 大文件在 `edit-gate`、`review-pack`、`govern-audit` 判定一致；`review` worktree 无 `--task` 放行合法归档；`check-empirical` 保持先于 `--include-diff` 而 `check-fault` 收敛到 `record --verdict pass`；`review-pack --json` 仅含 1 份 `contextBrief` 且耗时 `<500ms`；`verify-tools create` `scratch/` 探针豁免零断言校验。
+- [x] C12: `review-ledger.mjs` Round 3 首次停损缺 `--reason` 阻断、`rebuts` 完整继承 `baseLedger.rebuts`、低风险单会话与 `generic-git` `awaiting-remote-mr` 正常；`node scripts/dev/fixtures.mjs --domain r6c-gates` 与 `verify-injections.mjs --jobs 4` 全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -138,6 +138,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：完成 C9..C12 与 A2 全部改造：`test-inventory.mjs` 统一多栈 `resolveTestRunner`（`.venv`/pytest/uv/poetry/unittest、mvnw/mvn/gradlew/gradle、vitest/jest/tap/mocha/ava/tsx/bun/node、go、cargo + `missing-runner`）、`\b` 边界 `slugTestToken` 与 `configuredTestEntries`/`fixtures-*.mjs` 盘点；`signals.mjs` 与 `iterate*.mjs` 过滤非代码热点、拦截 committed 默认分支 `generate --write`、默认 `run --escalate`（支持 `--no-escalate`）并持久化 `cycle` 累加/停损；`static-gates.mjs`、`verify-state.mjs`、`edit-gate.mjs`、`review-*.mjs`、`govern-*.mjs`、`verify-tools.mjs` 统一 `countTextLines`/`isLegalArchiveMove`/`resolveOversizedExemption`/`reviewWorktreePath`、收敛 `check-fault` 至 `record --verdict pass`、JSON 全局单份 `contextBrief`、`evaluateToolStaleness` `!baseline` 快跳与 Round 3 `--reason`/`rebuts`/低风险/`generic-git` 修复。
+- **与草案的差异**：未修改 `escalation.mjs` 与 `exit-codes.mjs`（`BLOCKED_MAIN_SLOT_VIOLATION`、`BLOCKED_STOP_LOSS_REASON_REQUIRED` 等阻断码已在册且 `classifyEscalationTier` 已有行为已满足）；按协调者 `#734` 裁决保留 Node <22.6 的 `unsupported-ts-runtime` 诊断并同步调整 3 处既有用例。
+- **关联同步文件**：经协调者 `#734` 授权同步更新 `scripts/dev/e2e-scenarios-evolution.mjs:209`、`scripts/dev/blind-run-matrix.mjs:143`（加测 `main` exit 3 后转隔离 worktree）及 `scripts/dev/fixtures-w6c-context-brief.mjs:181`（校验单源 `pack.contextBrief` 且无重复）。`docs/TDD.md` 同步留归 Wave 2 `r6d`。

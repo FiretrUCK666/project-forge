@@ -204,26 +204,34 @@ async function runScenarioL(pkgRoot, sandbox, env, h) {
   h.assertOk(h.runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoL, '--no-backup'], repoL, env), 'Scenario L equip')
   h.assertOk(h.runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoL, '--check'], repoL, env), 'Scenario L equip --check with overlays/hooks')
 
-  // 1. dev-iterate generates native test (never in .agents/), updates feature-map testRefs, runs concurrently, escalates real failure
-  const iterScript = join(repoL, '.agents/skills/dev-iterate/scripts/iterate.mjs')
-  const genRes = h.runNodeScript(iterScript, ['generate', repoL, '--focus', 'billing', '--tier', 'integration', '--write', '--json'], repoL, env)
+  // 1. dev-iterate blocks generate --write directly on main (exit 3), then succeeds inside isolated worktree, updates feature-map testRefs, runs concurrently, escalates real failure
+  const iterScriptMain = join(repoL, '.agents/skills/dev-iterate/scripts/iterate.mjs')
+  const mainBlocked = h.runNodeScript(iterScriptMain, ['generate', repoL, '--focus', 'billing', '--tier', 'integration', '--write', '--json'], repoL, env)
+  if (mainBlocked.status !== 3 || !`${mainBlocked.stdout}${mainBlocked.stderr}`.includes('BLOCKED_MAIN_SLOT_VIOLATION')) {
+    throw new Error(`Scenario L expected generate --write on main to block exit 3: status=${mainBlocked.status} out=${mainBlocked.stdout}`)
+  }
+  const wtL = join(sandbox, 'wt-l-iterate')
+  h.runGit(repoL, ['worktree', 'add', '-b', 'feat/l-iterate', wtL, 'main'])
+  h.assertOk(h.runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [wtL, '--no-backup'], wtL, env), 'Scenario L wt equip')
+  const iterScript = join(wtL, '.agents/skills/dev-iterate/scripts/iterate.mjs')
+  const genRes = h.runNodeScript(iterScript, ['generate', wtL, '--focus', 'billing', '--tier', 'integration', '--write', '--json'], wtL, env)
   h.assertOk(genRes, 'Scenario L dev-iterate generate')
   const genJson = JSON.parse(genRes.stdout)
   if (!genJson.writtenPaths.length || genJson.writtenPaths.some((p) => p.startsWith('.agents/'))) {
     throw new Error(`Scenario L invalid generated paths: ${JSON.stringify(genJson)}`)
   }
-  const fmAfter = JSON.parse(readFileSync(join(repoL, 'docs/feature-map.json'), 'utf8'))
+  const fmAfter = JSON.parse(readFileSync(join(wtL, 'docs/feature-map.json'), 'utf8'))
   if (!fmAfter.features[0].testRefs.includes(genJson.writtenPaths[0])) {
     throw new Error(`Scenario L did not attach testRef back to feature-map.json: ${JSON.stringify(fmAfter)}`)
   }
-  const runPass = h.runNodeScript(iterScript, ['run', repoL, '--targets', genJson.writtenPaths.join(','), '--concurrency', '2', '--json'], repoL, env)
+  const runPass = h.runNodeScript(iterScript, ['run', wtL, '--targets', genJson.writtenPaths.join(','), '--concurrency', '2', '--json'], wtL, env)
   h.assertOk(runPass, 'Scenario L dev-iterate run pass')
 
   // Intentional failing regression test -> escalation + signals.jsonl without modifying business source
-  const failTestAbs = join(repoL, 'tests/integration/failing-check.test.mjs')
+  const failTestAbs = join(wtL, 'tests/integration/failing-check.test.mjs')
   mkdirSync(dirname(failTestAbs), { recursive: true })
   writeFileSync(failTestAbs, "import assert from 'node:assert/strict'\nimport test from 'node:test'\ntest('regression fails', () => { assert.equal(1, 2) })\n", 'utf8')
-  const runFail = h.runNodeScript(iterScript, ['run', repoL, '--targets', 'tests/integration/failing-check.test.mjs', '--escalate', '--json'], repoL, env)
+  const runFail = h.runNodeScript(iterScript, ['run', wtL, '--targets', 'tests/integration/failing-check.test.mjs', '--escalate', '--json'], wtL, env)
   if (runFail.status === 0) throw new Error('Scenario L failing test should exit non-zero')
   const failJson = JSON.parse(runFail.stdout)
   if (failJson.signalsWritten < 1 || !failJson.escalations?.[0]?.ok) {

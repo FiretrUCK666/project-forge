@@ -363,6 +363,7 @@ function diffSymbolsByFile(prevMap = {}, curMap = {}) {
 /** 免手工日期过时校验与三级风险处置（`low` 告警、`medium` 转 E2E/scratch 记债、`high` 硬阻断）。 */
 export async function evaluateToolStaleness({
   repoRoot, gitCommonDir, mainRoot = repoRoot, feature, tool, baseRef = null, slotKey = null,
+  skipFingerprintOnUnbaselined = false, changedFilesSet = null, precomputed = null,
 } = {}) {
   const riskLevel = VALID_RISK_LEVELS.includes(tool?.riskLevel) ? tool.riskLevel : 'medium'
   if (tool?.scriptPath) {
@@ -385,28 +386,50 @@ export async function evaluateToolStaleness({
     }
   }
 
-  const cache = readVerifyCache(gitCommonDir, mainRoot)
+  const cache = precomputed?.cache ?? readVerifyCache(gitCommonDir, mainRoot)
   const effSlot = slotKey ?? resolveVerifySlotKey(repoRoot, mainRoot)
   const baseline = (effSlot ? cache.slots?.[effSlot]?.[tool.id] : null) ?? cache.tools[tool.id] ?? null
-  const headRes = await gitRun(repoRoot, ['rev-parse', 'HEAD'])
-  const headSha = headRes.ok ? headRes.stdout.trim() : null
-  let resolvedBaseSha = null
-  if (baseRef) {
-    const br = await gitRun(repoRoot, ['rev-parse', '--verify', baseRef])
-    if (br.ok) resolvedBaseSha = br.stdout.trim()
-  }
-  const useBaseTree = Boolean(resolvedBaseSha && headSha && resolvedBaseSha !== headSha)
-  const currentFp = await computeFeatureFingerprint(repoRoot, feature, { tool })
-  const treeFp = useBaseTree ? await computeFeatureFingerprint(repoRoot, feature, { ref: resolvedBaseSha, tool }) : currentFp
-
   if (!baseline) {
+    const current = skipFingerprintOnUnbaselined ? null : await computeFeatureFingerprint(repoRoot, feature, { tool })
     return {
       toolId: tool.id, featureId: feature?.id ?? null, riskLevel,
       status: 'unbaselined', action: 'run', code: null,
       reasons: ['尚无仓外 cache.json 基线快照，运行通过后将自动采集首次符号与树基线'],
-      changedModules: [], addedSymbols: [], removedSymbols: [], baseline: null, current: currentFp,
+      changedModules: [], addedSymbols: [], removedSymbols: [], baseline: null, current,
     }
   }
+
+  let headSha = precomputed?.headSha
+  if (headSha === undefined) {
+    const headRes = await gitRun(repoRoot, ['rev-parse', 'HEAD'])
+    headSha = headRes.ok ? headRes.stdout.trim() : null
+  }
+  let resolvedBaseSha = precomputed?.resolvedBaseSha
+  if (resolvedBaseSha === undefined) {
+    resolvedBaseSha = null
+    if (baseRef) {
+      const br = await gitRun(repoRoot, ['rev-parse', '--verify', baseRef])
+      if (br.ok) resolvedBaseSha = br.stdout.trim()
+    }
+  }
+  if (changedFilesSet && headSha && baseline.passedAtCommit === headSha) {
+    const toolMods = [...(feature?.modules ?? []), ...(tool?.scriptPath ? [tool.scriptPath] : [])].map((m) => posixPath(String(m ?? '')).replace(/^\.\//, '').replace(/\/+$/, ''))
+    const anyChanged = toolMods.some((m) => m && [...changedFilesSet].some((c) => c === m || c.startsWith(`${m}/`)))
+    if (!anyChanged) {
+      return {
+        toolId: tool.id, featureId: feature?.id ?? null, riskLevel,
+        status: 'fresh', action: 'run', code: null,
+        reasons: [], changedModules: [], addedSymbols: [], removedSymbols: [], baseline, current: null,
+      }
+    }
+  }
+  const useBaseTree = Boolean(resolvedBaseSha && headSha && resolvedBaseSha !== headSha)
+  const [currentFp, treeFp] = useBaseTree
+    ? await Promise.all([
+      computeFeatureFingerprint(repoRoot, feature, { tool }),
+      computeFeatureFingerprint(repoRoot, feature, { ref: resolvedBaseSha, tool }),
+    ])
+    : await (async () => { const fp = await computeFeatureFingerprint(repoRoot, feature, { tool }); return [fp, fp] })()
 
   const symbolDrift = currentFp.symbolHash !== baseline.symbolHash
   const treeDrift = treeFp.moduleTreeHash !== baseline.moduleTreeHash

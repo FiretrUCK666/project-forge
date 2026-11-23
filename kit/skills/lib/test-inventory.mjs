@@ -5,12 +5,13 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
-import { dirname, join, posix } from 'node:path'
+import { basename, dirname, extname, join, posix } from 'node:path'
 
+import { resolveExecutable } from './exec.mjs'
 import { FEATURE_MAP_REL } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import {
-  ASSERTION_RE, CODE_EXT_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
+  ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
   checkProcessArtifactFilename, scanStructuralHygiene, stripCodeCommentsLines,
 } from './static-gates.mjs'
 
@@ -237,9 +238,26 @@ export function collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConf
   if ((ciSteps ?? []).length > 0) definedScripts.ciRunSteps = ciSteps.slice(0, 30).map((s) => `${s.file}: ${s.cmd}`)
   if (configuredTestEntries.length > 0) definedScripts.configuredTestEntries = configuredTestEntries
 
+  const seenTestRels = new Set()
+  const mergedTestRels = []
+  const addTestRel = (rel) => {
+    const clean = posixPath(String(rel ?? '')).replace(/^\.\//, '')
+    if (!clean || seenTestRels.has(clean)) return
+    seenTestRels.add(clean)
+    mergedTestRels.push(clean)
+  }
+  for (const tf of testFiles ?? []) addTestRel(tf.rel)
+  for (const f of files ?? []) {
+    if (FIXTURE_FILE_RE.test(f.rel)) addTestRel(f.rel)
+  }
+  for (const entry of configuredTestEntries ?? []) {
+    const clean = posixPath(String(entry ?? '')).replace(/^\.\//, '')
+    if (clean && existsSync(join(repoRoot, clean))) addTestRel(clean)
+  }
+
   const dirCounts = new Map()
-  for (const tf of testFiles ?? []) {
-    const parts = tf.rel.split('/').filter(Boolean)
+  for (const rel of mergedTestRels) {
+    const parts = rel.split('/').filter(Boolean)
     const bucket = parts.length >= 2 ? parts.slice(0, Math.min(2, parts.length - 1)).join('/') : '.'
     dirCounts.set(bucket, (dirCounts.get(bucket) ?? 0) + 1)
   }
@@ -249,9 +267,9 @@ export function collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConf
     .map(([dir, count]) => ({ dir, files: count }))
 
   return {
-    totalTestFiles: (testFiles ?? []).length,
+    totalTestFiles: mergedTestRels.length,
     configuredTestEntries,
-    totalTestEntries: new Set([...(testFiles ?? []).map((f) => f.rel), ...configuredTestEntries]).size,
+    totalTestEntries: new Set([...mergedTestRels, ...configuredTestEntries]).size,
     testDirectories,
     definedScripts,
     ciConfigFiles: ciConfigFiles ?? [],
@@ -346,7 +364,6 @@ export function updateFeatureMapTestRefs(repoRoot, { featureIds = [], modulePath
 export function isPathInQuickTestScope(devProfile, relPath) {
   const rel = posixPath(relPath).replace(/^\.\//, '')
   const quickCmds = (devProfile?.['quick-test'] ?? []).map((c) => String(c ?? '').trim()).filter((c) => c && c.toLowerCase() !== 'none')
-  if (quickCmds.length === 0) return false
   for (const cmd of quickCmds) {
     if (cmd.includes('{target}')) continue
     if (/(?:test\/unit|tests\/unit|__tests__\/unit|unit\.mjs|unit_test)/i.test(cmd)) {
@@ -365,19 +382,14 @@ function countTestFilesByLang(repoRoot, dirs = []) {
   let tsCount = 0
   let jsCount = 0
   const stack = dirs.filter((d) => existsSync(join(repoRoot, d))).slice(0, 6)
-  let visited = 0
-  while (stack.length > 0 && visited < 40) {
+  for (let visited = 0; stack.length > 0 && visited < 40; visited += 1) {
     const rel = stack.pop()
-    visited += 1
     let entries = []
     try { entries = readdirSync(join(repoRoot, rel), { withFileTypes: true }) } catch { continue }
     for (const ent of entries) {
-      if (ent.isDirectory() && !ent.name.startsWith('.')) {
-        stack.push(`${rel}/${ent.name}`)
-      } else if (ent.isFile()) {
-        if (TS_TEST_NAME_RE.test(ent.name)) tsCount += 1
-        else if (JS_TEST_NAME_RE.test(ent.name)) jsCount += 1
-      }
+      if (ent.isDirectory() && !ent.name.startsWith('.')) stack.push(`${rel}/${ent.name}`)
+      else if (ent.isFile() && TS_TEST_NAME_RE.test(ent.name)) tsCount += 1
+      else if (ent.isFile() && JS_TEST_NAME_RE.test(ent.name)) jsCount += 1
     }
   }
   return { tsCount, jsCount }
@@ -426,6 +438,9 @@ export function detectNodeTestRunner(repoRoot, pkg = null, devProfile = null) {
   const combined = `${scriptBlob}\n${profileBlob}`
   if (deps.vitest || /\bvitest\b/i.test(combined)) return 'vitest'
   if (deps.jest || deps['ts-jest'] || /\bjest\b/i.test(combined)) return 'jest'
+  if (deps.tap || /\bnode\s+--?tap\b|\btap\b/i.test(combined)) return 'tap'
+  if (deps.mocha || /\bmocha\b/i.test(combined)) return 'mocha'
+  if (deps.ava || /\bava\b/i.test(combined)) return 'ava'
   if (existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb')) || /\bbun\s+test\b/i.test(combined)) return 'bun'
   if (deps.tsx || /\btsx\b/i.test(combined)) return 'tsx'
   return 'node'
@@ -453,7 +468,7 @@ export function resolveNativeTestDir(repoRoot, { ecosystem = null, tier = 'integ
   } else if (stack === 'rust') {
     dirRel = 'tests'
   } else if (stack === 'python') {
-    dirRel = hasDir('tests') ? `tests/${cleanTier}` : `tests/${cleanTier}`
+    dirRel = hasDir('test') && !hasDir('tests') ? `test/${cleanTier}` : `tests/${cleanTier}`
   } else {
     if (hasDir(`tests/${cleanTier}`)) dirRel = `tests/${cleanTier}`
     else if (hasDir(`test/${cleanTier}`)) dirRel = `test/${cleanTier}`
@@ -514,8 +529,9 @@ export function slugTestToken(raw) {
   return String(raw ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
+    .replace(/\b(?:issue|pr|stage|wave|phase|sprint|slice|batch)(?:[-_]?\d+[a-z0-9]*|\b)/gi, 'flow')
+    .replace(/-{2,}/g, '-')
     .replace(/^-+|-+$/g, '')
-    .replace(/(?:issue|pr|stage|wave|phase|sprint|slice|batch)[-_]?[a-z0-9]*/gi, 'flow')
     .slice(0, 40) || 'feature-flow'
 }
 
@@ -706,3 +722,70 @@ export function renderNativeTestContent(repoRoot, candidate, stack) {
     '',
   ].join('\n')
 }
+
+function resolveLocalBin(repoRoot, name, env = process.env) {
+  const cands = process.platform === 'win32'
+    ? [join(repoRoot, 'node_modules', '.bin', `${name}.cmd`), join(repoRoot, 'node_modules', '.bin', name)]
+    : [join(repoRoot, 'node_modules', '.bin', name)]
+  return cands.find((c) => existsSync(c)) ?? resolveExecutable(name, { cwd: repoRoot, env })
+}
+
+/** 统一解析多技术栈（Python/Java/Node-TS/Go/Rust）单个测试文件真实执行器；缺失则返回 `missing-runner`。 */
+export function resolveTestRunner(repoRoot, targetRel, opts = {}) {
+  const { devProfile = null, fileText = null, env = process.env, nodeVersion = process.versions.node } = opts
+  const cleanRel = posixPath(String(targetRel ?? '')).replace(/^\.\//, '')
+  const ext = extname(cleanRel).toLowerCase()
+  const txt = fileText ?? readUtf8FileSafe(join(repoRoot, cleanRel)) ?? ''
+  const ok = (runner, command, args) => ({ ok: true, runner, command, args, failureKind: null })
+  const miss = (runner, reason, failureKind = 'missing-runner') => ({ ok: false, runner, command: null, args: [], failureKind, reason })
+  if (/^\.(?:js|mjs|cjs|jsx|ts|tsx|mts|cts)$/.test(ext)) {
+    const fw = /\bfrom\s+['"]vitest['"]|require\(['"]vitest['"]\)/.test(txt) ? 'vitest'
+      : /@jest\/globals|\bfrom\s+['"]jest['"]/.test(txt) ? 'jest'
+      : /\bfrom\s+['"]tap['"]|require\(['"]tap['"]\)/.test(txt) ? 'tap'
+      : /\bfrom\s+['"]mocha['"]|require\(['"]mocha['"]\)/.test(txt) ? 'mocha'
+      : /\bfrom\s+['"]ava['"]|require\(['"]ava['"]\)/.test(txt) ? 'ava'
+      : (/\bnode:test\b/.test(txt) ? 'node' : detectNodeTestRunner(repoRoot, null, devProfile))
+    const binArgs = { vitest: ['run', cleanRel], jest: [cleanRel], tap: [cleanRel], mocha: [cleanRel], ava: [cleanRel], bun: ['test', cleanRel] }
+    if (binArgs[fw]) {
+      const bin = fw === 'bun' ? resolveExecutable('bun', { cwd: repoRoot, env }) : resolveLocalBin(repoRoot, fw, env)
+      return bin ? ok(fw, bin, binArgs[fw]) : miss(fw, `missing ${fw} test runner binary`)
+    }
+    if (/^\.(?:ts|tsx|mts|cts)$/.test(ext)) {
+      const tsx = resolveLocalBin(repoRoot, 'tsx', env)
+      if (tsx) return ok('tsx', tsx, ['--test', cleanRel])
+      const bun = resolveExecutable('bun', { cwd: repoRoot, env })
+      if (bun) return ok('bun', bun, ['test', cleanRel])
+      const [maj, min] = String(nodeVersion).split('.').map((n) => Number.parseInt(n, 10) || 0)
+      return (maj > 22 || (maj === 22 && min >= 6)) ? ok('node', process.execPath, ['--experimental-strip-types', '--test', cleanRel]) : miss('node', 'Node < 22.6 lacks TypeScript test execution without tsx/vitest/jest/bun', 'unsupported-ts-runtime')
+    }
+    return ok('node', process.execPath, ['--test', cleanRel])
+  }
+  if (ext === '.py') {
+    const venvHit = ['.venv/Scripts/pytest.exe', '.venv/bin/pytest', 'venv/Scripts/pytest.exe', 'venv/bin/pytest'].find((r) => existsSync(join(repoRoot, r)))
+    if (venvHit) return ok('pytest', join(repoRoot, venvHit), [cleanRel])
+    const pyBin = resolveExecutable('pytest', { cwd: repoRoot, env })
+    if (pyBin) return ok('pytest', pyBin, [cleanRel])
+    const uv = (existsSync(join(repoRoot, 'pyproject.toml')) || existsSync(join(repoRoot, 'uv.lock'))) ? resolveExecutable('uv', { cwd: repoRoot, env }) : null
+    if (uv) return ok('uv', uv, ['run', 'pytest', cleanRel])
+    const poetry = existsSync(join(repoRoot, 'pyproject.toml')) ? resolveExecutable('poetry', { cwd: repoRoot, env }) : null
+    if (poetry) return ok('poetry', poetry, ['run', 'pytest', cleanRel])
+    const py = /\bunittest\b/.test(txt) ? (resolveExecutable('python3', { cwd: repoRoot, env }) ?? resolveExecutable('python', { cwd: repoRoot, env })) : null
+    return py ? ok('unittest', py, ['-m', 'unittest', cleanRel]) : miss('pytest', 'missing Python test runner (.venv/pytest, pytest, uv, poetry, or unittest)')
+  }
+  if (ext === '.java') {
+    const cls = basename(cleanRel, '.java')
+    for (const [r, wrap, manifests, cli, args] of [
+      ['mvn', process.platform === 'win32' ? 'mvnw.cmd' : 'mvnw', ['pom.xml'], 'mvn', [`-Dtest=${cls}`, 'test']],
+      ['gradle', process.platform === 'win32' ? 'gradlew.bat' : 'gradlew', ['build.gradle', 'build.gradle.kts'], 'gradle', ['test', '--tests', cls]],
+    ]) {
+      if (existsSync(join(repoRoot, wrap))) return ok(r, join(repoRoot, wrap), args)
+      const bin = manifests.some((m) => existsSync(join(repoRoot, m))) ? resolveExecutable(cli, { cwd: repoRoot, env }) : null
+      if (bin) return ok(r, bin, args)
+    }
+    return miss('java', 'missing Maven (mvnw/mvn) or Gradle (gradlew/gradle) runner')
+  }
+  if (ext === '.go') { const b = resolveExecutable('go', { cwd: repoRoot, env }); const d = posix.dirname(cleanRel); return b ? ok('go', b, ['test', d === '.' ? '.' : `./${d}`]) : miss('go', 'missing go binary') }
+  if (ext === '.rs') { const b = resolveExecutable('cargo', { cwd: repoRoot, env }); return b ? ok('cargo', b, ['test']) : miss('cargo', 'missing cargo binary') }
+  return miss(ext || 'unknown', `unsupported test file extension for ${cleanRel}`)
+}
+

@@ -4,10 +4,12 @@
  * 从 scripts/compose-agents.mjs 拆出以控制主模块体量；仅依赖 node:* 内置模块与同层 lib/。
  */
 
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { DEFAULT_HIGH_RISK_PATHS } from '../../kit/skills/lib/profile.mjs'
+import { hasDotGitInAncestors } from '../../kit/skills/lib/git-fast.mjs'
+import { DEFAULT_HIGH_RISK_PATHS, defaultHighRiskPaths } from '../../kit/skills/lib/profile.mjs'
 import * as protocol from './protocol.mjs'
 import { ECO_COMMANDS_SHOWN_PER_KIND } from './render.mjs'
 
@@ -328,6 +330,31 @@ export function excludedSkillsFor(facts, manifest, root, { kitDir } = {}) {
   return excluded
 }
 
+/** 探测仓库中受 Git 跟踪的 `dist/` / `build/` 构建产物路径，避免将其错误归入 `do-not-edit`。 */
+export function detectTrackedBuildArtifacts(facts, targetRoot) {
+  const trackedFiles = []
+  if (Array.isArray(facts?.git?.trackedPaths)) {
+    for (const raw of facts.git.trackedPaths) {
+      const p = String(raw ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+      if (p.startsWith('dist/') || p.startsWith('build/')) trackedFiles.push(p)
+    }
+  } else if (targetRoot && (existsSync(join(targetRoot, '.git')) || hasDotGitInAncestors(targetRoot))) {
+    const res = spawnSync('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'ls-files', '-z', '--', 'dist', 'build'], {
+      cwd: targetRoot, encoding: 'utf8', timeout: 3000, windowsHide: true,
+    })
+    if (res.status === 0 && res.stdout) {
+      for (const raw of res.stdout.split('\0')) {
+        const p = String(raw ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+        if (p.startsWith('dist/') || p.startsWith('build/')) trackedFiles.push(p)
+      }
+    }
+  }
+  const dirs = []
+  if (trackedFiles.some((f) => f.startsWith('dist/'))) dirs.push('dist/')
+  if (trackedFiles.some((f) => f.startsWith('build/'))) dirs.push('build/')
+  return { dirs, files: trackedFiles }
+}
+
 /**
  * 基于 survey 探测到的命令与生态清单预填 7 键 Dev Profile：
  * - 纯文档或无清单无命令仓默认值收口为 `none` / `AGENTS.md` / `docs/archive/` 且不留 fill 提示；
@@ -337,6 +364,7 @@ export function buildDevProfileVars(facts, targetRoot) {
   const cmds = facts?.commands ?? {}
   const manifests = Array.isArray(facts?.ecosystem?.manifests) ? facts.ecosystem.manifests : []
   const kinds = Array.isArray(facts?.ecosystem?.kinds) ? facts.ecosystem.kinds : []
+  const trackedBuild = detectTrackedBuildArtifacts(facts, targetRoot)
   const plan = commandPlanOf(facts ?? {})
   const hasCommands = plan.block.trim().length > 0
     || COMMAND_ORDER.some((k) => typeof cmds[k] === 'string' && cmds[k].trim())
@@ -346,13 +374,15 @@ export function buildDevProfileVars(facts, targetRoot) {
   if (!hasCommands && !hasCodeManifests) {
     const hasGithub = Boolean(targetRoot && existsSync(join(targetRoot, '.github')))
       || (Array.isArray(facts?.docs?.workflows) && facts.docs.workflows.length > 0)
+    const baseHighRisk = hasGithub ? [...DEFAULT_HIGH_RISK_PATHS] : ['AGENTS.md', '.gitattributes']
+    for (const bd of trackedBuild.dirs) if (!baseHighRisk.includes(bd)) baseHighRisk.push(bd)
     return {
       PROFILE_QUICK_TEST: 'none',
       PROFILE_FULL_TEST: 'none',
       PROFILE_SMOKE_VERIFY: 'none',
       PROFILE_MERGE_GATE: 'none',
       PROFILE_ARCH_RULES: 'none',
-      PROFILE_HIGH_RISK: hasGithub ? DEFAULT_HIGH_RISK_PATHS.join(', ') : 'AGENTS.md, .gitattributes',
+      PROFILE_HIGH_RISK: baseHighRisk.join(', '),
       PROFILE_DO_NOT_EDIT: 'docs/archive/',
       PROFILE_FILL_HINT: '',
     }
@@ -377,7 +407,9 @@ export function buildDevProfileVars(facts, targetRoot) {
   else mergeGate = '<合并前必跑完整门禁命令>'
 
   const archRules = '<跨层禁引规则如 src/lib/** -> src/ui/**，逗号分隔或 none>'
-  const highRisk = '<高风险路径前缀或文件，逗号分隔>'
+  const highRisk = trackedBuild.dirs.length > 0
+    ? [...defaultHighRiskPaths(targetRoot), ...trackedBuild.dirs].join(', ')
+    : '<高风险路径前缀或文件，逗号分隔>'
   const doNotEdit = '<禁止自动修改的路径，逗号分隔>'
 
   const anyPlaceholder = [quickTest, fullTest, smokeVerify, mergeGate, archRules, highRisk, doNotEdit]

@@ -2,7 +2,7 @@
  * survey-workspace.mjs —— 版本控制、工作区扫描、文档/工作流/设计体系与套件清单探测。
  */
 
-import { execFile } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFile, readFileSync, realpathSync, stat, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, relative } from 'node:path'
@@ -676,6 +676,58 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
     scanCoverage: { truncated, depthReached, skippedLargeFiles, unreadableFiles },
     nestedRepos: nestedUnique,
   }
+}
+
+export const GOVERNANCE_CHECK_PATHS = Object.freeze([
+  '.agents/skills/lib/shared.mjs',
+  '.agents/skills/templates/docs-todo.md',
+  '.agents/skills/dev-flow/scripts/flow.mjs',
+  'docs/TDD.md',
+  'docs/feature-map.json',
+  'AGENTS.md',
+])
+
+function buildGitignoreAnchorAdvice(pattern, path, source = '.gitignore') {
+  const pat = String(pattern ?? '').trim()
+  if (!pat) return `检查 \`${source}\` 中遮蔽 \`${path}\` 的规则`
+  const bare = pat.replace(/\/+$/, '')
+  if (!pat.startsWith('/') && !/[*?[\]]/.test(pat) && !bare.includes('/')) {
+    return `将 \`${source}\` 中的 \`${pat}\` 锚定为 \`/${pat}\`（避免误伤 \`.agents/skills/\` 等子目录）`
+  }
+  if (/[*?[\]]/.test(pat)) {
+    return `在 \`${source}\` 为 \`${path}\` 添加放行规则（如 \`!${path}\`）或收窄 \`${pat}\``
+  }
+  return `收窄或移除 \`${source}\` 中的 \`${pat}\`，避免治理文件无法被 Git 跟踪`
+}
+
+/** 检测关键受管治理路径是否被 `.gitignore` 规则遮蔽。 */
+export function detectIgnoredGovernancePaths(root) {
+  if (!root || (!existsSync(join(root, '.git')) && !hasDotGitInAncestors(root))) return []
+  const res = spawnSync('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'check-ignore', '-v', '-z', '--stdin'], {
+    cwd: root,
+    input: `${GOVERNANCE_CHECK_PATHS.join('\0')}\0`,
+    encoding: 'utf8',
+    timeout: 5000,
+    windowsHide: true,
+  })
+  if ((res.status !== 0 && res.status !== 1) || typeof res.stdout !== 'string' || !res.stdout) return []
+  const parts = res.stdout.split('\0')
+  const hits = []
+  for (let i = 0; i + 3 < parts.length; i += 4) {
+    const source = parts[i] || '.gitignore'
+    const line = Number(parts[i + 1]) || 0
+    const pattern = parts[i + 2]
+    const path = parts[i + 3]
+    if (!path || !pattern || pattern.startsWith('!')) continue
+    hits.push({
+      path,
+      source,
+      line,
+      pattern,
+      advice: buildGitignoreAnchorAdvice(pattern, path, source),
+    })
+  }
+  return hits
 }
 
 export async function walkWorkspace(root, gitFacts) {

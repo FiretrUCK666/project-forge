@@ -46,6 +46,7 @@ import {
   classifyHomePath,
   detectConventions,
   detectGit,
+  detectIgnoredGovernancePaths,
   finalizeWalkWorkspace,
 } from './lib/survey-workspace.mjs'
 import { detectReentry, scanProjectStaticFacts } from './lib/survey-scan.mjs'
@@ -95,6 +96,7 @@ export function computeArtifactPlan(facts) {
     if (!ignores.hasGitignore) missingIgnores.push('.gitignore')
     if ((ignores.unignoredOutputDirs?.length ?? 0) > 0) missingIgnores.push('未忽略产物目录')
     if ((ignores.ignoredButTracked?.length ?? 0) > 0) missingIgnores.push('已入库忽略文件')
+    if ((ignores.ignoredGovernancePaths?.length ?? 0) > 0) missingIgnores.push('治理路径被 .gitignore 遮蔽')
     // 「版本库在」与「有历史」是两件事：只 init 没提交的目录，文件全在 `??` 里、
     // `git log` 报错，而只看「.git 在不在」就会写「已就绪」——用户拿到的是一句空话。
     const noCommits = Number(git.commits ?? 0) === 0
@@ -536,6 +538,9 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       hasGitattributes: relSet ? relSet.has('.gitattributes') : existsSync(join(root, '.gitattributes')),
       unignoredOutputDirs: ws.unignoredOutputDirs,
       ignoredButTracked: ws.ignoredButTracked,
+      ignoredGovernancePaths: (gitFacts.present === true && gitFacts.isRepoRoot !== false)
+        ? detectIgnoredGovernancePaths(root)
+        : [],
     },
     outputs: {
       heavyDirsPresent: [],

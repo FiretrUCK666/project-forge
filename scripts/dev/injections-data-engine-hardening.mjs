@@ -105,8 +105,8 @@ export const INJECTIONS_ENGINE_HARDENING = [
     id: 'I237',
     what: '关闭 handoff.mjs vendored 嵌入目录大文件免截断豁免',
     file: 'scripts/handoff.mjs',
-    from: '          if (isVendoredRel(rel)) state.skippedVendoredLarge += 1',
-    to: '          if (false && isVendoredRel(rel)) state.skippedVendoredLarge += 1',
+    from: '      if (isVendoredRel(rel)) state.skippedVendoredLarge += 1',
+    to: '      if (false && isVendoredRel(rel)) state.skippedVendoredLarge += 1',
     expect: 'C7：handoff.mjs dirname(rel) 校验',
   },
   {

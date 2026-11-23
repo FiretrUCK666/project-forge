@@ -17,12 +17,15 @@ import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, parseMarkers } from './lib/protoco
 import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
 import { inspectKitManifestForReview, validateDevProfileRegion } from './lib/agents-sections.mjs'
 import {
+  checkEslintAgentsIgnore,
   checkGovernancePrdCoverage,
   collectMissingRemoteCapabilities,
   collectReleaseTagIssues,
   collectSecretsSummary,
   collectStaleCommandsInfo,
   collectUnfilledReleaseNotes,
+  findDoNotEditTrackedBuildOverlap,
+  findTradeoffContradictions,
   inspectContract,
   placeholderIdentity,
   runReviewCli,
@@ -162,6 +165,14 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     if (facts.ignores.ignoredButTracked.length > 0) {
       add(finding('missing', 'git', 'git.ignored-tracked',
         `有 ${facts.ignores.ignoredButTracked.length} 个已入库文件同时命中忽略规则（${facts.ignores.ignoredButTracked.slice(0, 3).join('、')}）——忽略规则对已入库的文件无效，要 \`git rm --cached\``, {
+          ref: { file: 'references/version-control.md', section: '忽略规则' },
+        }))
+    }
+    const ignoredGov = facts.ignores.ignoredGovernancePaths ?? []
+    if (ignoredGov.length > 0) {
+      const sample = ignoredGov.slice(0, 4).map((x) => `\`${x.path}\`（命中 \`${x.source}\` 规则 \`${x.pattern}\`：${x.advice}）`).join('；')
+      add(finding('missing', 'git', 'git.ignored-governance',
+        `关键治理路径被 \`.gitignore\` 规则遮蔽（${ignoredGov.length} 项）：${sample}`, {
           ref: { file: 'references/version-control.md', section: '忽略规则' },
         }))
     }
@@ -348,6 +359,21 @@ export async function reviewProject(targetDir, { scopes } = {}) {
         ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
       }))
     }
+    const parsedAgents = parseAgentsProfile(root)
+    const buildOverlaps = findDoNotEditTrackedBuildOverlap(root, facts, parsedAgents.doNotEdit)
+    if (buildOverlaps.length > 0) {
+      add(finding('notice', 'agents', 'agents.do-not-edit-tracked-build',
+        `${facts.docs.agents.file} 的 \`do-not-edit\` 覆盖了受 Git 跟踪的构建产物（${buildOverlaps.join('、')}）——重编产物会被 \`edit-gate\` 误拦；建议改列入 \`high-risk\``, {
+          ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+        }))
+    }
+    const tradeoffIssues = findTradeoffContradictions(root, facts, readDecisionMap(agentsText))
+    if (tradeoffIssues.length > 0) {
+      add(finding('notice', 'agents', 'agents.tradeoff-contradiction',
+        `${facts.docs.agents.file}「## 取舍」与磁盘现状矛盾：${tradeoffIssues.join('；')}`, {
+          ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+        }))
+    }
   }
 
   // ── 文档 ──────────────────────────────────────────────────────────
@@ -430,6 +456,14 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       const extraNote = kState.customCount > 0 ? `，已豁免定制 ${kState.customCount} 项` : ''
       add(finding('ok', 'kit', 'kit.ready',
         `受管 \`.agents/skills/\` 套件已就绪（${kState.filesCount} 个托管文件，版本 ${kState.forgeVersion ?? '未知'}${extraNote}）`))
+    }
+  }
+
+  if (!decisions.has('no-kit')) {
+    const eslintGap = checkEslintAgentsIgnore(root)
+    if (eslintGap) {
+      add(finding('notice', 'kit', 'kit.eslint-agents-ignore',
+        `检测到 ESLint 配置（\`${eslintGap.configFile}\`）未忽略 \`.agents/**\`——装配技能套件后 lint 会扫描 \`.agents/skills/\` 产生大量噪音；建议${eslintGap.advice}`))
     }
   }
 

@@ -13,6 +13,9 @@ import { basename, dirname, join } from 'node:path'
 
 export { writeAtomic } from '../../kit/skills/lib/git-core.mjs'
 
+/** 临时文件名匹配模式：兼容 `原名.tmp-<pid>` 与 `writeAtomic` 的 `原名.tmp-<pid>-<ts>-<counter>`。 */
+export const STALE_TEMP_RE = /^(.+)\.tmp-(\d+)(?:-\d+-\d+)?$/
+
 /** 临时文件名形状的唯一来源：`原名.tmp-<pid>`。 */
 export function tempPathFor(path) {
   return `${path}.tmp-${process.pid}`
@@ -49,13 +52,15 @@ export function processAlive(pid) {
  *
  * `dryRun` 时只报不删——只读模式下删文件会让「只读」这个承诺变成假话。
  */
-export function clearStaleTemps(targetPath, { dryRun = false } = {}) {
+export function clearStaleTemps(targetPath, { dryRun = false, recursive = false } = {}) {
   const removed = []
   const kept = []
   let dir = targetPath
   let onlyBase = null
+  let isDir = false
   try {
-    if (!statSync(targetPath).isDirectory()) {
+    isDir = statSync(targetPath).isDirectory()
+    if (!isDir) {
       dir = dirname(targetPath)
       onlyBase = basename(targetPath)
     }
@@ -65,24 +70,32 @@ export function clearStaleTemps(targetPath, { dryRun = false } = {}) {
     onlyBase = basename(targetPath)
   }
 
-  let entries = []
-  try { entries = readdirSync(dir) } catch { return { removed, kept } }
-  for (const name of entries) {
-    const m = /^(.+)\.tmp-(\d+)$/.exec(name)
-    if (!m) continue
-    // 只清「这个文件的」临时文件时，前缀必须逐字对上。
-    if (onlyBase !== null && m[1] !== onlyBase) continue
-    const pid = Number(m[2])
-    if (pid === process.pid || processAlive(pid)) { kept.push(join(dir, name)); continue }
-    const full = join(dir, name)
-    try {
-      if (!statSync(full).isFile()) continue
-    } catch { continue }
-    removed.push(full)
-    if (!dryRun) {
-      try { unlinkSync(full) } catch { /* 删不掉就留着，下次还会看到 */ }
+  const scanDir = (dir) => {
+    let entries = []
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const name = entry.name
+      const full = join(dir, name)
+      if (isDir && recursive && entry.isDirectory()) {
+        scanDir(full)
+        continue
+      }
+      const m = STALE_TEMP_RE.exec(name)
+      if (!m) continue
+      // 只清「这个文件的」临时文件时，前缀必须逐字对上。
+      if (onlyBase !== null && m[1] !== onlyBase) continue
+      const pid = Number(m[2])
+      if (pid === process.pid || processAlive(pid)) { kept.push(join(dir, name)); continue }
+      try {
+        if (!entry.isFile() && !statSync(full).isFile()) continue
+      } catch { continue }
+      removed.push(full)
+      if (!dryRun) {
+        try { unlinkSync(full) } catch { /* 删不掉就留着，下次还会看到 */ }
+      }
     }
   }
+  scanDir(dir)
   return { removed, kept }
 }
 

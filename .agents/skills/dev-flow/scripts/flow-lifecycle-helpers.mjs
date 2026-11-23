@@ -8,13 +8,16 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { evaluateMasterPrdClosureState } from '../../lib/doc-substantive.mjs'
 import { evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
 import { mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
-import { gitRun, posixPath, readTextSafe, syncDetachedWorktree, writeAtomic } from '../../lib/git.mjs'
-import { resolveRefShaFast } from '../../lib/git-fast.mjs'
+import {
+  detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ,
+  inspectBranchMergeState, posixPath, readTextSafe, resolveDefaultBranch, syncDetachedWorktree, writeAtomic,
+} from '../../lib/git.mjs'
+import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { recordMountedDepsInLedger, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
 import { evaluatePlanExitGate, PLAN_EXIT_BLOCK_CODE } from '../../lib/plan-exit-gate.mjs'
@@ -22,16 +25,20 @@ import { parseMilestoneNumber } from '../../lib/platform.mjs'
 import {
   buildE2eDiagnosticPacket,
   buildE2eObservation,
+  determineWorkflowPolicy,
+  evaluateNextState,
+  hasRepoCiWorkflow,
   hasValidE2eObservationOnHead,
   validateE2eEvidenceText,
   readVerificationEvidence,
   resolveEffectiveBaseSha,
   scoreExecutionResult,
+  validateVerificationEvidence,
   writeVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
-import { matchGlob } from '../../lib/static-gates.mjs'
+import { detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import * as workflowPolicy from '../../lib/workflow-policy.mjs'
 import { getChangedFiles } from './flow-inspect.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
@@ -612,5 +619,104 @@ export function emitVerifyOutcomeOutput({
         : [`验证未通过（exit=${finalExit}），请修复后重新运行 verify。`],
       { repoRoot: roots.mainRoot },
     )
+  }
+}
+
+async function collectSnapshotChangedFiles(cwd, baseRef, statusEntries = [], diffEntries = null) {
+  const set = new Set()
+  if (Array.isArray(diffEntries)) {
+    for (const e of diffEntries) if (e?.file) set.add(e.file)
+  } else if (baseRef) {
+    if (readHeadFast(resolveGitDirFast(cwd))?.oid !== baseRef) {
+      const diff = await gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`])
+      if (diff?.ok) for (const e of diff.entries) if (e.file) set.add(e.file)
+    }
+  } else {
+    const tree = await gitRunBuffer(cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD'])
+    if (tree?.ok) for (const f of tree.stdout.toString('utf8').split('\0')) if (f) set.add(posixPath(f))
+  }
+  for (const e of Array.isArray(statusEntries) ? statusEntries : []) if (e?.file) set.add(e.file)
+  return [...set].sort()
+}
+
+/** 单源任务运行时快照采集：供 `flow-next`、`flow-cleanup`、`flow-merge`、`flow-lifecycle` 共用。 */
+export async function collectTaskRuntimeSnapshot({
+  mainRoot, gitDir = null, ledger, activeTasks = [], allLedgers = activeTasks,
+  pendingCleanupTasks = [], hasDevReview = undefined, profile: preProfile = null,
+  includeMainDirty = false, includeMergeState = false, evaluateNext = true,
+  multiTaskFiles = null, repoRoot = mainRoot, gateFindingsOverride = null,
+} = {}) {
+  const implRel = ledger?.worktreePath || (ledger?.role === 'inbound-external-pr' ? ledger?.reviewWorktreePath : null)
+  const implRoot = implRel ? resolve(mainRoot, implRel) : mainRoot
+  const exists = existsSync(implRoot)
+  const profile = preProfile ?? parseAgentsProfile(mainRoot)
+  const effectiveHasDevReview = hasDevReview !== undefined ? hasDevReview : hasSkillSupport(mainRoot, 'dev-review')
+  const effectiveGitDir = gitDir ?? resolveGitDirFast(mainRoot)
+  const fastHeadOid = exists ? (readHeadFast(resolveGitDirFast(implRoot), effectiveGitDir)?.oid ?? null) : null
+  const effectiveBaseSha = exists ? await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: effectiveGitDir }) : (ledger?.baseSha ?? null)
+  const [stZ, headRes, diffRawRes] = exists
+    ? await Promise.all([
+        gitStatusPorcelainZ(implRoot),
+        fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
+        !effectiveBaseSha
+          ? Promise.resolve(null)
+          : (fastHeadOid && fastHeadOid === effectiveBaseSha ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${effectiveBaseSha}..HEAD`)),
+      ])
+    : [{ ok: true, entries: [] }, { ok: false, stdout: '' }, null]
+  const headSha = headRes.ok ? headRes.stdout.trim() : null
+  const sharedEntries = diffRawRes?.ok ? diffRawRes.entries : undefined
+  const [op, changedFiles, gateHits] = exists
+    ? await Promise.all([
+        detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
+        collectSnapshotChangedFiles(implRoot, effectiveBaseSha, stZ.entries, sharedEntries),
+        Array.isArray(gateFindingsOverride) ? Promise.resolve(gateFindingsOverride) : detectGateWeakening(implRoot, effectiveBaseSha, ledger?.baseBranch, { headSha, nameStatusEntries: sharedEntries }),
+      ])
+    : [{ inProgress: false, op: null }, [], []]
+  const ownArchived = [ledger?.archivedTodoFile, ledger?.archivedSpecFile, ledger?.archivedPrdFile].filter(Boolean)
+  const policy = determineWorkflowPolicy({
+    changedFiles, ownArchived, caseType: ledger?.caseType, highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
+    gateWeakeningHits: gateHits, hasRemote: ledger?.role !== 'local-only', hasCiWorkflow: hasRepoCiWorkflow(exists ? implRoot : mainRoot),
+    visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview: effectiveHasDevReview,
+  })
+  const evidence = readVerificationEvidence(effectiveGitDir, ledger?.taskId)
+  const evidenceValidation = validateVerificationEvidence({ policy, evidence, headSha, profile })
+  let nonDocChangesAfterFinalize = false
+  if (ledger?.finalized && ledger?.finalizedHead && headSha && ledger.finalizedHead !== headSha && exists) {
+    const postFin = await gitDiffNameStatusZ(implRoot, [`${ledger.finalizedHead}..${headSha}`])
+    nonDocChangesAfterFinalize = postFin.entries.some((e) => e.file && !/^docs\//.test(e.file))
+  }
+  let mainDirtyCount = 0
+  if (includeMainDirty && ledger?.worktreePath && mainRoot !== implRoot) {
+    const mainStatus = await gitStatusPorcelainZ(mainRoot)
+    mainDirtyCount = mainStatus?.ok ? mainStatus.entries.length : 0
+  }
+  let commitsAheadOfBase = 0
+  if (exists) {
+    const countBase = effectiveBaseSha || ledger?.baseBranch || ledger?.baseSha
+    if (countBase) {
+      const countRes = await gitRun(implRoot, ['rev-list', '--count', `${countBase}..HEAD`])
+      if (countRes.ok) commitsAheadOfBase = Number(countRes.stdout.trim()) || 0
+    }
+  }
+  let mergeState = null
+  if (includeMergeState && ledger?.branch) {
+    const targetDefault = ledger?.baseBranch || await resolveDefaultBranch(mainRoot, { strict: true })
+    if (targetDefault) {
+      mergeState = await inspectBranchMergeState(mainRoot, { branch: ledger.branch, headSha: headSha ?? undefined, defaultBranch: targetDefault, gitDir: effectiveGitDir })
+    }
+  }
+  const taskRuntime = {
+    opInProgress: Boolean(op.inProgress), opName: op.op ?? null, headSha, dirty: stZ.entries.length,
+    mainDirtyCount, policy, evidenceValidation, nonDocChangesAfterFinalize, profile, commitsAheadOfBase, hasDevReview: effectiveHasDevReview,
+  }
+  const evaluated = evaluateNext
+    ? evaluateNextState({ activeTasks, allLedgers, pendingCleanupTasks, selectedTask: ledger, taskRuntime, multiTaskFiles, repoRoot })
+    : null
+  return {
+    implRoot, exists, headSha, dirty: stZ.entries.length, statusEntries: stZ.entries, diffEntries: sharedEntries,
+    diffText: diffRawRes?.ok && typeof diffRawRes.diffText === 'string' ? diffRawRes.diffText : undefined,
+    mainDirtyCount, effectiveBaseSha, changedFiles, gateHits, policy, evidence, evidenceValidation,
+    nonDocChangesAfterFinalize, commitsAheadOfBase, opInProgress: Boolean(op.inProgress), opName: op.op ?? null,
+    mergeState, taskRuntime, evaluated, phase: evaluated?.phase ?? null, profile, hasDevReview: effectiveHasDevReview,
   }
 }

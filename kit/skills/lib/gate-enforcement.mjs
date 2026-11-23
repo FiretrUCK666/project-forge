@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto'
 
 import { EXIT } from './exit-codes.mjs'
-import { gitRun, inspectBranchMergeState, posixPath } from './git.mjs'
+import { gitRun, inspectBranchMergeState, posixPath, resolveDefaultBranch } from './git.mjs'
 
 export const DEFAULT_ENFORCE_GATES = true
 
@@ -45,19 +45,28 @@ export function verifyCleanupPreviewHash(expectedHash, providedHash) {
 }
 
 /** 复用 ancestry + git cherry + 远端已合入态校验，阻止未合分支被盲目 `-D` 误删。 */
-export async function isSafeBranchDelete(mainRoot, branch, baseBranch = 'main', {
+export async function isSafeBranchDelete(mainRoot, branch, baseBranch = null, {
   remoteBranchMerged = false,
   mergeState = null,
 } = {}) {
   const targetBr = String(branch ?? '').trim()
-  const targetBase = String(baseBranch || 'main').trim() || 'main'
   if (!targetBr) return { safe: false, code: 'BLOCKED_UNMERGED_BRANCH_DELETE', exitCode: EXIT.FACT, reason: '缺少待删除分支名' }
 
   if (remoteBranchMerged || mergeState?.state === 'squash_or_rebase_merged') {
     return { safe: true, method: 'squash-or-remote-merged', deleteFlag: '-D' }
   }
 
-  const state = mergeState ?? (await inspectBranchMergeState(mainRoot, targetBr, targetBase))
+  const targetBase = String(baseBranch ?? '').trim() || await resolveDefaultBranch(mainRoot, { strict: true })
+  if (!targetBase) {
+    return {
+      safe: false,
+      code: 'BLOCKED_MISSING_DEFAULT_BRANCH',
+      exitCode: EXIT.FACT,
+      reason: `BLOCKED_MISSING_DEFAULT_BRANCH: 无法解析仓库默认分支，拒绝盲目删除分支 ${targetBr}。`,
+    }
+  }
+
+  const state = mergeState ?? (await inspectBranchMergeState(mainRoot, { branch: targetBr, defaultBranch: targetBase }))
   if (state?.state === 'merged' || state?.state === 'merged_in_git' || state?.state === 'squash_or_rebase_merged') {
     return { safe: true, method: state.state, deleteFlag: state.state === 'squash_or_rebase_merged' ? '-D' : '-d', state }
   }

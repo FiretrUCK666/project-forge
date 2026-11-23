@@ -381,14 +381,17 @@ export function resolveCritiqueReadiness(doc) {
     }
   }
   const stamp = doc?.data?.plan_critique
+  const isSkippedStamp = /^skipped\b/i.test(String(stamp ?? '').trim())
   return {
     blocked: true,
     basis: verdict.basis,
     message: verdict.basis === APPROVAL_BASIS.CRITIQUE_UNREADY
       ? `的规划内审状态未就绪（plan_critique: ${stamp}）`
       : '的规划内审没有任何记录（plan_critique 缺失或为空）',
-    fixHint: '内审非得是有效 passed / 带实质理由的 skipped / 有效 human-override 才能退场。'
-      + '若已停损并由人裁决放行，须先跑 critique-override --human-approved --reason "<裁决说明>"。',
+    fixHint: isSkippedStamp
+      ? '单会话 --skip-critique-reason 仅本机留痕有效；跨机团队交棒请走独立 critique-pass 或人类 critique-override。'
+      : '内审非得是有效 passed / 带实质理由的 skipped / 有效 human-override 才能退场。'
+        + '若已停损并由人裁决放行，须先跑 critique-override --human-approved --reason "<裁决说明>"。',
   }
 }
 

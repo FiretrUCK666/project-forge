@@ -70,18 +70,19 @@ export const INJECTIONS_WORKFLOW = [
   },
   {
     id: 'I59',
-    what: '关闭 flow-merge.mjs generic-git 未经远端核验的本地强合阻断',
-    file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
-    from: "  if (ledger.role === 'generic-git' && !opts['human-approved']) {",
-    to: "  if (false && ledger.role === 'generic-git' && !opts['human-approved']) {",
+    what: '关闭 task-backend-local.mjs GenericRemoteBackend.mergePr 远端核验阻断',
+    file: 'kit/skills/lib/task-backend-local.mjs',
+    alsoDropIn: ['.agents/skills/lib/task-backend-local.mjs'],
+    from: '    if (!fetched && !humanApproved) {',
+    to: '    if (false && !fetched && !humanApproved) {',
     alsoPatches: [
       {
         file: 'kit/skills/lib/task-backend-local.mjs',
-        from: '    if (!fetched && !humanApproved) {',
-        to: '    if (false && !fetched && !humanApproved) {',
+        from: '    if (!mergedStates.has(state.state)) {',
+        to: '    if (false && !mergedStates.has(state.state)) {',
       },
       {
-        file: 'kit/skills/lib/task-backend-local.mjs',
+        file: '.agents/skills/lib/task-backend-local.mjs',
         from: '    if (!mergedStates.has(state.state)) {',
         to: '    if (false && !mergedStates.has(state.state)) {',
       },

@@ -15,13 +15,13 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { gitRun, posixPath } from '../../lib/git.mjs'
 import { readGitConfigFast } from '../../lib/git-fast.mjs'
 import { isNonImplRoleActor, isValidActorName, resolveHostMode } from '../../lib/harness-context.mjs'
-import { rememberPreviousImplementer, resolveTaskContext, updateTaskLedger, verifyPlanningProvenance } from '../../lib/ledger.mjs'
+import { rememberPreviousImplementer, resolveTaskContext, sanitizeTaskId, updateTaskLedger, verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemoteUrls,
-  probeForWrite, resolveIdentityLayers,
+  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber,
+  parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
-import { buildTargetRepoContext } from './flow-inspect.mjs'
+import { buildTargetRepoContext, syncTaskDocsSafe } from './flow-context.mjs'
 
 const TERMINAL_SLICE_STATUSES = new Set(['implemented', 'done', 'superseded', 'dropped', 'archived'])
 
@@ -109,7 +109,7 @@ export function evaluateMasterIssueCloseGuard({
   issueNumber,
   ledger = {},
   taskId = null,
-  baseBranch = 'main',
+  baseBranch = null,
 } = {}) {
   const issNum = Number(issueNumber)
   if (!mainRoot || !Number.isInteger(issNum) || issNum <= 0) {
@@ -161,9 +161,10 @@ export function evaluateMasterIssueCloseGuard({
   }
 
   if (remainingSiblings.length > 0) {
+    const baseLabel = baseBranch || ledger?.baseBranch || '默认基线'
     const names = remainingSiblings.map((s) => `\`${s.taskId}\` (${s.status})`).join('、')
     const progressNote = [
-      `[1:N 切片合并进展] 切片 \`${taskId ?? ledger?.taskId ?? 'unknown'}\` 已合入 \`${baseBranch}\`。`,
+      `[1:N 切片合并进展] 切片 \`${taskId ?? ledger?.taskId ?? 'unknown'}\` 已合入 \`${baseLabel}\`。`,
       `- 关联总控 PRD：\`${master.rel}\`（\`multi_spec: true\`）`,
       `- 尚有 ${remainingSiblings.length} 个未完成兄弟切片：${names}`,
       `- 按总控关单保护门禁保留 Issue #${issNum} 开启，待全部兄弟切片达成终态后自动关闭。`,
@@ -186,6 +187,56 @@ export function evaluateMasterIssueCloseGuard({
     remainingSiblings: [],
     progressNote: null,
   }
+}
+
+const claimRef = (taskId) => `refs/pf/claims/${sanitizeTaskId(taskId)}`
+const claimWildcardSpec = () => ['+refs/pf/claims/', '*:refs/pf/claims/', '*'].join('')
+const claimRemote = (remoteUrls, role) => (!remoteUrls || Object.keys(remoteUrls).length === 0 || role === 'local-only') ? null : (remoteUrls.origin ? 'origin' : Object.keys(remoteUrls)[0])
+export async function fetchGitClaimRefs(mainRoot, { remoteUrls = {}, role = 'local-only', branch = null, opts = {} } = {}) {
+  const remote = claimRemote(remoteUrls, role)
+  if (!remote || opts?.['skip-fetch'] || opts?._ghClient) return { ok: false, skipped: true, remote }
+  const res = await gitRun(mainRoot, ['fetch', '--no-tags', remote, claimWildcardSpec()]).catch(() => ({ ok: false }))
+  if (branch) await gitRun(mainRoot, ['fetch', '--no-tags', remote, branch]).catch(() => null)
+  return { ok: Boolean(res?.ok), remote }
+}
+export async function readGitClaimLease(mainRoot, taskId) {
+  const ref = claimRef(taskId)
+  const show = await gitRun(mainRoot, ['show-ref', '--verify', '--', ref]).catch(() => ({ ok: false, stdout: '' }))
+  if (!show?.ok) return null
+  const oid = show.stdout.trim().split(/\s+/)[0]
+  const body = await gitRun(mainRoot, ['log', '-1', '--format=%B', oid]).catch(() => ({ ok: false, stdout: '' }))
+  try { return { ref, oid, ...(JSON.parse(body.stdout.trim() || '{}')) } } catch { return { ref, oid } }
+}
+export async function acquireGitClaimLease(mainRoot, taskId, payload = {}, { remoteUrls = {}, role = 'local-only', takeover = false, opts = {} } = {}) {
+  await fetchGitClaimRefs(mainRoot, { remoteUrls, role, branch: payload.branch, opts })
+  const existing = await readGitClaimLease(mainRoot, taskId)
+  const nextActor = String(payload.actor || payload.agent || payload.account || '').trim().toLowerCase()
+  const prevActor = String(existing?.actor || existing?.agent || existing?.account || '').trim().toLowerCase()
+  if (existing && !takeover && (!prevActor || !nextActor || prevActor !== nextActor)) return { ok: false, blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', lease: existing }
+  const treeRes = await gitRun(mainRoot, ['rev-parse', '--verify', '-q', 'HEAD^{tree}']).catch(() => ({ ok: false, stdout: '' }))
+  const treeOid = treeRes?.ok ? treeRes.stdout.trim() : '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+  const commit = await gitRun(mainRoot, ['-c', 'user.name=pf', '-c', 'user.email=pf@local', 'commit-tree', treeOid, '-m', JSON.stringify(payload)])
+  if (!commit.ok) return { ok: true, skipped: true }
+  const newOid = commit.stdout.trim()
+  const ref = claimRef(taskId)
+  const cas = await gitRun(mainRoot, ['update-ref', ref, newOid, existing?.oid ?? ''])
+  if (!cas.ok) return { ok: false, blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', lease: await readGitClaimLease(mainRoot, taskId) }
+  const remote = claimRemote(remoteUrls, role)
+  if (remote && !opts?.['skip-push'] && !opts?._ghClient) {
+    const pushRes = await gitRun(mainRoot, ['push', remote, `${ref}:${ref}`, `--force-with-lease=${ref}:${existing?.oid ?? ''}`])
+    if (!pushRes.ok && /(stale info|rejected|failed to push)/i.test(pushRes.stderr || '')) {
+      await gitRun(mainRoot, existing?.oid ? ['update-ref', ref, existing.oid] : ['update-ref', '-d', ref]).catch(() => null)
+      await fetchGitClaimRefs(mainRoot, { remoteUrls, role, opts })
+      return { ok: false, blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', lease: await readGitClaimLease(mainRoot, taskId) }
+    }
+  }
+  return { ok: true, ref, oid: newOid }
+}
+export async function releaseGitClaimLease(mainRoot, taskId, { remoteUrls = {}, role = 'local-only', opts = {} } = {}) {
+  const ref = claimRef(taskId)
+  await gitRun(mainRoot, ['update-ref', '-d', ref]).catch(() => null)
+  const remote = claimRemote(remoteUrls, role)
+  if (remote && !opts?.['skip-push'] && !opts?._ghClient) await gitRun(mainRoot, ['push', remote, `:${ref}`]).catch(() => null)
 }
 
 export async function handleRelease(opts, roots) {
@@ -241,6 +292,7 @@ export async function handleRelease(opts, roots) {
   ledger.releaseReason = reason || null
   ledger.claimedAt = null
   ledger.claimedBy = null
+  await releaseGitClaimLease(roots.mainRoot, taskId, { remoteUrls, role: ledger.role, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   if (opts.json) {
@@ -281,6 +333,12 @@ export async function handleClaim(opts, roots) {
   if (isTakeover && !takeoverReason) {
     process.stderr.write('BLOCKED_TAKEOVER_REASON_REQUIRED: --takeover 必须同时传入 --reason "<接管原因>"。\n')
     return { exitCode: EXIT.FACT }
+  }
+  if (isTakeover && !isValidActorName(opts.agent)) {
+    const msg = 'BLOCKED_MISSING_ACTOR: --takeover 接管认领必须显式指定合法 --agent <id>，禁止匿名回退旧实施者。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_MISSING_ACTOR', reason: msg }, null, 2)}\n`)
+    process.stderr.write(`${msg}\n`)
+    return { exitCode: EXIT.USAGE }
   }
 
   const prevAgent = ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? null
@@ -326,7 +384,6 @@ export async function handleClaim(opts, roots) {
       ledger.implementerId = localLayers.account
     }
     if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
-      const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
       await syncTaskDocsSafe(claimRoot, ledger)
     }
     const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
@@ -341,6 +398,16 @@ export async function handleClaim(opts, roots) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, taskId, ...localClaim }, null, 2)}\n`)
       process.stderr.write(`${localClaim.message}\n`)
       return { exitCode: localClaim.exitCode ?? EXIT.FACT }
+    }
+    const casClaim = await acquireGitClaimLease(roots.mainRoot, taskId, {
+      taskId, actor: String(opts.agent ?? '').trim() || localLayers.agent || localLayers.account || null,
+      branch: ledger.branch, claimedAt: new Date().toISOString(), takeover: isTakeover,
+    }, { remoteUrls, role: ledger.role, takeover: isTakeover, opts })
+    if (casClaim?.blocked) {
+      const msg = `BLOCKED_ISSUE_ALREADY_CLAIMED: 任务 ${taskId} 的 Git 租约 ${casClaim.lease?.ref ?? ''} 已被 ${casClaim.lease?.actor ?? '他人'} 持有，如需接管请传 --takeover --agent <id> --reason "<原因>"。`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', taskId, lease: casClaim.lease }, null, 2)}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { exitCode: EXIT.FACT }
     }
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
@@ -388,7 +455,6 @@ export async function handleClaim(opts, roots) {
     ledger.implementerId = onlineLayers.account
   }
   if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
-    const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
     await syncTaskDocsSafe(claimRoot, ledger)
   }
   const actorKey = onlineLayers.agent || onlineLayers.account
@@ -414,6 +480,17 @@ export async function handleClaim(opts, roots) {
         activeClaimsByIssue.set(num, activeClaim)
       }
     }
+  }
+
+  const casClaim = await acquireGitClaimLease(roots.mainRoot, taskId, {
+    taskId, actor: String(opts.agent ?? '').trim() || actorKey || null,
+    branch: ledger.branch, claimedAt: new Date().toISOString(), takeover: isTakeover,
+  }, { remoteUrls, role: ledger.role, takeover: isTakeover, opts })
+  if (casClaim?.blocked) {
+    const msg = `BLOCKED_ISSUE_ALREADY_CLAIMED: 任务 ${taskId} 的 Git 租约 ${casClaim.lease?.ref ?? ''} 已被 ${casClaim.lease?.actor ?? '他人'} 持有，如需接管请传 --takeover --agent <id> --reason "<原因>"。`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', taskId, lease: casClaim.lease }, null, 2)}\n`)
+    process.stderr.write(`${msg}\n`)
+    return { exitCode: EXIT.FACT }
   }
 
   const prevClaim = [...activeClaimsByIssue.values()][0] ?? null

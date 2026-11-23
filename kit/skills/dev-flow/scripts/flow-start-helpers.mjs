@@ -7,14 +7,16 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { extractDocBriefSeeds } from '../../lib/context-brief.mjs'
+import { parseDocFrontmatter } from '../../lib/docs.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
-import { gitStatusPorcelainZ } from '../../lib/git.mjs'
+import { gitRun, gitStatusPorcelainZ, readTextSafe, resolveDefaultBranch } from '../../lib/git.mjs'
 import {
   enforceSlotBoundary,
   isValidActorName,
   resolveHostMode,
 } from '../../lib/harness-context.mjs'
-import { recordMountedDepsInLedger } from '../../lib/ledger.mjs'
+import { createExploredEvidence, recordMountedDepsInLedger } from '../../lib/ledger.mjs'
 import { findBlockingTriageDowngrade, markTriageConsumed, readSessionState } from '../../lib/session-state.mjs'
 import { validateStartProvenanceAndRole } from './flow-start-provenance.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
@@ -83,6 +85,89 @@ export function emitBlockedStart(opts, payload) {
   return { exitCode: payload.exitCode ?? EXIT.FACT }
 }
 
+export async function calibrateLedgerBaseBranch(mainRoot, ledger, resolvedDefault = null) {
+  if (!ledger || typeof ledger !== 'object') return null
+  const current = String(ledger.baseBranch ?? '').trim()
+  if (current) {
+    const hasLocal = (await gitRun(mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${current}`])).ok
+    const hasOrigin = hasLocal || (await gitRun(mainRoot, ['show-ref', '--verify', '--quiet', `refs/remotes/origin/${current}`])).ok
+    if (hasLocal || hasOrigin) return current
+  }
+  const realDefault = resolvedDefault || await resolveDefaultBranch(mainRoot, { strict: true })
+  if (realDefault) ledger.baseBranch = realDefault
+  return ledger.baseBranch ?? null
+}
+
+/**
+ * 若 `flow start` 绑定的 SPEC/Todo 已过审/就绪且包含真实仓内路径或复用模块，
+ * 或 `session-state.json` 已记录有效探索，则自动继承写入 `ledger.explored` 凭据。
+ */
+export function inheritExploredCredentials({
+  mainRoot,
+  docRoot = mainRoot,
+  ledger,
+  specFile = ledger?.specFile,
+  todoFile = ledger?.todoFile,
+  prdFile = ledger?.prdFile,
+  implementerId = null,
+} = {}) {
+  if (!ledger || ledger.planning || ledger.status === 'planning' || Number(ledger.caseType ?? 3) < 3 || ledger.explored?.at) {
+    return ledger?.explored ?? null
+  }
+  const sess = readSessionState(mainRoot)
+  if (sess?.explored?.at || sess?.steps?.EXPLORE?.ok) {
+    const ev = createExploredEvidence({
+      at: sess.explored?.at ?? sess.steps?.EXPLORE?.at ?? new Date().toISOString(),
+      tier: sess.explored?.tier ?? 'session-state',
+      symbolCount: Number(sess.explored?.symbolCount ?? 0),
+      by: implementerId || ledger.implementerId || 'session-state',
+      source: 'session-state',
+    })
+    ledger.explored = ev
+    return ev
+  }
+  const docRels = [specFile, todoFile, prdFile].filter(Boolean)
+  if (!specFile && !todoFile) return null
+  const readPlan = (rel) => {
+    for (const base of [docRoot, mainRoot].filter(Boolean)) {
+      const abs = join(base, rel)
+      if (existsSync(abs)) return readTextSafe(abs) ?? ''
+    }
+    return ''
+  }
+  let planReady = false
+  if (specFile) {
+    const raw = readPlan(specFile)
+    const fm = raw ? parseDocFrontmatter(raw) : null
+    const st = String(fm?.data?.status ?? '').trim().toLowerCase()
+    const crit = String(fm?.data?.plan_critique ?? '').trim().toLowerCase()
+    planReady = Boolean(
+      fm?.data?.approved === true
+      || ['approved', 'implementing', 'in_review', 'implemented'].includes(st)
+      || crit.startsWith('passed')
+      || crit.startsWith('skipped'),
+    )
+  } else if (todoFile) {
+    const raw = readPlan(todoFile)
+    const fm = raw ? parseDocFrontmatter(raw) : null
+    const st = String(fm?.data?.status ?? '').trim().toLowerCase()
+    planReady = (st === 'active' || st === 'done') && !/\b(?:TBD|FIXME)\b/.test(raw)
+  }
+  if (!planReady) return null
+  const seeds = extractDocBriefSeeds([docRoot, mainRoot].filter(Boolean), docRels)
+  const existingPaths = seeds.paths.filter((p) => existsSync(join(docRoot, p)) || existsSync(join(mainRoot, p)))
+  if (existingPaths.length === 0) return null
+  const ev = createExploredEvidence({
+    at: new Date().toISOString(),
+    tier: 'inherited-plan-audit',
+    symbolCount: existingPaths.length,
+    by: implementerId || ledger.implementerId || 'plan-audit',
+    source: 'plan-audit',
+  })
+  ledger.explored = ev
+  return ev
+}
+
 export async function promotePlanningToStarted({
   roots, existing, existingWorkRootPre, slug, taskId, opts, runStartPlanGate,
   role = null, providerId = null, baseBranch = null, baseSha = null,
@@ -117,7 +202,8 @@ export async function promotePlanningToStarted({
 
   if (role && (existing.role === 'local-only' || !existing.role)) existing.role = role
   if (providerId && (existing.providerId === 'none' || !existing.providerId)) existing.providerId = providerId
-  if (baseBranch && !existing.baseBranch) existing.baseBranch = baseBranch
+  if (baseBranch) existing.baseBranch = baseBranch
+  await calibrateLedgerBaseBranch(roots.mainRoot, existing, baseBranch)
   if (baseSha && !existing.baseSha) existing.baseSha = baseSha
   existing.caseType = nextCase
   existing.status = 'started'
@@ -132,6 +218,12 @@ export async function promotePlanningToStarted({
     isPlanning: false,
     implementerId: existing.implementerId,
     opts,
+  })
+  inheritExploredCredentials({
+    mainRoot: roots.mainRoot,
+    docRoot: gateRoot,
+    ledger: existing,
+    implementerId: existing.implementerId,
   })
   return { blocked: false }
 }

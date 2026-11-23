@@ -475,11 +475,23 @@ export const INJECTIONS_CORE = [
   },
   {
     id: 'I48',
-    what: '禁用 flow-merge-claim.mjs claim 对已被他人认领 Issue 的互斥阻断检查',
+    what: '禁用 flow-merge-claim.mjs claim 对已被他人认领 Issue 与 CAS 租约的互斥阻断检查',
     file: 'kit/skills/dev-flow/scripts/flow-merge-claim.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-merge-claim.mjs'],
     from: '        if (!isTakeover) {',
     to: '        if (false && !isTakeover) {',
+    alsoPatches: [
+      {
+        file: 'kit/skills/dev-flow/scripts/flow-merge-claim.mjs',
+        from: "  if (existing && !takeover && (!prevActor || !nextActor || prevActor !== nextActor)) return { ok: false, blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', lease: existing }",
+        to: '  if (false && existing && !takeover) return { ok: false }',
+      },
+      {
+        file: '.agents/skills/dev-flow/scripts/flow-merge-claim.mjs',
+        from: "  if (existing && !takeover && (!prevActor || !nextActor || prevActor !== nextActor)) return { ok: false, blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', lease: existing }",
+        to: '  if (false && existing && !takeover) return { ok: false }',
+      },
+    ],
     expect: '他人重复 claim 未阻断',
   },
   {

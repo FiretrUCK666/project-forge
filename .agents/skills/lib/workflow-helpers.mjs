@@ -4,10 +4,12 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 workflow-policy.mjs 重导出。
  */
 
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { resolve } from 'node:path'
 
 import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from './doc-slice-graph.mjs'
-import { gitRun, posixPath } from './git.mjs'
+import { gitRun, resolveDefaultBranch } from './git.mjs'
 import { resolveRefShaFast } from './git-fast.mjs'
 import { parseBodyRelations } from './platform.mjs'
 import { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle, resolveReadablePrTitleWithSource } from './pr-template-hydrate.mjs'
@@ -182,7 +184,8 @@ export async function resolveEffectiveBaseSha(repoRoot, ledger, { gitCommonDir =
   if (!repoRoot || ledger?.isolation === 'in-place' || (ledger?.branch && ledger?.baseBranch && ledger.branch === ledger.baseBranch)) {
     return storedBase
   }
-  const baseBranch = String(ledger?.baseBranch || 'main').trim() || 'main'
+  const baseBranch = String(ledger?.baseBranch ?? '').trim() || await resolveDefaultBranch(repoRoot, { strict: true })
+  if (!baseBranch) return storedBase
   const candidates = []
   const seen = new Set()
   const addCand = (ref) => {

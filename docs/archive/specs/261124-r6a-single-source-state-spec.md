@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: 单源默认分支、任务活性分类与跨平台四态闭环
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
-pr: null
-branch: feat/r6-arch-plan
+pr: 162
+branch: feat/r6a-single-source-state
 owner: plan-r6-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r6-arch, round=1, sha=d4210c087951, summary=核查 C1..C4、单一 resolveDefaultBranch(strict)/isDefaultBranch/detectCommitStyle、classifyTaskLiveness、flow-merge.mjs:70 解锁、A3 合并权、plan-exit-gate.mjs:283、refs/pf/claims/ CAS 租约及 Wave 1 写域隔离（不改 flow-lifecycle-finalize.mjs）均真实自洽)"
-related_prd: ../prd/261124-r6-arch-hardening-prd.md
+related_prd: ../../prd/261124-r6-arch-hardening-prd.md
 related_todo: ../todo/261124-r6a-single-source-state-todo.md
 high_risk_paths: [kit/skills/lib/, kit/skills/dev-flow/scripts/, scripts/lib/]
 task_id: r6a-single-source-state
@@ -27,13 +27,13 @@ depends_on: []
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / Issue / PR | `feat/r6-arch-plan` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-r6-arch / `pending` |
+| 分支 / Issue / PR | `feat/r6a-single-source-state` / 未关联 / #162 |
+| 负责人 / 内审状态 | plan-r6-arch / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | `../prd/261124-r6-arch-hardening-prd.md` / `../todo/261124-r6a-single-source-state-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261124-r6-arch-hardening-prd.md` / `docs/archive/todo/261124-r6a-single-source-state-todo.md` |
 
 - **变更一句话**：改造唯一 `resolveDefaultBranch(repoRoot, { strict = true })`、下沉唯一 `detectCommitStyle`、落地 `classifyTaskLiveness` 与 `collectTaskRuntimeSnapshot`、解开 `generic-git` 合流死锁、落盘 A3 合并权、修复跨机便携交棒并实现标准 Git-Ref CAS 原子认领租约（认领总控 PRD `C1`、`C2`、`C3`、`C4`）。
 
@@ -121,10 +121,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `master`-only 模拟仓全流转 `ledger.baseBranch` 恒为 `'master'` 且零新建 `refs/heads/main`；缺真实分支返回 `BLOCKED_MISSING_DEFAULT_BRANCH`；`detectCommitStyle` 在 `< 5` 条非自动提交下不反转漂移。
-- [ ] C2: 保留本仓 7 个遗留台账运行 `node .agents/skills/dev-flow/scripts/flow.mjs next --json` 无 `MULTIPLE_ACTIVE_TASKS` / `BLOCKED_NOT_CLAIMED`；`flow.mjs status --all --json` 与 `status --task` 对同任务 `phase` 完全一致。
-- [ ] C3: `generic-git` 进入 `GenericRemoteBackend.mergePr` 真实 fetch 四态判定；`flow.mjs merge` 放行 `reviewPassed === true && headSha === reviewPassedHead` 的独立审查者/调度者且硬拦截实施者自合；`flow.mjs start` 对已过 `audit` 规划自动继承 `explored` 凭据。
-- [ ] C4: `plan-exit-gate.mjs` 在 `ledgerEntry: null` 时不触发假阳性、跨机缺 `.git/issues` 不死循环、Case 3 独立 Todo 正确带 `--case 3`、`refs/pf/claims/` CAS 并发认领互斥、`claim --takeover` 缺 `--agent` 阻断、`generic-git + contributor-fork` 写入 `awaiting-upstream-merge`；`node scripts/dev/fixtures.mjs --domain r6a-state` 与 `verify-injections.mjs --jobs 4` 全绿。
+- [x] C1: `master`-only 模拟仓全流转 `ledger.baseBranch` 恒为 `'master'` 且零新建 `refs/heads/main`；缺真实分支返回 `BLOCKED_MISSING_DEFAULT_BRANCH`；`detectCommitStyle` 在 `< 5` 条非自动提交下不反转漂移。
+- [x] C2: 保留本仓 7 个遗留台账运行 `node .agents/skills/dev-flow/scripts/flow.mjs next --json` 无 `MULTIPLE_ACTIVE_TASKS` / `BLOCKED_NOT_CLAIMED`；`flow.mjs status --all --json` 与 `status --task` 对同任务 `phase` 完全一致。
+- [x] C3: `generic-git` 进入 `GenericRemoteBackend.mergePr` 真实 fetch 四态判定；`flow.mjs merge` 放行 `reviewPassed === true && headSha === reviewPassedHead` 的独立审查者/调度者且硬拦截实施者自合；`flow.mjs start` 对已过 `audit` 规划自动继承 `explored` 凭据。
+- [x] C4: `plan-exit-gate.mjs` 在 `ledgerEntry: null` 时不触发假阳性、跨机缺 `.git/issues` 不死循环、Case 3 独立 Todo 正确带 `--case 3`、`refs/pf/claims/` CAS 并发认领互斥、`claim --takeover` 缺 `--agent` 阻断、`generic-git + contributor-fork` 写入 `awaiting-upstream-merge`；`node scripts/dev/fixtures.mjs --domain r6a-state` 与 `verify-injections.mjs --jobs 4` 全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -138,6 +138,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：`resolveDefaultBranch(repoRoot, { strict = true })`、`isDefaultBranch` 与共享 `detectCommitStyle(subjects)`（过滤 Merge/自动提交且要求有效样本 `>= 5`）已单源下沉至 `kit/skills/lib/git-core.mjs`/`git.mjs`/`git-fast.mjs` 并消除 `'main'` 硬编码与 `update-ref` 旁支；`classifyTaskLiveness` 与 `collectTaskRuntimeSnapshot`（落盘于 `flow-lifecycle-helpers.mjs` 以避免环依赖）统一驱动 `flow-next`、`flow-cleanup`、`flow-merge`、`flow-lifecycle`；移除 `flow-merge.mjs:70` 对 `GenericRemoteBackend.mergePr` 短路并落地 A3 `BLOCKED_SELF_MERGE` 与 `refs/pf/claims/` CAS 原子租约；新增 `scripts/dev/fixtures-r6a-state.mjs` 与 `scripts/dev/injections-data-r6a.mjs`（`I601..I607`）。
+- **与草案的差异**：经 `@coordinator` #732/#740 裁决：① 保留 `plan-exit-gate.mjs:283` `'ledgerEntry' in doc` 防绕过校验并优化 `skipped` 提示；② 在 `exit-codes.mjs` 登记 `BLOCKED_MISSING_DEFAULT_BRANCH` 与 `BLOCKED_SELF_MERGE`；③ 同步调整 `injections-data-workflow.mjs`（`I59`）与 `injections-data-core.mjs`（`I48` `alsoPatches`）。
+- **关联同步文件**：`kit/skills/` 与 `.agents/skills/` 已通过 `equip.mjs .` 同步字节一致；总控 PRD 保持活跃；`docs/TDD.md` 与剩余 4 处白名单交由 Wave 2 `r6d` 同步。

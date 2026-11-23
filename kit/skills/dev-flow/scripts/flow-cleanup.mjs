@@ -14,22 +14,18 @@ import { destroyTaskScratchDir, findAffectedFeatures, readFeatureMap } from '../
 import { computeCleanupPreviewHash, isSafeBranchDelete, verifyCleanupPreviewHash } from '../../lib/gate-enforcement.mjs'
 import { reclaimVerifySlotCache } from '../../lib/verify-state.mjs'
 import {
-  canonicalPath, detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
-  parseWorktreeListPorcelain, posixPath, samePath,
+  canonicalPath, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
+  parseWorktreeListPorcelain, posixPath, resolveDefaultBranch, samePath,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { listTaskLedgers, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { collectTaskLivenessBuckets, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite,
 } from '../../lib/platform.mjs'
-import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
-import {
-  determineWorkflowPolicy, evaluateNextState, hasRepoCiWorkflow,
-  readVerificationEvidence, resolveEffectiveBaseSha, validateVerificationEvidence,
-} from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
+import { buildTargetRepoContext } from './flow-inspect.mjs'
+import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
+import { releaseGitClaimLease } from './flow-merge-claim.mjs'
 import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
 import { unmountSharedDeps } from './worktree-deps.mjs'
 
@@ -201,8 +197,9 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
 
   const worktrees = wtEntries
   const localBranchExists = Boolean(ledger.branch && refRes.ok)
-  const mergeState = localBranchExists
-    ? (mergeStateOverride ?? await inspectBranchMergeState(mainRoot, { branch: ledger.branch, defaultBranch: ledger.baseBranch || 'main', gitDir: effectiveGitDir }))
+  const resolvedBase = ledger.baseBranch || await resolveDefaultBranch(mainRoot, { strict: true })
+  const mergeState = localBranchExists && resolvedBase
+    ? (mergeStateOverride ?? await inspectBranchMergeState(mainRoot, { branch: ledger.branch, defaultBranch: resolvedBase, gitDir: effectiveGitDir }))
     : null
   const remoteBranchExists = Boolean(shouldProbeRemote && lsRes.ok && lsRes.stdout.trim() !== '')
 
@@ -310,11 +307,17 @@ export async function handleCleanup(opts, roots) {
     return { exitCode: EXIT.FACT }
   }
 
+  const resolvedBase = ledger.baseBranch || await resolveDefaultBranch(roots.mainRoot, { strict: true })
   if (cl.localBranch && !keepLocalBr) {
     const fastMainBranch = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
     const curBr = fastMainBranch ? { ok: true, stdout: fastMainBranch } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
     if (curBr.ok && curBr.stdout.trim() === cl.localBranch) {
-      const sw = await gitRun(roots.mainRoot, ['switch', ledger.baseBranch || 'main'])
+      if (!resolvedBase) {
+        if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_MISSING_DEFAULT_BRANCH', branch: cl.localBranch }, null, 2)}\n`)
+        process.stderr.write('BLOCKED_MISSING_DEFAULT_BRANCH: 找不到可用的默认基线分支，无法切回主分支并删除当前分支。\n')
+        return { exitCode: EXIT.FACT }
+      }
+      const sw = await gitRun(roots.mainRoot, ['switch', resolvedBase])
       if (!sw.ok) throw new Error(`切回默认分支失败：${sw.stderr}`)
     }
   }
@@ -324,8 +327,13 @@ export async function handleCleanup(opts, roots) {
   const { removedWorktrees } = rmOut
 
   let deletedLocalBranch = false
-  if (cl.localBranch && !keepLocalBr && cl.localBranch !== ledger.baseBranch) {
-    const delCheck = await isSafeBranchDelete(roots.mainRoot, cl.localBranch, ledger.baseBranch || 'main', {
+  if (cl.localBranch && !keepLocalBr && cl.localBranch !== resolvedBase) {
+    if (!resolvedBase) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_MISSING_DEFAULT_BRANCH', branch: cl.localBranch }, null, 2)}\n`)
+      process.stderr.write('BLOCKED_MISSING_DEFAULT_BRANCH: 找不到可用的默认基线分支，无法校验分支安全删除。\n')
+      return { exitCode: EXIT.FACT }
+    }
+    const delCheck = await isSafeBranchDelete(roots.mainRoot, cl.localBranch, resolvedBase, {
       remoteBranchMerged: cl.prState === 'MERGED' || ledger.prState === 'MERGED',
       mergeState: cl.mergeState,
     })
@@ -347,6 +355,7 @@ export async function handleCleanup(opts, roots) {
   }
 
   const verifyScratchCleanup = await cleanupTaskVerifyScratch(roots, taskId, ledger, 'flow-cleanup')
+  await releaseGitClaimLease(roots.mainRoot, taskId, { remoteUrls, role: ledger.role, opts })
   ledger.status = (keptWorktrees.length === 0 && !keepLocalBr && !keepRemoteBr) ? 'cleaned' : ledger.status
   ledger.cleanedAt = new Date().toISOString()
   await runLifecycleGovernHook({ stage: 'cleanup', mainRoot: roots.mainRoot, implRoot: roots.mainRoot, taskId, ledger, opts })
@@ -362,7 +371,12 @@ export async function handleCleanup(opts, roots) {
 }
 
 export async function handleStatus(opts, roots) {
-  const active = listTaskLedgers(roots.mainRoot, { includeTerminal: false })
+  const buckets = collectTaskLivenessBuckets(roots.mainRoot, { repoRoot: roots.mainRoot })
+  const active = buckets.active
+  const pendingCleanupTasks = buckets.pendingCleanup.map((t) => ({
+    taskId: t.taskId, status: t.status, branch: t.branch ?? null, worktreePath: t.worktreePath ?? null,
+  }))
+  const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
   if (opts.all) {
     const readySlices = scanUnstartedReadySlices(roots.mainRoot, active)
     const wavePlan = buildMultiTaskWavePlan([...active, ...readySlices])
@@ -376,8 +390,12 @@ export async function handleStatus(opts, roots) {
           : (inferredProvider === 'generic-git' ? 'generic-git' : 'maintainer'))
       : 'local-only')
     const backend = createTaskBackend({ role: inferredRole, providerId: inferredProvider, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    const tasks = active.map((t) => {
-      const ev = evaluateNextState({ activeTasks: active, selectedTask: t, repoRoot: roots.mainRoot })
+    const tasks = await Promise.all(active.map(async (t) => {
+      const snap = await collectTaskRuntimeSnapshot({
+        mainRoot: roots.mainRoot, gitDir: roots.gitDir, ledger: t,
+        activeTasks: active, allLedgers: buckets.all, pendingCleanupTasks, hasDevReview, evaluateNext: true,
+      })
+      const ev = snap.evaluated
       return {
         taskId: t.taskId,
         slug: t.slug ?? null,
@@ -393,12 +411,13 @@ export async function handleStatus(opts, roots) {
         nextAction: ev.command || ev.nextAction,
         syncFailures: t.syncFailures ?? [],
       }
-    })
+    }))
     const summary = {
       ok: true,
       all: true,
       activeCount: tasks.length,
       activeTasks: tasks,
+      ...(pendingCleanupTasks.length > 0 ? { pendingCleanupTasks } : {}),
       readySlices,
       wavePlan,
       parallelDispatch: wavePlan.parallelDispatch ?? null,
@@ -437,78 +456,23 @@ export async function handleStatus(opts, roots) {
   }
 
   const { taskId, ledger, source } = ctx
-  const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-  const exists = existsSync(implRoot)
-  const profile = parseAgentsProfile(roots.mainRoot)
-  const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
-  const fastStatusHead = exists ? readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid : null
-  const effectiveBase = exists ? await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir }) : ledger.baseSha
-  const [stZ, headRes, diffRawRes] = exists
-    ? await Promise.all([
-        gitStatusPorcelainZ(implRoot),
-        fastStatusHead ? Promise.resolve({ ok: true, stdout: fastStatusHead }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
-        !effectiveBase
-          ? Promise.resolve(null)
-          : (fastStatusHead && fastStatusHead === effectiveBase ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`)),
-      ])
-    : [{ entries: [] }, { ok: false, stdout: '' }, null]
-  const head = headRes.ok ? headRes.stdout.trim() : null
-  const sharedEntries = diffRawRes?.ok ? diffRawRes.entries : undefined
-  const [op, changedFiles, gateHits] = exists
-    ? await Promise.all([
-        detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
-        getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: sharedEntries }),
-        detectGateWeakening(implRoot, effectiveBase, ledger.baseBranch, { headSha: head, nameStatusEntries: sharedEntries }),
-      ])
-    : [{ inProgress: false }, [], []]
-  const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
-  const policy = determineWorkflowPolicy({
-    changedFiles, ownArchived, caseType: ledger.caseType,
-    highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
-    gateWeakeningHits: gateHits, hasRemote: ledger.role !== 'local-only',
-    hasCiWorkflow: hasRepoCiWorkflow(exists ? implRoot : roots.mainRoot),
-    profile, hasDevReview,
+  const snap = await collectTaskRuntimeSnapshot({
+    mainRoot: roots.mainRoot, gitDir: roots.gitDir, ledger,
+    activeTasks: active, allLedgers: buckets.all, pendingCleanupTasks, hasDevReview, evaluateNext: true,
   })
-  const evidence = readVerificationEvidence(roots.gitDir, taskId)
-  const evidenceValidation = validateVerificationEvidence({ policy, evidence, headSha: head, profile })
-  let nonDocChangesAfterFinalize = false
-  if (ledger.finalized && ledger.finalizedHead && head && ledger.finalizedHead !== head && exists) {
-    const postFin = await gitDiffNameStatusZ(implRoot, [`${ledger.finalizedHead}..${head}`])
-    nonDocChangesAfterFinalize = postFin.entries.some((e) => e.file && !/^docs\//.test(e.file))
-  }
-  let commitsAheadOfBase = 0
-  if (exists && (effectiveBase || ledger.baseBranch)) {
-    const countRes = await gitRun(implRoot, ['rev-list', '--count', `${effectiveBase || ledger.baseBranch}..HEAD`])
-    if (countRes.ok) commitsAheadOfBase = Number(countRes.stdout.trim()) || 0
-  }
-  const evaluated = evaluateNextState({
-    activeTasks: active,
-    selectedTask: ledger,
-    taskRuntime: {
-      opInProgress: Boolean(op.inProgress),
-      opName: op.op ?? null,
-      headSha: head,
-      dirty: stZ.entries.length,
-      policy,
-      evidenceValidation,
-      nonDocChangesAfterFinalize,
-      profile,
-      commitsAheadOfBase,
-      hasDevReview,
-    },
-    repoRoot: roots.mainRoot,
-  })
+  const head = snap.headSha
+  const evaluated = snap.evaluated
   const nextAction = evaluated.command || evaluated.nextAction
 
   const payload = {
     taskId, inferredFrom: source, status: ledger.status, phase: evaluated.phase, ownerRole: evaluated.ownerRole,
-    role: ledger.role, branch: ledger.branch, head, dirty: stZ.entries.length,
+    role: ledger.role, branch: ledger.branch, head, dirty: snap.dirty,
     finalized: ledger.finalized, verifiedHead: ledger.verifiedHead, reviewPassed: Boolean(ledger.reviewPassed),
     blockingReasons: evaluated.blockingReasons, nextAction, command: evaluated.command, nextSummary: evaluated.nextAction,
   }
   if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
   else {
-    process.stdout.write(`任务状态：${taskId}（推断来源=${source}，phase=${evaluated.phase}）\n- status=${ledger.status} | role=${ledger.role} | branch=${ledger.branch ?? '-'}\n- HEAD=${head?.slice(0, 7) ?? 'unborn'} | dirty=${stZ.entries.length} | verified=${ledger.verifiedHead === head} | reviewPassed=${Boolean(ledger.reviewPassed)}\n`)
+    process.stdout.write(`任务状态：${taskId}（推断来源=${source}，phase=${evaluated.phase}）\n- status=${ledger.status} | role=${ledger.role} | branch=${ledger.branch ?? '-'}\n- HEAD=${head?.slice(0, 7) ?? 'unborn'} | dirty=${snap.dirty} | verified=${ledger.verifiedHead === head} | reviewPassed=${Boolean(ledger.reviewPassed)}\n`)
     printNextStep([{ skill: 'dev-flow', text: nextAction }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
@@ -532,10 +496,12 @@ export async function handleAbort(opts, roots) {
   if (ledger.branch && !opts['keep-branch'] && ledger.branch !== ledger.baseBranch) {
     const fastAbrBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
     const cur = fastAbrBr ? { ok: true, stdout: fastAbrBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-    if (cur.ok && cur.stdout.trim() === ledger.branch) await gitRun(roots.mainRoot, ['switch', ledger.baseBranch || 'main'])
+    const abortBase = ledger.baseBranch || await resolveDefaultBranch(roots.mainRoot, { strict: true })
+    if (cur.ok && cur.stdout.trim() === ledger.branch && abortBase) await gitRun(roots.mainRoot, ['switch', abortBase])
     await gitRun(roots.mainRoot, opts.force ? ['branch', '-D', ledger.branch] : ['branch', '-d', ledger.branch])
   }
   const verifyScratchCleanup = await cleanupTaskVerifyScratch(roots, taskId, ledger, 'flow-abort')
+  await releaseGitClaimLease(roots.mainRoot, taskId, { role: ledger.role, opts })
   ledger.status = 'aborted'
   ledger.abortedAt = new Date().toISOString()
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })

@@ -14,7 +14,7 @@ import { discoverContextDocs, locateTopSlicesForPaths } from './doc-locator.mjs'
 import { matchFeatureMapForPaths, readFeatureMapStatus } from './feature-map.mjs'
 import { canonicalPath, posixPath, readTextSafe } from './git.mjs'
 import { indexMarkdownSections } from './markdown-scan.mjs'
-import { discoverEvergreenDocs } from './profile.mjs'
+import { discoverEvergreenDocs, resolveAuthoritativeTddPath } from './profile.mjs'
 
 function quoteCliArg(value) {
   return `"${String(value ?? '').replace(/"/g, '\\"')}"`
@@ -182,7 +182,10 @@ export function buildContextBrief(repoRoot, {
   }
 
   const normPaths = uniqStrings((paths ?? []).map(normRelPath))
-  const normExcludes = new Set(uniqStrings((excludeFiles ?? []).map(normRelPath)))
+  const normExcludes = new Set(uniqStrings([...(excludeFiles ?? []), 'AGENTS.md'].map(normRelPath)))
+  const authTddPath = (() => {
+    try { return normRelPath(resolveAuthoritativeTddPath(root, profile?.decisions) ?? '') } catch { return '' }
+  })()
   const cleanKeywords = uniqStrings(keywords)
   const kwTokens = cleanKeywords
     .flatMap((k) => k.toLowerCase().split(/[\s,，;；/]+/))
@@ -209,6 +212,10 @@ export function buildContextBrief(repoRoot, {
   } catch { /* Fail-Soft */ }
 
   const sortedEvergreen = [...byPath.values()].sort((a, b) => {
+    if (authTddPath) {
+      if (a.path === authTddPath && b.path !== authTddPath) return -1
+      if (b.path === authTddPath && a.path !== authTddPath) return 1
+    }
     const diff = scoreEvergreenPriority(b, normPaths, kwTokens) - scoreEvergreenPriority(a, normPaths, kwTokens)
     return diff !== 0 ? diff : a.path.localeCompare(b.path)
   })
@@ -226,14 +233,13 @@ export function buildContextBrief(repoRoot, {
       const headings = allH2.slice(0, maxHeads).map((s) => ({
         title: s.title,
         line: s.startLine,
-        locateCommand: buildDocLocateCmd(doc.path, s.title),
       }))
       evergreenToc.push({
         path: doc.path,
         source: doc.source,
         headings,
         sectionCount: allH2.length,
-        locateCommand: buildDocLocateCmd(doc.path, headings[0]?.title ?? null),
+        locateCommand: buildDocLocateCmd(doc.path),
       })
     } catch { /* Fail-Soft */ }
   }

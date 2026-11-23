@@ -181,15 +181,16 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   // 两个根都要看：主仓里有已归档的文档，而这条任务的归档在**实施位**里，
   // 还没合并回主仓。只查一个根，两种情形各漏一半。
   const docRoots = mainRoot ? [mainRoot, ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null].filter(Boolean) : []
-  const pickDoc = (live, archived) => {
-    for (const rel of [live, archived]) {
+  const pickDoc = (...candidates) => {
+    for (const rel of candidates) {
       if (!rel) continue
       if (docRoots.some((root) => existsSync(join(root, rel)))) return rel
     }
     return null
   }
-  const specRel = pickDoc(ledger?.specFile, ledger?.archivedSpecFile)
-  const todoRel = pickDoc(ledger?.todoFile, ledger?.archivedTodoFile)
+  const prdRel = pickDoc(ledger?.prdFile, ledger?.archivedPrdFile, ledger?.privatePrdFile)
+  const specRel = pickDoc(ledger?.specFile, ledger?.archivedSpecFile, ledger?.privateSpecFile)
+  const todoRel = pickDoc(ledger?.todoFile, ledger?.archivedTodoFile, ledger?.privateTodoFile)
   const readFromDocRoots = (rel) => {
     if (!rel) return ''
     for (const root of docRoots) {
@@ -198,23 +199,26 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     }
     return ''
   }
+  const prdText = readFromDocRoots(prdRel)
   const specText = readFromDocRoots(specRel)
   const todoText = readFromDocRoots(todoRel)
 
-  // 验收标准以 SPEC 为准，没有 SPEC 时退到 Todo。两者都没有就明说没有。
+  // 验收标准以 SPEC 为准，没有 SPEC 时退到 Todo 或 PRD。都没有就明说没有。
   const specFm = specText ? parseDocFrontmatter(specText) : null
   const todoFm = todoText ? parseDocFrontmatter(todoText) : null
+  const prdFm = prdText ? parseDocFrontmatter(prdText) : null
   const fmScopeFiles = [
     ...(Array.isArray(specFm?.data?.scope_files) ? specFm.data.scope_files : []),
     ...(Array.isArray(todoFm?.data?.scope_files) ? todoFm.data.scope_files : []),
+    ...(Array.isArray(prdFm?.data?.scope_files) ? prdFm.data.scope_files : []),
   ].map((s) => String(s ?? '').trim()).filter(Boolean)
-  const criteria = specText ? extractCriteria(specText) : extractCriteria(todoText)
-  const sourceDoc = specText ? specRel : (todoText ? todoRel : null)
-  const paths = [...new Set([...fmScopeFiles, ...extractDocPaths(specText), ...extractDocPaths(todoText)])]
+  const criteria = specText ? extractCriteria(specText) : (todoText ? extractCriteria(todoText) : extractCriteria(prdText))
+  const sourceDoc = specText ? specRel : (todoText ? todoRel : (prdText ? prdRel : null))
+  const paths = [...new Set([...fmScopeFiles, ...extractDocPaths(specText), ...extractDocPaths(todoText), ...extractDocPaths(prdText)])]
   // 去重要按「说了同一件事」判，不是按字符串相等：
   // SPEC 写「不引入第三方解析器（零依赖是不变量）；不做 LSP 级语义分析」，
   // Todo 写「第三方解析器、LSP 级语义分析」——字面不同，内容重复。
-  const rawGoals = [...extractNonGoals(specText), ...extractNonGoals(todoText)]
+  const rawGoals = [...extractNonGoals(specText), ...extractNonGoals(todoText), ...extractNonGoals(prdText)]
   const seenFragments = new Set()
   const nonGoals = []
   for (const g of rawGoals) {
@@ -237,16 +241,18 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   const locateRoot = wtCandidate && existsSync(wtCandidate) ? wtCandidate : mainRoot
   const keywords = [
     ledger?.taskId,
-    parseDocFrontmatter(specText || todoText)?.data?.title,
+    parseDocFrontmatter(specText || todoText || prdText)?.data?.title,
     ...criteria.slice(0, 6).map((c) => c.text),
   ].filter(Boolean)
   const contextBrief = buildContextBrief(locateRoot, {
     paths,
     keywords,
-    excludeFiles: [specRel, todoRel].filter(Boolean),
+    excludeFiles: [specRel, todoRel, prdRel, 'AGENTS.md'].filter(Boolean),
     limit: 3,
     budgetLines: 48,
   })
+  const role = String(explicitRole ?? ownerRole ?? ledger?.ownerRole ?? ledger?.role ?? 'implementer')
+  const isExploreOrCritic = role === 'explore' || role === 'critic' || role === 'critique'
   const evergreenToc = contextBrief.evergreenToc
   const otherEvergreenDocs = contextBrief.otherEvergreenDocs
   const totalEvergreenDocs = contextBrief.totalEvergreenDocs
@@ -332,11 +338,22 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   lines.push('')
 
   const design = extractDesignSection(specText)
-  if (design) {
-    lines.push("## 怎么做（来自 SPEC 的设计方案）")
-    lines.push("")
-    lines.push(design)
-    lines.push("")
+  const visibleDesign = isExploreOrCritic ? '' : design
+  const isLongDesign = Boolean(visibleDesign && (visibleDesign.split('\n').length > 24 || visibleDesign.length > 1500))
+  const designPointer = (visibleDesign && specRel)
+    ? `node .agents/skills/dev-explore/scripts/doc-locate.mjs --file "${specRel}" --section "设计方案"`
+    : null
+  if (visibleDesign) {
+    lines.push('## 怎么做（来自 SPEC 的设计方案）')
+    lines.push('')
+    if (isLongDesign && designPointer) {
+      lines.push(`设计方案较长（${visibleDesign.split('\n').length} 行），按需执行指针命令定位阅读：`)
+      lines.push('')
+      lines.push(`- \`${designPointer}\``)
+    } else {
+      lines.push(visibleDesign)
+    }
+    lines.push('')
   }
 
   if (evergreenToc.length > 0 || otherEvergreenDocs.length > 0) {
@@ -410,7 +427,6 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   // 抄不走的只有一件事：**这个角色该做与不该做的边界**。它不随流程改动而失效。
   const taskId = ledger?.taskId ?? null
   // `ownerRole` 由状态机算出，`ledger.role` 是平台身份——不是一回事。
-  const role = String(explicitRole ?? ownerRole ?? ledger?.ownerRole ?? ledger?.role ?? 'implementer')
   const boundary = ROLE_BOUNDARY[role] ?? ROLE_BOUNDARY.default
 
   lines.push('## 你的角色与边界')
@@ -587,29 +603,33 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   }
 
   const receiptTemplate = RECEIPT_LINES.join('\n')
+  const fields = {
+    taskId: ledger?.taskId ?? null,
+    sourceDoc,
+    criteriaCount: criteria.length,
+    criteria,
+    paths,
+    scopeFiles: fmScopeFiles,
+    nonGoals,
+    design: visibleDesign,
+    ...(designPointer ? { designPointer } : {}),
+    contextBrief,
+    explored: ledger?.explored ?? null,
+    reworkFeedback,
+    receiptTemplate,
+    commands: { quick, full, mergeGate },
+    requiredGates: gates,
+  }
+  Object.defineProperties(fields, {
+    relatedSlices: { value: relatedSlices, enumerable: false, configurable: true },
+    evergreenToc: { value: evergreenToc, enumerable: false, configurable: true },
+    otherEvergreenDocs: { value: otherEvergreenDocs, enumerable: false, configurable: true },
+    totalEvergreenDocs: { value: totalEvergreenDocs, enumerable: false, configurable: true },
+    featureMapContext: { value: featureMapContext, enumerable: false, configurable: true },
+  })
   return {
     role,
     prompt: `${lines.join('\n').trimEnd()}\n`,
-    fields: {
-      taskId: ledger?.taskId ?? null,
-      sourceDoc,
-      criteriaCount: criteria.length,
-      criteria,
-      paths,
-      scopeFiles: fmScopeFiles,
-      nonGoals,
-      design,
-      relatedSlices,
-      evergreenToc,
-      otherEvergreenDocs,
-      totalEvergreenDocs,
-      featureMapContext,
-      contextBrief,
-      explored: ledger?.explored ?? null,
-      reworkFeedback,
-      receiptTemplate,
-      commands: { quick, full, mergeGate },
-      requiredGates: gates,
-    },
+    fields,
   }
 }

@@ -5,7 +5,7 @@
  * 写路径编排由 `dev-flow/scripts/flow-intake.mjs` 统一经 `probeForWrite` 驱动。
  */
 
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { readPlanCritiqueEntrySync } from './critique-rounds.mjs'
@@ -16,6 +16,7 @@ import { posixPath, readJsonSafe, readTextSafe, withFileLock, writeJsonAtomic } 
 import { parseBodyRelations, parsePfStateTags } from './github-parse.mjs'
 import { listTaskLedgers, sanitizeTaskId } from './ledger.mjs'
 import { listLocalIssues, resolveEffectiveCommonGitDir } from './local-issues.mjs'
+import { indexPlanDocs } from './plan-index.mjs'
 import { parseDevProfile, resolveAuthoritativeTddPath } from './profile.mjs'
 
 export const INTAKE_DECISIONS = Object.freeze(['accept', 'reject', 'merge-duplicate', 'needs-info', 'defer'])
@@ -196,19 +197,14 @@ export function isApprovedInternalPlan(repoRoot, input = {}) {
     for (const iss of matchedLedger.linkedIssues) linkedIssueSet.add(Number(iss))
   }
 
-  const candidateDocs = []
-  for (const dirRel of ['docs/specs', 'docs/todo']) {
-    const abs = join(repoRoot, dirRel)
-    if (!existsSync(abs)) continue
-    let entries = []
-    try { entries = readdirSync(abs).filter((n) => n.endsWith('.md')).sort() } catch { entries = [] }
-    for (const name of entries) {
-      candidateDocs.push(`${dirRel}/${name}`)
-    }
-  }
+  const candidateDocs = indexPlanDocs(repoRoot, {
+    includeArchive: false,
+    includeWorktrees: false,
+  }).filter((d) => d.kind === 'spec' || d.kind === 'todo')
 
-  for (const rel of candidateDocs) {
-    const raw = readTextSafe(join(repoRoot, rel))
+  for (const doc of candidateDocs) {
+    const rel = doc.rel
+    const raw = doc.text
     if (!raw) continue
     const verdict = approvalOfDoc(raw, rel, { repoRoot, ledger: matchedLedger })
     if (!verdict.approved) continue
@@ -396,21 +392,14 @@ function evaluateNonGoalsAndRedlines(repoRoot, combinedText, featureRef) {
 
 function evaluateDuplicateCheck(repoRoot, { title, body, gitDir, closedIssues = [], duplicateOf = null }) {
   const candidates = []
-  for (const kind of ['prd', 'specs', 'todo']) {
-    const dirRel = `docs/archive/${kind}`
-    const abs = join(repoRoot, dirRel)
-    if (!existsSync(abs)) continue
-    let files = []
-    try { files = readdirSync(abs).filter((f) => f.endsWith('.md')).sort() } catch { files = [] }
-    for (const f of files) {
-      const rel = `${dirRel}/${f}`
-      const raw = readTextSafe(join(abs, f)) ?? ''
-      const fm = parseDocFrontmatter(raw)
-      const h1 = /^#\s+(.+)$/m.exec(raw)?.[1]?.trim() ?? ''
-      const docTitle = String(fm.data?.title ?? h1 ?? f.replace(/\.md$/, '')).trim()
-      const firstPara = raw.replace(/^---[\s\S]*?---\s*/, '').split(/\n\s*\n/).slice(0, 2).join(' ').slice(0, 300)
-      candidates.push({ ref: rel, path: rel, title: docTitle, summary: firstPara, status: String(fm.data?.status ?? 'archived') })
-    }
+  const archivedDocs = indexPlanDocs(repoRoot, {
+    includeArchive: true,
+    includeWorktrees: false,
+  }).filter((d) => d.archived)
+  for (const doc of archivedDocs) {
+    const raw = doc.text ?? ''
+    const firstPara = raw.replace(/^---[\s\S]*?---\s*/, '').split(/\n\s*\n/).slice(0, 2).join(' ').slice(0, 300)
+    candidates.push({ ref: doc.rel, path: doc.rel, title: String(doc.title ?? '').trim(), summary: firstPara, status: String(doc.data?.status ?? 'archived') })
   }
 
   const localClosed = listLocalIssues({ mainRoot: repoRoot, gitDir, state: 'closed' })

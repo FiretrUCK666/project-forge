@@ -32,22 +32,24 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { degradeSkillCommands, getSkillFallbacks, resolveAvailableSkills } from './cli.mjs'
-import { listDocs } from '../dev-plan/scripts/doc-audit.mjs'
+import { buildContextBrief, formatContextBriefLines } from './context-brief.mjs'
 import { discoverContextDocs } from './doc-locator.mjs'
 import { listTaskLedgers } from './ledger.mjs'
 import { readTextSafe } from './git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { listLocalIssues } from './local-issues.mjs'
 import { detectGitModeMarkers } from './platform.mjs'
+import { APPROVED_STATUS_BY_KIND, listPlanDocsSummary } from './plan-index.mjs'
+import { readPreInitState } from './session-state.mjs'
 
 /** 这份文档当前卡在哪一格。空数组表示它不需要人管。 */
 function blockOf(doc, kind) {
   const out = []
   const status = String(doc.status ?? '').toLowerCase()
-  if (kind === 'prd' && !['active', 'done', 'dropped'].includes(status)) {
+  if (kind === 'prd' && !APPROVED_STATUS_BY_KIND.prd.has(status) && status !== 'dropped' && status !== 'superseded') {
     out.push('未批准（state=draft，需 critique-pass 后 approve）')
   }
-  if (kind === 'spec' && !['approved', 'implementing', 'in_review', 'implemented', 'superseded'].includes(status)) {
+  if (kind === 'spec' && !APPROVED_STATUS_BY_KIND.spec.has(status) && status !== 'superseded') {
     out.push('未批准（state=draft，需 critique-pass 后 approve）')
   }
   if (kind === 'todo' && ['draft', 'pending'].includes(status)) {
@@ -80,7 +82,13 @@ function summarize(kind, doc) {
  * @returns {{ docs: object, tasks: object, stuck: Array, nextSteps: Array, text: string }}
  */
 export function buildSessionOrientation(mainRoot) {
-  const listed = listDocs(mainRoot)
+  const listed = listPlanDocsSummary(mainRoot)
+  const preInit = readPreInitState(mainRoot)
+  const contextBrief = buildContextBrief(mainRoot, {
+    paths: preInit?.anchors ?? [],
+    keywords: preInit?.topic ? [preInit.topic] : [],
+    excludeFiles: ['AGENTS.md'],
+  })
   let contextDocs = { architecture: null, subAgents: [], headlessDocs: [], contextIndex: [], docLocateHints: [] }
   try {
     contextDocs = discoverContextDocs(mainRoot)
@@ -251,6 +259,22 @@ export function buildSessionOrientation(mainRoot) {
   })
   lines.push('')
 
+  if (preInit) {
+    lines.push('## 预初始化讨论缓冲（preInit，init 时自动吸收）')
+    lines.push('')
+    if (preInit.topic) lines.push(`- 主题：${preInit.topic}`)
+    if (preInit.decisions.length > 0) lines.push(`- 已定结论（${preInit.decisions.length}）：${preInit.decisions.slice(-4).join('；')}`)
+    if (preInit.exclusions.length > 0) lines.push(`- 明确不做（${preInit.exclusions.length}）：${preInit.exclusions.slice(-4).join('；')}`)
+    if (preInit.anchors.length > 0) lines.push(`- 技术锚点（${preInit.anchors.length}）：${preInit.anchors.slice(-4).join('、')}`)
+    if (preInit.openQuestions.length > 0) lines.push(`- 待拍板问题（${preInit.openQuestions.length}）：${preInit.openQuestions.slice(-4).join('；')}`)
+    lines.push('')
+  }
+
+  const briefLines = formatContextBriefLines(contextBrief)
+  if (briefLines.length > 0) {
+    lines.push(...briefLines, '')
+  }
+
   // 远端评论只在远端：把这件事说明白，否则新会话会以为本地就是全部。
   const hasAgents = existsSync(join(mainRoot, 'AGENTS.md'))
   if (hasAgents) {
@@ -267,6 +291,8 @@ export function buildSessionOrientation(mainRoot) {
     remediationTodos,
     contextIndex: contextDocs.contextIndex,
     docLocateHints: contextDocs.docLocateHints,
+    contextBrief,
+    preInit,
     tasks,
     localIssues: openLocalIssues.map((i) => ({ number: i.number, title: i.title, state: i.state, labels: i.labels ?? [], assignees: i.assignees ?? [] })),
     pendingLocalMigration,

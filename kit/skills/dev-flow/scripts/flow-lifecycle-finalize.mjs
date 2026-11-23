@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path'
 import { printNextStep } from '../../lib/cli.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { parseDocFrontmatter } from '../../lib/doc-frontmatter.mjs'
-import { archiveCompletedDocsGroup, docIsoDate } from '../../lib/docs.mjs'
+import { archiveCompletedDocsGroup, docIsoDate, syncPlanDocBodyMeta } from '../../lib/docs.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import {
   detectInProgressGitOp, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, writeAtomic,
@@ -36,7 +36,7 @@ import { checkLifecyclePreconditions, checkTaskSlotBoundaryOrEmit, runLifecycleG
 
 /**
  * 同步 SPEC 正文 `## 文档信息与变更概览` 状态表（当前状态 / 更新日期 / 内审状态 / 关联归档路径），
- * 消除 SPEC 正文状态表与 Frontmatter YAML `status: implemented` 脱节的问题。
+ * 统一委托给 `docs.mjs` 的单源 `syncPlanDocBodyMeta`。
  */
 export function syncSpecBodyStatusTable(specText, {
   status = 'implemented',
@@ -45,63 +45,7 @@ export function syncSpecBodyStatusTable(specText, {
   todoRel = null,
   critiquePassed = false,
 } = {}) {
-  const raw = String(specText ?? '')
-  if (!raw) return raw
-  const eol = raw.includes('\r\n') ? '\r\n' : '\n'
-  const lines = raw.replace(/\r\n/g, '\n').split('\n')
-  const out = []
-  let inTable = false
-  for (const line of lines) {
-    if (/^\|\s*(?:项目|字段|Key)\s*\|/.test(line)) {
-      inTable = true
-      out.push(line)
-      continue
-    }
-    if (inTable && !/^\s*\|/.test(line)) {
-      inTable = false
-    }
-    if (!inTable) {
-      out.push(line)
-      continue
-    }
-    const m = /^(\|\s*([^|]+?)\s*\|\s*)(.+?)(\s*\|\s*)$/.exec(line)
-    if (!m) {
-      out.push(line)
-      continue
-    }
-    const [, prefix, rawKey, rawVal, suffix] = m
-    const key = rawKey.trim()
-    let nextVal = rawVal.trim()
-
-    if (/^(?:当前状态|状态|Status)$/i.test(key)) {
-      const rest = nextVal.replace(/^`?(?:draft|approved|implementing|in_review|implemented|done|superseded)`?/i, '').trim()
-      nextVal = rest ? `\`${status}\`${rest.startsWith('（') || rest.startsWith('(') ? rest : ` ${rest}`}` : `\`${status}\``
-    } else if (today && /^(?:创建\s*\/\s*更新|更新日期|Updated)$/i.test(key)) {
-      if (/\//.test(nextVal)) {
-        nextVal = nextVal.replace(/(\s*\/\s*)`?\d{4}-\d{2}-\d{2}`?/, `$1\`${today}\``)
-      } else {
-        nextVal = `\`${today}\``
-      }
-    } else if (critiquePassed && /^(?:负责人\s*\/\s*内审状态|内审状态)$/i.test(key)) {
-      nextVal = nextVal.replace(/`pending`/i, '`passed`')
-    } else if ((prdRel || todoRel) && /^(?:关联\s*PRD\s*\/\s*Todo|关联文档)$/i.test(key)) {
-      const parts = nextVal.split(/\s+\/\s+/).map((s) => s.trim())
-      if (parts.length >= 2) {
-        const nextPrd = prdRel ? `\`${posixPath(prdRel)}\`` : parts[0]
-        const nextTodo = todoRel ? `\`${posixPath(todoRel)}\`` : parts.slice(1).join(' / ')
-        nextVal = `${nextPrd} / ${nextTodo}`
-      } else if (prdRel && todoRel) {
-        nextVal = `\`${posixPath(prdRel)}\` / \`${posixPath(todoRel)}\``
-      } else if (prdRel) {
-        nextVal = `\`${posixPath(prdRel)}\``
-      } else if (todoRel) {
-        nextVal = `${parts[0] || '未关联'} / \`${posixPath(todoRel)}\``
-      }
-    }
-    out.push(`${prefix}${nextVal}${suffix}`)
-  }
-  const joined = out.join(eol)
-  return raw.endsWith('\n') && !joined.endsWith('\n') ? `${joined}${eol}` : joined
+  return syncPlanDocBodyMeta(specText, {}, { status, today, prdRel, todoRel, critiquePassed })
 }
 
 function syncSpecStatusTableOnDisk(implRoot, specRel, { today, prdRel, todoRel }) {
@@ -112,7 +56,7 @@ function syncSpecStatusTableOnDisk(implRoot, specRel, { today, prdRel, todoRel }
   if (!text) return false
   const fm = parseDocFrontmatter(text)
   const critiquePassed = Boolean(fm.data?.approved === true || /^passed/i.test(String(fm.data?.plan_critique ?? '')))
-  const synced = syncSpecBodyStatusTable(text, {
+  const synced = syncPlanDocBodyMeta(text, fm.data ?? {}, {
     status: String(fm.data?.status ?? 'implemented'),
     today,
     prdRel,

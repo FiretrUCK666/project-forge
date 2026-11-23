@@ -11,116 +11,20 @@
  *   `critic` / `reviewer` Round 2+ 强制新建独立子代理，严禁复用历史上下文。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
 
+import { buildContextBrief, extractDocPaths, formatContextBriefLines } from './context-brief.mjs'
 import { collectExcludedReviewers, critiqueTextFingerprint, parseCritiqueRounds, readPlanCritiqueEntrySync } from './critique-rounds.mjs'
-import { isManagedPlanDoc, parseDocFrontmatter } from './docs.mjs'
+import { parseDocFrontmatter } from './docs.mjs'
 import { gitStatusPorcelainZ, posixPath, readTextSafe } from './git.mjs'
-import { listTaskLedgers, readTaskLedger, sanitizeTaskId } from './ledger.mjs'
+import { readTaskLedger, sanitizeTaskId } from './ledger.mjs'
 import { analyzePendingDecisions, normalizePlanMode } from './pending-decisions.mjs'
 import { resolveCritiqueReadiness } from './plan-exit-gate.mjs'
+import { indexPlanDocs, inferPlanDocKind, isPlanDocApproved } from './plan-index.mjs'
+import { readPreInitState } from './session-state.mjs'
 
 const TERMINAL_PLAN_STATUSES = new Set(['done', 'archived', 'implemented', 'superseded', 'dropped'])
-const APPROVED_SPEC_STATUSES = new Set(['approved', 'implementing', 'in_review', 'implemented'])
-const APPROVED_PRD_STATUSES = new Set(['active', 'in_review', 'done'])
-
-function readMarkdownListSafe(dirAbs, rootDir) {
-  if (!existsSync(dirAbs)) return []
-  const out = []
-  try {
-    for (const ent of readdirSync(dirAbs, { withFileTypes: true })) {
-      if (!ent.isFile() || !ent.name.endsWith('.md')) continue
-      const abs = join(dirAbs, ent.name)
-      const rel = posixPath(relative(rootDir, abs))
-      const text = readTextSafe(abs)
-      if (text === undefined || !isManagedPlanDoc(rel, text)) continue
-      const fm = parseDocFrontmatter(text)
-      out.push({
-        root: rootDir,
-        rel,
-        abs,
-        kind: String(fm.data?.kind ?? inferKindFromRel(rel)).toLowerCase(),
-        status: String(fm.data?.status ?? 'draft').trim().toLowerCase(),
-        data: fm.data ?? {},
-        text,
-      })
-    }
-  } catch { /* ignore unreadable dir */ }
-  return out.sort((a, b) => a.rel.localeCompare(b.rel))
-}
-
-function inferKindFromRel(rel) {
-  const low = posixPath(rel).toLowerCase()
-  if (low.includes('/prd/')) return 'prd'
-  if (low.includes('/specs/')) return 'spec'
-  if (low.includes('/todo/')) return 'todo'
-  return 'spec'
-}
-
-function resolveDocRoots({ repoRoot, mainRoot, taskId = null, ledger = null, file = null }) {
-  const roots = []
-  const seen = new Set()
-  const addRoot = (dir, source) => {
-    if (!dir || !existsSync(dir)) return
-    const key = resolve(dir).toLowerCase()
-    if (seen.has(key)) return
-    seen.add(key)
-    roots.push({ dir: resolve(dir), source })
-  }
-
-  if (file && repoRoot) addRoot(repoRoot, 'cwd')
-  if (ledger?.worktreePath) addRoot(join(mainRoot, ledger.worktreePath), 'task-worktree')
-  if (taskId) addRoot(join(mainRoot, '.worktrees', `impl-${sanitizeTaskId(taskId)}`), 'task-worktree')
-  if (repoRoot && resolve(repoRoot).toLowerCase() !== resolve(mainRoot).toLowerCase()) addRoot(repoRoot, 'cwd')
-
-  // 扫描未绑定 `--task` 时存在规划文档的隔离 worktree，避免主仓干净时漏掉在途规划
-  const wtBase = join(mainRoot, '.worktrees')
-  if (existsSync(wtBase)) {
-    try {
-      for (const ent of readdirSync(wtBase, { withFileTypes: true })) {
-        if (!ent.isDirectory() || !ent.name.startsWith('impl-')) continue
-        addRoot(join(wtBase, ent.name), 'planning-worktree')
-      }
-    } catch { /* ignore */ }
-  }
-  addRoot(mainRoot, 'main')
-  return roots
-}
-
-function collectCandidateDocs({ repoRoot, mainRoot, taskId = null, ledger = null, file = null }) {
-  const roots = resolveDocRoots({ repoRoot, mainRoot, taskId, ledger, file })
-  const byRel = new Map()
-  const prdDocs = []
-  const specDocs = []
-  const todoDocs = []
-
-  const pushDoc = (doc, locationType) => {
-    const key = posixPath(doc.rel)
-    if (byRel.has(key)) return
-    const item = { ...doc, rel: key, locationType }
-    byRel.set(key, item)
-    if (item.kind === 'prd') prdDocs.push(item)
-    else if (item.kind === 'todo') todoDocs.push(item)
-    else specDocs.push(item)
-  }
-
-  for (const r of roots) {
-    const privateRel = ledger?.privateDocsDir ? posixPath(String(ledger.privateDocsDir).trim()) : null
-    const dirs = [
-      { rel: 'docs/prd', loc: r.source },
-      { rel: 'docs/specs', loc: r.source },
-      { rel: 'docs/todo', loc: r.source },
-      ...(privateRel ? [{ rel: privateRel, loc: 'private-docs' }] : []),
-    ]
-    for (const d of dirs) {
-      for (const doc of readMarkdownListSafe(join(r.dir, d.rel), r.dir)) {
-        pushDoc(doc, d.loc)
-      }
-    }
-  }
-  return { prdDocs, specDocs, todoDocs, allDocs: [...byRel.values()] }
-}
 
 function resolveExplicitDoc(repoRoot, mainRoot, file) {
   const raw = String(file ?? '').trim()
@@ -136,7 +40,7 @@ function resolveExplicitDoc(repoRoot, mainRoot, file) {
       root: base,
       rel,
       abs,
-      kind: String(fm.data?.kind ?? inferKindFromRel(rel)).toLowerCase(),
+      kind: inferPlanDocKind(rel, fm.data),
       status: String(fm.data?.status ?? 'draft').trim().toLowerCase(),
       data: fm.data ?? {},
       text,
@@ -144,13 +48,6 @@ function resolveExplicitDoc(repoRoot, mainRoot, file) {
     }
   }
   return null
-}
-
-function isDocApproved(doc) {
-  if (!doc) return false
-  if (doc.kind === 'prd') return APPROVED_PRD_STATUSES.has(doc.status)
-  if (doc.kind === 'todo') return doc.status === 'active' || doc.status === 'done'
-  return APPROVED_SPEC_STATUSES.has(doc.status) || doc.data?.approved === true
 }
 
 function selectTargetPlanningDoc({ explicitDoc, taskId, ledger, allDocs, prdDocs, specDocs, todoDocs }) {
@@ -181,10 +78,10 @@ function selectTargetPlanningDoc({ explicitDoc, taskId, ledger, allDocs, prdDocs
     ? activeSpecs.filter((s) => typeof s.data?.related_prd === 'string' && s.data.related_prd.includes(masterPrd.rel.split('/').pop()))
     : []
 
-  if (masterPrd && !isDocApproved(masterPrd)) {
+  if (masterPrd && !isPlanDocApproved(masterPrd)) {
     return { selectedDoc: masterPrd, masterPrd, childSlices }
   }
-  const nextSlice = (childSlices.length > 0 ? childSlices : activeSpecs).find((s) => !isDocApproved(s))
+  const nextSlice = (childSlices.length > 0 ? childSlices : activeSpecs).find((s) => !isPlanDocApproved(s))
     ?? activeSpecs[0]
     ?? activeTodos[0]
     ?? masterPrd
@@ -198,7 +95,7 @@ async function inspectWorktreeInterruption({ mainRoot, selectedDoc, taskId, ledg
   const wtRel = ledger?.worktreePath
     ?? (selectedDoc && resolve(selectedDoc.root).toLowerCase() !== resolve(mainRoot).toLowerCase()
       ? posixPath(relative(mainRoot, selectedDoc.root))
-      : (effTask && existsSync(join(mainRoot, '.worktrees', `impl-${effTask}`)) ? `.worktrees/impl-${effTask}` : null))
+      : (effTask && existsSync(resolve(mainRoot, '.worktrees', `impl-${effTask}`)) ? `.worktrees/impl-${effTask}` : null))
   if (!wtRel) return { exists: false, worktreePath: null, branch: ledger?.branch ?? null, dirtyCount: 0, activeActor: null, owner: selectedDoc?.data?.owner ?? null }
   const wtAbs = resolve(mainRoot, wtRel)
   if (!existsSync(wtAbs)) return { exists: false, worktreePath: wtRel, branch: ledger?.branch ?? null, dirtyCount: 0, activeActor: null, owner: selectedDoc?.data?.owner ?? null }
@@ -237,14 +134,30 @@ export async function evaluatePlanNextState({
   const resolvedTaskId = taskId ? sanitizeTaskId(taskId) : null
   const activeLedger = ledger ?? (resolvedTaskId ? readTaskLedger(effMain, resolvedTaskId) : null)
   const explicitDoc = resolveExplicitDoc(repoRoot, effMain, file)
-  const { prdDocs, specDocs, todoDocs, allDocs } = collectCandidateDocs({
-    repoRoot, mainRoot: effMain, taskId: resolvedTaskId, ledger: activeLedger, file,
+  const allDocs = indexPlanDocs({
+    repoRoot,
+    mainRoot: effMain,
+    taskId: resolvedTaskId,
+    ledger: activeLedger,
+    file,
+    includeArchive: false,
+    includeWorktrees: true,
+    managedOnly: true,
   })
+  const prdDocs = allDocs.filter((d) => d.kind === 'prd')
+  const specDocs = allDocs.filter((d) => d.kind === 'spec')
+  const todoDocs = allDocs.filter((d) => d.kind === 'todo')
   const { selectedDoc, masterPrd, childSlices } = selectTargetPlanningDoc({
     explicitDoc, taskId: resolvedTaskId, ledger: activeLedger, allDocs, prdDocs, specDocs, todoDocs,
   })
+  const preInit = readPreInitState(effMain)
 
   if (!selectedDoc) {
+    const contextBrief = buildContextBrief(repoRoot || effMain, {
+      paths: preInit?.anchors ?? [],
+      keywords: preInit?.topic ? [preInit.topic] : [],
+      excludeFiles: ['AGENTS.md'],
+    })
     return {
       ok: true,
       phase: 'needs-triage',
@@ -259,6 +172,8 @@ export async function evaluatePlanNextState({
       pendingDecisions: { found: false, total: 0, unresolved: [] },
       critique: { round: 0, nextRound: 1, excludedReviewers: [], findings: [], stopLossActive: false, readiness: null },
       reviewChoices: [],
+      preInit,
+      contextBrief,
       nextAction: '当前无在途规划文档；先跑 dev-explore 核清仓内复用，再执行 doc-plan.mjs triage 定档分流。',
       command: 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>"',
       blockingReasons: [],
@@ -270,15 +185,25 @@ export async function evaluatePlanNextState({
   const docLedger = activeLedger ?? (effTask ? readTaskLedger(effMain, effTask) : null)
   const docPlanMode = normalizePlanMode(selectedDoc.data?.plan_mode) || 'autonomous'
   const interruptedWorktree = await inspectWorktreeInterruption({ mainRoot: effMain, selectedDoc, taskId: effTask, ledger: docLedger })
+  const docScopePaths = [
+    ...(Array.isArray(selectedDoc.data?.scope_files) ? selectedDoc.data.scope_files : []),
+    ...extractDocPaths(selectedDoc.text),
+    ...(preInit?.anchors ?? []),
+  ]
+  const contextBrief = buildContextBrief(selectedDoc.root || repoRoot || effMain, {
+    paths: docScopePaths,
+    keywords: [effTask, selectedDoc.data?.title, preInit?.topic].filter(Boolean),
+    excludeFiles: [relDoc, 'AGENTS.md'],
+  })
 
   const masterPrdInfo = masterPrd
-    ? { file: masterPrd.rel, status: masterPrd.status, approved: isDocApproved(masterPrd) }
+    ? { file: masterPrd.rel, status: masterPrd.status, approved: isPlanDocApproved(masterPrd) }
     : null
   const sliceSummary = childSlices.length > 0
     ? {
         totalSlices: childSlices.length,
-        approvedSlices: childSlices.filter((s) => isDocApproved(s)).length,
-        pendingSlices: childSlices.filter((s) => !isDocApproved(s)).map((s) => s.rel),
+        approvedSlices: childSlices.filter((s) => isPlanDocApproved(s)).length,
+        pendingSlices: childSlices.filter((s) => !isPlanDocApproved(s)).map((s) => s.rel),
       }
     : null
 
@@ -288,7 +213,7 @@ export async function evaluatePlanNextState({
       phase: 'terminal-archived',
       ownerRole: 'coordinator',
       deliveryMode: planOnly ? 'plan-only' : 'impl',
-      doc: { file: relDoc, kind: selectedDoc.kind, status: selectedDoc.status, approved: isDocApproved(selectedDoc), root: selectedDoc.root, locationType: selectedDoc.locationType },
+      doc: { file: relDoc, kind: selectedDoc.kind, status: selectedDoc.status, approved: isPlanDocApproved(selectedDoc), root: selectedDoc.root, locationType: selectedDoc.locationType },
       taskId: effTask,
       planMode: docPlanMode,
       masterPrd: masterPrdInfo,
@@ -297,6 +222,8 @@ export async function evaluatePlanNextState({
       pendingDecisions: { found: false, total: 0, unresolved: [] },
       critique: { round: 0, nextRound: 1, excludedReviewers: [], findings: [], stopLossActive: false, readiness: null },
       reviewChoices: [],
+      preInit,
+      contextBrief,
       nextAction: `文档 ${relDoc} 已处于终态（status=${selectedDoc.status}），无需继续规划或开工；如需新需求请另建规划或运行 flow next。`,
       command: 'node ".agents/skills/dev-flow/scripts/flow.mjs" next',
       blockingReasons: [],
@@ -380,7 +307,7 @@ export async function evaluatePlanNextState({
     blockingReasons.push(readiness.basis || 'CRITIQUE_UNREADY')
     nextAction = `请新建独立只读 critic 子代理（排除：${excludedReviewers.join(', ') || '作者'}）运行 critique-scope 并按事实给出 Round ${nextRound} 结论。`
     command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${relDoc}" --round ${nextRound}`
-  } else if (!isDocApproved(selectedDoc)) {
+  } else if (!isPlanDocApproved(selectedDoc)) {
     phase = 'needs-human-review'
     ownerRole = 'human'
     reviewChoices = [
@@ -414,7 +341,7 @@ export async function evaluatePlanNextState({
       file: relDoc,
       kind: selectedDoc.kind,
       status: selectedDoc.status,
-      approved: isDocApproved(selectedDoc),
+      approved: isPlanDocApproved(selectedDoc),
       root: selectedDoc.root,
       locationType: selectedDoc.locationType,
       sha: currentSha,
@@ -434,6 +361,8 @@ export async function evaluatePlanNextState({
       readiness,
     },
     reviewChoices,
+    preInit,
+    contextBrief,
     nextAction,
     command,
     blockingReasons,
@@ -457,6 +386,14 @@ export function buildPlanHandoff({ state, deliveryMode = state?.deliveryMode ?? 
   if (s.masterPrd) {
     lines.push(`- **总控 PRD（1:N）**：\`${s.masterPrd.file}\` (status=${s.masterPrd.status})${s.sliceSummary ? ` | 切片进度：已过审 ${s.sliceSummary.approvedSlices}/${s.sliceSummary.totalSlices}` : ''}`)
   }
+  if (s.preInit) {
+    lines.push('', '### 预初始化讨论缓冲（init 前保留）')
+    if (s.preInit.topic) lines.push(`- 主题：${s.preInit.topic}`)
+    if (s.preInit.decisions?.length > 0) lines.push(`- 已定结论：${s.preInit.decisions.join('；')}`)
+    if (s.preInit.exclusions?.length > 0) lines.push(`- 明确不做：${s.preInit.exclusions.join('；')}`)
+    if (s.preInit.anchors?.length > 0) lines.push(`- 锚点：${s.preInit.anchors.join('、')}`)
+    if (s.preInit.openQuestions?.length > 0) lines.push(`- 待拍板：${s.preInit.openQuestions.join('；')}`)
+  }
   if (s.pendingDecisions?.unresolved?.length > 0) {
     lines.push('', '### 未清空待拍板问题（须逐项问到零）')
     for (const u of s.pendingDecisions.unresolved.slice(0, 6)) {
@@ -466,6 +403,10 @@ export function buildPlanHandoff({ state, deliveryMode = state?.deliveryMode ?? 
   if (s.critique?.findings?.length > 0) {
     lines.push('', '### 本轮须闭环修改意见 / 退回 Findings')
     for (const f of s.critique.findings) lines.push(`- ${f}`)
+  }
+  const briefLines = formatContextBriefLines(s.contextBrief)
+  if (briefLines.length > 0) {
+    lines.push('', ...briefLines)
   }
   if (s.reviewChoices?.length > 0) {
     lines.push('', '### 人类最终拍板三态出口（仅主 Agent 可退出规划）')

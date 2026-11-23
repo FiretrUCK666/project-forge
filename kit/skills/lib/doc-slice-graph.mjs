@@ -20,18 +20,18 @@
  * 区块、`scope_files`、`depends_on`、`task_id`、`related_prd` 都是文档里已有的字段。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, relative, resolve } from 'node:path'
 
-import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
-import { posixPath, readTextSafe } from './git.mjs'
+import { isManagedPlanDoc, parseDocFilename } from './doc-frontmatter.mjs'
+import { posixPath } from './git.mjs'
 import { parseBodyRelations } from './github-client.mjs'
+import { DONE_PLAN_STATUSES, INERT_PLAN_STATUSES, indexPlanDocs } from './plan-index.mjs'
 
 /** 判定为「不参与当前规划」的文档状态。 */
-const INERT_STATUS = new Set(['superseded', 'dropped', 'archived'])
+const INERT_STATUS = INERT_PLAN_STATUSES
 
 /** 已完成的状态：依赖到它们等于依赖已满足。 */
-const DONE_STATUS = new Set(['implemented', 'done', 'merged', 'cleaned'])
+const DONE_STATUS = DONE_PLAN_STATUSES
 
 /** 确定性派生清单：由脚本按源码重新生成，不算「谁改了它」。 */
 export const DERIVED_MANIFEST_PATHS = Object.freeze(['.agents/skills/.pf-manifest.json'])
@@ -43,23 +43,6 @@ export const SLICE_GRAPH_CODES = Object.freeze({
   cycle: 'BLOCKED_SLICE_CYCLE',
   overlap: 'BLOCKED_SLICE_OVERLAP',
 })
-
-function readDocAt(repoRoot, abs) {
-  const text = readTextSafe(abs)
-  if (text === undefined) return null
-  const fm = parseDocFrontmatter(text)
-  return { abs, rel: posixPath(relative(repoRoot, abs)), text, data: fm.data ?? {} }
-}
-
-function listMarkdownSafe(dirAbs) {
-  try {
-    return readdirSync(dirAbs, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith('.md'))
-      .map((e) => join(dirAbs, e.name))
-  } catch {
-    return []
-  }
-}
 
 function normalizeStatus(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -104,27 +87,7 @@ export function extractClaimedCriteria(text) {
  * 的合法答案。只看活跃目录会把已完成的切片判成悬空。
  */
 export function collectPlanDocs(repoRoot) {
-  const dirs = [
-    ['docs/prd', 'prd'],
-    ['docs/specs', 'spec'],
-    ['docs/todo', 'todo'],
-    ['docs/archive/prd', 'prd'],
-    ['docs/archive/specs', 'spec'],
-    ['docs/archive/todo', 'todo'],
-  ]
-  const out = []
-  for (const [dirRel, kind] of dirs) {
-    const dirAbs = join(repoRoot, dirRel)
-    if (!existsSync(dirAbs)) continue
-    for (const abs of listMarkdownSafe(dirAbs)) {
-      const doc = readDocAt(repoRoot, abs)
-      if (!doc) continue
-      doc.kind = kind
-      doc.archived = dirRel.includes('/archive/')
-      out.push(doc)
-    }
-  }
-  return out
+  return indexPlanDocs(repoRoot, { includeArchive: true, includeWorktrees: false })
 }
 
 /** 切片的唯一标识：优先 Frontmatter `task_id`，否则 Issue 号，最后退文件名 slug。 */

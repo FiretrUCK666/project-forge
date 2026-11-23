@@ -81,6 +81,17 @@ export const GAP_RULES = [
     review: 'git.ignored-tracked',
   },
   {
+    id: 'ignores.governance-shadowed',
+    when: (f) => (f.ignores?.ignoredGovernancePaths?.length ?? 0) > 0,
+    text: (f) => {
+      const sample = f.ignores.ignoredGovernancePaths.slice(0, 3)
+        .map((x) => `\`${x.path}\`（命中 \`${x.pattern}\`：${x.advice}）`)
+        .join('；')
+      return `关键治理路径被 \`.gitignore\` 规则遮蔽：${sample}`
+    },
+    review: 'git.ignored-governance',
+  },
+  {
     id: 'secrets.tracked',
     when: (f) => !(f.decisions && 'secrets-are-placeholders' in f.decisions)
       && (f.risks.secretFiles.some((x) => x.status === 'tracked')

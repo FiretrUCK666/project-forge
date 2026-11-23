@@ -12,7 +12,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { ensurePreWriteBackup } from './backup.mjs'
-import { writeAtomic } from './lib/fs-atomic.mjs'
+import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
+import { detectIgnoredGovernancePaths } from './lib/survey-workspace.mjs'
 import { cleanStaleLocalModeMarker } from '../kit/skills/lib/platform.mjs'
 import { detectOptionalNativeCheckers } from '../kit/skills/lib/profile-sniffer.mjs'
 import {
@@ -83,6 +84,7 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, env = p
   if (!existsSync(kitDir)) {
     return { ok: false, reason: `找不到源套件目录：${kitDir}`, missing: [], drifted: [], unregistered: [], extraManaged: [], customized: [] }
   }
+  if (existsSync(skillsDir)) clearStaleTemps(skillsDir, { recursive: true })
 
   const existing = readExistingManifest(manifestPath)
   const kitSkills = getKitSkills(kitDir)
@@ -192,6 +194,8 @@ export function equip(targetDir, {
   if (!existsSync(kitDir)) throw new Error(`找不到源套件目录：${kitDir}`)
 
   const skillsDir = join(root, '.agents', 'skills')
+  if (existsSync(skillsDir)) clearStaleTemps(skillsDir, { dryRun, recursive: true })
+  const ignoredGovernancePaths = detectIgnoredGovernancePaths(root)
   const manifestPath = join(root, PF_MANIFEST_REL)
   const existing = readExistingManifest(manifestPath)
   const kitSkills = getKitSkills(kitDir)
@@ -571,6 +575,10 @@ export function equip(targetDir, {
     })(),
     ...(integrityCheck ? { integrityCheck } : {}),
     disabledSkills: nextManifest.disabledSkills, removedFiles: Object.keys(nextManifest.removedFiles), ensuredGitkeeps,
+    ...(ignoredGovernancePaths.length > 0 ? {
+      ignoredGovernancePaths,
+      warnings: ignoredGovernancePaths.map((x) => `关键治理路径被 ${x.source} (${x.pattern}) 遮蔽：${x.path}——${x.advice}`),
+    } : {}),
     ...(cleanedStaleLocalMode.length > 0 ? { cleanedStaleLocalMode } : {}),
   }
 }
@@ -703,6 +711,9 @@ async function main(argv) {
       else if (argv[k].startsWith('--base-dir=')) baseDir = resolve(argv[k].slice('--base-dir='.length))
     }
     const equipResult = equip(target, { kitDir, baseDir, dryRun, noBackup, restore, adoptCustom })
+    if ((equipResult.warnings?.length ?? 0) > 0) {
+      for (const w of equipResult.warnings) process.stderr.write(`[WARN] ${w}\n`)
+    }
     if (!dryRun) recordStepStateSafe(target, { step: 'S3', ok: true, summary: 'equipped' })
     let hooksResult
     if (withHooks) {

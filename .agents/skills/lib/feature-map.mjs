@@ -60,8 +60,22 @@ export const FORBIDDEN_TRACKED_KEYS = Object.freeze([
   'lastVerifiedDate', 'verifiedAt', 'contentHash', 'treeHash', 'symbolsByFile',
 ])
 
+const PATH_WITH_SYMBOL_RE = /^([^\s'"`()<>]+(?:\.[A-Za-z0-9]{1,12}|\/))['"`]?(?:\s+.*|\s*\([^)]*\).*)$/
+
 function normRelPath(p) {
-  return posixPath(String(p ?? '').trim()).replace(/^\.\//, '').replace(/^\/+/, '')
+  let s = posixPath(String(p ?? '').trim()).replace(/^['"`]+/, '')
+  const m = PATH_WITH_SYMBOL_RE.exec(s)
+  if (m && (m[1].includes('/') || /\.[A-Za-z0-9]{1,12}$/.test(m[1]))) {
+    s = m[1]
+  } else {
+    s = s.replace(/['"`]+$/, '')
+  }
+  return s.replace(/^\.\//, '').replace(/^\/+/, '')
+}
+
+function isValidFeaturePath(normPath) {
+  if (!normPath || /\s/.test(normPath)) return false
+  return !normPath.includes('..') && !/[<>*?`'"|]/.test(normPath)
 }
 
 function uniqStrings(arr) {
@@ -74,12 +88,14 @@ function uniqStrings(arr) {
   return out
 }
 
-function uniqPaths(arr) {
+function uniqPaths(arr, { strictFeaturePath = false } = {}) {
   const out = []
   const seen = new Set()
   for (const item of Array.isArray(arr) ? arr : []) {
     const s = normRelPath(item)
-    if (s && !seen.has(s)) { seen.add(s); out.push(s) }
+    if (!s) continue
+    if (strictFeaturePath && !isValidFeaturePath(s)) continue
+    if (!seen.has(s)) { seen.add(s); out.push(s) }
   }
   return out
 }
@@ -108,8 +124,8 @@ export function sanitizeVerificationTool(tool) {
 export function sanitizeFeatureEntry(entry) {
   const id = slugifyFeatureId(entry?.id ?? entry?.name ?? 'feature')
   const name = String(entry?.name ?? id).trim() || id
-  const entrypoints = uniqPaths(entry?.entrypoints)
-  const modules = uniqPaths(entry?.modules?.length ? entry.modules : entrypoints)
+  const entrypoints = uniqPaths(entry?.entrypoints, { strictFeaturePath: true })
+  const modules = uniqPaths(entry?.modules?.length ? entry.modules : entrypoints, { strictFeaturePath: true })
   const businessFlows = uniqStrings(entry?.businessFlows)
   const seenTools = new Set()
   const verificationTools = []
@@ -119,7 +135,7 @@ export function sanitizeFeatureEntry(entry) {
     seenTools.add(clean.id)
     verificationTools.push(clean)
   }
-  const testRefs = uniqPaths(entry?.testRefs)
+  const testRefs = uniqPaths(entry?.testRefs, { strictFeaturePath: true })
   return { id, name, entrypoints, modules, businessFlows, verificationTools, testRefs }
 }
 
@@ -186,6 +202,15 @@ export function validateFeatureMap(raw) {
           if (Object.prototype.hasOwnProperty.call(tool, key)) {
             errors.push(`tool "${tid || '?'}" 禁止在受跟踪 JSON 内写入易变哈希/日期字段 "${key}"`)
           }
+        }
+      }
+    }
+    for (const field of ['entrypoints', 'modules', 'testRefs']) {
+      if (!Array.isArray(f[field])) continue
+      for (const rawPath of f[field]) {
+        const s = String(rawPath ?? '').trim()
+        if (!s || /\s/.test(s)) {
+          errors.push(`feature "${fid || i}" ${field} 包含含空白或符号后缀的非法路径："${s}"`)
         }
       }
     }
@@ -351,8 +376,8 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false 
     const cleanId = slugifyFeatureId(id)
     if (seen.has(cleanId)) return
     seen.add(cleanId)
-    const epList = uniqPaths(entrypoints)
-    const modList = uniqPaths([...epList, ...(modules ?? [])])
+    const epList = uniqPaths(entrypoints, { strictFeaturePath: true })
+    const modList = uniqPaths([...epList, ...(modules ?? [])], { strictFeaturePath: true })
     const isHigh = modList.some((m) => highRiskGlobs.some((g) => m.startsWith(g.replace(/\/\*+$/, ''))))
     const verificationTools = isRunnableVerifyCommand(command)
       ? [sanitizeVerificationTool({
@@ -367,16 +392,31 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false 
   }
 
   for (const fm of Array.isArray(repoMap?.featureMap) ? repoMap.featureMap : []) {
-    const src = normRelPath(fm.source)
-    if (isNonFeatureArtifactPath(src)) continue
+    const rawSource = String(fm.source ?? '').trim()
+    const src = normRelPath(rawSource)
+    if (!isValidFeaturePath(src) || isNonFeatureArtifactPath(src)) continue
+    const extraSources = Array.isArray(fm.sources)
+      ? fm.sources.map((p) => normRelPath(p)).filter((p) => isValidFeaturePath(p) && !isNonFeatureArtifactPath(p))
+      : []
+    const allSources = uniqPaths([src, ...extraSources], { strictFeaturePath: true })
+    const rawNorm = posixPath(rawSource).replace(/^['"`]+|['"`]+$/g, '').replace(/^\.\//, '').replace(/^\/+/, '')
+    const inlineSym = rawNorm.startsWith(src) && rawNorm.length > src.length
+      ? rawNorm.slice(src.length).replace(/^['"`\s]+/, '').trim()
+      : ''
+    const symbols = Array.isArray(fm.symbols) && fm.symbols.length > 0
+      ? fm.symbols
+      : (inlineSym ? [inlineSym] : [])
     const stem = basename(src).replace(/\.[^.]+$/, '')
     const matchedTests = matchTestsForSourceFile(src, testFiles).slice(0, 6)
     const relatedFlows = flowsList
       .filter((fl) => normRelPath(fl.entry) === src || normRelPath(fl.source) === src)
       .map((fl) => `[${fl.surface}] ${fl.name} (${fl.entry})`)
+    const defaultFlow = symbols.length > 0
+      ? `${fm.feature || stem} 主入口 (${src}: ${symbols.join(', ')})`
+      : `${fm.feature || stem} 主入口 (${src})`
     addCandidate({
-      id: stem, name: fm.feature || stem, entrypoints: [src], modules: [src],
-      businessFlows: relatedFlows.length > 0 ? relatedFlows : [`${fm.feature || stem} 主入口 (${src})`],
+      id: stem, name: fm.feature || stem, entrypoints: allSources, modules: allSources,
+      businessFlows: relatedFlows.length > 0 ? relatedFlows : [defaultFlow],
       command: fm.verifyCmd, testRefs: matchedTests,
     })
   }

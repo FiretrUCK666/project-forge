@@ -165,6 +165,29 @@ function isProjectModule(name) {
   return true
 }
 
+const LICENSE_HEADER_RE = /\b(?:licensed\s+to|spdx-license-identifier|apache\s+software\s+foundation|copyright|license|permission\s+is\s+hereby\s+granted)\b/i
+
+/**
+ * 从现有仓库根目录 Markdown 文档头部探测 HTML 注释形式的许可证声明（如 Apache ASF 头），
+ * 跳过 `project-forge:` 受管标记，以便新建 `docs/TDD.md` 时自动继承。
+ */
+export function detectRepoLicenseHeader(repoRoot) {
+  if (!repoRoot) return null
+  for (const rel of ['SECURITY.md', 'README.md', 'CONTRIBUTING.md', 'AGENTS.md']) {
+    const abs = join(repoRoot, rel)
+    if (!existsSync(abs)) continue
+    const text = readTextSafe(abs)
+    if (!text) continue
+    const trimmed = text.replace(/^\s+/, '')
+    const m = /^(<!--[\s\S]*?-->)/.exec(trimmed)
+    if (!m) continue
+    const comment = m[1]
+    if (/<!--\s*project-forge:/i.test(comment)) continue
+    if (LICENSE_HEADER_RE.test(comment)) return comment
+  }
+  return null
+}
+
 /**
  * 拼一份预填 TDD。
  *
@@ -331,11 +354,16 @@ function formatPreForgeBaselineBlock(facts, opts) {
   if (rendered === null) {
     throw new Error('读不到 TDD 模板（kit/skills/templates/docs-tdd.md）——生成器不该在没有模板时继续')
   }
-  return appendCustomDocSections(rendered, {
+  const body = appendCustomDocSections(rendered, {
     repoRoot,
     kind: 'tdd',
     title: vars.PROJECT_NAME,
     safeSlug: 'tdd',
     taskId: 'tdd',
   })
+  const licenseHeader = repoRoot ? detectRepoLicenseHeader(repoRoot) : null
+  if (licenseHeader && !body.trimStart().startsWith(licenseHeader)) {
+    return `${licenseHeader}\n\n${body.replace(/^\n+/, '')}`
+  }
+  return body
 }

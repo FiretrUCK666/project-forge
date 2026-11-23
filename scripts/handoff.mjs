@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
-import { existsSync, readdirSync, readlinkSync, realpathSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { flushAndExit, isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.mjs'
 import { isInsideDir } from '../kit/skills/lib/git-core.mjs'
 import { scanLines } from './lib/markdown.mjs'
-import { processAlive } from './lib/fs-atomic.mjs'
+import { STALE_TEMP_RE, processAlive } from './lib/fs-atomic.mjs'
 import { VERIFY_EXIT } from '../kit/skills/lib/exit-codes.mjs'
 import {
   COMMON_SKIP_DIRS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
@@ -27,7 +28,7 @@ const SCAN_EXT = /\.(?:md|mdx|markdown|ya?ml|json|toml|txt)$/i
  * `--scan` 与 `--verify` 全都看不见它——而它恰恰是这套工具唯一会**主动留下**的东西
  * （写文件写到一半被杀的时候）。
  */
-const TEMP_RE = /\.tmp-(\d+)$/
+const TEMP_RE = STALE_TEMP_RE
 
 /**
  * 把一行里的行内代码挖掉，剩下的才是「正文」。
@@ -42,7 +43,7 @@ function stripInlineCode(line) {
 }
 
 const SKIP_DIRS = COMMON_SKIP_DIRS
-const MAX_DEPTH = 6
+const MAX_DEPTH = 14
 /** 这个脚本所在的 skill 根。「扫的是不是自己家」靠的是一条结构性事实，不靠名字。 */
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const MAX_FILES = 20000
@@ -131,6 +132,49 @@ function isIntentionalSymlink(fullPath, canonRoot) {
   }
 }
 
+function collectGitTrackedFiles(root) {
+  if (!existsSync(join(root, '.git'))) return null
+  const top = spawnSync('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'rev-parse', '--show-toplevel'], {
+    cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true,
+  })
+  if (top.status !== 0 || !top.stdout?.trim() || !samePath(top.stdout.trim(), root)) return null
+  const res = spawnSync('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'ls-files', '-z'], {
+    cwd: root, encoding: 'utf8', timeout: 10000, maxBuffer: 32 * 1024 * 1024, windowsHide: true,
+  })
+  if (res.status !== 0 || typeof res.stdout !== 'string') return null
+  return res.stdout.split('\0').map((p) => p.replace(/\\/g, '/')).filter(Boolean)
+}
+
+function subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state) {
+  const stack = [dir]
+  let visited = 0
+  while (stack.length > 0) {
+    if (visited > MAX_FILES) return true
+    const cur = stack.pop()
+    let entries
+    try { entries = readdirSync(cur, { withFileTypes: true }) } catch { state.unreadable += 1; return true }
+    for (const entry of entries) {
+      if (isMacOsMetadata(entry.name) || SKIP_DIRS.has(entry.name)) continue
+      visited += 1
+      const full = join(cur, entry.name)
+      if (entry.isSymbolicLink()) {
+        state.symlinks += 1
+        if (isIntentionalSymlink(full, canonRoot)) { state.skippedSymlinks += 1; continue }
+        return true
+      }
+      if (entry.isDirectory()) {
+        stack.push(full)
+      } else if (entry.isFile()) {
+        if (isLockfileName(entry.name)) continue
+        if (!(SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) continue
+        const rel = relative(root, full).split(sep).join('/')
+        if (!seenTracked.has(rel)) return true
+      }
+    }
+  }
+  return false
+}
+
 function walk(root) {
   const canonRoot = (() => { try { return realpathSync(root) } catch { return resolve(root) } })()
   const out = []
@@ -145,8 +189,49 @@ function walk(root) {
     depthLimited: 0,
     symlinks: 0,
   }
+  const seenTracked = new Set()
+  const checkAndAddFile = (full, rel, name) => {
+    if (isLockfileName(name)) { state.skippedLockfiles += 1; return }
+    if (!(SCAN_EXT.test(name) || TEMP_RE.test(name))) return
+    if (out.length > MAX_FILES) { state.truncated = true; return }
+    let size = 0
+    try { size = statSync(full).size } catch { state.unreadable += 1; state.truncated = true; return }
+    if (size > MAX_BYTES) {
+      if (isVendoredRel(rel)) state.skippedVendoredLarge += 1
+      else if (isNonEngineeringLargeAsset(rel)) state.skippedLargeAssets += 1
+      else { state.skippedLarge += 1; state.truncated = true }
+      return
+    }
+    out.push(rel)
+  }
+
+  const trackedList = collectGitTrackedFiles(root)
+  if (trackedList) {
+    for (const rel of trackedList) {
+      const segs = rel.split('/')
+      if (segs.some((s) => isMacOsMetadata(s) || SKIP_DIRS.has(s))) continue
+      const full = join(root, ...segs)
+      let lst
+      try { lst = lstatSync(full) } catch { continue }
+      if (lst.isSymbolicLink()) {
+        seenTracked.add(rel)
+        state.symlinks += 1
+        if (isIntentionalSymlink(full, canonRoot)) state.skippedSymlinks += 1
+        else state.truncated = true
+        continue
+      }
+      if (!lst.isFile()) continue
+      seenTracked.add(rel)
+      checkAndAddFile(full, rel, segs[segs.length - 1])
+    }
+  }
+
   const go = (dir, depth) => {
-    if (depth > MAX_DEPTH) { state.depthLimited += 1; state.truncated = true; return }
+    if (depth > MAX_DEPTH) {
+      state.depthLimited += 1
+      if (subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state)) state.truncated = true
+      return
+    }
     if (out.length > MAX_FILES) { state.truncated = true; return }
     let entries
     // 读不到这一层：它**下面**有多少东西我们一个都不知道。这不是「没有痕迹」，
@@ -157,6 +242,8 @@ function walk(root) {
       const full = join(dir, entry.name)
       // 合法/有意符号链接（指向仓内或依赖目录）豁免不计入 truncated；悬空或越界软链仍标未扫全。
       if (entry.isSymbolicLink()) {
+        const rel = relative(root, full).split(sep).join('/')
+        if (seenTracked.has(rel)) continue
         state.symlinks += 1
         if (isIntentionalSymlink(full, canonRoot)) state.skippedSymlinks += 1
         else state.truncated = true
@@ -165,18 +252,9 @@ function walk(root) {
       if (entry.isDirectory()) {
         go(full, depth + 1)
       } else if (entry.isFile()) {
-        if (isLockfileName(entry.name)) { state.skippedLockfiles += 1; continue }
-        if (!(SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) continue
         const rel = relative(root, full).split(sep).join('/')
-        let size = 0
-        try { size = statSync(full).size } catch { state.unreadable += 1; state.truncated = true; continue }
-        if (size > MAX_BYTES) {
-          if (isVendoredRel(rel)) state.skippedVendoredLarge += 1
-          else if (isNonEngineeringLargeAsset(rel)) state.skippedLargeAssets += 1
-          else { state.skippedLarge += 1; state.truncated = true }
-          continue
-        }
-        out.push(rel)
+        if (seenTracked.has(rel)) continue
+        checkAndAddFile(full, rel, entry.name)
       }
     }
   }
@@ -205,7 +283,7 @@ export function scan(targetDir, { strictClean = false } = {}) {
 
   for (const rel of files) {
     // 临时文件不读内容：它的存在本身就是结论，读它只是白花时间。
-    const tempPid = TEMP_RE.exec(rel)?.[1]
+    const tempPid = TEMP_RE.exec(rel)?.[2]
     if (tempPid !== undefined) {
       const alive = processAlive(Number(tempPid))
       staleTemps.push({ file: rel, pid: Number(tempPid), alive })

@@ -142,6 +142,30 @@ export function extractTaskRunners(root, packages) {
   return runners
 }
 
+function extractFeatureTableCellPaths(root, rawCell) {
+  const cleaned = String(rawCell ?? '').replace(/`/g, ' ').replace(/\r?\n/g, ' ')
+  const tokens = cleaned.split(/[\s,，;；()[\]]+/).map((t) => t.trim()).filter(Boolean)
+  const paths = []
+  const symbols = []
+  const seen = new Set()
+  for (const tok of tokens) {
+    const colonParts = tok.split('::')
+    const baseTok = colonParts[0]
+    const cand = baseTok
+      .replace(/^\.\//, '')
+      .replace(/^\/+/, '')
+      .replace(/(?:#L\d+(?:-L?\d+)?|:\d+(?::\d+)?)$/, '')
+    if (!cand || cand.includes('..') || /^https?:/i.test(cand) || /[<>*?]/.test(cand)) continue
+    if (existsSync(join(root, cand))) {
+      if (!seen.has(cand)) { seen.add(cand); paths.push(cand) }
+      if (colonParts[1]) symbols.push(colonParts.slice(1).join('::'))
+    } else if (/^[A-Za-z_][A-Za-z0-9_.:]*(?:\([^)]*\))?$/.test(tok)) {
+      symbols.push(tok)
+    }
+  }
+  return { paths, symbols: [...new Set(symbols)] }
+}
+
 export function buildFeatureMap(root, entrypoints, testFiles, profile, runners, packages) {
   const features = []
   const seen = new Set()
@@ -155,10 +179,20 @@ export function buildFeatureMap(root, entrypoints, testFiles, profile, runners, 
         if (!row) continue
         const [c1, c2, c3] = [row[1], row[2], row[3]].map((s) => s.trim().replace(/`/g, ''))
         if (!c1 || /^[-:]+$/.test(c1) || /功能|模块|Feature|Entry/i.test(c1) || /^<.*>$/.test(c1)) continue
-        const key = `${c1}=>${c2}`
+        const extracted = extractFeatureTableCellPaths(root, row[2])
+        if (extracted.paths.length === 0) continue
+        const primary = extracted.paths[0]
+        const key = `${c1}=>${primary}`
         if (!seen.has(key)) {
           seen.add(key)
-          features.push({ feature: c1, source: c2, verifyCmd: c3 || profile.smokeVerify || profile.quickTest || '待补充', origin: 'docs/TDD.md' })
+          features.push({
+            feature: c1,
+            source: primary,
+            ...(extracted.paths.length > 1 ? { sources: extracted.paths } : {}),
+            ...(extracted.symbols.length > 0 ? { symbols: extracted.symbols } : {}),
+            verifyCmd: c3 || profile.smokeVerify || profile.quickTest || '待补充',
+            origin: 'docs/TDD.md',
+          })
         }
       }
     }

@@ -7,10 +7,12 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { readTextSafe } from './text.mjs'
+import { readJsonSafe, readTextSafe } from './text.mjs'
 import { parseMarkers } from './protocol.mjs'
+import { detectTrackedBuildArtifacts } from './agents-defaults.mjs'
 import { COMMAND_DISPLAY_MAX_BYTES, splitCommandSegments, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { parseDocFrontmatter } from '../../kit/skills/lib/doc-frontmatter.mjs'
+import { matchGlob } from '../../kit/skills/lib/git-core.mjs'
 
 export const REVIEW_SCOPES = new Set([
   'git', 'agents', 'docs', 'artifacts', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
@@ -269,6 +271,78 @@ export function collectMissingRemoteCapabilities(caps) {
   if (caps.releases === false) missing.push('发布')
   if (caps.checks === false) missing.push('CI 检查状态')
   return missing
+}
+
+const NOT_APPLICABLE_DECISION_RE = /^(?:不适用|不采用|不启用|n\/a|not\s+applicable|false|no|否)(?=$|[\s，,。；;：:（(])/i
+const SKIP_LICENSE_DECISION_RE = /^(?:暂不|暂未|不放|不公开|不对外|私有|不授权|保留版权|proprietary|无|none|skip|n\/a|不适用)(?=$|[\s，,。；;：:（(])/i
+const ESLINT_CONFIG_FILES = Object.freeze([
+  'eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs',
+  'eslint.config.ts', 'eslint.config.mts', 'eslint.config.cts',
+  '.eslintrc.json', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.yml', '.eslintrc.yaml', '.eslintrc',
+])
+
+/** 检查 `AGENTS.md` `do-not-edit` 是否与受 Git 跟踪的 `dist/` / `build/` 构建产物重叠。 */
+export function findDoNotEditTrackedBuildOverlap(root, facts, doNotEditGlobs = []) {
+  if (!Array.isArray(doNotEditGlobs) || doNotEditGlobs.length === 0) return []
+  const tracked = detectTrackedBuildArtifacts(facts, root)
+  if (tracked.files.length === 0) return []
+  const overlaps = []
+  for (const pat of doNotEditGlobs) {
+    if (tracked.files.some((f) => matchGlob(f, pat))) overlaps.push(pat)
+  }
+  return overlaps
+}
+
+/** 核对 `AGENTS.md ## 取舍` 中的 `no-ci` 与 `license` 是否与磁盘现有 `.github/workflows/` 或 `LICENSE*` 自相矛盾。 */
+export function findTradeoffContradictions(root, facts, decisionMap) {
+  if (!(decisionMap instanceof Map) || decisionMap.size === 0) return []
+  const issues = []
+  const workflows = facts?.docs?.workflows ?? []
+  if (decisionMap.has('no-ci') && workflows.length > 0) {
+    const val = String(decisionMap.get('no-ci') ?? '').trim()
+    if (!NOT_APPLICABLE_DECISION_RE.test(val)) {
+      issues.push(`\`no-ci\`（${val || '已声明'}）与磁盘现存工作流 ${workflows.map((w) => `.github/workflows/${w}`).join('、')} 矛盾`)
+    }
+  }
+  if (decisionMap.has('license') && facts?.docs?.license) {
+    const val = String(decisionMap.get('license') ?? '').trim()
+    if (SKIP_LICENSE_DECISION_RE.test(val)) {
+      issues.push(`\`license: ${val}\` 与仓库根目录现存 \`${facts.docs.license}\` 矛盾`)
+    } else {
+      const licText = readTextSafe(join(root, facts.docs.license)) ?? ''
+      const declaredMit = /^MIT(?=$|[\s，,。；;（(])/i.test(val)
+      const declaredApache = /^Apache[- ]?2(?:\.0)?(?=$|[\s，,。；;（(])/i.test(val)
+      const diskHasApache = /Apache License/i.test(licText)
+      const diskHasMit = /MIT License|Permission is hereby granted, free of charge/i.test(licText)
+      if (declaredMit && diskHasApache && !diskHasMit) {
+        issues.push(`\`license\` 声明为 MIT，但 \`${facts.docs.license}\` 正文为 Apache License`)
+      } else if (declaredApache && diskHasMit && !diskHasApache) {
+        issues.push(`\`license\` 声明为 Apache，但 \`${facts.docs.license}\` 正文为 MIT License`)
+      }
+    }
+  }
+  return issues
+}
+
+/** 检测仓库是否存在 ESLint 配置却未忽略 `.agents/**`。 */
+export function checkEslintAgentsIgnore(root) {
+  const pkg = readJsonSafe(join(root, 'package.json'))
+  const cfgFile = ESLINT_CONFIG_FILES.find((f) => existsSync(join(root, f)))
+    ?? (pkg?.eslintConfig ? 'package.json' : null)
+  const ignoreFile = existsSync(join(root, '.eslintignore')) ? '.eslintignore' : null
+  if (!cfgFile && !ignoreFile) return null
+  const mentionsAgents = (rel) => Boolean(rel && /\.agents\b/.test(readTextSafe(join(root, rel)) ?? ''))
+  const pkgIgnoreOk = Array.isArray(pkg?.eslintIgnore) && pkg.eslintIgnore.some((p) => /\.agents\b/.test(String(p)))
+  if (mentionsAgents(cfgFile) || mentionsAgents(ignoreFile) || pkgIgnoreOk) return null
+  const target = ignoreFile ?? cfgFile
+  const advice = ignoreFile
+    ? '在 `.eslintignore` 添加 `.agents/`'
+    : (cfgFile === 'package.json'
+        ? '在 `package.json` 的 `eslintConfig.ignorePatterns` 或 `.eslintignore` 中添加 `.agents/**`'
+        : (/^eslint\.config\./.test(cfgFile)
+            ? `在 \`${cfgFile}\` 的 \`ignores\` 中添加 \`".agents/**"\``
+            : `在 \`${cfgFile}\` 的 \`ignorePatterns\` 或 \`.eslintignore\` 中添加 \`.agents/**\``))
+  return { configFile: target, advice }
 }
 
 export function renderReviewReport(result, strict) {

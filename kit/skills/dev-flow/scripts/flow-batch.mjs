@@ -329,8 +329,8 @@ async function handleMergeQueue(opts, roots) {
     const remoteUrls = parseRemoteUrls(remoteRes.stdout)
     const topology = parseRemotesTopology(remoteRes.stdout)
     const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-    const defaultBranch = (roots.gitDir ? readRefsFast(roots.gitDir, null, fastCfg?.initDefaultBranch) : null)
-      ?? await resolveDefaultBranch(roots.mainRoot)
+    const defaultBranch = (roots.gitDir ? readRefsFast(roots.gitDir, null, fastCfg?.initDefaultBranch, { strict: true }) : null)
+      ?? await resolveDefaultBranch(roots.mainRoot, { strict: true })
     let sharedGhProbe = opts._ghProbe ?? null
     const results = []
     let stoppedWithFailure = false
@@ -388,7 +388,14 @@ async function handleMergeQueue(opts, roots) {
         }
       }
 
-      const baseBranch = ledger.baseBranch || defaultBranch || 'main'
+      const baseBranch = ledger.baseBranch || defaultBranch
+      if (!baseBranch) {
+        queue.unshift(taskId)
+        results.push({ taskId, ok: false, blocked: true, code: 'BLOCKED_MISSING_DEFAULT_BRANCH', exitCode: EXIT.FACT })
+        stoppedWithFailure = true
+        exitCode = EXIT.FACT
+        break
+      }
       const fastBaseSha = resolveRefShaFast(roots.gitDir, `refs/heads/${baseBranch}`)
       const curBaseRes = fastBaseSha ? { ok: true, stdout: fastBaseSha } : await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`])
       const currentBaseSha = curBaseRes.ok ? curBaseRes.stdout.trim() : null

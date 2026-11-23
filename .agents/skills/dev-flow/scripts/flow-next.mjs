@@ -10,22 +10,18 @@ import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { collectExcludedReviewers } from '../../lib/critique-rounds.mjs'
-import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, readJsonSafe } from '../../lib/git.mjs'
-import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { gitRun, readJsonSafe } from '../../lib/git.mjs'
+import { readGitConfigFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildPlanHandoff, evaluatePlanNextState } from '../../lib/plan-next.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
 import { readSessionState } from '../../lib/session-state.mjs'
-import { ensureReviewToken, listTaskLedgers, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { collectTaskLivenessBuckets, ensureReviewToken, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
-import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { computeSignalFingerprint, readSignalsJsonl } from '../../lib/signals.mjs'
-import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
-import {
-  determineWorkflowPolicy, evaluateNextState, hasRepoCiWorkflow,
-  readVerificationEvidence, resolveEffectiveBaseSha, validateVerificationEvidence,
-} from '../../lib/workflow-policy.mjs'
+import { evaluateNextState } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, detectRemoteDriftWarnings, getChangedFiles } from './flow-context.mjs'
+import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
 
 async function hydrateRemotePfState({ roots, ledger, opts }) {
   if (!opts['probe-auth']) return { rehydrated: false }
@@ -208,8 +204,15 @@ function buildRetroHint({ mainRoot, gitDir, isGit }) {
 
 /** 唯一路由入口：处理 0 任务 idle、多任务 ambiguous 与单任务全态判定。 */
 export async function handleNext(opts, roots) {
-  const allLedgers = listTaskLedgers(roots.mainRoot, { includeTerminal: true })
-  const activeTasks = listTaskLedgers(roots.mainRoot, { includeTerminal: false })
+  const buckets = collectTaskLivenessBuckets(roots.mainRoot, { repoRoot: roots.mainRoot })
+  const allLedgers = buckets.all
+  const activeTasks = buckets.active
+  const pendingCleanupTasks = buckets.pendingCleanup.map((t) => ({
+    taskId: t.taskId,
+    status: t.status,
+    branch: t.branch ?? null,
+    worktreePath: t.worktreePath ?? null,
+  }))
   let selectedTask = null
 
   if (opts.task && String(opts.task).trim() !== '') {
@@ -259,88 +262,15 @@ export async function handleNext(opts, roots) {
   const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
   if (selectedTask) {
     hydration = await hydrateRemotePfState({ roots, ledger: selectedTask, opts })
-    const implRoot = selectedTask.worktreePath ? resolve(roots.mainRoot, selectedTask.worktreePath) : roots.mainRoot
-    const exists = existsSync(implRoot)
-    const profile = parseAgentsProfile(roots.mainRoot)
-    const fastHeadOid = exists ? (readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null) : null
-    const effectiveBase = exists ? await resolveEffectiveBaseSha(implRoot, selectedTask, { gitCommonDir: roots.gitDir }) : selectedTask.baseSha
-    const [stZ, headRes, diffRawRes] = exists
-      ? await Promise.all([
-          gitStatusPorcelainZ(implRoot),
-          fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
-          !effectiveBase
-            ? Promise.resolve(null)
-            : (fastHeadOid && fastHeadOid === effectiveBase ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`)),
-        ])
-      : [{ ok: true, entries: [] }, { ok: false, stdout: '' }, null]
-    const headSha = headRes.ok ? headRes.stdout.trim() : null
-    const sharedEntries = diffRawRes?.ok ? diffRawRes.entries : undefined
-    const [op, changedFiles, gateHits] = exists
-      ? await Promise.all([
-          detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
-          getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: sharedEntries }),
-          detectGateWeakening(implRoot, effectiveBase, selectedTask.baseBranch, { headSha, nameStatusEntries: sharedEntries }),
-        ])
-      : [{ inProgress: false }, [], []]
-    const ownArchived = [selectedTask.archivedTodoFile, selectedTask.archivedSpecFile, selectedTask.archivedPrdFile].filter(Boolean)
-    const policy = determineWorkflowPolicy({
-      changedFiles,
-      ownArchived,
-      caseType: selectedTask.caseType,
-      highRiskGlobs: profile.highRisk,
-      doNotEditGlobs: profile.doNotEdit,
-      gateWeakeningHits: gateHits,
-      hasRemote: selectedTask.role !== 'local-only',
-      hasCiWorkflow: hasRepoCiWorkflow(exists ? implRoot : roots.mainRoot),
-      profile,
+    const snap = await collectTaskRuntimeSnapshot({
+      mainRoot: roots.mainRoot,
+      gitDir: roots.gitDir,
+      ledger: selectedTask,
       hasDevReview,
+      includeMainDirty: true,
+      evaluateNext: false,
     })
-
-    const evidence = readVerificationEvidence(roots.gitDir, selectedTask.taskId)
-    const evidenceValidation = validateVerificationEvidence({ policy, evidence, headSha, profile })
-
-    let nonDocChangesAfterFinalize = false
-    if (selectedTask.finalized && selectedTask.finalizedHead && headSha && selectedTask.finalizedHead !== headSha && exists) {
-      const postFin = await gitDiffNameStatusZ(implRoot, [`${selectedTask.finalizedHead}..${headSha}`])
-      nonDocChangesAfterFinalize = postFin.entries.some((e) => e.file && !/^docs\//.test(e.file))
-    }
-
-    // 主工作区直接改文件：这是「绕过隔离位」的早期信号。
-    //
-    // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干。主 Agent 若在自己的工作区直接 write，
-    // 隔离位形同虚设，而「这次改动包含什么」也就说不清了——可这条此前没有任何东西看得见。
-    //
-    // 它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
-    // 真正的硬拦留在 merge。
-    const mainStatus = selectedTask.worktreePath && roots.mainRoot !== implRoot
-      ? await gitStatusPorcelainZ(roots.mainRoot)
-      : null
-    const mainDirtyCount = mainStatus?.ok ? mainStatus.entries.length : 0
-
-    // 分支上有没有基线没有的提交。rebase 会把基线的提交带进来，
-    // 所以这个数不因同步基线而变——只有真写了东西才会涨。
-    let commitsAheadOfBase = 0
-    if (exists) {
-      const baseRef = selectedTask.baseBranch || selectedTask.baseSha
-      if (baseRef) {
-        const countRes = await gitRun(implRoot, ['rev-list', '--count', `${baseRef}..HEAD`])
-        if (countRes.ok) commitsAheadOfBase = Number(countRes.stdout.trim()) || 0
-      }
-    }
-
-    taskRuntime = {
-      opInProgress: Boolean(op.inProgress),
-      opName: op.op ?? null,
-      headSha,
-      dirty: stZ.entries.length,
-      mainDirtyCount,
-      policy,
-      evidenceValidation,
-      nonDocChangesAfterFinalize,
-      profile,
-      commitsAheadOfBase,
-      hasDevReview,
-    }
+    taskRuntime = snap.taskRuntime
   }
 
   let multiTaskFiles = null
@@ -359,7 +289,7 @@ export async function handleNext(opts, roots) {
   }
 
   let out = evaluateNextState({
-    activeTasks, allLedgers, selectedTask, taskRuntime, hasDevReview, multiTaskFiles, repoRoot: roots.mainRoot,
+    activeTasks, allLedgers, pendingCleanupTasks, selectedTask, taskRuntime, hasDevReview, multiTaskFiles, repoRoot: roots.mainRoot,
   })
 
   if (roots.isGit) {

@@ -384,7 +384,7 @@ export function normalizeRepoMetaPayload(data = {}, viewerLogin = null) {
     ok: true,
     isFork: Boolean(data?.fork),
     parent: data?.parent?.full_name?.toLowerCase() ?? null,
-    defaultBranch: data?.default_branch ?? 'main',
+    defaultBranch: data?.default_branch ?? null,
     viewerLogin,
     viewerPermission: perms?.admin ? 'ADMIN' : perms?.maintain ? 'MAINTAIN' : perms?.push ? 'WRITE' : (perms?.pull || !perms ? 'READ' : 'NONE'),
   }

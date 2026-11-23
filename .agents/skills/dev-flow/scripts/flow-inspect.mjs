@@ -11,12 +11,13 @@ import { join, resolve } from 'node:path'
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import {
-  applyLocalAutoClaim, checkStartAuthorSeparation, checkStartMainCleanAndSlot,
-  checkStartTriageDowngrade, emitBlockedStart, markStartTriageConsumed, promotePlanningToStarted,
+  applyLocalAutoClaim, calibrateLedgerBaseBranch, checkStartAuthorSeparation, checkStartMainCleanAndSlot,
+  checkStartTriageDowngrade, emitBlockedStart, inheritExploredCredentials, markStartTriageConsumed, promotePlanningToStarted,
 } from './flow-start-helpers.mjs'
+import { fetchGitClaimRefs } from './flow-merge-claim.mjs'
 import { workTypePrefix } from '../../lib/escalation.mjs'
 import {
-  canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
+  canonicalPath, detectCommitStyle, detectInProgressGitOp, ensureWorktreesIgnored,
   gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
   readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
@@ -130,9 +131,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     if (subj && subjects.length < 20) subjects.push(subj)
   }
   const historyAuthors = [...authorSet]
-  const convRe = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]*\))?!?:\s+\S/i
-  const convCount = subjects.filter((s) => convRe.test(s)).length
-  const commitStyle = subjects.length > 0 && convCount > subjects.length / 2 ? 'conventional' : 'plain'
+  const commitStyle = detectCommitStyle(subjects)
   let commits = 0
   if (head) {
     if (skipLog && !fastHeadUnborn) commits = 1
@@ -144,14 +143,11 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   }
 
   const defaultBranch = !roots.isGit
-    ? 'main'
+    ? null
     : (needRefsExec
-        ? resolveDefaultBranchFromRefs(refsRes?.stdout, branch, initDefaultBranch)
-        : (readRefsFast(roots.gitDir, branch, initDefaultBranch) ?? resolveDefaultBranchFromRefs('', branch, initDefaultBranch)))
-  const hasDocsSystem = existsSync(join(mainRoot, 'docs', 'TDD.md'))
-    || existsSync(join(mainRoot, 'docs', 'specs'))
-    || existsSync(join(mainRoot, 'docs', 'todo'))
-    || existsSync(join(mainRoot, 'docs', 'prd'))
+        ? resolveDefaultBranchFromRefs(refsRes?.stdout, branch, initDefaultBranch, { strict: true })
+        : (readRefsFast(roots.gitDir, branch, initDefaultBranch, { strict: true }) ?? resolveDefaultBranchFromRefs('', branch, initDefaultBranch, { strict: true })))
+  const hasDocsSystem = ['TDD.md', 'specs', 'todo', 'prd'].some((d) => existsSync(join(mainRoot, 'docs', d)))
   const worktrees = !roots.isGit
     ? []
     : (fastWtList
@@ -432,6 +428,7 @@ export async function handleStart(opts, roots) {
   const slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
 
   const isPlanning = Boolean(opts.planning)
+  await fetchGitClaimRefs(roots.mainRoot, { remoteUrls: state.remoteUrls ?? {}, role, opts })
   const existing = readTaskLedger(roots.mainRoot, taskId)
   if (existing && existing.status !== 'cleaned' && existing.status !== 'aborted' && (
     (existing.worktreePath && existsSync(join(roots.mainRoot, existing.worktreePath)))
@@ -458,7 +455,7 @@ export async function handleStart(opts, roots) {
     if ((existing.status === 'planning' || existing.planning === true) && !isPlanning) {
       const promo = await promotePlanningToStarted({
         roots, existing, existingWorkRootPre, slug, taskId, opts, runStartPlanGate,
-        role, providerId, baseBranch: state.defaultBranch || 'main', baseSha: state.head,
+        role, providerId, baseBranch: state.defaultBranch ?? null, baseSha: state.head,
       })
       if (promo.blocked) return { exitCode: promo.exitCode }
     } else if (isPlanning && (existing.status === 'planning' || existing.status === 'planned')) {
@@ -505,6 +502,8 @@ export async function handleStart(opts, roots) {
       await syncTaskDocsSafe(existingWorkRoot, existing, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, newlyBoundIssues, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
     }
     if (milestoneVal && !existing.milestone) existing.milestone = milestoneVal
+    await calibrateLedgerBaseBranch(roots.mainRoot, existing, state.defaultBranch)
+    if (!isPlanning) inheritExploredCredentials({ mainRoot: roots.mainRoot, docRoot: existingWorkRoot, ledger: existing })
     await updateTaskLedger(roots.mainRoot, existing.taskId, (cur) => ({ ...(cur ?? existing), ...existing }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...existing, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
@@ -515,7 +514,7 @@ export async function handleStart(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  let baseBranch = state.defaultBranch || 'main'
+  let baseBranch = state.defaultBranch ?? (state.commits === 0 && state.branch && state.branch !== '(detached)' ? state.branch : null)
   let baseSha = state.head
   // 允许显式指定基线：工作全在一条特性分支上时（主线还没合），
   // 新任务必须从那条分支起头，否则它看不到已有工作——一开会就少几十个提交。
@@ -529,6 +528,8 @@ export async function handleStart(opts, roots) {
       if (r.ok && r.stdout.trim()) { baseBranch = explicitBase; baseSha = r.stdout.trim(); ok = true; break }
     }
     if (!ok) throw new Error(`--base 指定的分支不存在：${explicitBase}`)
+  } else if (!baseBranch && state.commits > 0 && !opts.after && !effectiveExternalPr) {
+    return emitBlockedStart(opts, { code: 'BLOCKED_MISSING_DEFAULT_BRANCH', exitCode: EXIT.FACT, reason: '找不到可用默认分支，请先检出默认分支或显式传入 --base。' })
   } else if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
     for (const candRef of [`refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`]) {
       const fastSha = resolveRefShaFast(roots.gitDir, candRef)
@@ -564,15 +565,11 @@ export async function handleStart(opts, roots) {
       parentTaskId: parentLedger?.taskId ?? null,
       parentBranch,
       parentPrNumber: parentLedger?.prNumber ?? null,
-      stackTargetBase: parentLedger?.stackTargetBase ?? (state.defaultBranch || 'main'),
+      stackTargetBase: parentLedger?.stackTargetBase ?? (state.defaultBranch ?? null),
     }
   }
-  const filesList = opts.files
-    ? String(opts.files).split(/[\s,]+/).map((s) => posixPath(s).replace(/^\.\//, '').trim()).filter(Boolean)
-    : []
-  const depMeta = state.inputs?.graph?.externalDependencies?.length
-    ? { dependsOn: state.inputs.graph.externalDependencies }
-    : {}
+  const filesList = opts.files ? String(opts.files).split(/[\s,]+/).map((s) => posixPath(s).replace(/^\.\//, '').trim()).filter(Boolean) : []
+  const depMeta = state.inputs?.graph?.externalDependencies?.length ? { dependsOn: state.inputs.graph.externalDependencies } : {}
   const startIdentity = resolveIdentityLayers({
     ghLogin: state.github?.trackB?.login,
     ghTier: state.github?.trackB?.tier,
@@ -698,6 +695,7 @@ export async function handleStart(opts, roots) {
       ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     applyLocalAutoClaim(ledger, { role, isPlanning, implementerId, opts })
+    if (!isPlanning) inheritExploredCredentials({ mainRoot: roots.mainRoot, docRoot: roots.mainRoot, ledger })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })
@@ -768,6 +766,7 @@ export async function handleStart(opts, roots) {
   if (specIssueWt && !ledger.linkedIssues.includes(specIssueWt)) {
     ledger.linkedIssues = [...ledger.linkedIssues, specIssueWt]
   }
+  if (!isPlanning) inheritExploredCredentials({ mainRoot: roots.mainRoot, docRoot: implAbs, ledger })
   if (ledger.linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
   await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })

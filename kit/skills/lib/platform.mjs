@@ -613,7 +613,7 @@ export async function probeGitHubEnv({
   cwd = process.cwd(),
   remoteUrls = {},
   branch,
-  defaultBranch = 'main',
+  defaultBranch = null,
   probeNetwork = false,
   verifyToken = false,
   mcpAvailable,

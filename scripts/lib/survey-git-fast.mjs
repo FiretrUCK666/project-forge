@@ -6,8 +6,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
+import { detectCommitStyle } from '../../kit/skills/lib/git-core.mjs'
 import { readSystemGitConfigMapAsync } from '../../kit/skills/lib/git-fast.mjs'
 import { isMacMetadataName, readTextSafe } from './text.mjs'
+
+export { detectCommitStyle }
 
 export function parseConfigList(text) {
   const map = new Map()
@@ -22,22 +25,6 @@ export function parseConfigList(text) {
     map.set(body.slice(0, eq).toLowerCase(), { scope, value: body.slice(eq + 1) })
   }
   return map
-}
-
-export function detectCommitStyle(subjects) {
-  if (!Array.isArray(subjects) || subjects.length === 0) return 'plain'
-  const conventional = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]*\))?!?:\s+\S/i
-  const gitmoji = /^(?::[a-z_]+:|[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}])/u
-  let conv = 0
-  let emoji = 0
-  for (const s of subjects) {
-    if (conventional.test(s)) conv += 1
-    else if (gitmoji.test(s)) emoji += 1
-  }
-  const half = subjects.length / 2
-  if (conv > half) return 'conventional'
-  if (emoji > half) return 'gitmoji'
-  return 'plain'
 }
 
 export function parsePorcelainV2(text) {

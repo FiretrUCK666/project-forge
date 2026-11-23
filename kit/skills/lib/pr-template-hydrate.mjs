@@ -397,7 +397,7 @@ export function hydratePrTemplateBody({
     policy?.oneWayBoundaryHits?.length ? `- 触及 one-way 边界：${policy.oneWayBoundaryHits.slice(0, 6).map((f) => `\`${f}\``).join('、')}` : null,
   ].filter(Boolean).join('\n')
   const verifyText = buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged, visualVerifiedOnHead })
-  const rollbackText = `- 回滚基线：\`${String(ledger?.baseSha ?? '').slice(0, 7) || ledger?.baseBranch || 'main'}\`（反向提交 \`git revert\` 并重跑完整门禁）`
+  const rollbackText = `- 回滚基线：\`${String(ledger?.baseSha ?? '').slice(0, 7) || ledger?.baseBranch || 'HEAD'}\`（反向提交 \`git revert\` 并重跑完整门禁）`
   const mergeAuthText = policy?.independentReviewRequired === false
     ? '- 低风险纯文档改动：门禁绿灯可直接合入'
     : '- 独立审查 `fail` 为空且 CI 绿灯后由审查者合入（审查结论以独立评论记录；若含弱化门禁须人工确认）'

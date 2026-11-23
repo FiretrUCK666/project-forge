@@ -49,8 +49,8 @@ export {
   resolveGitDirFast,
 }
 
-/** 从 `for-each-ref` 输出推算默认分支。 */
-export function resolveDefaultBranchFromRefs(refsStdout, curBranch, initDefaultBranch) {
+/** 从 `for-each-ref` 输出推算默认分支（strict=true 时无可用分支返回 null）。 */
+export function resolveDefaultBranchFromRefs(refsStdout, curBranch, initDefaultBranch, { strict = true } = {}) {
   const localHeads = new Set()
   const originHeads = new Set()
   let originHeadTarget
@@ -67,12 +67,12 @@ export function resolveDefaultBranchFromRefs(refsStdout, curBranch, initDefaultB
     }
   }
   if (originHeadTarget) return originHeadTarget
-  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
   for (const cand of LIKELY_DEFAULT_BRANCHES) {
     if (localHeads.has(cand) || originHeads.has(cand)) return cand
   }
+  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
   if (curBranch && curBranch !== 'HEAD' && curBranch !== '(detached)') return curBranch
-  return initDefaultBranch || 'main'
+  return strict ? null : (initDefaultBranch || 'main')
 }
 
 let cachedSysConfigMap
@@ -393,8 +393,8 @@ export function parseRawAndUnifiedDiff(bufOrText) {
   return { entries, diffText }
 }
 
-/** 零子进程读取 loose/packed refs 推导默认分支（reftable 仓返回 null）。 */
-export function readRefsFast(gitCommonDir, curBranch, initDefaultBranch) {
+/** 零子进程读取 loose/packed refs 推导默认分支（reftable 仓或 strict 模式下无可用引用时返回 null）。 */
+export function readRefsFast(gitCommonDir, curBranch, initDefaultBranch, { strict = true } = {}) {
   if (!gitCommonDir || existsSync(join(gitCommonDir, 'reftable'))) return null
   const origHeadPath = join(gitCommonDir, 'refs', 'remotes', 'origin', 'HEAD')
   const origHeadText = readTextSafe(origHeadPath)
@@ -434,16 +434,16 @@ export function readRefsFast(gitCommonDir, curBranch, initDefaultBranch) {
       }
     }
   }
-  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
   for (const cand of LIKELY_DEFAULT_BRANCHES) {
     if (localHeads.has(cand) || originHeads.has(cand)) return cand
   }
+  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
   if (curBranch && curBranch !== 'HEAD' && curBranch !== '(detached)') return curBranch
-  return initDefaultBranch || 'main'
+  return strict ? null : (initDefaultBranch || 'main')
 }
 
 /** 零子进程解析仓库默认分支（遇到 reftable 或缺失 .git 时返回 null 交由 CLI 回退）。 */
-export function resolveDefaultBranchFast(repoRoot, gitCommonDir = null) {
+export function resolveDefaultBranchFast(repoRoot, gitCommonDir = null, { strict = true } = {}) {
   const wtGitDir = resolveGitDirFast(repoRoot)
   if (!wtGitDir) return null
   let commonDir = gitCommonDir
@@ -456,7 +456,7 @@ export function resolveDefaultBranchFast(repoRoot, gitCommonDir = null) {
   if (!headInfo) return null
   const cfg = readGitConfigFast(commonDir)
   const curBranch = headInfo.detached ? 'HEAD' : headInfo.branch
-  return readRefsFast(commonDir, curBranch, cfg?.initDefaultBranch)
+  return readRefsFast(commonDir, curBranch, cfg?.initDefaultBranch, { strict })
 }
 
 

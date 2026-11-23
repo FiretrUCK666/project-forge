@@ -9,6 +9,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
+import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import {
   readPlanningProvenanceIndex,
   recordPlanningProvenanceCore,
@@ -23,7 +24,68 @@ import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 export { readPlanningProvenanceIndex, verifyPlanningProvenance }
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
+const TERMINAL_DOC_STATUSES = new Set(['implemented', 'done', 'archived', 'superseded', 'dropped'])
+const PRE_SUBMIT_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released'])
 const OPEN_TASK_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
+
+/**
+ * 单源任务活性分类：`'active' | 'terminal-pending-cleanup' | 'terminal'`。
+ * 将 `'merged'` 与工作树缺失/已归档/主线已前进的孤儿任务归入 `'terminal-pending-cleanup'`，
+ * 从活跃任务集中剥离，仅在 `pendingCleanupTasks` 提示而不阻塞 `flow next` / `resolveTaskContext`。
+ */
+export function classifyTaskLiveness(ledger, { repoRoot = null, graph = null, headOid = undefined } = {}) {
+  if (!ledger || typeof ledger !== 'object') return 'terminal'
+  const status = String(ledger.status ?? '').trim().toLowerCase()
+  if (TERMINAL_TASK_STATUSES.has(status)) return 'terminal'
+  if (status === 'merged') return 'terminal-pending-cleanup'
+
+  if (repoRoot) {
+    if (ledger.worktreePath && !existsSync(resolve(repoRoot, ledger.worktreePath))) {
+      return 'terminal-pending-cleanup'
+    }
+    if (ledger.isolation === 'review-pr' && ledger.reviewWorktreePath && !existsSync(resolve(repoRoot, ledger.reviewWorktreePath))) {
+      return 'terminal-pending-cleanup'
+    }
+    if (
+      ledger.isolation === 'in-place'
+      && !ledger.worktreePath
+      && status === 'started'
+      && !ledger.claimedAt
+      && !ledger.finalized
+      && !ledger.verifiedHead
+      && ledger.branch
+      && ledger.baseBranch
+      && ledger.branch === ledger.baseBranch
+      && ledger.baseSha
+    ) {
+      const curHead = headOid !== undefined ? headOid : (readHeadFast(resolveGitDirFast(repoRoot))?.oid ?? null)
+      if (curHead && ledger.baseSha !== curHead) return 'terminal-pending-cleanup'
+    }
+  }
+
+  if (PRE_SUBMIT_STATUSES.has(status)) {
+    const boundDoc = ledger.specFile || (!ledger.specFile ? ledger.todoFile : null)
+    if (boundDoc && graph?.slices) {
+      const normBound = posixPath(boundDoc)
+      const hit = graph.slices.find((s) => posixPath(s.rel) === normBound || (ledger.taskId && s.key === ledger.taskId))
+      if (hit && (hit.archived || hit.done || TERMINAL_DOC_STATUSES.has(String(hit.status ?? '').toLowerCase()))) {
+        return 'terminal-pending-cleanup'
+      }
+    } else if (boundDoc && repoRoot) {
+      const absDoc = resolve(repoRoot, boundDoc)
+      if (existsSync(absDoc)) {
+        const fm = parseDocFrontmatter(readTextSafe(absDoc) ?? '')
+        if (TERMINAL_DOC_STATUSES.has(String(fm.data?.status ?? '').toLowerCase())) {
+          return 'terminal-pending-cleanup'
+        }
+      } else if (ledger.archivedSpecFile || ledger.archivedTodoFile) {
+        return 'terminal-pending-cleanup'
+      }
+    }
+  }
+
+  return 'active'
+}
 
 /**
  * 发一枚独立审查令牌。**只由 `flow next` 在 `needs-review` 阶段调用。**
@@ -184,7 +246,7 @@ export function createDefaultLedger(partial = {}) {
     role,
     providerId: partial.providerId ?? (role === 'local-only' ? 'none' : null),
     branch: partial.branch ?? null,
-    baseBranch: partial.baseBranch ?? 'main',
+    baseBranch: partial.baseBranch ?? null,
     baseSha: partial.baseSha ?? null,
     worktreePath: partial.worktreePath ?? null,
     reviewWorktreePath: partial.reviewWorktreePath ?? null,
@@ -470,20 +532,43 @@ export async function resolveLedgerRoot(repoRoot, explicitLedgerRoot = null) {
   return repoRoot
 }
 
-export function listTaskLedgers(mainRoot, { includeTerminal = true } = {}) {
+export function listTaskLedgers(mainRoot, { includeTerminal = true, includePendingCleanup = includeTerminal, repoRoot = mainRoot, graph = null } = {}) {
   const dir = join(mainRoot, '.worktrees', '.state', 'tasks')
   if (!existsSync(dir)) return []
+  const effRoot = repoRoot ?? mainRoot
+  const headOid = (!includeTerminal || !includePendingCleanup) && effRoot
+    ? (readHeadFast(resolveGitDirFast(effRoot))?.oid ?? null)
+    : null
   const out = []
   try {
     for (const name of readdirSync(dir).sort()) {
       if (!name.endsWith('.json')) continue
       const data = readJsonSafe(join(dir, name))
       if (!data || !data.taskId) continue
-      if (!includeTerminal && TERMINAL_TASK_STATUSES.has(String(data.status ?? '').toLowerCase())) continue
+      const liveness = classifyTaskLiveness(data, { repoRoot: effRoot, graph, headOid })
+      if (!includeTerminal && liveness === 'terminal') continue
+      if (!includePendingCleanup && liveness === 'terminal-pending-cleanup') continue
       out.push(data)
     }
   } catch { /* 忽略不可读条目 */ }
   return out
+}
+
+/** 将所有账本按 `classifyTaskLiveness` 分为 active / pendingCleanup / terminal 三桶。 */
+export function collectTaskLivenessBuckets(mainRoot, { repoRoot = mainRoot, graph = null } = {}) {
+  const all = listTaskLedgers(mainRoot, { includeTerminal: true, includePendingCleanup: true })
+  const effRoot = repoRoot ?? mainRoot
+  const headOid = effRoot ? (readHeadFast(resolveGitDirFast(effRoot))?.oid ?? null) : null
+  const active = []
+  const pendingCleanup = []
+  const terminal = []
+  for (const data of all) {
+    const liveness = classifyTaskLiveness(data, { repoRoot: effRoot, graph, headOid })
+    if (liveness === 'terminal') terminal.push(data)
+    else if (liveness === 'terminal-pending-cleanup') pendingCleanup.push(data)
+    else active.push(data)
+  }
+  return { all, active, pendingCleanup, terminal }
 }
 
 /**
@@ -497,8 +582,7 @@ export function listTaskLedgers(mainRoot, { includeTerminal = true } = {}) {
 export async function resolveTaskContext(roots, opts = {}, { requireExisting = true } = {}) {
   const mainRoot = roots?.mainRoot ?? process.cwd()
   const workRoot = roots?.workTreeRoot ?? mainRoot
-  const all = listTaskLedgers(mainRoot, { includeTerminal: true })
-  const active = all.filter((t) => !TERMINAL_TASK_STATUSES.has(String(t.status ?? '').toLowerCase()))
+  const active = listTaskLedgers(mainRoot, { includeTerminal: false, repoRoot: mainRoot })
 
   if (opts.task !== undefined && String(opts.task).trim() !== '') {
     const taskId = sanitizeTaskId(opts.task)

@@ -15,6 +15,34 @@ export const LIKELY_DEFAULT_BRANCHES = Object.freeze([
   'main', 'master', 'trunk', 'develop', 'default', 'development',
 ])
 
+export const MIN_COMMIT_STYLE_SAMPLES = 5
+
+const MERGE_OR_AUTO_COMMIT_RE = /^(?:Merge\b|Revert\s+"|Initial commit$|chore\((?:release|deps(?:-dev)?)\):|build\(deps(?:-dev)?\):|release:\s|bump\b|auto[- ]?merge\b|.*\[bot\])/i
+const CONVENTIONAL_SUBJECT_RE = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]*\))?!?:\s+\S/i
+const GITMOJI_SUBJECT_RE = /^(?::[a-z_]+:|[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}])/u
+
+/**
+ * 过滤合并提交与自动化提交后判定提交风格（`conventional` | `gitmoji` | `plain`）。
+ * 有效样本不足 5 条时返回中性 `'plain'`，防止浅克隆或初期少数提交触发风格漂移。
+ */
+export function detectCommitStyle(subjects) {
+  if (!Array.isArray(subjects) || subjects.length === 0) return 'plain'
+  const effective = subjects
+    .map((s) => String(s ?? '').trim())
+    .filter((s) => s && !MERGE_OR_AUTO_COMMIT_RE.test(s))
+  if (effective.length < MIN_COMMIT_STYLE_SAMPLES) return 'plain'
+  let conv = 0
+  let emoji = 0
+  for (const s of effective) {
+    if (CONVENTIONAL_SUBJECT_RE.test(s)) conv += 1
+    else if (GITMOJI_SUBJECT_RE.test(s)) emoji += 1
+  }
+  const half = effective.length / 2
+  if (conv > half) return 'conventional'
+  if (emoji > half) return 'gitmoji'
+  return 'plain'
+}
+
 export const COMMON_SKIP_DIRS = new Set([
   '.git', '.worktrees', 'node_modules', '.pnpm-store', '.yarn', 'bower_components',
   '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',

@@ -225,10 +225,9 @@ export function normalizeGitHubRepo(value, sshHostMap) {
 }
 
 /** 生成 1-click GitHub Pull Request 创建链接（half-duplex 降级输出）。 */
-export function buildOneClickPrUrl({ targetRepo, baseBranch = 'main', headOwner, headBranch } = {}) {
+export function buildOneClickPrUrl({ targetRepo, baseBranch = null, headOwner, headBranch } = {}) {
   const repo = normalizeGitHubRepo(targetRepo)
   if (!repo) return undefined
-  const base = encodeURIComponent(baseBranch || 'main')
   if (!headBranch || headBranch === baseBranch || headBranch === 'HEAD') {
     return `https://github.com/${repo}/compare?expand=1`
   }
@@ -237,6 +236,10 @@ export function buildOneClickPrUrl({ targetRepo, baseBranch = 'main', headOwner,
   const headSpec = headOwner && headOwner.toLowerCase() !== repoOwner.toLowerCase()
     ? `${encodeURIComponent(headOwner)}:${branchEnc}`
     : branchEnc
+  if (!baseBranch) {
+    return `https://github.com/${repo}/compare/${headSpec}?expand=1`
+  }
+  const base = encodeURIComponent(baseBranch)
   return `https://github.com/${repo}/compare/${base}...${headSpec}?expand=1`
 }
 
@@ -541,7 +544,7 @@ export async function probeGitHubEnvCore({
   cwd = process.cwd(),
   remoteUrls = {},
   branch,
-  defaultBranch = 'main',
+  defaultBranch = null,
   timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
   probeNetwork = false,
   mcpAvailable,
@@ -672,7 +675,7 @@ export async function probeGitHubEnvCore({
   const oneClickPrUrl = sshWorks && targetRepo
     ? buildOneClickPrUrl({
         targetRepo,
-        baseBranch: defaultBranch || 'main',
+        baseBranch: defaultBranch || null,
         headOwner,
         headBranch: branch,
       })

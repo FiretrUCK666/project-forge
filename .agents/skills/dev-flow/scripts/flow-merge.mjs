@@ -12,23 +12,24 @@ import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMergeComments, formatAttribution } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
-import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, samePath } from '../../lib/git.mjs'
-import { enforceSlotBoundary } from '../../lib/harness-context.mjs'
+import { detectInProgressGitOp, gitRun, gitStatusPorcelainZ, resolveDefaultBranch, samePath } from '../../lib/git.mjs'
+import { enforceSlotBoundary, resolveHostMode } from '../../lib/harness-context.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { collectImplementerHistory, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemoteUrls, parseRemotesTopology, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { classifyDoorType, detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { classifyDoorType, detectGateWeakening, gitDiffRawEntriesAndText, matchGlob } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged, checkUnresolvedDependencies } from '../../lib/task-graph.mjs'
 import {
-  determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence,
-  resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateReviewRecordClosure, validateVerificationEvidence,
+  hasRepoCiWorkflow,
+  resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateReviewRecordClosure,
 } from '../../lib/workflow-policy.mjs'
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
+import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
 import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
 import {
   analyzeIssueClaimState, assertClaimOrMergeProvenance, evaluateMasterIssueCloseGuard,
@@ -66,13 +67,6 @@ export async function assertPreMergeGates({
   if (ledger.role === 'clone-readonly' || ledger.role === 'undetermined') {
     process.stderr.write(`BLOCKED_ROLE_CANNOT_MERGE: 当前身份为 ${ledger.role}，不允许执行合并。\n`)
     return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_ROLE_CANNOT_MERGE' }
-  }
-  if (ledger.role === 'generic-git' && !opts['human-approved']) {
-    const msg = 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并；'
-      + 'merge 会现场取回远端，并按四态合流判定核验，核不到就阻断。确需人工拍板时带 --human-approved --reason "<原因>"。'
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', role: ledger.role }, null, 2)}\n`)
-    process.stderr.write(`${msg}\n`)
-    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED' }
   }
 
   const implRoot = ledger.worktreePath ? resolve(mainRoot, ledger.worktreePath) : mainRoot
@@ -116,7 +110,8 @@ export async function assertPreMergeGates({
     return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_NOT_VERIFIED' }
   }
 
-  const stackGate = await checkStackedParentMerged(mainRoot, ledger, { backend, targetRepo, defaultBranch: ledger.stackTargetBase || 'main' })
+  const stackDefault = ledger.stackTargetBase || ledger.baseBranch || await resolveDefaultBranch(mainRoot, { strict: true })
+  const stackGate = await checkStackedParentMerged(mainRoot, ledger, { backend, targetRepo, defaultBranch: stackDefault })
   if (stackGate.blocked) {
     if (opts.json) process.stdout.write(`${JSON.stringify(stackGate, null, 2)}\n`)
     process.stderr.write(`${stackGate.message}\n`)
@@ -134,21 +129,17 @@ export async function assertPreMergeGates({
 
   const profile = preProfile ?? parseAgentsProfile(mainRoot)
   const sharedDiffEntries = diffNsRes?.ok ? diffNsRes.entries : undefined
-  const [changed, gateFindings] = await Promise.all([
-    getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: sharedDiffEntries }),
+  const [gateFindings] = await Promise.all([
     detectGateWeakening(implRoot, effectiveBase, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
   ])
-  const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
-  const hasDevReview = hasSkillSupport(mainRoot, 'dev-review')
-  const policy = determineWorkflowPolicy({
-    changedFiles: changed, ownArchived, caseType: ledger.caseType,
-    highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
-    gateWeakeningHits: gateFindings, hasRemote: ledger.role !== 'local-only',
-    hasCiWorkflow: hasRepoCiWorkflow(implRoot),
-    visualFilesChanged: changed.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
+  const snap = await collectTaskRuntimeSnapshot({
+    mainRoot, gitDir, ledger, profile, evaluateNext: false, gateFindingsOverride: gateFindings,
   })
-  const evidence = readVerificationEvidence(gitDir, taskId)
-  const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
+  const changed = snap.changedFiles
+  const hasDevReview = snap.hasDevReview
+  const policy = snap.policy
+  const evidence = snap.evidence
+  const evCheck = snap.evidenceValidation
   if (!evCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: evCheck.code, reason: evCheck.reason, policy }, null, 2)}\n`)
     process.stderr.write(`${evCheck.code}: ${evCheck.reason}\n`)
@@ -207,9 +198,25 @@ export async function assertPreMergeGates({
     ledger.humanApprovedReason = reasonCheck.cleaned
   }
 
+  const normActor = (v) => String(v ?? '').trim().toLowerCase().replace(/^@/, '')
+  const implementerSet = new Set([
+    ...collectImplementerHistory(ledger),
+    ledger.claimedBy,
+    ledger.agent,
+    ledger.implementerId,
+  ].map(normActor).filter(Boolean))
+  const callerActor = normActor(opts.agent ?? opts.actor ?? opts.reviewer)
+  const allowSingleSessionSelf = resolveHostMode(opts) === 'single-session' && Boolean(opts['human-approved'])
   const requiresReview = hasDevReview && (policy.independentReviewRequired || (policy.riskTier !== 'low' && (rounds.length > 0 || Boolean(ledger.lastReview))))
+  if (callerActor && !allowSingleSessionSelf && (requiresReview || (hasDevReview && Number(ledger.caseType ?? 3) >= 2)) && implementerSet.has(callerActor)) {
+    const msg = `BLOCKED_SELF_MERGE: 实施者（${callerActor}）禁止自合并自己实施或认领的任务，须由独立审查者或调度者执行 flow.mjs merge。`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_SELF_MERGE', actor: callerActor, taskId }, null, 2)}\n`)
+    process.stderr.write(`${msg}\n`)
+    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_SELF_MERGE' }
+  }
   if (requiresReview) {
-    if (!effectiveReviewer || effectiveReviewer === ledger.implementerId) {
+    const revNorm = normActor(effectiveReviewer)
+    if (!revNorm || implementerSet.has(revNorm)) {
       process.stderr.write(`BLOCKED_REQUIRES_INDEPENDENT_REVIEW: 触碰高风险路径或需要独立审查（hits=${highRiskHits.join(',') || `case ${ledger.caseType}`}），必须存在 reviewerId !== implementerId 的独立审查 PASS 记录。\n`)
       return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_REQUIRES_INDEPENDENT_REVIEW' }
     }
@@ -295,7 +302,12 @@ export async function handleMerge(opts, roots) {
     stopLossActive ? '独立审查停损（STOP_LOSS_ESCALATE）' : null,
     (gateFindings ?? []).length > 0 ? `门禁弱化检查（${(gateFindings ?? []).map((f) => f.type).join(', ')}）` : null,
   ].filter(Boolean)
-  const baseBranch = ledger.baseBranch || 'main'
+  const baseBranch = ledger.baseBranch || await resolveDefaultBranch(roots.mainRoot, { strict: true })
+  if (!baseBranch) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_MISSING_DEFAULT_BRANCH', taskId }, null, 2)}\n`)
+    process.stderr.write('BLOCKED_MISSING_DEFAULT_BRANCH: 找不到可用的默认基线分支，无法执行合并。\n')
+    return { exitCode: EXIT.FACT, code: 'BLOCKED_MISSING_DEFAULT_BRANCH' }
+  }
   let mergeRes = null
   // 本次合并发出的回告逐条记成败：两条合并路径共用一份，报告里统一列出未发出的那些。
   const mergeComments = []
@@ -502,6 +514,7 @@ export async function handleMerge(opts, roots) {
   }
 
   ledger.status = 'merged'
+  if (mergeRes?.state === 'MERGED' || mergeRes?.merged === true) ledger.prState = 'MERGED'
   ledger.mergedAt = new Date().toISOString()
   ledger.mergeComments = mergeComments
   if (syncFailures.length > 0) {

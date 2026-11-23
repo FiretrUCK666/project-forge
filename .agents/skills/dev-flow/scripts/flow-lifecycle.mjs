@@ -33,6 +33,7 @@ import { assertSubmitOwnership, checkLifecyclePreconditions, checkTaskSlotBounda
 import {
   applySubmitPostActions,
   cmdContainsSubcommand,
+  collectTaskRuntimeSnapshot,
   emitFlowSignal,
   emitVerifyOutcomeOutput,
   evaluateFlowMasterPrdGate,
@@ -142,36 +143,25 @@ export async function handleVerify(opts, roots) {
   // 层级到 Dev Profile 键的对应与降级链只在 profile.mjs 一处，这里不再自己拼一遍。
   if (!cmd && !isExplicitNone) cmd = resolveTierCommand(profile, mode, { fallback: true })
 
-  const computeVerifyPolicy = async (stZReuse = null) => {
-    const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
-    const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
-    const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir })
-    const [stZ, headRes, diffNsRes, remoteRes] = await Promise.all([
-      stZReuse ? Promise.resolve(stZReuse) : gitStatusPorcelainZ(implRoot),
-      fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
-      !effectiveBase
-        ? Promise.resolve(null)
-        : (fastHeadOid && fastHeadOid === effectiveBase ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`)),
-      fastCfg ? Promise.resolve({ ok: true, stdout: fastCfg.remoteText }) : gitRun(roots.mainRoot, ['remote', '-v']),
-    ])
-    const currentHead = headRes.ok ? headRes.stdout.trim() : null
-    const sharedDiffEntries = diffNsRes?.ok ? diffNsRes.entries : undefined
-    const [changedFiles, gateHits] = await Promise.all([
-      getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: sharedDiffEntries }),
-      detectGateWeakening(implRoot, effectiveBase, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
-    ])
-    const dirty = stZ.entries.length > 0
-    const stStdout = stZ.entries.map((e) => `${e.xy} ${e.file}`).join('\n')
-    const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
-    const hasCi = hasRepoCiWorkflow(implRoot)
-    const policy = determineWorkflowPolicy({
-      changedFiles, ownArchived, caseType: ledger.caseType,
-      highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
-      gateWeakeningHits: gateHits, hasRemote: ledger.role !== 'local-only' && Boolean(remoteRes.ok && remoteRes.stdout.trim()),
-      hasCiWorkflow: hasCi, visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
+  const computeVerifyPolicy = async () => {
+    const snap = await collectTaskRuntimeSnapshot({
+      mainRoot: roots.mainRoot,
+      gitDir: roots.gitDir,
+      ledger,
+      profile,
+      hasDevReview,
+      evaluateNext: false,
     })
-    const diffText = !dirty && diffNsRes?.ok && typeof diffNsRes.diffText === 'string' ? diffNsRes.diffText : undefined
-    return { currentHead, dirty, stStdout, changedFiles, policy, diffText }
+    const dirty = snap.dirty > 0
+    const stStdout = (snap.statusEntries ?? []).map((e) => `${e.xy} ${e.file}`).join('\n')
+    return {
+      currentHead: snap.headSha,
+      dirty,
+      stStdout,
+      changedFiles: snap.changedFiles,
+      policy: snap.policy,
+      diffText: !dirty ? snap.diffText : undefined,
+    }
   }
 
   // 证据只取人说过的原文（`--e2e-evidence` / `--visual-evidence`）。裸 `--visual-checked` 只是口头声明、
@@ -565,14 +555,14 @@ export async function handleSubmit(opts, roots) {
 
   if (isGenericGit) {
     await postLocalLifecycleComments({ targetRepo, pushRemote, actionFallback: 'submitted' })
-    ledger.status = 'submitted'
+    ledger.status = ledger.role === 'contributor-fork' ? 'awaiting-upstream-merge' : 'submitted'
     ledger.deferredPush = deferredPush
     ledger.deferredPushReason = deferredPushReason
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, deferredPush, deferredPushReason, head: currentHead, pushRemote, reviewSlotSync }, null, 2)}\n`)
     else {
       process.stdout.write(deferredPush
-        ? `submit 完成（generic-git 离线/延迟推送模式：${deferredPushReason}，本地已就绪 @ ${currentHead?.slice(0, 7)}，合前须手工推送并在远端合并后带 --remote-merged）。\n`
+        ? `submit 完成（generic-git 离线/延迟推送模式：${deferredPushReason}，本地已就绪 @ ${currentHead?.slice(0, 7)}，合前须手工推送并在远端托管完成合并，随后执行 flow.mjs merge 现场取回核验）。\n`
         : `submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
       printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }

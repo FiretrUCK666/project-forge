@@ -44,6 +44,8 @@ export function readSessionState(mainRoot) {
   return null
 }
 
+export const PRE_INIT_MAX_BYTES = 8192
+
 export function recordStepState(mainRoot, { step, ok = true, summary = '', meta = {} } = {}) {
   const stepKey = String(step ?? '').trim().toUpperCase()
   if (!stepKey) return null
@@ -61,6 +63,8 @@ export function recordStepState(mainRoot, { step, ok = true, summary = '', meta 
       },
     },
     triage: prev.triage ?? null,
+    ...(prev.triageByTask ? { triageByTask: prev.triageByTask } : {}),
+    ...(prev.preInit ? { preInit: prev.preInit } : {}),
     updatedAt: new Date().toISOString(),
   }
   writeJsonAtomic(statePath, next)
@@ -103,6 +107,7 @@ export function recordTriageDecision(mainRoot, { caseType, summary = '', paths =
     steps: prev.steps ?? {},
     triage: entry,
     triageByTask: { ...(prev.triageByTask ?? {}), [mapKey]: entry },
+    ...(prev.preInit ? { preInit: prev.preInit } : {}),
     updatedAt: entry.at,
   }
   writeJsonAtomic(statePath, next)
@@ -190,4 +195,164 @@ export function findBlockingTriageDowngrade(sess, { taskId = null, slug = null, 
     if (!chk.ok) return chk
   }
   return { ok: true }
+}
+
+function emptyPreInit() {
+  return {
+    topic: null,
+    decisions: [],
+    exclusions: [],
+    anchors: [],
+    openQuestions: [],
+    updatedAt: null,
+    consumedByTaskId: null,
+    consumedAt: null,
+  }
+}
+
+function normalizePreInitList(raw, existing = []) {
+  const out = [...(Array.isArray(existing) ? existing : [])]
+  const seen = new Set(out)
+  const incoming = Array.isArray(raw) ? raw : (raw !== undefined && raw !== null ? [raw] : [])
+  for (const item of incoming) {
+    const s = String(item ?? '').trim().slice(0, 600)
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+  }
+  return out
+}
+
+function hasPreInitContent(pre) {
+  if (!pre || typeof pre !== 'object') return false
+  return Boolean(
+    pre.topic
+    || (pre.decisions?.length ?? 0) > 0
+    || (pre.exclusions?.length ?? 0) > 0
+    || (pre.anchors?.length ?? 0) > 0
+    || (pre.openQuestions?.length ?? 0) > 0,
+  )
+}
+
+function boundPreInitSize(pre, maxBytes = PRE_INIT_MAX_BYTES) {
+  const fields = ['decisions', 'exclusions', 'anchors', 'openQuestions']
+  while (Buffer.byteLength(JSON.stringify(pre), 'utf8') > maxBytes) {
+    let longestField = null
+    let longestLen = 0
+    for (const f of fields) {
+      if (pre[f].length > longestLen) {
+        longestLen = pre[f].length
+        longestField = f
+      }
+    }
+    if (longestField && longestLen > 0) {
+      pre[longestField].shift()
+    } else if (pre.topic && pre.topic.length > 64) {
+      pre.topic = pre.topic.slice(0, 64)
+    } else {
+      break
+    }
+  }
+  return pre
+}
+
+/** 读取未消费的 `init` 前讨论缓冲（`preInit`）；为空或已消费则返回 null。 */
+export function readPreInitState(mainRoot) {
+  const sess = readSessionState(mainRoot)
+  const raw = sess?.preInit
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.consumedByTaskId && !hasPreInitContent(raw)) return null
+  if (!hasPreInitContent(raw)) return null
+  return {
+    topic: raw.topic ?? null,
+    decisions: Array.isArray(raw.decisions) ? [...raw.decisions] : [],
+    exclusions: Array.isArray(raw.exclusions) ? [...raw.exclusions] : [],
+    anchors: Array.isArray(raw.anchors) ? [...raw.anchors] : [],
+    openQuestions: Array.isArray(raw.openQuestions) ? [...raw.openQuestions] : [],
+    updatedAt: raw.updatedAt ?? null,
+    consumedByTaskId: raw.consumedByTaskId ?? null,
+    consumedAt: raw.consumedAt ?? null,
+  }
+}
+
+/** 向 `session-state.json` 的有界 `preInit` 缓冲追加决策/排除项/锚点/待拍板问题。 */
+export function appendPreInitNote(mainRoot, {
+  topic = null,
+  decision = null,
+  decisions = [],
+  exclude = null,
+  exclusions = [],
+  anchor = null,
+  anchors = [],
+  open = null,
+  openQuestions = [],
+  reset = false,
+} = {}) {
+  const statePath = resolveSessionStatePath(mainRoot)
+  const prev = readJsonSafe(statePath, null) ?? { schemaVersion: 1, steps: {}, triage: null, triageByTask: {} }
+  const prevPre = (!reset && prev.preInit && !prev.preInit.consumedByTaskId) ? prev.preInit : emptyPreInit()
+  const nextTopic = topic && String(topic).trim()
+    ? String(topic).trim().slice(0, 240)
+    : (prevPre.topic ?? null)
+  const now = new Date().toISOString()
+  const preInit = boundPreInitSize({
+    topic: nextTopic,
+    decisions: normalizePreInitList([...(Array.isArray(decisions) ? decisions : []), ...(decision ? [decision] : [])], prevPre.decisions),
+    exclusions: normalizePreInitList([...(Array.isArray(exclusions) ? exclusions : []), ...(exclude ? [exclude] : [])], prevPre.exclusions),
+    anchors: normalizePreInitList([...(Array.isArray(anchors) ? anchors : []), ...(anchor ? [anchor] : [])], prevPre.anchors),
+    openQuestions: normalizePreInitList([...(Array.isArray(openQuestions) ? openQuestions : []), ...(open ? [open] : [])], prevPre.openQuestions),
+    updatedAt: now,
+    consumedByTaskId: null,
+    consumedAt: null,
+  })
+  const next = {
+    schemaVersion: 1,
+    steps: prev.steps ?? {},
+    triage: prev.triage ?? null,
+    triageByTask: prev.triageByTask ?? {},
+    preInit,
+    updatedAt: now,
+  }
+  writeJsonAtomic(statePath, next)
+  return { preInit, byteSize: Buffer.byteLength(JSON.stringify(preInit), 'utf8') }
+}
+
+/** 在 `initDoc` 吸收后清空 `preInit` 条目并标记 `consumedByTaskId`，防止重复吸收。 */
+export function consumePreInitNotes(mainRoot, { taskId = null, slug = null } = {}) {
+  try {
+    const statePath = resolveSessionStatePath(mainRoot)
+    const prev = readJsonSafe(statePath, null)
+    if (!prev || typeof prev !== 'object' || !hasPreInitContent(prev.preInit)) return null
+    const snapshot = readPreInitState(mainRoot)
+    const now = new Date().toISOString()
+    const nextPreInit = {
+      ...emptyPreInit(),
+      updatedAt: now,
+      consumedByTaskId: taskId || slug || 'init',
+      consumedAt: now,
+    }
+    writeJsonAtomic(statePath, {
+      ...prev,
+      preInit: nextPreInit,
+      updatedAt: now,
+    })
+    return snapshot
+  } catch {
+    return null
+  }
+}
+
+/** 从最近匹配的未终结 `triage` 记录继承 `planMode`（`interactive` / `autonomous`）。 */
+export function resolveInheritedTriagePlanMode(mainRoot, { taskId = null, slug = null } = {}) {
+  const sess = readSessionState(mainRoot)
+  if (!sess) return null
+  const cleanTask = taskId ? String(taskId).trim().toLowerCase() : ''
+  const cleanSlug = slug ? String(slug).trim().toLowerCase() : ''
+  const byTask = sess.triageByTask && typeof sess.triageByTask === 'object' ? Object.values(sess.triageByTask) : []
+  const pool = [...byTask, ...(sess.triage ? [sess.triage] : [])].filter((r) => r && !r.terminal && r.planMode)
+  const exact = pool.find((r) => (cleanTask && String(r.taskId ?? '').toLowerCase() === cleanTask)
+    || (cleanSlug && String(r.slug ?? '').toLowerCase() === cleanSlug))
+  if (exact?.planMode) return exact.planMode
+  const unconsumed = pool.filter((r) => !r.consumedByTaskId).at(-1)
+  return unconsumed?.planMode ?? sess.triage?.planMode ?? null
 }

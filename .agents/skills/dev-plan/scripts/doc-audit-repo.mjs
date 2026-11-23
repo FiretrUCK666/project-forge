@@ -5,10 +5,11 @@
  */
 
 import { existsSync, readdirSync } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 
 import { canonicalPath, posixPath, readTextSafe } from '../../lib/git.mjs'
-import { isManagedPlanDoc, parseDocFrontmatter } from '../../lib/docs.mjs'
+import { isManagedPlanDoc } from '../../lib/docs.mjs'
+import { listPlanDocsSummary } from '../../lib/plan-index.mjs'
 
 /** 受管规划文档目录：审计只在这里找可审对象。 */
 const AUDITED_PLAN_DIRS = ['docs/prd', 'docs/specs', 'docs/todo']
@@ -24,32 +25,8 @@ export function collectMarkdownFiles(dir, root) {
   return out.sort((a, b) => a.rel.localeCompare(b.rel))
 }
 
-function summarizeDoc(item) {
-  const text = readTextSafe(item.abs) ?? ''
-  const fm = parseDocFrontmatter(text)
-  const title = /^#\s+(.+)$/m.exec(fm.body || text)?.[1]?.trim() ?? fm.data?.title ?? basename(item.rel)
-  return {
-    file: item.rel,
-    title,
-    status: fm.data?.status ?? null,
-    created: fm.data?.created ?? null,
-    plannedAt: fm.data?.planned_at ?? null,
-    issue: fm.data?.issue ?? null,
-    pr: fm.data?.pr ?? null,
-    totalChecks: (text.match(/^- \[[ xX]\]/gm) ?? []).length,
-    doneChecks: (text.match(/^- \[[xX]\]/gm) ?? []).length,
-  }
-}
-
 export function listDocs(repoRoot) {
-  const tddPath = join(repoRoot, 'docs', 'TDD.md')
-  return {
-    tdd: existsSync(tddPath) ? summarizeDoc({ rel: 'docs/TDD.md', abs: tddPath }) : null,
-    prds: collectMarkdownFiles(join(repoRoot, 'docs', 'prd'), repoRoot).map(summarizeDoc),
-    specs: collectMarkdownFiles(join(repoRoot, 'docs', 'specs'), repoRoot).map(summarizeDoc),
-    todos: collectMarkdownFiles(join(repoRoot, 'docs', 'todo'), repoRoot).map(summarizeDoc),
-    archived: collectMarkdownFiles(join(repoRoot, 'docs', 'archive'), repoRoot).map(summarizeDoc),
-  }
+  return listPlanDocsSummary(repoRoot)
 }
 
 export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkOrphanSlices, evaluateSliceGraph = null }) {

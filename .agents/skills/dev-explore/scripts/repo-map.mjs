@@ -340,13 +340,18 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus, writeF
     hotspots,
   }
   const fmSync = prefillFeatureMapFromRepoMap(root, map, { write: Boolean(writeFeatureMap) })
-  return {
+  const result = {
     ...map,
     featureMapPath: FEATURE_MAP_REL,
     featureMapExists: existsSync(join(root, FEATURE_MAP_REL)),
     featureMapWritten: fmSync.written,
-    featureMapIndex: fmSync.featureMap,
   }
+  Object.defineProperty(result, 'featureMapIndex', {
+    value: fmSync.featureMap,
+    enumerable: false,
+    configurable: true,
+  })
+  return result
 }
 
 function printHelp() {

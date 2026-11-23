@@ -257,26 +257,85 @@ export function serializeFindings(round, findings = []) {
   return parts.join(' ;; ')
 }
 
-/** 把存下来的历史解析回结构化记录。 */
+/** 把存下来的历史解析回结构化记录（同时兼容管道串、`Round N:` 串及 `ledgerEntry.findings` 数组）。 */
 export function parseFindings(raw) {
+  if (Array.isArray(raw)) {
+    const out = []
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object') continue
+      const r = Number(entry.round) || 1
+      if (Array.isArray(entry.items)) {
+        const sev = String(entry.verdict ?? '').toLowerCase() === 'passed' ? 'should' : 'must'
+        for (const item of entry.items) {
+          const text = String(item ?? '').trim()
+          if (text) out.push({ round: r, severity: sev, text })
+        }
+      } else if (entry.text) {
+        out.push({ round: r, severity: String(entry.severity ?? 'must').toLowerCase(), text: String(entry.text).trim() })
+      }
+    }
+    return out
+  }
   const out = []
   for (const part of String(raw ?? '').split(';;')) {
     const seg = part.trim()
     if (!seg) continue
-    const m = /^(\d+)\|([a-z]+)\|(.+)$/i.exec(seg)
-    if (!m) continue
-    out.push({ round: Number(m[1]), severity: m[2].toLowerCase(), text: m[3].trim() })
+    const pipeMatch = /^(\d+)\|([a-z]+)\|(.+)$/i.exec(seg)
+    if (pipeMatch) {
+      out.push({ round: Number(pipeMatch[1]), severity: pipeMatch[2].toLowerCase(), text: pipeMatch[3].trim() })
+      continue
+    }
+    const roundMatch = /^Round\s+(\d+)\s*:\s*(.+)$/i.exec(seg)
+    if (roundMatch) {
+      for (const item of roundMatch[2].split(/;\s*/).map((s) => s.trim()).filter(Boolean)) {
+        out.push({ round: Number(roundMatch[1]), severity: 'must', text: item })
+      }
+    }
   }
   return out
 }
 
-/** 生成「这一轮要复核什么」的清单。 */
-export function buildCritiqueScope({ round, currentSha, previousSha, findingsRaw, reviewer }) {
-  const history = parseFindings(findingsRaw)
+/** 生成「这一轮要复核什么」的清单（原生消费 `ledgerEntry.findings`、`priorRounds`、`override`、`continued`）。 */
+export function buildCritiqueScope({
+  round, currentSha, previousSha = null, findingsRaw = '', findings = null,
+  priorRounds = [], override = null, continued = null, reviewer = '(未指定)',
+}) {
+  const history = []
+  const seen = new Set()
+  const addFinding = (f) => {
+    const r = Number(f?.round) || 1
+    const text = String(f?.text ?? '').trim()
+    if (!text) return
+    const key = `${r}:${text}`
+    if (seen.has(key)) return
+    seen.add(key)
+    history.push({ round: r, severity: String(f?.severity ?? 'must').toLowerCase(), text })
+  }
+
+  for (const item of parseFindings(findings)) addFinding(item)
+  for (const pr of Array.isArray(priorRounds) ? priorRounds : []) {
+    const rNum = Number(pr?.round) || 1
+    const sev = String(pr?.verdict ?? '').toLowerCase() === 'passed' ? 'should' : 'must'
+    const items = Array.isArray(pr?.findings) && pr.findings.length > 0
+      ? pr.findings
+      : (String(pr?.verdict ?? '').toLowerCase() === 'rejected' && pr?.summary ? [pr.summary] : [])
+    for (const txt of items) addFinding({ round: rNum, severity: sev, text: txt })
+  }
+  for (const item of parseFindings(findingsRaw)) addFinding(item)
+
+  const sortedRounds = Array.isArray(priorRounds)
+    ? [...priorRounds].sort((a, b) => (Number(a?.round) || 0) - (Number(b?.round) || 0))
+    : []
+  const lastPriorRound = sortedRounds.at(-1) ?? null
+  const effPrevSha = previousSha
+    ?? lastPriorRound?.artifact_baseline?.shortSha
+    ?? lastPriorRound?.sha
+    ?? null
+
   const rounds = [...new Set(history.map((h) => h.round))].sort((a, b) => a - b)
   const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null
   const lastFindings = history.filter((h) => h.round === lastRound)
-  const changed = Boolean(previousSha && currentSha && String(previousSha) !== String(currentSha))
+  const changed = Boolean(effPrevSha && currentSha && String(effPrevSha) !== String(currentSha))
 
   const lines = [
     `# 规划审核范围（Round ${round}，复核人 ${reviewer}）`,
@@ -295,10 +354,18 @@ export function buildCritiqueScope({ round, currentSha, previousSha, findingsRaw
   } else {
     lines.push('## 第一轮', '', '按完整范围审，并将发现记入 `--findings`。', '')
   }
-  lines.push('## 正文指纹', '', `- 当前：\`${currentSha ?? '(未计算)'}\``, `- 上轮：\`${previousSha ?? '(无记录)'}\``, '')
+  if (continued?.active && continued.reason) {
+    lines.push('## 人类打回重写指令（critique-continue）', '', `- 原因：${continued.reason}`, `- 指纹：\`${continued.sha ?? '-'}\`（${continued.sha === currentSha ? '正文尚未修改' : '正文已修订'}）`, '')
+  }
+  if (override?.approved) {
+    lines.push('## 人类停损解锁记录（critique-override）', '', `- 理由：${override.reason ?? '-'}`, `- 签字指纹：\`${override.sha ?? '-'}\`（${override.sha && currentSha && override.sha !== currentSha ? '已过期' : '有效'}）`, '')
+  }
+  lines.push('## 正文指纹', '', `- 当前：\`${currentSha ?? '(未计算)'}\``, `- 上轮：\`${effPrevSha ?? '(无记录)'}\``, '')
   return {
     prompt: `${lines.join('\n').trimEnd()}\n`,
     mustRecheck: lastFindings.map((f) => f.text),
+    allFindings: history,
+    previousSha: effPrevSha,
     changed,
     note: lastFindings.length > 0 ? `上一轮 ${lastFindings.length} 条，正文${changed ? '已改' : '未改'}` : '无历史意见',
   }

@@ -146,7 +146,7 @@ export function registerTraceSyncCases(cases) {
 
       const newSpecInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'spec', '--slug', 'pair-sync-v2', '--title', 'Pair Sync V2',
-        '--issue', String(locNum), '--owner', 'arch-1', '--in-place', '--json',
+        '--issue', String(locNum), '--owner', 'arch-1', '--in-place', '--force', '--json',
       ], { cwd: dir })
       if (newSpecInit.status !== 0) return `新 SPEC init 失败：${newSpecInit.stderr}`
       const newSpecRel = JSON.parse(newSpecInit.stdout).file

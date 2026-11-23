@@ -4,18 +4,12 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-plan、dev-flow、dev-review、dev-govern 共用。
  */
 
-import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import {
-  DOC_LEGACY_NAME_RE,
-  DOC_STANDARD_NAME_RE,
-  isManagedPlanDoc,
-  parseDocFilename,
-  parseDocFrontmatter,
-  serializeDocFrontmatter,
-  stripCritiqueMeta,
-  updateDocFrontmatter,
+  DOC_LEGACY_NAME_RE, DOC_STANDARD_NAME_RE, isManagedPlanDoc, parseDocFilename,
+  parseDocFrontmatter, serializeDocFrontmatter, stripCritiqueMeta, updateDocFrontmatter,
 } from './doc-frontmatter.mjs'
 import { evaluateMasterPrdClosureState } from './doc-substantive.mjs'
 import { collectOwnerHistory, isApprovingStatus, PREVIOUS_OWNERS_KEY } from './doc-approval.mjs'
@@ -23,18 +17,12 @@ import { EXIT } from './exit-codes.mjs'
 import { gitRun, posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { hasDotGitInAncestors, isPathInGitIndexFast } from './git-fast.mjs'
 import { listTaskLedgers, recordPlanningProvenance, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
+import { indexPlanDocs, syncPlanDocBodyMeta } from './plan-index.mjs'
 
 export {
-  DOC_LEGACY_NAME_RE,
-  DOC_STANDARD_NAME_RE,
-  isManagedPlanDoc,
-  parseDocFilename,
-  parseDocFrontmatter,
-  serializeDocFrontmatter,
-  stripCritiqueMeta,
-  updateDocFrontmatter,
+  DOC_LEGACY_NAME_RE, DOC_STANDARD_NAME_RE, isManagedPlanDoc, parseDocFilename,
+  parseDocFrontmatter, serializeDocFrontmatter, stripCritiqueMeta, syncPlanDocBodyMeta, updateDocFrontmatter,
 }
-
 export { collectOwnerHistory, isApprovingStatus, isApprovingStatusValue, PREVIOUS_OWNERS_KEY } from './doc-approval.mjs'
 
 export const DOC_FRONTMATTER_KEY_ORDER = Object.freeze({
@@ -98,16 +86,9 @@ function inferDocKindFromPath(relPath, fmData) {
 }
 
 function listDocsInFolder(repoRoot, folderRel) {
-  const absDir = join(repoRoot, folderRel)
-  if (!existsSync(absDir)) return []
-  try {
-    return readdirSync(absDir, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith('.md'))
-      .map((e) => `${folderRel}/${e.name}`)
-      .sort()
-  } catch {
-    return []
-  }
+  return indexPlanDocs(repoRoot, { includeArchive: true, includeWorktrees: false })
+    .filter((d) => posixPath(dirname(d.rel)) === posixPath(folderRel))
+    .map((d) => d.rel)
 }
 
 function escapeRegExpStr(s) {
@@ -573,7 +554,12 @@ export async function syncDocsLifecycle(repoRoot, {
     }
     const defaultOrder = DOC_FRONTMATTER_KEY_ORDER[sib.kind] ?? []
     const keyOrder = [...defaultOrder, ...fm.keyOrder, ...Object.keys(merged)]
-    const cleanBody = fm.body.replace(/^\n+/, '')
+    const rawBody = fm.body.replace(/^\n+/, '')
+    const cleanBody = syncPlanDocBodyMeta(rawBody, merged, {
+      prdRel: byKind.prd ?? undefined,
+      specRel: byKind.spec ?? undefined,
+      todoRel: byKind.todo ?? undefined,
+    })
     const nextText = `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`
     writeAtomic(abs, nextText)
     updated.push({ file: sib.rel, kind: sib.kind, data: merged })
@@ -723,7 +709,12 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     const merged = { ...fm.data }
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) merged[k] = v
     const keyOrder = [...(DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? []), ...fm.keyOrder, ...Object.keys(merged)]
-    const cleanBody = fm.body.replace(/^\n+/, '')
+    const rawBody = fm.body.replace(/^\n+/, '')
+    const cleanBody = syncPlanDocBodyMeta(rawBody, merged, {
+      prdRel: byKind.prd ?? undefined,
+      specRel: byKind.spec ?? undefined,
+      todoRel: byKind.todo ?? undefined,
+    })
     writeAtomic(abs, `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`)
     updated.push({ file: item.rel, kind: item.kind, status: merged.status })
   }

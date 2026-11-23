@@ -131,16 +131,22 @@ async function checkCommandClaim(root, cmd, profile = null) {
  * @param {string} text 文档全文
  * @returns {Promise<object>}
  */
-export async function verifyDocClaims(root, text) {
+export async function verifyDocClaims(root, text, { runCommands = true } = {}) {
   const claims = collectDocClaims(text)
   const { text: codeText, files: codeFiles } = readCodebase(root)
 
   const paths = claims.paths.map((rel) => ({ rel, ...checkPathClaim(root, rel) }))
   const names = claims.identifiers.map((name) => ({ name, ...checkNameExists(codeText, name) }))
 
-  const profile = parseDevProfile(root)
+  const profile = runCommands ? parseDevProfile(root) : null
   const commands = []
-  for (const cmd of claims.commands) commands.push({ cmd, ...(await checkCommandClaim(root, cmd, profile)) })
+  for (const cmd of claims.commands) {
+    if (!runCommands) {
+      commands.push({ cmd, ok: true, ran: false, skippedByStaticMode: true, why: '静态核查模式，未执行命令（传 --run-commands 可真跑）' })
+    } else {
+      commands.push({ cmd, ...(await checkCommandClaim(root, cmd, profile)) })
+    }
+  }
 
   const failedPaths = paths.filter((r) => !r.ok)
   const failedNames = names.filter((r) => !r.ok)
@@ -152,11 +158,12 @@ export async function verifyDocClaims(root, text) {
   return {
     total,
     failed,
+    staticOnly: !runCommands,
     scannedFiles: codeFiles.length,
     paths,
     names,
     commands,
-    summary: `核了 ${total} 条机械断言（扫了 ${codeFiles.length} 个源码文件）：${total - failed} 条成立，${failed} 条不成立`,
+    summary: `核了 ${total} 条机械断言（扫了 ${codeFiles.length} 个源码文件${runCommands ? '' : '，命令仅静态识别未执行'}）：${total - failed} 条成立，${failed} 条不成立`,
   }
 }
 
@@ -171,7 +178,9 @@ export function renderVerificationForReviewer(result) {
     '## 已替你核过的机械事实',
     '',
     '> 这一段由 `doc-plan verify-facts` 自动生成。',
-    '> 文件在不在、名字在代码里有没有、命令跑不跑得通——这些不需要人判断，已经跑过一遍了。',
+    result.staticOnly
+      ? '> 默认静态核查模式（不执行测试命令）：已核验仓内路径与符号；若需真跑文档只读命令请显式传 `--run-commands`。'
+      : '> 文件在不在、名字在代码里有没有、命令跑不跑得通——这些不需要人判断，已经跑过一遍了。',
     '> **请把时间花在「这条判据能不能证伪」这类判断上**，别再手工核这些。',
     '',
     result.summary,

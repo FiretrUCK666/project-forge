@@ -490,7 +490,7 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
     const details = [
       eq.reason,
       ...eq.missing.map((p) => `缺失：${p}`),
-      ...eq.drifted.map((p) => `字节不一致：${p}`),
+      ...eq.drifted.map((p) => (typeof p === 'string' ? `字节不一致：${p}` : `${p.state}：${p.path}`)),
       ...eq.unregistered.map((p) => `未登记哈希：${p}`),
       ...eq.extraManaged.map((p) => `多余托管文件：${p}`),
     ].filter(Boolean)

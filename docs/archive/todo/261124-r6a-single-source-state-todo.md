@@ -5,7 +5,7 @@ status: done
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
-pr: null
+pr: 162
 branch: feat/r6a-single-source-state
 owner: plan-r6-arch
 plan_mode: interactive
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-r6a-single-source-state-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / 基线 | `feat/r6-arch-plan` @ `1853e22` |
+| 分支 / 基线 | `feat/r6a-single-source-state` @ `1853e22` |
 | 任务编号 | `r6a-single-source-state` |
-| 负责人 / 审批 | plan-r6-arch / `false` |
+| 负责人 / 审批 | plan-r6-arch / `true` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-r6a-single-source-state-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / #162 / `docs/archive/specs/261124-r6a-single-source-state-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -64,7 +64,7 @@ related_spec: ../specs/261124-r6a-single-source-state-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，待提审`
+- **当前状态**：`已完成 (done)`
 - **待拍板事项**：无
 - **下一步第一件事**：完成 `finalize` 归档与提交、执行 `verify --mode full` / `--mode gate` 实证并 `submit` 提 PR。
 

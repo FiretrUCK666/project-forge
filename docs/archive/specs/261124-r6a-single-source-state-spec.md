@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
-pr: null
+pr: 162
 branch: feat/r6a-single-source-state
 owner: plan-r6-arch
 plan_mode: interactive
@@ -30,7 +30,7 @@ depends_on: []
 | 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / Issue / PR | `feat/r6-arch-plan` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/r6a-single-source-state` / 未关联 / #162 |
 | 负责人 / 内审状态 | plan-r6-arch / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
 | 关联 PRD / Todo | `docs/prd/261124-r6-arch-hardening-prd.md` / `docs/archive/todo/261124-r6a-single-source-state-todo.md` |

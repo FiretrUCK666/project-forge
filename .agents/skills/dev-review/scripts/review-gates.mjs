@@ -12,12 +12,14 @@ import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
 import { formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { checkMermaidLabelWidth, isSharedMasterPrd } from '../../lib/docs.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
+import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
   CODE_EXT_RE, GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE,
-  classifyDoorType, detectGateWeakeningInEntry, evaluateArchRules, isTestOrFixtureFile, matchGlob,
+  classifyDoorType, countTextLines, detectGateWeakeningInEntry, evaluateArchRules, isLegalArchiveMove, isTestOrFixtureFile, matchGlob,
   scanStructuralHygiene, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
+import { resolveOversizedExemption } from '../../lib/static-gates-comment-hygiene.mjs'
 import { EXTRA_CI_FILE_RE, hasValidE2eObservationOnHead } from '../../lib/workflow-policy.mjs'
 import { formatReviewContextLines } from './review-context.mjs'
 
@@ -387,12 +389,15 @@ export function assessBehavioralGate({
   }
 }
 
-export function assessStructuralGate({ reviewRoot, diff, devProfile, parity }) {
+export function assessStructuralGate({ reviewRoot, mainRoot = reviewRoot, diff, devProfile, parity }) {
   const chunks = diff.chunks ?? splitDiffByFile(diff.text)
   const tombstoneComments = []
   const excuseSuppressions = []
   const godFiles = []
   const codeFilesOnDisk = []
+  const gitAttributesText = readTextSafe(join(reviewRoot, '.gitattributes'), 64 * 1024) ?? ''
+  const agentsText = readTextSafe(join(reviewRoot, 'AGENTS.md'), 64 * 1024) ?? readTextSafe(join(mainRoot, 'AGENTS.md'), 64 * 1024) ?? ''
+  const forgeHooksConfig = loadForgeHooksConfig(mainRoot, reviewRoot)?.config ?? null
 
   const allEntries = [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]
   if (allEntries.length === 0) {
@@ -420,8 +425,8 @@ export function assessStructuralGate({ reviewRoot, diff, devProfile, parity }) {
     }
 
     const fullText = !isTestOrFixtureFile(f) ? readTextSafe(join(reviewRoot, f), 2 * 1024 * 1024) : undefined
-    const fullLineCount = fullText ? fullText.split('\n').length : 0
-    const hy = scanStructuralHygiene({ fileRel: f, lines: added, fullText, fullLineCount, warnLines: 800, highLines: 1500 })
+    const fullLineCount = fullText ? countTextLines(fullText) : 0
+    const hy = scanStructuralHygiene({ fileRel: f, lines: added, fullText, fullLineCount, warnLines: 800, highLines: 1500, gitAttributesText })
 
     for (const tc of hy.tombstoneComments) {
       tombstoneComments.push({
@@ -438,12 +443,15 @@ export function assessStructuralGate({ reviewRoot, diff, devProfile, parity }) {
       })
     }
     if (hy.godFile) {
-      godFiles.push({
-        file: f,
-        lines: hy.godFile.lines,
-        severity: hy.godFile.severity,
-        hint: `File exceeds 800 lines (${hy.godFile.lines}); extract cohesive modules instead of expanding a god file.`,
-      })
+      const exempt = resolveOversizedExemption({ fileRel: f, agentsText, forgeHooksConfig })
+      if (!exempt.exempt) {
+        godFiles.push({
+          file: f,
+          lines: hy.godFile.lines,
+          severity: hy.godFile.severity,
+          hint: `File exceeds 800 lines (${hy.godFile.lines}); extract cohesive modules instead of expanding a god file.`,
+        })
+      }
     }
   }
 
@@ -480,8 +488,12 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
     ...(task?.prdFile?.startsWith('docs/archive/') ? [task.prdFile] : []),
   ].filter(Boolean))
 
+  const deletedFiles = new Set((diff.files ?? []).filter((e) => e.status === 'D').map((e) => e.file))
+  const entryByFile = new Map((diff.files ?? []).map((e) => [e.file, e]))
+  const isExemptArchive = (f) => ownArchived.has(f) || isLegalArchiveMove(entryByFile.get(f) ?? { file: f, status: 'M' }, deletedFiles, ownArchived)
+
   const nonExemptDoNotEdit = allFiles.some(
-    (f) => !ownArchived.has(f) && doNotEdit.some((pat) => matchGlob(f, pat)),
+    (f) => !isExemptArchive(f) && doNotEdit.some((pat) => matchGlob(f, pat)),
   )
 
   const oneWayReasons = []
@@ -508,7 +520,7 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
         oneWayReasons.push('Modifies schema/migration or security/auth boundary')
       }
     }
-    if (!ownArchived.has(f) && doNotEdit.some((pat) => matchGlob(f, pat))) {
+    if (!isExemptArchive(f) && doNotEdit.some((pat) => matchGlob(f, pat))) {
       if (!oneWayReasons.includes('Modifies path listed in do-not-edit')) {
         oneWayReasons.push('Modifies path listed in do-not-edit')
       }
@@ -525,7 +537,7 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
     diffBytes: diff.bytes,
   })
 
-  const isOneWay = oneWayReasons.length > 0 || (baseDoor.doorType === 'one-way' && !allFiles.every((f) => ownArchived.has(f)))
+  const isOneWay = oneWayReasons.length > 0 || (baseDoor.doorType === 'one-way' && !allFiles.every((f) => isExemptArchive(f)))
   const doorType = isOneWay ? 'one-way' : 'two-way'
   let blastRadius = 'low'
   if (gateWeakened || hrHits.length >= 2 || oneWayReasons.length >= 2 || totalFiles >= 10 || diff.bytes >= 40000) {
@@ -638,7 +650,12 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
   }
 
   if (pack.reviewContext) lines.push(...formatReviewContextLines(pack.reviewContext))
-  else if (pack.contextBrief) lines.push(...formatContextBriefLines(pack.contextBrief))
+  if (pack.contextBrief && !pack.reviewContext?.contextBrief) {
+    lines.push(...formatContextBriefLines(pack.contextBrief, {
+      title: '  Evergreen Docs & Context Brief:',
+      includeFeatureMap: (pack.reviewContext?.affectedBusinessFlows?.length ?? 0) === 0,
+    }))
+  }
 
   lines.push('', '--- Doc-Code Parity Gate ---')
   if (pack.parity.triggers.length === 0 && pack.parity.todoIssues.length === 0 && (pack.parity.mermaidViolations?.length ?? 0) === 0) {

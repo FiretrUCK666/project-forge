@@ -15,7 +15,7 @@ import {
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, ISSUE_REF_RE, JUSTIFICATION_ANCHOR_RE,
-  RUST_ALLOW_RE, TEST_FILE_RE, TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
+  RUST_ALLOW_RE, TEST_FILE_RE, TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, countTextLines, evaluateArchRules,
   extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode, scanStructuralHygiene,
 } from '../../lib/static-gates.mjs'
 import { resolveOversizedExemption, scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
@@ -437,21 +437,33 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
       const lines = getLinesCached(f.full, info) ?? []
       const parsedComments = getCommentLinesCached(f.full, lines, ext)
       if (!isTestOrFixtureFile(f.rel) && !f.name.endsWith('.min.js') && lines.length > GOD_FILE_WARN_LINES) {
+        const lineCount = countTextLines(info.text)
         const structCheck = scanStructuralHygiene({
-          fileRel: f.rel, lines, fullText: info.text, fullLineCount: lines.length,
+          fileRel: f.rel, lines, fullText: info.text, fullLineCount: lineCount,
           warnLines: GOD_FILE_WARN_LINES, highLines: GOD_FILE_HIGH_LINES, skipFixtureCheck: true, gitAttributesText,
         })
         if (structCheck.godFile) {
           const exempt = resolveOversizedExemption({ fileRel: f.rel, agentsText, forgeHooksConfig })
-          if (!exempt.exempt) {
-            const isHigh = lines.length > GOD_FILE_HIGH_LINES
-            oversizedNonExemptFiles.push({ rel: f.rel, lines: lines.length })
+          let ratchetPass = false
+          if (!exempt.exempt && changedSet && changedSet.has(f.rel) && isGit) {
+            const cmpRef = defaultBranch && (await gitRun(workRoot, ['--no-optional-locks', 'rev-parse', '--verify', defaultBranch])).ok
+              ? (await gitRun(workRoot, ['--no-optional-locks', 'merge-base', 'HEAD', defaultBranch])).stdout?.trim() || 'HEAD'
+              : 'HEAD'
+            const baseShow = await gitRun(workRoot, ['--no-optional-locks', 'show', `${cmpRef}:${f.rel}`])
+            if (baseShow.ok && baseShow.stdout) {
+              const baseLineCount = countTextLines(baseShow.stdout)
+              if (baseLineCount > GOD_FILE_WARN_LINES && (lineCount - baseLineCount) <= 80) ratchetPass = true
+            }
+          }
+          if (!exempt.exempt && !ratchetPass) {
+            const isHigh = lineCount > GOD_FILE_HIGH_LINES
+            oversizedNonExemptFiles.push({ rel: f.rel, lines: lineCount })
             addFinding(findings, {
               id: `hygiene.god-file.${f.rel}`,
               category: 'hygiene',
               severity: isHigh ? 'high' : 'medium',
               file: f.rel,
-              title: `Oversized source file (${lines.length} lines > ${isHigh ? GOD_FILE_HIGH_LINES : GOD_FILE_WARN_LINES}): ${f.rel}`,
+              title: `Oversized source file (${lineCount} lines > ${isHigh ? GOD_FILE_HIGH_LINES : GOD_FILE_WARN_LINES}): ${f.rel}`,
               action: 'Split cohesive responsibilities into smaller focused modules rather than expanding a god file.',
             })
           }

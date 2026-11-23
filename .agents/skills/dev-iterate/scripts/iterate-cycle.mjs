@@ -302,6 +302,51 @@ function buildRoundStages(round, stop) {
 }
 
 /**
+ * 合并历史进度：保留既有多轮记录，并把本轮新增条目（未显式编号或单轮追加时）接续编号。
+ */
+export function mergeCycleHistory(prevRaw = [], incomingRaw = undefined) {
+  const prev = normalizeProgressHistory(prevRaw)
+  if (incomingRaw === undefined || incomingRaw === null || String(incomingRaw).trim() === '') {
+    return { rawForPlan: prev, parseWarnings: [] }
+  }
+  const detail = parseProgressHistoryDetail(incomingRaw)
+  const incomingItems = parseJsonish(incomingRaw, [])
+  if (detail.warnings.length > 0) {
+    return { rawForPlan: prev, parseWarnings: detail.warnings }
+  }
+  if (prev.length === 0) return { rawForPlan: detail.rounds, parseWarnings: [] }
+  const maxPrevRound = prev.at(-1)?.round ?? prev.length
+  const hasExplicitFullList = incomingItems.length > prev.length && incomingItems.every((it) => it && typeof it === 'object' && Number.isFinite(Number(it.round)))
+  if (hasExplicitFullList) return { rawForPlan: detail.rounds, parseWarnings: [] }
+  const appended = [...prev]
+  for (const item of incomingItems) {
+    if (item === null || item === undefined) continue
+    const rec = typeof item === 'number' ? { advanced: item } : item
+    if (!rec || typeof rec !== 'object') continue
+    const explicitRound = Number(rec.round)
+    const round = Number.isFinite(explicitRound) && explicitRound > appended.at(-1).round
+      ? explicitRound
+      : (appended.at(-1)?.round ?? maxPrevRound) + 1
+    appended.push(...normalizeProgressHistory([{ ...rec, round }]))
+  }
+  return { rawForPlan: appended, parseWarnings: [] }
+}
+
+/** 合并已持久化与新增待拍板门禁，按 id/summary 去重并保留单向门标记。 */
+export function mergeCycleGates(prevRaw = [], incomingRaw = undefined) {
+  const prev = normalizePendingGates(prevRaw)
+  if (incomingRaw === undefined || incomingRaw === null || String(incomingRaw).trim() === '') return prev
+  const next = normalizePendingGates(incomingRaw)
+  const byKey = new Map()
+  for (const g of [...prev, ...next]) {
+    const key = `${g.id}|${g.summary}`
+    const existing = byKey.get(key)
+    byKey.set(key, existing ? { ...existing, oneWay: existing.oneWay || g.oneWay } : g)
+  }
+  return [...byKey.values()]
+}
+
+/**
  * 构造有界循环编排结果。纯函数，不读盘不写盘，绝不修改任何源码。
  */
 export function buildCyclePlan({ goal = '', maxRounds = DEFAULT_MAX_ROUNDS, progressHistory = [], pendingGates = [] } = {}) {
@@ -332,6 +377,7 @@ export function buildCyclePlan({ goal = '', maxRounds = DEFAULT_MAX_ROUNDS, prog
     phase: stages[0]?.phase ?? null,
     phases: [...CYCLE_PHASES],
     stages,
+    history,
     roundProgress,
     pendingGates: gates,
     warnings,

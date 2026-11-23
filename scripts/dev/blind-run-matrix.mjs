@@ -137,14 +137,19 @@ export async function runEvolutionBlindMatrix(tracker, sandbox, envExtra) {
       `reduction=${metrics.tokenReductionPct}% (${locOutBytes}B vs ${fullDocsBytes}B)`,
     )
 
-    // Zero-Hint Scenario 1 & 3: Milestone natural-language flow + dev-iterate Day-2 native test generation
+    // Zero-Hint Scenario 1 & 3: Milestone natural-language flow + dev-iterate Day-2 native test generation (isolated worktree)
     const msCreate = runNode(flow, ['milestone', 'create', '--title', 'v10-GA', '--json'], dir, envExtra)
     const issCreate = runNode(flow, ['issue', 'create', '--title', 'feat: add scheduler regression', '--milestone', '1', '--json'], dir, envExtra)
-    const iterGen = runNode(iterScript, ['generate', dir, '--focus', 'scheduler', '--tier', 'integration', '--write', '--json'], dir, envExtra)
+    const iterMainBlocked = runNode(iterScript, ['generate', dir, '--focus', 'scheduler', '--tier', 'integration', '--write', '--json'], dir, envExtra)
+    const iterWt = join(sandbox, 'wt-matrix-iterate')
+    spawnSync('git', ['worktree', 'add', '-b', 'feat/matrix-iterate', iterWt, 'HEAD'], { cwd: dir, env: envExtra, stdio: 'pipe' })
+    runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [iterWt, '--no-backup'], iterWt, envExtra)
+    const iterWtScript = join(iterWt, '.agents/skills/dev-iterate/scripts/iterate.mjs')
+    const iterGen = runNode(iterWtScript, ['generate', iterWt, '--focus', 'scheduler', '--tier', 'integration', '--write', '--json'], iterWt, envExtra)
     const iterRun = iterGen.status === 0
-      ? runNode(iterScript, ['run', dir, '--targets', JSON.parse(iterGen.stdout).writtenPaths.join(','), '--concurrency', '2', '--json'], dir, envExtra)
+      ? runNode(iterWtScript, ['run', iterWt, '--targets', JSON.parse(iterGen.stdout).writtenPaths.join(','), '--concurrency', '2', '--json'], iterWt, envExtra)
       : { status: 1 }
-    const sc13Ok = msCreate.status === 0 && issCreate.status === 0 && iterGen.status === 0 && iterRun.status === 0
+    const sc13Ok = msCreate.status === 0 && issCreate.status === 0 && iterMainBlocked.status === 3 && iterGen.status === 0 && iterRun.status === 0
     if (sc13Ok) metrics.firstPassScenariosPassed += 2
     assertStep(
       tracker,

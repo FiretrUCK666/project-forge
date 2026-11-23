@@ -14,25 +14,31 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node
 import { cpus } from 'node:os'
 import { basename, dirname, join, posix, relative, resolve } from 'node:path'
 
-import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { locateDocuments } from '../../lib/doc-locator.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 import {
   COMMON_SKIP_DIRS, execSafe, gitRun, isMacOsJunkPath, isMainModule,
   posixPath, readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
-import { resolveExecutable } from '../../lib/exec.mjs'
+import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
-import { appendGovernSignal, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
+import { scanNeutralCiSteps } from '../../lib/profile-sniffer.mjs'
+import { appendGovernSignal, isActionableSignalCodeTarget, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
 import {
-  isPathInQuickTestScope, readFeatureMapSafe, renderNativeTestContent,
-  resolveNativeTestDir, slugTestToken, updateFeatureMapTestRefs, validateGeneratedTestQuality,
+  collectConfiguredTestEntries, expandVerificationCommands, isPathInQuickTestScope,
+  readFeatureMapSafe, renderNativeTestContent, resolveNativeTestDir, resolveTestRunner,
+  slugTestToken, updateFeatureMapTestRefs, validateGeneratedTestQuality,
 } from '../../lib/test-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
-import { buildCyclePlan, formatCycleText, loadCycleState, saveCycleState } from './iterate-cycle.mjs'
+import {
+  STOP_REASONS, buildCyclePlan, formatCycleText, loadCycleState,
+  mergeCycleGates, mergeCycleHistory, saveCycleState,
+} from './iterate-cycle.mjs'
 
 export { validateGeneratedTestQuality }
 
@@ -64,7 +70,9 @@ function printHelp() {
     '  --concurrency <N>        并发 worker 数量（默认 min(4, CPU核数)）',
     '  --timeout-ms <ms>        单测执行超时毫秒（默认 30000）',
     '  --perf-budget-ms <ms>    性能预算阈值毫秒（超阈视为退化并升级）',
-    '  --escalate               运行失败/越阈时经 escalation.mjs 建单转入正流修复',
+    '  --escalate               运行失败/越阈时经 escalation.mjs 建单转入正流修复（默认开启）',
+    '  --no-escalate            关闭运行失败自动升级建单（需配合外部理由或本地调试）',
+    '  --reset                  重置已持久化的 cycle 状态重新开始',
     '  --no-signals             不写入 signals.jsonl（测试预演用）',
     '  --json                   输出结构化 JSON',
     '',
@@ -134,7 +142,7 @@ export async function buildIterationPlan(repoRoot, {
   const testFiles = allCode.filter((f) => TEST_FILE_RE.test(f.rel))
   const featureMap = readFeatureMapSafe(repoRoot)
   const stateDir = resolveGovernStateDir(repoRoot, gitDir, isGit)
-  const { events: signals } = readSignalsJsonl(stateDir)
+  const { events: signals } = readSignalsJsonl(stateDir, { codeOnly: true, repoRoot })
   const recentChanges = await collectRecentChangedFiles(repoRoot, isGit)
   const nativeTarget = resolveNativeTestDir(repoRoot, { tier: cleanTier, devProfile, files: allCode })
 
@@ -175,11 +183,13 @@ export async function buildIterationPlan(repoRoot, {
         }
       }
       if (score > 0) {
-        const syms = extractSymbols(txt, sf.rel)
+        const syms = extractSymbols(txt, posix.extname(sf.rel) || sf.rel)
         scoredModules.push({
           rel: sf.rel,
           score,
-          symbols: Array.isArray(syms?.symbols) ? syms.symbols.slice(0, 6).map((s) => s.name) : [],
+          symbols: Array.isArray(syms?.symbols)
+            ? syms.symbols.slice(0, 6).map((s) => (typeof s === 'string' ? s : s?.name)).filter(Boolean)
+            : [],
         })
       }
     }
@@ -255,8 +265,8 @@ export async function buildIterationPlan(repoRoot, {
     // 2. signals.jsonl 高频复发热点模块
     const hotspotByMod = new Map()
     for (const ev of signals) {
-      const target = posixPath(ev.file || ev.targetArtifact || '')
-      if (!target || isToolOwnedPath(target) || TEST_FILE_RE.test(target)) continue
+      const target = posixPath(ev.file || ev.targetArtifact || '').replace(/^\.\//, '')
+      if (!isActionableSignalCodeTarget(target, repoRoot)) continue
       const cur = hotspotByMod.get(target) ?? { count: 0, classes: new Set() }
       cur.count += 1
       if (ev.defectClass) cur.classes.add(ev.defectClass)
@@ -270,7 +280,7 @@ export async function buildIterationPlan(repoRoot, {
         reason: `signals.jsonl 中 ${mod} 累计触发 ${info.count} 次告警（${[...info.classes].join(', ') || 'defect'}）`,
         topic: basename(mod).replace(/\.[^.]+$/, ''),
         featureId: null,
-        targetModule: existsSync(join(repoRoot, mod)) ? mod : null,
+        targetModule: mod,
         exportedSymbols: [],
         tier: cleanTier,
       })
@@ -412,64 +422,47 @@ export async function generateIterationTests(repoRoot, {
   }
 }
 
-function resolveLocalNodeBin(repoRoot, binName) {
-  const candidate = join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${binName}.cmd` : binName)
-  return existsSync(candidate) ? candidate : null
-}
-
-async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfBudgetMs = 0 } = {}) {
-  const abs = join(repoRoot, relPath)
-  const ext = relPath.split('.').pop()?.toLowerCase() ?? ''
-  const t0 = performance.now()
-  let cmd = process.execPath
-  let args = ['--test', abs]
-  if (ext === 'py') {
-    cmd = process.platform === 'win32' ? 'python' : 'python3'
-    args = ['-m', 'unittest', relPath]
-  } else if (ext === 'go') {
-    cmd = 'go'
-    args = ['test', `./${posix.dirname(relPath)}`]
-  } else if (ext === 'rs') {
-    cmd = 'cargo'
-    args = ['test', '--test', basename(relPath, '.rs')]
-  } else if (['ts', 'tsx', 'mts', 'cts'].includes(ext)) {
-    const content = readTextSafe(abs) ?? ''
-    const localVitest = resolveLocalNodeBin(repoRoot, 'vitest')
-    const localJest = resolveLocalNodeBin(repoRoot, 'jest')
-    const localTsx = resolveLocalNodeBin(repoRoot, 'tsx')
-    const [nodeMajor, nodeMinor] = process.versions.node.split('.').map((n) => Number(n) || 0)
-    const supportsNativeTs = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 6)
-    if (/from\s+['"]vitest['"]/.test(content) && localVitest) {
-      cmd = localVitest
-      args = ['run', relPath]
-    } else if (localJest && !/from\s+['"]node:test['"]/.test(content)) {
-      cmd = localJest
-      args = [relPath]
-    } else if (localTsx) {
-      cmd = localTsx
-      args = ['--test', abs]
-    } else if ((existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb'))) && resolveExecutable('bun')) {
-      cmd = 'bun'
-      args = ['test', abs]
-    } else if (nodeMajor === 22 && nodeMinor >= 6) {
-      cmd = process.execPath
-      args = ['--experimental-strip-types', '--test', abs]
-    } else if (!supportsNativeTs) {
-      const durationMs = Math.round(performance.now() - t0)
-      return {
-        file: posixPath(relPath),
-        ok: false,
-        exitCode: 1,
-        durationMs,
-        timedOut: false,
-        perfExceeded: perfBudgetMs > 0 && durationMs > perfBudgetMs,
-        failureKind: 'unsupported-ts-runtime',
-        stdout: '',
-        stderr: `Node ${process.versions.node} 不支持直接执行 .${ext} 测试文件且未找到本地 vitest/jest/tsx/bun 可执行文件：${relPath}`,
+function walkTestDirRecursive(repoRoot, startRel, maxFiles = 500) {
+  const startAbs = join(repoRoot, startRel)
+  if (!existsSync(startAbs) || !statSync(startAbs).isDirectory()) return []
+  const out = []
+  const stack = [posixPath(startRel).replace(/\/+$/, '')]
+  while (stack.length > 0 && out.length < maxFiles) {
+    const relDir = stack.pop()
+    let entries = []
+    try { entries = readdirSync(join(repoRoot, relDir), { withFileTypes: true }) } catch { continue }
+    for (const ent of entries) {
+      if (isMacOsJunkPath(ent.name)) continue
+      const rel = `${relDir}/${ent.name}`
+      if (ent.isDirectory()) {
+        if (!SKIP_DIRS.has(ent.name) && !ent.name.startsWith('.')) stack.push(rel)
+      } else if (ent.isFile() && TEST_FILE_RE.test(rel)) {
+        out.push(posixPath(rel))
       }
     }
   }
-  const res = await execSafe(cmd, args, { cwd: repoRoot, timeout: timeoutMs })
+  return out
+}
+
+async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfBudgetMs = 0, devProfile = null } = {}) {
+  const t0 = performance.now()
+  const resolved = resolveTestRunner(repoRoot, relPath, { devProfile })
+  if (!resolved.ok) {
+    const durationMs = Math.round(performance.now() - t0)
+    return {
+      file: posixPath(relPath),
+      ok: false,
+      exitCode: 1,
+      durationMs,
+      timedOut: false,
+      perfExceeded: perfBudgetMs > 0 && durationMs > perfBudgetMs,
+      failureKind: resolved.failureKind,
+      runner: resolved.runner,
+      stdout: '',
+      stderr: resolved.reason,
+    }
+  }
+  const res = await execSafe(resolved.command, resolved.args, { cwd: repoRoot, timeout: timeoutMs })
   const durationMs = Math.round(performance.now() - t0)
   const perfExceeded = perfBudgetMs > 0 && durationMs > perfBudgetMs
   const timedOut = Boolean(res.timedOut)
@@ -485,19 +478,20 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
     timedOut,
     perfExceeded,
     failureKind,
+    runner: resolved.runner,
     stdout: String(res.stdout ?? '').slice(0, 600),
     stderr: String(res.stderr ?? '').slice(0, 600),
   }
 }
 
-/** 分片并发执行目标测试集；遇失败/超时/性能越阈不改业务源码，写 signals.jsonl 并按需经 escalation.mjs 建单。 */
+/** 分片并发执行目标测试集；遇失败/超时/性能越阈不改业务源码，写 signals.jsonl 并默认按分级策略经 escalation.mjs 建单。 */
 export async function runIterationSuites(repoRoot, {
   targets = [],
   tier = 'integration',
   concurrency = Math.min(4, Math.max(1, cpus().length)),
   timeoutMs = 30000,
   perfBudgetMs = 0,
-  escalate = false,
+  escalate = true,
   writeSignals = true,
   isGit = true,
   gitDir = null,
@@ -508,15 +502,19 @@ export async function runIterationSuites(repoRoot, {
   const devProfile = parseDevProfile(repoRoot)
   let resolvedTargets = [...new Set((targets ?? []).map((t) => posixPath(String(t ?? '').trim()).replace(/^\.\//, '')).filter(Boolean))]
   if (resolvedTargets.length === 0) {
-    const nativeInfo = resolveNativeTestDir(repoRoot, { tier, devProfile })
-    const dirAbs = join(repoRoot, nativeInfo.dirRel)
-    if (existsSync(dirAbs) && statSync(dirAbs).isDirectory()) {
-      for (const entry of readdirSync(dirAbs, { withFileTypes: true })) {
-        if (entry.isFile() && TEST_FILE_RE.test(entry.name)) {
-          resolvedTargets.push(posixPath(`${nativeInfo.dirRel}/${entry.name}`))
-        }
-      }
+    const allCode = walkSourceFiles(repoRoot)
+    const nativeInfo = resolveNativeTestDir(repoRoot, { tier, devProfile, files: allCode })
+    for (const rel of walkTestDirRecursive(repoRoot, nativeInfo.dirRel)) resolvedTargets.push(rel)
+    if (resolvedTargets.length === 0) {
+      for (const f of allCode) { if (TEST_FILE_RE.test(f.rel)) resolvedTargets.push(f.rel) }
     }
+    const { steps: ciSteps } = scanNeutralCiSteps(repoRoot)
+    const expanded = expandVerificationCommands(repoRoot, ciSteps, devProfile, null)
+    const { configuredTestEntries } = collectConfiguredTestEntries(repoRoot, allCode, expanded)
+    for (const entry of configuredTestEntries) {
+      if (existsSync(join(repoRoot, entry))) resolvedTargets.push(posixPath(entry))
+    }
+    resolvedTargets = [...new Set(resolvedTargets)]
   }
   resolvedTargets = resolvedTargets.filter((rel) => existsSync(join(repoRoot, rel))).sort()
 
@@ -527,7 +525,7 @@ export async function runIterationSuites(repoRoot, {
     while (cursor < resolvedTargets.length) {
       const idx = cursor
       cursor += 1
-      results[idx] = await runSingleTestTarget(repoRoot, resolvedTargets[idx], { timeoutMs, perfBudgetMs })
+      results[idx] = await runSingleTestTarget(repoRoot, resolvedTargets[idx], { timeoutMs, perfBudgetMs, devProfile })
     }
   }
   await Promise.all(Array.from({ length: lanes }, () => worker()))
@@ -538,6 +536,7 @@ export async function runIterationSuites(repoRoot, {
 
   for (const item of failed) {
     const defectClass = item.failureKind === 'timeout' ? 'race-condition' : 'missing-runtime-proof'
+    const isMissingRunner = item.failureKind === 'missing-runner' || item.failureKind === 'unsupported-ts-runtime'
     if (writeSignals) {
       const sig = await appendGovernSignal({
         mainRoot: repoRoot,
@@ -548,7 +547,7 @@ export async function runIterationSuites(repoRoot, {
         pattern: `iterate.${item.failureKind || 'fail'}`,
         ruleId: `dev-iterate.${item.failureKind || 'fail'}`,
         defectClass,
-        severity: 'high',
+        severity: isMissingRunner ? 'medium' : 'high',
         source: 'dev-iterate',
         message: `${item.file} failed (${item.failureKind}, exit=${item.exitCode}, ${item.durationMs}ms): ${(item.stderr || item.stdout || 'see test output').slice(0, 240)}`,
       })
@@ -558,13 +557,13 @@ export async function runIterationSuites(repoRoot, {
       const esc = await escalateToBackend({
         backend: _backend,
         repoRoot,
-        force: true,
         _ghProbe,
         _ghClient,
         item: {
           source: 'dev-iterate',
-          caseType: 2,
-          severity: 'high',
+          severity: isMissingRunner ? 'medium' : 'high',
+          singleFile: true,
+          e2eBlocking: tier === 'e2e' && !isMissingRunner,
           title: `dev-iterate detected ${item.failureKind} in ${item.file}`,
           summary: `${item.file} failed (${item.failureKind}, duration=${item.durationMs}ms, exit=${item.exitCode})`,
           rootCause: (item.stderr || item.stdout || `Test ${item.file} failed under dev-iterate (${item.failureKind}).`).slice(0, 400),
@@ -601,7 +600,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       subcommands: SUBCOMMANDS,
       allowPositionalWithoutSubcommand: true,
       positionalDir: 'auto',
-      booleanFlags: ['write', 'escalate', 'no-signals'],
+      booleanFlags: ['write', 'escalate', 'no-escalate', 'no-signals', 'reset'],
       valueFlags: ['focus', 'tier', 'limit', 'targets', 'concurrency', 'timeout-ms', 'perf-budget-ms', 'goal', 'max-rounds', 'progress-history', 'pending-gates'],
       usageHint: `iterate.mjs [${SUBCOMMANDS.join('|')}] [dir]`,
     })
@@ -616,21 +615,46 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   const repoRoot = roots.workTreeRoot
 
   if (sub === 'cycle') {
-    const prevCycle = loadCycleState(roots.mainRoot)
-    const effectiveProgress = opts['progress-history'] ?? prevCycle?.progressHistory ?? []
+    const prevCycle = opts.reset ? null : loadCycleState(roots.mainRoot)
+    const mergedHist = mergeCycleHistory(prevCycle?.progressHistory ?? [], opts['progress-history'])
+    const mergedGates = mergeCycleGates(prevCycle?.pendingGates ?? [], opts['pending-gates'])
     const plan = buildCyclePlan({
       goal: opts.goal || prevCycle?.goal || '',
       maxRounds: opts['max-rounds'] ?? prevCycle?.maxRounds,
-      progressHistory: effectiveProgress,
-      pendingGates: opts['pending-gates'],
+      progressHistory: mergedHist.rawForPlan,
+      pendingGates: mergedGates,
     })
+    if (mergedHist.parseWarnings.length > 0) plan.warnings.unshift(...mergedHist.parseWarnings)
+    let escalated = prevCycle?.escalated ?? null
+    if (plan.stopped && !opts['no-escalate'] && !escalated) {
+      escalated = await escalateToBackend({
+        backend: runtimeOpts._backend,
+        repoRoot,
+        _ghProbe: runtimeOpts._ghProbe,
+        _ghClient: runtimeOpts._ghClient,
+        item: {
+          source: 'dev-iterate-cycle',
+          stopLoss: true,
+          severity: 'high',
+          doorType: plan.stopReason === STOP_REASONS.ONE_WAY ? 'one-way' : 'two-way',
+          title: `dev-iterate cycle stop-loss (${plan.stopReason}): ${plan.goal || 'iteration loop'}`,
+          summary: plan.stopDetail ?? `Stopped at round ${plan.roundsCompleted}`,
+          rootCause: plan.stopDetail ?? `Cycle stopped by ${plan.stopReason}`,
+          files: [],
+          labels: ['dev-iterate', 'stop-loss'],
+        },
+      })
+    }
+    if (escalated) plan.escalated = escalated
     saveCycleState(roots.mainRoot, {
       goal: plan.goal,
       maxRounds: plan.maxRounds,
       round: plan.nextRound ?? plan.roundsCompleted,
-      progressHistory: plan.roundProgress,
+      progressHistory: plan.history,
+      pendingGates: plan.pendingGates,
       stopped: plan.stopped,
       stopReason: plan.stopReason ?? null,
+      escalated,
     })
     if (opts.json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
     else process.stdout.write(`${formatCycleText(plan)}\n`)
@@ -656,6 +680,15 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   }
 
   if (sub === 'generate') {
+    if (opts.write && roots.isGit && !roots.isWorktree) {
+      const head = readHeadFast(resolveGitDirFast(repoRoot), roots.gitDir)
+      if (head && head.oid && ['main', 'master'].includes(head.branch ?? '')) {
+        const msg = `BLOCKED_MAIN_SLOT_VIOLATION: 拒绝在有提交的默认分支（${head.branch}）非隔离主工作区执行 generate --write；请先运行 flow.mjs start 进入 .worktrees/ 隔离工作位。`
+        if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, status: 'BLOCKED_MAIN_SLOT_VIOLATION', code: 'BLOCKED_MAIN_SLOT_VIOLATION', exitCode: EXIT.FACT, branch: head.branch, error: msg }, null, 2)}\n`)
+        else process.stderr.write(`${msg}\n`)
+        return EXIT.FACT
+      }
+    }
     const out = await generateIterationTests(repoRoot, {
       focus: opts.focus ?? '',
       tier: opts.tier ?? 'integration',
@@ -680,7 +713,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       concurrency: opts.concurrency ? Number(opts.concurrency) : undefined,
       timeoutMs: opts['timeout-ms'] ? Number(opts['timeout-ms']) : 30000,
       perfBudgetMs: opts['perf-budget-ms'] ? Number(opts['perf-budget-ms']) : 0,
-      escalate: Boolean(opts.escalate),
+      escalate: opts['no-escalate'] ? false : (opts.escalate === undefined ? true : Boolean(opts.escalate)),
       writeSignals: !opts['no-signals'],
       isGit: roots.isGit,
       gitDir: roots.gitDir,

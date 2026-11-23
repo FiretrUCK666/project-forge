@@ -275,7 +275,13 @@ export async function handleCreate(opts, roots) {
   // 过 edit-gate 静态卫生门禁，阻断压制注释、死代码、过程命名或架构越界
   let editGateRes = null
   if (scriptRel) {
-    editGateRes = await runEditGate({ mode: 'standalone', files: [scriptRel], dir: workRoot, task: taskId })
+    editGateRes = await runEditGate({
+      mode: 'standalone',
+      files: [scriptRel],
+      dir: workRoot,
+      task: taskId,
+      exemptZeroAssertion: Boolean(promotedFromScratch || /(?:^|\/)scratch\//i.test(scriptRel)),
+    })
     if (!editGateRes.ok) {
       rollbackCopiedScript()
       const msg = `BLOCKED_EDIT_GATE_FAILED: 验证脚本 ${scriptRel} 未通过 edit-gate 静态门禁（${(editGateRes.blockers ?? []).length} 项阻塞）。`

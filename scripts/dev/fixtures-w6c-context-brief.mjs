@@ -171,16 +171,19 @@ export function registerW6cContextBriefCases(cases) {
         return `flow explore 载荷缺少 contextBrief 或计数：${JSON.stringify(exJson)}`
       }
 
-      // 5. review-pack（验证 reviewContext.evergreenContext + pack.contextBrief + 文本输出）
+      // 5. review-pack（验证单源 pack.contextBrief 且 reviewContext 不再重复挂载 + 文本输出）
       const wt = join(dir, '.worktrees/impl-bill-t')
       writeFileSync(join(wt, 'src/billing.mjs'), 'export const settleCents = (c) => Math.round(c)\n', 'utf8')
       gitCommitFast(wt, 'feat: round cents', { updateOnly: true })
       const rpJsonRun = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--task', 'bill-t', '--json'], { cwd: dir })
       if (rpJsonRun.status !== 0) return `review-pack --json 失败：${rpJsonRun.stderr}`
       const rpJson = JSON.parse(rpJsonRun.stdout)
-      if (!rpJson.reviewContext?.evergreenContext?.evergreenToc?.some((d) => d.path === 'docs/TDD.md')
+      if (!rpJson.contextBrief?.evergreenToc?.some((d) => d.path === 'docs/TDD.md')
         || !rpJson.contextBrief?.featureMap?.businessFlows?.includes('按分结算与对账闭环')) {
-        return `review-pack --json 缺少 evergreenContext/contextBrief：${JSON.stringify(rpJson.reviewContext?.evergreenContext)}`
+        return `review-pack --json 缺少单源 contextBrief：${JSON.stringify(rpJson.contextBrief)}`
+      }
+      if ('evergreenContext' in (rpJson.reviewContext ?? {}) || 'contextBrief' in (rpJson.reviewContext ?? {})) {
+        return `review-pack --json 的 reviewContext 不得重复包含 evergreenContext 或 contextBrief：${JSON.stringify(Object.keys(rpJson.reviewContext ?? {}))}`
       }
       const rpTextRun = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--task', 'bill-t'], { cwd: dir })
       if (rpTextRun.status !== 0 || !rpTextRun.stdout.includes('docs/TDD.md') || !rpTextRun.stdout.includes('doc-locate.mjs')) {

@@ -39,11 +39,14 @@ function matchesItemIdSet(pm, idSet) {
     || (pm.criterion && idSet.has(String(pm.criterion).toLowerCase()))
 }
 
-function resolveRecordNextSteps({ taskId, verdict, round, role, mainRoot, excludedReviewers = [] }) {
+function resolveRecordNextSteps({ taskId, verdict, round, role, providerId = null, mainRoot, excludedReviewers = [] }) {
   const skills = resolveAvailableSkills(mainRoot)
   if (verdict === 'pass') {
     if (role === 'contributor-fork') {
       return ['Review PASSED (contributor-fork): wait for upstream maintainer merge; do NOT delete your fork branch before PR is merged.']
+    }
+    if (role === 'generic-git' || providerId === 'generic-git') {
+      return [`Review PASSED (generic-git / awaiting-remote-mr): push branch and create/merge remote MR manually, then confirm with flow.mjs merge --task ${taskId}.`]
     }
     if (skills.has('dev-flow')) {
       return [`node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}`]
@@ -134,31 +137,6 @@ export async function handleRecord(opts, roots) {
     process.stderr.write(`${msg}\n`)
     return EXIT.USAGE
   }
-  // 按「历史 ∪ 当前」比对，不只看当前字段：一次接管就能让原实施者换个身份回来审自己的活。
-  const implementerHistory = [...new Set([...collectImplementerHistory(baseLedger), implementerId, optImplementer]
-    .filter((a) => String(a ?? '').trim()))]
-  const selfMatch = implementerHistory.find((a) => normActorId(a) === normActorId(reviewerId))
-  if (selfMatch) {
-    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) 与这个任务的历史实施者 (${selfMatch}) 相同。独立审查要求复核人不参与实施。`
-    if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId: selfMatch, implementerHistory }, null, 2)}\n`)
-    } else {
-      process.stdout.write(`${msg}\n`)
-    }
-    process.stderr.write(`${msg}\n`)
-    return EXIT.FACT
-  }
-
-  const distinctLock = checkDistinctRoundReviewer(prevRounds, reviewerId, {
-    minRound: 2, currentRound: round, code: 'BLOCKED_SAME_REVIEWER_REREVIEW', subject: '代码审查',
-  })
-  if (distinctLock.blocked) {
-    if (opts.json) process.stdout.write(`${JSON.stringify({ status: distinctLock.code, exitCode: distinctLock.exitCode, taskId, round, reviewerId, matchedRound: distinctLock.matchedRound, excludedReviewers: distinctLock.excludedReviewers, error: distinctLock.message }, null, 2)}\n`)
-    else process.stdout.write(`${distinctLock.message}\n`)
-    process.stderr.write(`${distinctLock.message}\n`)
-    return distinctLock.exitCode
-  }
-
   const targetRoot = (baseLedger.worktreePath && existsSync(resolve(mainRoot, baseLedger.worktreePath)))
     ? resolve(mainRoot, baseLedger.worktreePath)
     : ((baseLedger.reviewWorktreePath && existsSync(resolve(mainRoot, baseLedger.reviewWorktreePath)))
@@ -172,6 +150,33 @@ export async function handleRecord(opts, roots) {
   const optionalLowRiskRecord = opts['review-token'] === undefined
     ? await isOptionalLowRiskReview({ mainRoot, targetRoot, baseLedger })
     : false
+
+  // 按「历史 ∪ 当前」比对，不只看当前字段：一次接管就能让原实施者换个身份回来审自己的活（低风险单会话免审除外）。
+  const implementerHistory = [...new Set([...collectImplementerHistory(baseLedger), implementerId, optImplementer]
+    .filter((a) => String(a ?? '').trim()))]
+  const selfMatch = implementerHistory.find((a) => normActorId(a) === normActorId(reviewerId))
+  if (!optionalLowRiskRecord && selfMatch) {
+    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) 与这个任务的历史实施者 (${selfMatch}) 相同。独立审查要求复核人不参与实施。`
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId: selfMatch, implementerHistory }, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${msg}\n`)
+    }
+    process.stderr.write(`${msg}\n`)
+    return EXIT.FACT
+  }
+
+  const distinctLock = optionalLowRiskRecord
+    ? { blocked: false }
+    : checkDistinctRoundReviewer(prevRounds, reviewerId, {
+        minRound: 2, currentRound: round, code: 'BLOCKED_SAME_REVIEWER_REREVIEW', subject: '代码审查',
+      })
+  if (distinctLock.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: distinctLock.code, exitCode: distinctLock.exitCode, taskId, round, reviewerId, matchedRound: distinctLock.matchedRound, excludedReviewers: distinctLock.excludedReviewers, error: distinctLock.message }, null, 2)}\n`)
+    else process.stdout.write(`${distinctLock.message}\n`)
+    process.stderr.write(`${distinctLock.message}\n`)
+    return distinctLock.exitCode
+  }
 
   if (!optionalLowRiskRecord) {
     const tokenCheck = consumeReviewToken(baseLedger, opts['review-token'], round, { reviewerId, headSha })
@@ -354,12 +359,30 @@ export async function handleRecord(opts, roots) {
   // 现在的口径：pass 只说明本轮没有新的阻塞项。历史未终结项的去向由上一段的三态决定，
   // 没被证实解决的继续挂着，未提及的单列进 `unmentionedFromPrev`。
 
+  const slPre = evaluateThreeRoundStopLoss({
+    round,
+    verdict,
+    items: mustFixList,
+    prevItems: remainingFromPrev,
+    humanApproved: Boolean(baseLedger.humanApprovedStopLoss),
+    matchesSame: sameBlockerItem,
+    maxRounds: 3,
+  })
+  const humanApprovedNow = Boolean(opts['human-approved'])
+  const stopLossReason = String(opts.reason ?? '').trim()
+  if (slPre.stopLoss && humanApprovedNow && !baseLedger.humanApprovedStopLoss && !stopLossReason) {
+    const msg = 'BLOCKED_STOP_LOSS_REASON_REQUIRED: 第 3 轮触发停损时，--human-approved 必须提供非空 --reason 说明为何批准继续。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_STOP_LOSS_REASON_REQUIRED', code: 'BLOCKED_STOP_LOSS_REASON_REQUIRED', exitCode: EXIT.HUMAN, taskId, round, error: msg }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.HUMAN
+  }
   const sl = evaluateThreeRoundStopLoss({
     round,
     verdict,
     items: mustFixList,
     prevItems: remainingFromPrev,
-    humanApproved: Boolean(opts['human-approved'] || baseLedger.humanApprovedStopLoss),
+    humanApproved: Boolean((humanApprovedNow && stopLossReason) || baseLedger.humanApprovedStopLoss),
     matchesSame: sameBlockerItem,
     maxRounds: 3,
   })
@@ -421,7 +444,11 @@ export async function handleRecord(opts, roots) {
     shouldFix: shouldFixList,
     preExisting: preExistingList,
     dispositions: roundDispositions,
-    rebuts: prevRound?.rebuts ?? [],
+    rebuts: (() => {
+      const seenRebuts = new Set()
+      return [...(Array.isArray(baseLedger?.rebuts) ? baseLedger.rebuts : []), ...(Array.isArray(prevRound?.rebuts) ? prevRound.rebuts : [])]
+        .filter((r) => { const k = `${r?.id ?? ''}:${r?.reason ?? ''}`; if (seenRebuts.has(k)) return false; seenRebuts.add(k); return true })
+    })(),
     rebutAccepted: [...rebutAccepted],
     rebuttedItems,
     resolvedItems,
@@ -535,7 +562,7 @@ export async function handleRecord(opts, roots) {
       meta: { index: i + 1, kind: 'should-fix' },
     })
   }
-  const nextSteps = resolveRecordNextSteps({ taskId, verdict, round, role: updated.role, mainRoot, excludedReviewers })
+  const nextSteps = resolveRecordNextSteps({ taskId, verdict, round, role: updated.role, providerId: updated.providerId, mainRoot, excludedReviewers })
   const githubSync = await syncReviewToGitHub({
     mainRoot, workTreeRoot: targetRoot, ledger: updated, round, verdict, headSha, reviewerId, implementerId,
     empiricalSummary: reviewEmpirical, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems, nextSteps, opts,

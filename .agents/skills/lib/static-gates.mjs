@@ -57,6 +57,19 @@ export function isTestOrFixtureFile(rel) {
   return TEST_FILE_RE.test(p) || FIXTURE_FILE_RE.test(p)
 }
 
+export function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived = new Set()) {
+  const rel = posixPath(entry?.file ?? '')
+  if (!rel.startsWith('docs/archive/')) return false
+  const st = String(entry?.status ?? '')
+  if (/^R/i.test(st)) return true
+  if (/^(?:A|\?\?|M)/i.test(st)) {
+    if (ownArchived.has(rel)) return true
+    const origRel = rel.replace(/^docs\/archive\//, 'docs/')
+    if (deletedFiles.has(origRel)) return true
+  }
+  return false
+}
+
 export function isUiVisualFile(fileRel) {
   const p = posixPath(String(fileRel ?? '')).replace(/^\.\//, '')
   if (!p || isTestOrFixtureFile(p)) return false

@@ -28,6 +28,7 @@ import {
   checkGenericE2eContracts,
   checkProcessArtifactFilenames,
   completionRecordBeforeMerge,
+  evaluatePushTierContract,
   finishCommandsOf,
   finishRequiredMissing,
   finishSectionRange,
@@ -265,29 +266,18 @@ async function checkGapCoverage({ ROOT, fail, note }) {
 }
 
 function checkPushSemantics({ ROOT, readText, fail, note }) {
-  const groups = [
-    { docs: PUSH_TIER_DOCS, label: '日常流程' },
-    { docs: MERGE_AUTHORITY_DOCS, label: '提单模板' },
-  ]
-  for (const group of groups) {
-    for (const name of group.docs) {
-      const p = join(ROOT, name)
-      if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
-      const text = readText(p)
-      for (const rule of PUSH_TIER_RULE) {
-        if (group.label === '提单模板' && rule.everywhere !== true) continue
-        if (!rule.any.some((re) => re.test(text))) {
-          fail(`${name} 里缺「${rule.what}」这条说法——同一件事在不同文件里说法不一，执行者会按错的那一份行事`)
-        }
-      }
-      const stale = STALE_DAILY_END.exec(text)
-      if (stale) {
-        const line = text.slice(0, stale.index).split('\n').length
-        fail(`${name} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
-      }
-    }
+  const allDocs = [...PUSH_TIER_DOCS, ...MERGE_AUTHORITY_DOCS]
+  const filesMap = {}
+  for (const name of allDocs) {
+    const p = join(ROOT, name)
+    if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
+    filesMap[name] = readText(p)
   }
-  note(`推送分档：${PUSH_TIER_DOCS.length + MERGE_AUTHORITY_DOCS.length} 份文件说法一致（分档看可撤回性，推分支属日常，审查通过由审查者合，只有弱化门禁要人点头）`)
+  const res = evaluatePushTierContract(filesMap)
+  for (const msg of res.failures) fail(msg)
+  if (res.ok) {
+    note(`推送分档：权威源 ${PUSH_TIER_DOCS.includes('references/collaboration.md') ? 'references/collaboration.md' : ''} 判据完整，${allDocs.length} 份入口与模板指针齐备且无矛盾表述`)
+  }
 }
 
 function checkSingleSources({ ROOT, readText, fail, note }) {

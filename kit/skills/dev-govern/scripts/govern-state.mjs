@@ -11,9 +11,9 @@ import { join } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
 import {
-  ensureWorktreesIgnored, gitDiffNameStatusZ,
+  LIKELY_DEFAULT_BRANCHES, ensureWorktreesIgnored, gitDiffNameStatusZ,
   gitRun, gitStatusPorcelainZ, isMacOsJunkPath, posixPath, readJsonSafe,
-  writeAtomic, writeJsonAtomic,
+  resolveDefaultBranch, writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { applyIssuesToBackend, buildIssues } from '../../lib/escalation.mjs'
@@ -71,7 +71,8 @@ export async function collectChangedFilesSet(workRoot, isGit, defaultBranch) {
   const hasHead = fastHead ? Boolean(fastHead.oid) : (await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).ok
   if (!hasHead) return changed
 
-  const baseCandidates = [...new Set([defaultBranch, 'main', 'master', 'HEAD~1'].filter(Boolean))]
+  const resolvedDefault = defaultBranch || await resolveDefaultBranch(workRoot, { strict: true })
+  const baseCandidates = [...new Set([resolvedDefault, ...LIKELY_DEFAULT_BRANCHES, 'HEAD~1'].filter(Boolean))]
   for (const baseRef of baseCandidates) {
     const fastBaseSha = baseRef === 'HEAD~1' ? null : (resolveRefShaFast(fastGitDir, `refs/heads/${baseRef}`) ?? resolveRefShaFast(fastGitDir, `refs/remotes/origin/${baseRef}`))
     const verify = fastBaseSha

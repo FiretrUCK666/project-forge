@@ -16,7 +16,7 @@ import {
   resolveTaskScratchDir,
 } from '../../lib/feature-map.mjs'
 import {
-  gitLsFilesTextAndCode, gitRun, posixPath, readTextSafe, resolveDefaultBranch,
+  LIKELY_DEFAULT_BRANCHES, gitLsFilesTextAndCode, gitRun, posixPath, readTextSafe, resolveDefaultBranch,
 } from '../../lib/git.mjs'
 import { resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
@@ -28,6 +28,15 @@ import { generateRepoMap } from '../../dev-explore/scripts/repo-map.mjs'
 const IMPORT_SPEC_RE = /(?:^\s*(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/gm
 const PY_FROM_RE = /^\s*from\s+(\.+[A-Za-z0-9_.]*|[A-Za-z0-9_.]+)\s+import\b/gm
 
+function defaultBaseCandidates(def) {
+  return [...new Set([
+    def,
+    ...(def ? [`origin/${def}`] : []),
+    ...LIKELY_DEFAULT_BRANCHES,
+    ...LIKELY_DEFAULT_BRANCHES.map((b) => `origin/${b}`),
+  ].filter(Boolean))]
+}
+
 export async function resolveDefaultBaseRef(repoRoot, headRef) {
   const fastGitDir = resolveGitDirFast(repoRoot)
   const canFastRefs = Boolean(fastGitDir && !existsSync(join(fastGitDir, 'reftable')))
@@ -38,7 +47,7 @@ export async function resolveDefaultBaseRef(repoRoot, headRef) {
       if (resolveRefShaFast(fastGitDir, symTarget)) return symTarget.replace(/^refs\/remotes\//, '')
     }
     const def = await resolveDefaultBranch(repoRoot)
-    for (const cand of [def, 'main', 'master', `origin/${def}`, 'origin/main', 'origin/master', 'trunk'].filter(Boolean)) {
+    for (const cand of defaultBaseCandidates(def)) {
       const fullRef = cand.startsWith('origin/') ? `refs/remotes/${cand}` : `refs/heads/${cand}`
       if (resolveRefShaFast(fastGitDir, fullRef)) return cand
     }
@@ -49,7 +58,7 @@ export async function resolveDefaultBaseRef(repoRoot, headRef) {
     if ((await gitRun(repoRoot, ['rev-parse', '--verify', ref])).ok) return ref
   }
   const def = await resolveDefaultBranch(repoRoot)
-  for (const cand of [def, 'main', 'master', `origin/${def}`, 'origin/main', 'origin/master', 'trunk'].filter(Boolean)) {
+  for (const cand of defaultBaseCandidates(def)) {
     if ((await gitRun(repoRoot, ['rev-parse', '--verify', cand])).ok) return cand
   }
   if ((await gitRun(repoRoot, ['rev-parse', '--verify', `${headRef}~1`])).ok) return `${headRef}~1`

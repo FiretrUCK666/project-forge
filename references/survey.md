@@ -11,7 +11,7 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 ```
 
 - 默认纯只读扫描文件系统与本地 Git 状态（忽略 `.DS_Store`、`._*`、`__MACOSX`、`.Spotlight-V100`、`.Trashes`、`.fseventsd` 等 macOS Finder 元数据）；加 `--probe-auth` 后注入 `GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`SSH_ASKPASS_REQUIRE=never`、`GH_PROMPT_DISABLED=1`，并发探测 Track A（SSH 密钥就绪度 + `StrictHostKeyChecking=yes` 22/443、`git credential fill` 5s 硬超时、`gh auth setup-git`、`~/.ssh/config` 别名映射）与 Track B（`gh-cli` -> `node-https-token` -> 仅确认宿主能力时 `mcp-delegate` -> `half-duplex`/`offline`/`none`）。**即使尚未配置远端或处于空目录，传 `--probe-auth` 同样探测本机建仓凭据**；附加 `--verify-token` 可对本地令牌发一次轻量验活请求。
-- **离线只读与 `NEEDS_HUMAN` 停步铁律**：S1/S2 只读勘察与 `explore` 只读子代理**严禁调用网页搜索/抓取工具**（所有事实均来自本地仓与脚本输出）；当 `NEEDS_HUMAN > 0`（`needsHuman.count > 0`，如缺许可、`role=undetermined`、缺 Git 署名或待选发版策略）时**严禁任何 S3 写入**，必须先全部问清并等用户拍板后再进入 S3。
+- **外部调研边界与 `NEEDS_HUMAN` 停步铁律**：S1/S2 仓内事实以本地源码与脚本输出为准，离线或勘察仓内现状时禁用网页搜索代替本地核验；仅当需求澄清、技术选型或用户明确要求时允许调用外部调研（`webfetch`/`websearch` 并注明外部来源），且任何写入文档/规划的仓内路径、符号与命令必须经 `doc-locate`、`repo-map` 或 `verifyDocClaims` 在本仓验真（Repo-Path Grounding）；当 `NEEDS_HUMAN > 0`（`needsHuman.count > 0`，如缺许可、`role=undetermined`、缺 Git 署名或待选发版策略）时**严禁任何 S3 写入**，必须先全部问清并等用户拍板后再进入 S3。
 - 扫描结果末尾自带基于唯一判据生成的「下一步必读参考」，不靠人工记忆决定要读哪几份。
 
 ## 二、必须立即拦截的三类现场

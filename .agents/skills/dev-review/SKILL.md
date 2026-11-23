@@ -32,7 +32,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --staged
 node .agents/skills/dev-review/scripts/review-pack.mjs --base <ref>
 
 # 先跑实证、E2E 观察与故障注入闭环（写入 {gitCommonDir}/project-forge-flow/ 指纹回执），通过后再取全文 diff：
-node .agents/skills/dev-review/scripts/review-pack.mjs check-empirical (--task <id> | --pr <M> | --local | --staged | --base <ref>) [--cmd "<验证命令>"] [--target <path>] [--e2e-evidence "<运行观察结论>"] [--artifact <path>]... [--visual-checked] [--visual-evidence "<视觉观察>"] [--visual-blocked-reason "<原因>"] [--json]
+node .agents/skills/dev-review/scripts/review-pack.mjs check-empirical (--task <id> | --pr <M> | --local | --staged | --base <ref>) [--cmd "<验证命令>"] [--e2e-evidence "<运行观察结论>"] [--artifact <path>]... [--visual-checked] [--visual-evidence "<视觉观察>"] [--visual-blocked-reason "<原因>"] [--json]
 node .agents/skills/dev-review/scripts/review-pack.mjs check-fault --phase fail|restore (--task <id> | --pr <M> | --local | --staged | --base <ref>) --cmd "<验证命令>"
 node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> | --local | --staged | --base <ref>) --include-diff [--e2e-evidence "<观察结论>"|--visual-checked]
 ```
@@ -118,7 +118,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs override \
 ## 输出与下一跳（合入或返工闭环）
 
 每条命令均附 `[NEXT STEP]` 明确提示下一合法动作：
-- `REVIEW_PASSED`：若未触发门禁弱化且未声明 `merge-authority: human`，**由当前最终通过审查的独立审查子代理直接运行 `node .agents/skills/dev-flow/scripts/flow.mjs merge` 合并 PR 并双写关闭评论**（严禁自动删除分支/worktree）；随后交回主会话向用户确认 `flow.mjs cleanup --confirm` 清理范围；
+- `REVIEW_PASSED`：若未触发门禁弱化且未声明 `merge-authority: human`，在确认 `reviewPassedHead === HEAD` 后，**由独立审查者或调度者运行 `node .agents/skills/dev-flow/scripts/flow.mjs merge` 合并 PR 并双写关闭评论**（仍严禁实施者自合，严禁自动删除分支/worktree）；随后交回主会话向用户确认 `flow.mjs cleanup --confirm --preview-hash <hash>` 清理范围；
 - `CHANGES_REQUESTED`：实施者在原 `impl` 分支追加修复（`dev-flow` 的 `rework` -> `verify` -> `submit --rework` 更新同一 PR 并刷新评论），再由**新的独立 `review` 子代理上下文**复核；
 - `STOP_LOSS_ESCALATE`（退出码 `4`）或 `BLOCKED_EMPIRICAL_FIRST` / `BLOCKED_DIRTY_FAULT_RESIDUE` / `BLOCKED_UNTRUSTED_HAZARD`（退出码 `3`）：按返回 `nextSteps` 先完成实证与故障注入闭环（或外部高危项交人类 `override` / `--human-approved-exec`）。
 - **注释与决策复核**：确认新增注释只解释 Why（非复述 What）、`HACK`/`WORKAROUND`/`TEMP` 已绑定 `#<issue>`、无新增失效反引号路径，且架构取舍已同步 `docs/TDD.md` 或 `AGENTS.md ## 取舍`（不新增 `docs/adr/`）。

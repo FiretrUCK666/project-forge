@@ -17,7 +17,10 @@ import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
 import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
 import { DEV_PROFILE_KEYS } from '../../kit/skills/lib/profile.mjs'
-import { auditEntry, auditGlobalWhitelist, auditHandRolled, evaluateParity, ENTRY_SPECS, HAND_ROLLED_SPECS } from './cli-parity.mjs'
+import {
+  auditEntry, auditGlobalWhitelist, auditHandRolled, auditSkillDocsAndNextSteps,
+  evaluateParity, ENTRY_SPECS, HAND_ROLLED_SPECS,
+} from './cli-parity.mjs'
 import { evaluateSubcommandParity } from './subcommand-parity.mjs'
 import { evaluateExitCodeParity } from './exit-code-parity.mjs'
 import { blockedExitOf } from '../../kit/skills/lib/exit-codes.mjs'
@@ -682,10 +685,12 @@ function checkCliParity({ ROOT, fail, note, walk }) {
     ...HAND_ROLLED_SPECS.map((spec) => auditHandRolled(spec, { ROOT })),
   ]
   const { failures, notes } = evaluateParity(audits)
-  for (const message of failures) fail(`参数对拍：${message}`)
+  const docParity = auditSkillDocsAndNextSteps({ ROOT })
+  const allFailures = [...failures, ...docParity.failures]
+  for (const message of allFailures) fail(`参数对拍：${message}`)
   const globalCheck = auditGlobalWhitelist({ ROOT })
   if (!globalCheck.ok) fail(`参数对拍：${globalCheck.error}`)
-  if (failures.length === 0) note(`参数对拍：${notes.join('；')}`)
+  if (allFailures.length === 0) note(`参数对拍：${notes.join('；')}；SKILL.md/printNextStep ${docParity.checkedCommands} 条命令零漂移`)
 }
 
 /**

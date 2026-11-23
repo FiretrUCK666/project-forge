@@ -16,7 +16,7 @@ import {
   slugify, syncDocsLifecycle, syncPlanDocBodyMeta, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
-import { canonicalPath, ensureWorktreesIgnored, gitRun, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
+import { canonicalPath, ensureWorktreesIgnored, gitRun, isDefaultBranch, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { readTaskLedger, recordPlanningProvenance, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { parseIssueNumbers } from '../../lib/platform.mjs'
@@ -426,7 +426,7 @@ export async function initDoc({
       const sym = await gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD'])
       if (sym.ok && sym.stdout.trim()) curBranch = sym.stdout.trim()
     }
-    if (curBranch === 'main' || curBranch === 'master') {
+    if (curBranch && await isDefaultBranch(mainRoot, curBranch)) {
       const cnt = await gitRun(mainRoot, ['rev-list', '--count', '-n', '1', 'HEAD'])
       if (cnt.ok && Number(cnt.stdout.trim()) > 0) {
         effWorktree = true

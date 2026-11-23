@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: Round-6 与本仓全检单源架构根治
-status: active
+status: done
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -21,12 +21,12 @@ case_type: 4
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 关联 Issue / PR | 未关联 / 未关联 |
 | 提出方 / 负责人 | plan-r6-arch |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联设计 / 任务单 | 按 `r6a` / `r6b` / `r6c` / `r6d` 四份切片 `SPEC + Todo` 认领 `C1..C16` |
+| 关联设计 / 任务单 | `docs/archive/specs/261124-r6d-skills-contract-debloat-spec.md` / `docs/archive/todo/261124-r6d-skills-contract-debloat-todo.md` |
 
 - **目标读者**：实现者、审查者与后续接手人
 
@@ -60,7 +60,7 @@ case_type: 4
   - `docs/archive/specs/261124-r6a-single-source-state-spec.md`（单源默认分支、任务活性、运行时快照与跨平台四态 CAS 闭环；PR #162 已合入归档）
   - `docs/archive/specs/261124-r6b-plan-index-antiblue-spec.md`（唯一规划索引、指针简报协议、长聊 `preInit` 与客观防退化；PR #161 已合入归档）
   - `docs/archive/specs/261124-r6c-iterate-unified-gates-spec.md`（`dev-iterate` 确定性重构、跨门禁统一与 `review-pack` 提速去重；PR #163 已合入归档）
-  - `docs/specs/261124-r6d-skills-contract-debloat-spec.md`（默认分支收口、`cli-parity` 扩面、冲突去重与全仓装配）
+  - `docs/archive/specs/261124-r6d-skills-contract-debloat-spec.md`（默认分支收口、`cli-parity` 扩面、冲突去重与全仓装配）
 
 ### 明确不做（Non-Goals）
 
@@ -105,22 +105,22 @@ case_type: 4
 
 ## 八、验收标准
 
-- [ ] C1: 改造唯一 `resolveDefaultBranch(repoRoot, { strict = true })`（无真实分支返回 `null`）与唯一 `isDefaultBranch`、`ledger.mjs` `baseBranch: null`、禁止 `flow-trial-merge.mjs` 与 `task-backend-local.mjs` 擅自 `update-ref` 建 `main`；下沉唯一 `detectCommitStyle`（有效非自动提交 `< 5` 不反转）至 `kit/skills/lib/git-core.mjs` 由 `scripts/lib/survey-git-fast.mjs` 与 `kit/skills/lib/git.mjs` 共用。
-- [ ] C2: 在 `ledger.mjs` 实现 `classifyTaskLiveness` 过滤 `'merged'` 与缺失工作树孤儿任务（本仓 7 个历史台账现场运行 `flow.mjs next --json` 零 `MULTIPLE_ACTIVE_TASKS` / `BLOCKED_NOT_CLAIMED`）；在 `flow-next.mjs` 与 `flow-cleanup.mjs` 共用 `collectTaskRuntimeSnapshot` 消灭 `status --all` 与 `status --task` 分裂。
-- [ ] C3: 移除 `flow-merge.mjs` 对 `GenericRemoteBackend.mergePr` 的提前短路以走真实远端 fetch + 四态核验；落实 A3 允许独立审查 `verdict: pass` 且 `reviewPassedHead === HEAD` 后由独立审查者或调度者执行 `flow.mjs merge`（仍禁实施者自合）；`flow start` 自动继承已过 `audit` 文档探索凭据。
-- [ ] C4: 修复 `plan-exit-gate.mjs` `'ledgerEntry' in doc` 假阳性、取消跨机缺失本机 `.git/issues` 死循环、修 `workflow-policy-next.mjs` Case 3 独立 Todo 硬编码 `--case 4` 与无活跃任务直转在途 `draft`/未拆完 PRD；实现 `<50` 行标准 Git 协议 `refs/pf/claims/` CAS 原子认领租约；修复 `flow-lifecycle.mjs` `awaiting-upstream-merge` 与移除 `--remote-merged`、`flow-cleanup.mjs` 远端核查、`flow-merge-claim.mjs` `--takeover` 归属回退。
-- [ ] C5: 新建唯一 `kit/skills/lib/plan-index.mjs` (new) 直接替换 `doc-slice-graph.mjs` (`collectPlanDocs`)、`plan-next.mjs` (`collectCandidateDocs`)、`doc-audit-repo.mjs` (`listDocs`)；`session-orient.mjs` 改用 `plan-index.mjs` 消除 `kit/skills/lib/` 静态导入 `doc-audit.mjs`；`doc-plan-ops.mjs` `initDoc` 与 `intake-triage.mjs` 全仓拦截同 `slug`/`issue` 重复建档（`BLOCKED_DUPLICATE_PLAN_DOC`）。
-- [ ] C6: `doc-plan-ops.mjs` `approveSpec` 批准 SPEC 原子联动配套 Todo 设为 `status: active`；在 `docs.mjs` 实现 `syncPlanDocBodyMeta` 并接入 `syncDocsLifecycle`、`archiveCompletedDocsGroup`、`approveSpec` 与 `flow-lifecycle-finalize.mjs`，消除 PRD/SPEC/Todo 正文表与 Frontmatter 失步；落实 A1 对齐 `doc-plan.mjs` Case 3 Todo 自检直通。
-- [ ] C7: 改造 `context-brief.mjs`（权威 TDD 置顶豁免淘汰、排除 `AGENTS.md`、去掉每 heading 重复 `locateCommand`）并补链 `plan-next --handoff`、`critique-scope` 与 `session-orient`；`repo-map --json` 移除 `featureMapIndex` 全量倾倒；`handoff-package.mjs` 按角色裁剪（`explore`/`critic` 不灌 SPEC 设计正文、Fork 纳入 `privateTodoFile`/`privateSpecFile`/`privatePrdFile`、JSON 仅存 1 份 `contextBrief`）；修复 `critique-scope` `findings` 与 `priorRounds` 回显，`verifyDocClaims` 在 `critique-scope` 默认仅静态校验（仅显式 `--run-commands` 时跑重命令）。
-- [ ] C8: 在 `session-state.mjs` 新增有界 `preInit` 缓冲与 `doc-plan.mjs note` 追加并在 `initDoc` 自动吸收清空（同时继承 `triage.planMode`、修 Case 4 `prdRequired` `--kind all` 与 `audit` 跳转 `critique-scope`）；`resolveBaselineSnapshotSync` 接通 `plan-critique-state.json`；去掉魔数比率，仅守永恒客观底线（`DOC_REGRESSION_CORE_*`、`DOC_REGRESSION_CRITERIA_DROPPED`、`verifyDocClaims` 实路径与 `critique-scope` 上轮 `findings` 追踪）。
-- [ ] C9: 修复 `iterate.mjs` 漏导 `printNextStep`、`extractSymbols` 参数与返回值、`slugTestToken` `\b`、`resolveNativeTestDir` 漏传 `files`；抽象单源 `resolveTestRunner` 覆盖 Python（`.venv` `pytest`/`pytest`/`uv`/`unittest`）、Java（`mvn`/`gradle`）、Node/TS（`.js`/`.ts` 下 `tap`/`vitest`/`jest`/`tsx`/`bun`/`node --test`）、Go、Rust 并区分 `missing-runner`，支持递归测试目录与 `configuredTestEntries`。
-- [ ] C10: `iterate.mjs` 与 `signals.mjs` 过滤非代码/已归档/已删除目标；`static-gates.mjs`、`test-inventory.mjs` 与 `govern-audit.mjs` / `govern-state.mjs` 识别 `configuredTestEntries` 与 `scripts/dev/fixtures-*.mjs` 消灭 `Test Files: 0`；`generate --write` 强制隔离拦截；落实 A2 默认 `--escalate: true`（支持 `--no-escalate` 关闭）与 `classifyEscalationTier`；修通 `iterate-cycle.mjs` 持久化累计轮次与停损建单。
-- [ ] C11: `review-gates.mjs` 与 `govern-checks.mjs` 共用 `static-gates.mjs` `countTextLines`、`resolveOversizedExemption` 与 `isLegalArchiveMove`；`edit-gate.mjs` 识别 `reviewWorktreePath` 与 `includeTerminal: true` 兄弟归档更新并对齐 brownfield 棘轮；保留 `check-empirical` 在 `--include-diff` 之前而仅将 `check-fault` 锁收敛至 `record --verdict pass`；`review-context.mjs`/`review-pack.mjs` JSON 仅存 1 份 `contextBrief`；`verify-state.mjs` `evaluateToolStaleness` 跳过 `!baseline` 并批量 `git diff --name-only` 预过滤将 `review-pack` 压回 `<500ms`；`verify-tools create` 对 `scratch/` 探针豁免零断言校验。
-- [ ] C12: 修复 `review-ledger.mjs` Round 3 首次停损 `--human-approved` 缺 `--reason` 校验、完整继承 `baseLedger.rebuts`、低风险单会话冲突与对齐 `generic-git` `awaiting-remote-mr` 指引。
-- [ ] C13: 在 Wave 2 将 `doc-plan-ops.mjs`、`edit-gate.mjs`、`review-context.mjs`、`govern-state.mjs` 剩余 4 处 `['main','master']` 统一收口至 `isDefaultBranch`；移除幽灵参数 `--target`，补全 `flow.mjs` `printHelp()` 与 `SKILL.md` 必传模板，扩展 `scripts/dev/cli-parity.mjs` 校验全部 `kit/skills/dev-*/SKILL.md` 与 `printNextStep`。
-- [ ] C14: 先解绑 `scripts/dev/preflight-contract-rules.mjs` 多文件全文复制强锁（权威源查完整判据，入口查标题指针与禁过时声明），再整理 `SKILL.md`、`AGENTS.md`、`templates/agents-project.md`、`references/*.md`、8 份 `kit/skills/dev-*/SKILL.md` 与 `docs/TDD.md` 清理重复副本与矛盾（不设硬压字节死线）。
-- [ ] C15: 在权威文档与技能指南完整落地 A1/A2/A3、统一 `Case 1` 原地微调与 `--planning` 自动隔离、前置 `single-session + --human-approved`、松绑外部调研配仓内路径硬回落门禁（`doc-locate`/`repo-map`/`verifyDocClaims`），以及按上下文污染与不确定性的弹性探索启发式（不按文件数写死、不给简报写死行数）。
-- [ ] C16: 同步更新 `docs/TDD.md` 与 `docs/feature-map.json`，运行 `scripts/equip.mjs .` 与 `scripts/compose-agents.mjs .`，通过 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs --jobs 6`、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs`、`review.mjs .`、`doc-plan.mjs audit .` 与 `govern-audit.mjs audit . --strict` 全绿，并在最终 PR 归档本总控 PRD。
+- [x] C1: 改造唯一 `resolveDefaultBranch(repoRoot, { strict = true })`（无真实分支返回 `null`）与唯一 `isDefaultBranch`、`ledger.mjs` `baseBranch: null`、禁止 `flow-trial-merge.mjs` 与 `task-backend-local.mjs` 擅自 `update-ref` 建 `main`；下沉唯一 `detectCommitStyle`（有效非自动提交 `< 5` 不反转）至 `kit/skills/lib/git-core.mjs` 由 `scripts/lib/survey-git-fast.mjs` 与 `kit/skills/lib/git.mjs` 共用。
+- [x] C2: 在 `ledger.mjs` 实现 `classifyTaskLiveness` 过滤 `'merged'` 与缺失工作树孤儿任务（本仓 7 个历史台账现场运行 `flow.mjs next --json` 零 `MULTIPLE_ACTIVE_TASKS` / `BLOCKED_NOT_CLAIMED`）；在 `flow-next.mjs` 与 `flow-cleanup.mjs` 共用 `collectTaskRuntimeSnapshot` 消灭 `status --all` 与 `status --task` 分裂。
+- [x] C3: 移除 `flow-merge.mjs` 对 `GenericRemoteBackend.mergePr` 的提前短路以走真实远端 fetch + 四态核验；落实 A3 允许独立审查 `verdict: pass` 且 `reviewPassedHead === HEAD` 后由独立审查者或调度者执行 `flow.mjs merge`（仍禁实施者自合）；`flow start` 自动继承已过 `audit` 文档探索凭据。
+- [x] C4: 修复 `plan-exit-gate.mjs` `'ledgerEntry' in doc` 假阳性、取消跨机缺失本机 `.git/issues` 死循环、修 `workflow-policy-next.mjs` Case 3 独立 Todo 硬编码 `--case 4` 与无活跃任务直转在途 `draft`/未拆完 PRD；实现 `<50` 行标准 Git 协议 `refs/pf/claims/` CAS 原子认领租约；修复 `flow-lifecycle.mjs` `awaiting-upstream-merge` 与移除 `--remote-merged`、`flow-cleanup.mjs` 远端核查、`flow-merge-claim.mjs` `--takeover` 归属回退。
+- [x] C5: 新建唯一 `kit/skills/lib/plan-index.mjs` (new) 直接替换 `doc-slice-graph.mjs` (`collectPlanDocs`)、`plan-next.mjs` (`collectCandidateDocs`)、`doc-audit-repo.mjs` (`listDocs`)；`session-orient.mjs` 改用 `plan-index.mjs` 消除 `kit/skills/lib/` 静态导入 `doc-audit.mjs`；`doc-plan-ops.mjs` `initDoc` 与 `intake-triage.mjs` 全仓拦截同 `slug`/`issue` 重复建档（`BLOCKED_DUPLICATE_PLAN_DOC`）。
+- [x] C6: `doc-plan-ops.mjs` `approveSpec` 批准 SPEC 原子联动配套 Todo 设为 `status: active`；在 `docs.mjs` 实现 `syncPlanDocBodyMeta` 并接入 `syncDocsLifecycle`、`archiveCompletedDocsGroup`、`approveSpec` 与 `flow-lifecycle-finalize.mjs`，消除 PRD/SPEC/Todo 正文表与 Frontmatter 失步；落实 A1 对齐 `doc-plan.mjs` Case 3 Todo 自检直通。
+- [x] C7: 改造 `context-brief.mjs`（权威 TDD 置顶豁免淘汰、排除 `AGENTS.md`、去掉每 heading 重复 `locateCommand`）并补链 `plan-next --handoff`、`critique-scope` 与 `session-orient`；`repo-map --json` 移除 `featureMapIndex` 全量倾倒；`handoff-package.mjs` 按角色裁剪（`explore`/`critic` 不灌 SPEC 设计正文、Fork 纳入 `privateTodoFile`/`privateSpecFile`/`privatePrdFile`、JSON 仅存 1 份 `contextBrief`）；修复 `critique-scope` `findings` 与 `priorRounds` 回显，`verifyDocClaims` 在 `critique-scope` 默认仅静态校验（仅显式 `--run-commands` 时跑重命令）。
+- [x] C8: 在 `session-state.mjs` 新增有界 `preInit` 缓冲与 `doc-plan.mjs note` 追加并在 `initDoc` 自动吸收清空（同时继承 `triage.planMode`、修 Case 4 `prdRequired` `--kind all` 与 `audit` 跳转 `critique-scope`）；`resolveBaselineSnapshotSync` 接通 `plan-critique-state.json`；去掉魔数比率，仅守永恒客观底线（`DOC_REGRESSION_CORE_*`、`DOC_REGRESSION_CRITERIA_DROPPED`、`verifyDocClaims` 实路径与 `critique-scope` 上轮 `findings` 追踪）。
+- [x] C9: 修复 `iterate.mjs` 漏导 `printNextStep`、`extractSymbols` 参数与返回值、`slugTestToken` `\b`、`resolveNativeTestDir` 漏传 `files`；抽象单源 `resolveTestRunner` 覆盖 Python（`.venv` `pytest`/`pytest`/`uv`/`unittest`）、Java（`mvn`/`gradle`）、Node/TS（`.js`/`.ts` 下 `tap`/`vitest`/`jest`/`tsx`/`bun`/`node --test`）、Go、Rust 并区分 `missing-runner`，支持递归测试目录与 `configuredTestEntries`。
+- [x] C10: `iterate.mjs` 与 `signals.mjs` 过滤非代码/已归档/已删除目标；`static-gates.mjs`、`test-inventory.mjs` 与 `govern-audit.mjs` / `govern-state.mjs` 识别 `configuredTestEntries` 与 `scripts/dev/fixtures-*.mjs` 消灭 `Test Files: 0`；`generate --write` 强制隔离拦截；落实 A2 默认 `--escalate: true`（支持 `--no-escalate` 关闭）与 `classifyEscalationTier`；修通 `iterate-cycle.mjs` 持久化累计轮次与停损建单。
+- [x] C11: `review-gates.mjs` 与 `govern-checks.mjs` 共用 `static-gates.mjs` `countTextLines`、`resolveOversizedExemption` 与 `isLegalArchiveMove`；`edit-gate.mjs` 识别 `reviewWorktreePath` 与 `includeTerminal: true` 兄弟归档更新并对齐 brownfield 棘轮；保留 `check-empirical` 在 `--include-diff` 之前而仅将 `check-fault` 锁收敛至 `record --verdict pass`；`review-context.mjs`/`review-pack.mjs` JSON 仅存 1 份 `contextBrief`；`verify-state.mjs` `evaluateToolStaleness` 跳过 `!baseline` 并批量 `git diff --name-only` 预过滤将 `review-pack` 压回 `<500ms`；`verify-tools create` 对 `scratch/` 探针豁免零断言校验。
+- [x] C12: 修复 `review-ledger.mjs` Round 3 首次停损 `--human-approved` 缺 `--reason` 校验、完整继承 `baseLedger.rebuts`、低风险单会话冲突与对齐 `generic-git` `awaiting-remote-mr` 指引。
+- [x] C13: 在 Wave 2 将 `doc-plan-ops.mjs`、`edit-gate.mjs`、`review-context.mjs`、`govern-state.mjs` 剩余 4 处 `['main','master']` 统一收口至 `isDefaultBranch`；移除幽灵参数 `--target`，补全 `flow.mjs` `printHelp()` 与 `SKILL.md` 必传模板，扩展 `scripts/dev/cli-parity.mjs` 校验全部 `kit/skills/dev-*/SKILL.md` 与 `printNextStep`。
+- [x] C14: 先解绑 `scripts/dev/preflight-contract-rules.mjs` 多文件全文复制强锁（权威源查完整判据，入口查标题指针与禁过时声明），再整理 `SKILL.md`、`AGENTS.md`、`templates/agents-project.md`、`references/*.md`、8 份 `kit/skills/dev-*/SKILL.md` 与 `docs/TDD.md` 清理重复副本与矛盾（不设硬压字节死线）。
+- [x] C15: 在权威文档与技能指南完整落地 A1/A2/A3、统一 `Case 1` 原地微调与 `--planning` 自动隔离、前置 `single-session + --human-approved`、松绑外部调研配仓内路径硬回落门禁（`doc-locate`/`repo-map`/`verifyDocClaims`），以及按上下文污染与不确定性的弹性探索启发式（不按文件数写死、不给简报写死行数）。
+- [x] C16: 同步更新 `docs/TDD.md` 与 `docs/feature-map.json`，运行 `scripts/equip.mjs .` 与 `scripts/compose-agents.mjs .`，通过 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs --jobs 6`、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs`、`review.mjs .`、`doc-plan.mjs audit .` 与 `govern-audit.mjs audit . --strict` 全绿，并在最终 PR 归档本总控 PRD。
 
 ## 九、待拍板问题
 

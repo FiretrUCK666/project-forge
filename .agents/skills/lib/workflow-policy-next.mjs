@@ -353,8 +353,8 @@ export function evaluateNextState({
   } else if (t.status === 'merged') {
     phase = 'needs-cleanup'
     ownerRole = 'coordinator'
-    nextAction = '分支已合入，请向用户列清单确认后再执行 cleanup --confirm'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${t.taskId} --confirm`
+    nextAction = '分支已合入，请向用户列清单确认后再执行 cleanup --confirm --preview-hash <hash>'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${t.taskId}`
   } else if (t.role === 'inbound-external-pr') {
     const hasDevReview = rt.hasDevReview ?? true
     if (!hasDevReview) {
@@ -442,7 +442,8 @@ export function evaluateNextState({
     phase = 'needs-submit'
     ownerRole = 'implementer'
     nextAction = '实证已锁定当前 HEAD，由实施者执行 submit 推送并提 PR/同步审查工作位'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId}`
+    const submitAgent = t.claimedBy ?? t.implementerId ?? '<id>'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId} --agent ${submitAgent}`
   } else if (policy?.independentReviewRequired !== false && !reviewCoversHead) {
     phase = 'needs-review'
     ownerRole = 'reviewer'

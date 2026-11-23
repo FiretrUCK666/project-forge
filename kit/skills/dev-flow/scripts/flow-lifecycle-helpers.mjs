@@ -122,7 +122,8 @@ export async function handleRework(opts, roots) {
     process.stdout.write(`进入返工模式（task=${taskId}，原分支=${ledger.branch}，原 PR=${ledger.prNumber ?? '待创建'}）：\n`)
     if (forbiddenTouched.length > 0) process.stdout.write(`- 警告：以下变更命中 do-not-edit 列表：${forbiddenTouched.join(', ')}\n`)
     if (addedRebuts.length > 0) process.stdout.write(`- 已记录 ${addedRebuts.length} 条有据反驳。\n`)
-    printNextStep([{ skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }, { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }], { repoRoot: roots.mainRoot })
+    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+    printNextStep([{ skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }, { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }
@@ -605,7 +606,8 @@ export function emitVerifyOutcomeOutput({
   if (targetTip) process.stdout.write(`${targetTip}\n`)
   process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${finalExit} HEAD=${currentHead ?? 'unborn'} risk=${policy.riskTier}\n`)
   if (allOk) {
-    const next = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }]
+    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+    const next = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }]
     if (policy.smokeRequired && !evRec.e2eObservation) {
       next.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)
     } else if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {

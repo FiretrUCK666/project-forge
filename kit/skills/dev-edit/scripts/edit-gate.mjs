@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { execSafe, resolveExecutable } from '../../lib/exec.mjs'
 import {
-  gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, isMacOsJunkPath, isMainModule,
+  LIKELY_DEFAULT_BRANCHES, gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, isDefaultBranch, isMacOsJunkPath, isMainModule,
   posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
@@ -65,7 +65,12 @@ async function resolveCompareBaseSha(workRoot, isGit, defaultBranch, taskLedger,
     }
   }
 
-  const bases = [...new Set([defaultBranch, 'main', 'master', 'origin/main', 'origin/master'].filter(Boolean))]
+  const bases = [...new Set([
+    defaultBranch,
+    ...(defaultBranch ? [`origin/${defaultBranch}`] : []),
+    ...LIKELY_DEFAULT_BRANCHES,
+    ...LIKELY_DEFAULT_BRANCHES.map((b) => `origin/${b}`),
+  ].filter(Boolean))]
   for (const baseRef of bases) {
     const fastSha = baseRef.startsWith('origin/')
       ? resolveRefShaFast(fastGitDir, `refs/remotes/${baseRef}`)
@@ -284,7 +289,7 @@ export async function runEditGate(opts = {}) {
   if (!taskLedger && isGit) {
     const wtRel = roots.isWorktree ? posixPath(relative(mainRoot, workTreeRoot)) : null
     const br = readHeadFast(resolveGitDirFast(workTreeRoot), gitDir)?.branch ?? null
-    if (wtRel || (br && !['main', 'master'].includes(br))) {
+    if (wtRel || (br && !(await isDefaultBranch(workTreeRoot, br)))) {
       taskLedger = allLedgers.find((l) => (wtRel && (l.worktreePath === wtRel || l.reviewWorktreePath === wtRel)) || (br && l.branch === br)) ?? null
     }
   }

@@ -16,8 +16,12 @@
  * 所以声明只认两种形态：**行首的 `--xxx`**，与**方括号分组里的 `--xxx`**。
  */
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { isMainModule } from '../../kit/skills/lib/git-core.mjs'
+import { SUBCOMMAND_META } from '../../kit/skills/lib/subcommand-meta.mjs'
 
 /** 由 `parseStandardCli` 在各入口统一注入、因此不必各自声明的全局参数。 */
 export const GLOBAL_FLAGS = Object.freeze(['help', 'json', 'dir', 'repo'])
@@ -56,8 +60,7 @@ export const ENTRY_SPECS = Object.freeze([
 export const DARK_BASELINE = Object.freeze({
   '流程入口': Object.freeze([
     'action', 'actor', 'branch', 'comment', 'due-on', 'fork-url', 'human-approved-exec',
-    'implementer', 'issues', 'pr-ref', 'prd', 'run-govern-hook', 'spec',
-    'strict-lifecycle', 'todo', 'visual-evidence',
+    'implementer', 'issues', 'pr-ref', 'run-govern-hook', 'strict-lifecycle',
   ]),
   '规划入口': Object.freeze([
     // approve 是被拒的旧入口参数：它现在带 --approve 会得到 BLOCKED_APPROVAL_HAS_SINGLE_ENTRY，
@@ -377,4 +380,271 @@ export function evaluateParity(audits, baseline = DARK_BASELINE) {
     notes.push(`${a.label} ${a.registered}/${a.declared}，暗参数 ${a.dark.length} 个在册`)
   }
   return { failures, notes }
+}
+
+const REQUIRED_SUBCOMMAND_FLAGS = Object.freeze({
+  'flow.mjs': {
+    submit: ({ flags }) => {
+      if (flags.has('agent')) return []
+      const singleSession = flags.has('single-session') || flags.has('host-mode')
+      if (singleSession && flags.has('human-approved')) return []
+      return ['--agent']
+    },
+    cleanup: ({ flags }) => (flags.has('confirm') && !flags.has('preview-hash') ? ['--preview-hash'] : []),
+    close: ({ flags }) => ['issue', 'reason'].filter((f) => !flags.has(f)).map((f) => `--${f}`),
+  },
+  'doc-plan.mjs': {
+    init: ({ flags, sourceKind }) => {
+      const missing = ['kind', 'slug', 'title'].filter((f) => !flags.has(f)).map((f) => `--${f}`)
+      if (sourceKind === 'skill-md' && !flags.has('owner') && !flags.has('agent')) {
+        missing.push('--owner|--agent')
+      }
+      return missing
+    },
+    approve: ({ flags }) => (flags.has('file') ? [] : ['--file']),
+    'critique-pass': ({ flags }) => ['file', 'reviewer'].filter((f) => !flags.has(f)).map((f) => `--${f}`),
+    'critique-reject': ({ flags }) => ['file', 'reviewer'].filter((f) => !flags.has(f)).map((f) => `--${f}`),
+    'critique-override': ({ flags }) => ['file', 'human-approved', 'reason'].filter((f) => !flags.has(f)).map((f) => `--${f}`),
+  },
+  'review-pack.mjs': {
+    record: ({ flags }) => ['verdict', 'reviewer-id'].filter((f) => !flags.has(f)).map((f) => `--${f}`),
+    override: ({ flags }) => ['human-approved', 'reason'].filter((f) => !flags.has(f)).map((f) => `--${f}`),
+    'check-fault': ({ flags }) => ['phase', 'cmd'].filter((f) => !flags.has(f)).map((f) => `--${f}`),
+  },
+  'iterate.mjs': {
+    cycle: ({ flags, sourceKind }) => (sourceKind === 'skill-md' && !flags.has('goal') ? ['--goal'] : []),
+  },
+})
+
+function buildEntryCatalog(ROOT) {
+  const byBase = new Map()
+  const subcommandsByBase = new Map()
+  for (const meta of Object.values(SUBCOMMAND_META)) {
+    subcommandsByBase.set(basename(meta.file), new Set(meta.subcommands.map((s) => s.name)))
+  }
+  for (const spec of ENTRY_SPECS) {
+    const text = readTextSafe(join(ROOT, spec.file))
+    if (!text) continue
+    const reg = extractRegistered(text)
+    if (!reg.found) continue
+    const base = basename(spec.file)
+    const allowed = new Set([...reg.flags, ...GLOBAL_FLAGS, ...Object.keys(reg.aliases ?? {})])
+    byBase.set(base, {
+      spec,
+      base,
+      allowed,
+      subcommands: subcommandsByBase.get(base) ?? new Set(),
+    })
+  }
+  return byBase
+}
+
+function stripTemplateExprs(raw) {
+  let out = ''
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] === '$' && raw[i + 1] === '{') {
+      let depth = 1
+      let j = i + 2
+      while (j < raw.length && depth > 0) {
+        if (raw[j] === '{') depth += 1
+        else if (raw[j] === '}') depth -= 1
+        j += 1
+      }
+      out += ' <expr> '
+      i = j - 1
+    } else {
+      out += raw[i]
+    }
+  }
+  return out
+}
+
+function parseEntryCommandInvocation(segment, catalog) {
+  const cleaned = stripTemplateExprs(segment).trim()
+  if (!cleaned) return null
+  const m = /\bnode\s+["']?(?:[^"'\s]*\/)?([a-z0-9_-]+\.mjs)["']?(?:\s+([\s\S]*))?$/i.exec(cleaned)
+  if (!m) return null
+  const entryBase = m[1]
+  const entry = catalog.get(entryBase)
+  if (!entry) return null
+
+  const tail = m[2] ?? ''
+  // 将方括号或引号内的选项统一剥出，同时排除 --cmd "<外部命令 --foo>" 等内嵌引号值
+  const strippedQuotedVals = tail.replace(/(--(?:cmd|command|live-e2e-cmd|summary|reason|rationale|title|body|notes?|description|e2e-evidence|visual-evidence|visual-blocked-reason|evidence|findings|rebut|goal)\s+)(?:"[^"]*"|'[^']*')/gi, '$1<quoted>')
+  const tokens = strippedQuotedVals.match(/--[a-z0-9][\w-]*|[a-z0-9][\w-]*/gi) ?? []
+  let sub = null
+  const firstTok = tokens[0] ?? ''
+  if (firstTok && !firstTok.startsWith('--') && entry.subcommands.has(firstTok)) {
+    sub = firstTok
+  }
+  const flags = new Set()
+  for (const mFlag of strippedQuotedVals.matchAll(/(?:^|[\s\[(|])--([a-z0-9][\w-]*)\b/gi)) {
+    flags.add(mFlag[1])
+  }
+  return { entry, sub, flags, raw: cleaned }
+}
+
+/** 校验单段命令行是否存在未注册幽灵参数或缺失必填参数（自动跳过 git/gh/pytest/mvn 等外部 CLI）。 */
+export function auditCommandSnippet(snippet, { ROOT, sourceLabel = 'snippet', sourceKind = 'snippet', _catalog = null } = {}) {
+  const catalog = _catalog ?? buildEntryCatalog(ROOT)
+  const parsed = parseEntryCommandInvocation(snippet, catalog)
+  if (!parsed) return { ok: true, skippedExternal: true, failures: [] }
+  const { entry, sub, flags } = parsed
+  const failures = []
+  for (const f of flags) {
+    if (!entry.allowed.has(f)) {
+      failures.push(`${sourceLabel} 调用 ${entry.base}${sub ? ` ${sub}` : ''} 使用了未注册幽灵参数 --${f}`)
+    }
+  }
+  if (sub) {
+    const reqRule = REQUIRED_SUBCOMMAND_FLAGS[entry.base]?.[sub]
+    if (typeof reqRule === 'function') {
+      const missing = reqRule({ flags, sourceKind, parsed })
+      if (missing.length > 0) {
+        failures.push(`${sourceLabel} 调用 ${entry.base} ${sub} 缺少必填参数：${missing.join('、')}`)
+      }
+    }
+  }
+  return { ok: failures.length === 0, skippedExternal: false, entry: entry.base, sub, flags: [...flags], failures }
+}
+
+function extractShellCommandsFromMarkdown(mdText) {
+  const lines = String(mdText ?? '').replace(/\r\n/g, '\n').split('\n')
+  const cmds = []
+  let inFence = false
+  let fenceLang = ''
+  let buf = ''
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i]
+    const trimmed = raw.trim()
+    if (/^```/.test(trimmed)) {
+      if (!inFence) {
+        inFence = true
+        fenceLang = trimmed.slice(3).trim().toLowerCase()
+      } else {
+        if (buf.trim()) cmds.push({ line: i + 1, cmd: buf.trim() })
+        buf = ''
+        inFence = false
+        fenceLang = ''
+      }
+      continue
+    }
+    if (!inFence || (fenceLang && !/^(?:sh|bash|shell|zsh|pwsh|powershell)?$/.test(fenceLang))) continue
+    if (!trimmed || trimmed.startsWith('#')) {
+      if (buf.trim()) { cmds.push({ line: i, cmd: buf.trim() }); buf = '' }
+      continue
+    }
+    const cleanLine = trimmed.replace(/\s+#\s+.*$/, '')
+    if (cleanLine.endsWith('\\')) {
+      buf += (buf ? ' ' : '') + cleanLine.slice(0, -1).trim()
+      continue
+    }
+    const full = (buf ? `${buf} ` : '') + cleanLine
+    buf = ''
+    for (const part of full.split(/\s*(?:;|&&|\|\||->)\s*/)) {
+      if (part.trim()) cmds.push({ line: i + 1, cmd: part.trim() })
+    }
+  }
+  return cmds
+}
+
+function extractNextStepCommandsFromScript(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const hits = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (!line.includes('.mjs')) continue
+    if (!/(?:printNextStep|nextStep|nextSteps|command\s*=|command\s*:|parts\s*=|steps\.push|next\.unshift|nextTier|unlockCmd)/.test(line)
+      && !/['"`][^'"`]*node\s+["']?\.agents\/skills\//.test(line)) {
+      continue
+    }
+    for (const lit of line.matchAll(/(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)) {
+      const val = lit[2]
+      if (val.includes('.mjs') && /\bnode\s+/.test(val)) {
+        hits.push({ line: i + 1, cmd: val })
+      }
+    }
+  }
+  return hits
+}
+
+function walkMjsFiles(dir, out = []) {
+  if (!existsSync(dir)) return out
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    if (ent.name === 'node_modules' || ent.name === '.git') continue
+    const full = join(dir, ent.name)
+    if (ent.isDirectory()) walkMjsFiles(full, out)
+    else if (ent.isFile() && ent.name.endsWith('.mjs')) out.push(full)
+  }
+  return out
+}
+
+/** 扫描全仓 `kit/skills/dev-<name>/SKILL.md` 命令行代码块及 `kit/skills/` 中 `printNextStep`/导航命令，拦截幽灵参数与缺失必填参数。 */
+export function auditSkillDocsAndNextSteps({ ROOT }) {
+  const catalog = buildEntryCatalog(ROOT)
+  const failures = []
+  let checkedCommands = 0
+
+  const skillsRoot = join(ROOT, 'kit', 'skills')
+  if (existsSync(skillsRoot)) {
+    const skillDirs = readdirSync(skillsRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.startsWith('dev-'))
+      .map((d) => d.name)
+      .sort()
+    for (const dirName of skillDirs) {
+      const mdRel = `kit/skills/${dirName}/SKILL.md`
+      const text = readTextSafe(join(ROOT, mdRel))
+      if (!text) continue
+      for (const item of extractShellCommandsFromMarkdown(text)) {
+        const res = auditCommandSnippet(item.cmd, { ROOT, sourceLabel: `${mdRel}:${item.line}`, sourceKind: 'skill-md', _catalog: catalog })
+        if (!res.skippedExternal) {
+          checkedCommands += 1
+          failures.push(...res.failures)
+        }
+      }
+    }
+
+    for (const abs of walkMjsFiles(skillsRoot)) {
+      const relPath = abs.slice(resolve(ROOT).length + 1).replace(/\\/g, '/')
+      const text = readTextSafe(abs)
+      if (!text) continue
+      for (const item of extractNextStepCommandsFromScript(text)) {
+        const res = auditCommandSnippet(item.cmd, { ROOT, sourceLabel: `${relPath}:${item.line}`, sourceKind: 'script-next-step', _catalog: catalog })
+        if (!res.skippedExternal) {
+          checkedCommands += 1
+          failures.push(...res.failures)
+        }
+      }
+    }
+  }
+
+  return { ok: failures.length === 0, checkedCommands, failures }
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) {
+  const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
+  const walk = (dir, pred, out = []) => {
+    if (!existsSync(dir)) return out
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.name === 'node_modules' || ent.name === '.git' || ent.name === '.worktrees') continue
+      const full = join(dir, ent.name)
+      if (ent.isDirectory()) walk(full, pred, out)
+      else if (ent.isFile() && (!pred || pred(full))) out.push(full)
+    }
+    return out
+  }
+  const audits = [
+    ...ENTRY_SPECS.map((spec) => auditEntry(spec, { ROOT, walk })),
+    ...HAND_ROLLED_SPECS.map((spec) => auditHandRolled(spec, { ROOT })),
+  ]
+  const { failures, notes } = evaluateParity(audits)
+  const globalCheck = auditGlobalWhitelist({ ROOT })
+  if (!globalCheck.ok) failures.push(globalCheck.error)
+  const docParity = auditSkillDocsAndNextSteps({ ROOT })
+  failures.push(...docParity.failures)
+  process.stdout.write(`参数对拍：${notes.join('；')}；SKILL.md/printNextStep 校验 ${docParity.checkedCommands} 条命令\n`)
+  if (failures.length > 0) {
+    for (const f of failures) process.stderr.write(`FAIL  ${f}\n`)
+    process.exit(1)
+  }
 }

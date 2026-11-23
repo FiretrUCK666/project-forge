@@ -1,17 +1,17 @@
 ---
 kind: spec
 title: 八大技能契约零漂移、提示词去臃肿与提交风格防抖
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
 pr: null
-branch: feat/r6-arch-plan
+branch: feat/r6d-skills-contract-debloat
 owner: plan-r6-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r6d-refresh, round=2, sha=a9fa28b4d88f, summary=stripCritiqueMeta升级后按Wave1实际基线独立复核r6d Spec通过)"
 related_prd: ../prd/261124-r6-arch-hardening-prd.md
 related_todo: ../todo/261124-r6d-skills-contract-debloat-todo.md
@@ -27,13 +27,13 @@ depends_on: [r6a-single-source-state, r6b-plan-index-antiblue, r6c-iterate-unifi
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / Issue / PR | `feat/r6-arch-plan` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/r6d-skills-contract-debloat` / 未关联 / 未关联 |
 | 负责人 / 内审状态 | plan-r6-arch / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | `../prd/261124-r6-arch-hardening-prd.md` / `../todo/261124-r6d-skills-contract-debloat-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261124-r6-arch-hardening-prd.md` / `docs/archive/todo/261124-r6d-skills-contract-debloat-todo.md` |
 
 - **变更一句话**：在 Wave 1（A/B/C）合入后，将剩余 4 处默认分支调用收口至 `r6a` 的 `isDefaultBranch`、扩展 `cli-parity.mjs` 清零幽灵参数、先解绑 `preflight-contract-rules.mjs` 复制强锁再按「保留完整信息、仅删冲突与重复副本」原则整理全仓文档（无字节死线），并完成 `equip.mjs .`、`compose-agents.mjs .` 与总控 PRD 归档收口（认领总控 PRD `C13`、`C14`、`C15`、`C16`）。
 
@@ -85,7 +85,7 @@ flowchart LR
 
 4. **全仓同步装配、总控 PRD 归档与全量交付门禁（`C16`）**：
    - 同步更新 `docs/TDD.md` 与 `docs/feature-map.json`（涵盖 `plan-index.mjs` (new)、`refs/pf/claims/` CAS 租约、`preInit` 缓冲、`resolveTestRunner` 等全部新增原语）。
-   - 运行 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`；跑通全仓门禁矩阵；在切片 D 最终 PR 一并收口归档总控 PRD `docs/prd/261124-r6-arch-hardening-prd.md`。
+   - 运行 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`；跑通全仓门禁矩阵；在切片 D 最终 PR 一并收口归档总控 PRD `docs/archive/prd/261124-r6-arch-hardening-prd.md`。
 
 ### 数据与状态变更
 
@@ -119,14 +119,14 @@ flowchart LR
 | `scripts/dev/fixtures-r6d-contracts.mjs` (new)、`scripts/dev/injections-data-r6d.mjs` (new) | 新增 | 正反双向夹具与故障注入 | `fixtures.mjs` 与 `verify-injections.mjs` |
 
 - **对外可见的变化**：幽灵参数清零；五处文档冲突消解；支持弹性探索与外部调研松绑；`AGENTS.md` 去重复且保留完整关键约束。
-- **需要同步改的地方**：最终 PR 随同归档总控 PRD `docs/prd/261124-r6-arch-hardening-prd.md`。
+- **需要同步改的地方**：最终 PR 随同归档总控 PRD `docs/archive/prd/261124-r6-arch-hardening-prd.md`。
 
 ## 五、冻结的验收标准
 
-- [ ] C13: `doc-plan-ops.mjs`、`edit-gate.mjs`、`review-context.mjs`、`govern-state.mjs` 均已切换至 `isDefaultBranch`；`node scripts/dev/cli-parity.mjs` 校验全部 `kit/skills/dev-*/SKILL.md` 与 `printNextStep` 通过且 `kit/skills/dev-review/SKILL.md` 无 `--target`。
-- [ ] C14: `scripts/dev/preflight-contract-rules.mjs` 解绑多文件全文复制强锁，权威判据仅保留在 `references/` 单一真相源，入口保留指针与红线且无硬压字节死线；`node scripts/compose-agents.mjs . --check` 与 `node scripts/dev/gap-coverage.mjs` 通过。
-- [ ] C15: 文档完整对齐 A1/A2/A3、`Case 1` 原地微调、`--planning` 自动隔离、`single-session + --human-approved`、外部调研松绑 + 仓内路径硬回落、弹性探索启发式（无固定文件数与简报行数死线）。
-- [ ] C16: `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --jobs 6`、`node scripts/dev/verify-injections.mjs --jobs 4`、`node scripts/dev/e2e-zip-harness.mjs`、`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .` 与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 全绿退出码 `0`。
+- [x] C13: `doc-plan-ops.mjs`、`edit-gate.mjs`、`review-context.mjs`、`govern-state.mjs` 均已切换至 `isDefaultBranch`；`node scripts/dev/cli-parity.mjs` 校验全部 `kit/skills/dev-*/SKILL.md` 与 `printNextStep` 通过且 `kit/skills/dev-review/SKILL.md` 无 `--target`。
+- [x] C14: `scripts/dev/preflight-contract-rules.mjs` 解绑多文件全文复制强锁，权威判据仅保留在 `references/` 单一真相源，入口保留指针与红线且无硬压字节死线；`node scripts/compose-agents.mjs . --check` 与 `node scripts/dev/gap-coverage.mjs` 通过。
+- [x] C15: 文档完整对齐 A1/A2/A3、`Case 1` 原地微调、`--planning` 自动隔离、`single-session + --human-approved`、外部调研松绑 + 仓内路径硬回落、弹性探索启发式（无固定文件数与简报行数死线）。
+- [x] C16: `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --jobs 6`、`node scripts/dev/verify-injections.mjs --jobs 4`、`node scripts/dev/e2e-zip-harness.mjs`、`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .` 与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 全绿退出码 `0`。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -142,6 +142,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：将 `doc-plan-ops.mjs`、`edit-gate.mjs`、`review-context.mjs`、`govern-state.mjs` 剩余 4 处默认分支检查统一收口到 `isDefaultBranch`/`resolveDefaultBranch`/`LIKELY_DEFAULT_BRANCHES`，对齐 `agents-defaults.mjs` 提交风格防抖阈值；清理 `dev-review/SKILL.md` `--target` 幽灵参数、对齐 `flow.mjs` `printHelp()` 与 `cli-parity.mjs` `DARK_BASELINE` 并扩展 `cli-parity` 扫全 8 个技能文档及 `printNextStep`（264 条零漂移）；解绑 `preflight-contract-rules.mjs` 多文件全文复制锁并落地 A1/A2/A3、外部调研松绑+仓内验真与弹性探索；同步 `docs/TDD.md`、`docs/feature-map.json`、`equip.mjs .` 与 `compose-agents.mjs .`；新增 `fixtures-r6d-contracts.mjs` 与 `injections-data-r6d.mjs`。
+- **与草案的差异**：同步顺修 `flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs` 与 `workflow-policy-next.mjs` 中多处 `submit`/`cleanup` `printNextStep` 缺参问题，使新增的全量 `printNextStep` 扫描零漂移通过。
+- **关联同步文件**：`docs/TDD.md`、`docs/feature-map.json`、`AGENTS.md`、`.agents/skills/**`、`docs/archive/prd/261124-r6-arch-hardening-prd.md`、`docs/archive/todo/261124-r6d-skills-contract-debloat-todo.md`。

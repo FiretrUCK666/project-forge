@@ -24,14 +24,16 @@ metadata:
 4. **先查复用再造轮子**：结尾必须输出**可复用现成模块清单**（`reusableModules`、既有脚本、校验器与公共工具），供 `dev-plan` 方案选型与实施复用。
 5. **不越权、不当人肉代理**：结合 `Feature Map`、`businessFlows` 与 `smoke-verify` 锁定真实本地运行入口，动手后由程序跑实证；尊重 `Dev Profile` 显式配置（含 `none`）。
 
-## 四级探索策略（按复杂度选档，不浪费上下文）
+## 弹性探索策略（按上下文污染与不确定性选档，不写死文件数或行数阈值）
 
-| 档位 | 适用场景（与 `survey` / 日常对齐） | 执行动作 | 明确禁止 |
+- **弹性调度原则**：检索目标收敛且不污染主上下文时，主 Agent 可直接运行 `doc-locate.mjs` / `repo-map.mjs` 精准切片；广度高、跨多模块或不确定性强时派发并行只读 `explore` 子代理并以简洁结构化回执收口（**不设固定文件数或简报行数死线**）。
+
+| 档位 | 适用场景（与勘察 / 日常对齐） | 执行动作 | 明确禁止 |
 | --- | --- | --- | --- |
 | **none（跳过）** | 空白目录 0 业务文件起步（`explorationStrategy.tier: none`） | 直接交给 `--bootstrap-empty` 生成起步工程与初始 `docs/TDD.md` | **禁止派发子代理或运行全量探索** |
-| **quick** | 目标文件、文档章节或符号已明确，只查 1–3 处 | 优先运行 `doc-locate.mjs`（`--file`/`--section`/`--symbol`/`--query`）按行区间精读 | **不跑全量脚本、不整篇通读长文档、不派只读子代理** |
+| **quick** | 目标收敛、不污染主上下文 | 直接运行 `doc-locate.mjs`（`--file`/`--section`/`--symbol`/`--query`）按行区间精读 | **不跑全量脚本、不整篇通读长文档、不派冗余子代理** |
 | **medium** | 单一模块调用链、或 `explorationStrategy.tier: single-pass` 小型仓初始化 | 跑 `repo-map.mjs [--focus <subdir>]` + `doc-locate.mjs` 定位上下游契约、复用基建与测试命令 | 不跨到无关目录乱翻 |
-| **thorough** | `explorationStrategy.tier: parallel-subagents` 存量/重入仓、大型陌生仓或跨模块体检 | 先跑全量 `repo-map.mjs` 拿 `Feature Map`、文档索引、包清单、CI 步骤与热点，再按**互不重叠 `shards` 目录边界**并行派 2–4 个只读子代理深挖后汇总 | 禁止多个子代理扫描同一目录或直接修改任何文件 |
+| **thorough** | `explorationStrategy.tier: parallel-subagents` 存量/重入仓、广度高或强不确定性跨模块探索 | 先跑全量 `repo-map.mjs` 拿 `Feature Map`、文档索引、包清单、CI 步骤与热点，再按**互不重叠 `shards` 目录边界**并行派只读子代理深挖并用简洁结构化回执收口 | 禁止多个子代理扫描同一目录或直接修改任何文件 |
 
 ## 与 `docs/TDD.md` 的读写边界分工
 

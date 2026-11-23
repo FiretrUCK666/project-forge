@@ -18,7 +18,7 @@ export const PUSH_TIER_RULE = [
   },
   {
     what: '审查通过就由审查者合',
-    any: [/审查者(?:直接)?(?:合|合并)|审查通过[^\n]{0,20}(?:合|闭环)|由(?:那个)?审查/,
+    any: [/审查者(?:或调度者)?(?:直接)?(?:合|合并)|审查通过[^\n]{0,20}(?:合|闭环)|由(?:那个)?审查/,
       /reviewer merges|merges? (?:it )?(?:directly|right away)|the reviewer finishes/i],
     everywhere: true,
   },
@@ -28,6 +28,8 @@ export const PUSH_TIER_RULE = [
     everywhere: true,
   },
 ]
+
+export const PUSH_TIER_AUTHORITY = 'references/collaboration.md'
 
 export const PUSH_TIER_DOCS = [
   'SKILL.md',
@@ -46,6 +48,65 @@ export const MERGE_AUTHORITY_DOCS = [
 ]
 
 export const STALE_DAILY_END = /提交\s*[+＋]\s*推送/
+
+/**
+ * 解除多文件全文复制强锁后的推送分档核对：
+ * - 权威源（references/collaboration.md）须完整涵盖 PUSH_TIER_RULE 全部判据；
+ * - 入口 SKILL.md 只需保留「八、谁能合」标题指针与不冲突表述，不强制全文复写；
+ * - 目标仓契约（AGENTS.md / templates/agents-project.md）及 README/CONTRIBUTING/PR 模板
+ *   校验核心边界（如弱化门禁须人点头、日常终点为合并）与无过时表述，不强锁全文副本。
+ */
+export function evaluatePushTierContract(filesMap) {
+  const failures = []
+  const authText = filesMap[PUSH_TIER_AUTHORITY]
+  if (authText === undefined) {
+    failures.push(`推送分档核对：缺权威源 ${PUSH_TIER_AUTHORITY}`)
+  } else {
+    for (const rule of PUSH_TIER_RULE) {
+      if (!rule.any.some((re) => re.test(authText))) {
+        failures.push(`${PUSH_TIER_AUTHORITY} 里缺「${rule.what}」这条权威判据——单源判据缺失将导致所有入口失准`)
+      }
+    }
+  }
+
+  const skillText = filesMap['SKILL.md']
+  if (skillText !== undefined) {
+    const hasPointer = /`references\/collaboration\.md`[^\n]*「八、谁能合」/.test(skillText)
+    if (!hasPointer) {
+      failures.push('SKILL.md 缺少指向 `references/collaboration.md`「八、谁能合」的标题指针')
+    }
+  }
+
+  for (const rel of ['AGENTS.md', 'templates/agents-project.md']) {
+    const txt = filesMap[rel]
+    if (txt === undefined) continue
+    if (!/弱化门禁/.test(txt) || !/日常到此为止/.test(txt)) {
+      failures.push(`${rel} 缺少核心收口边界（「弱化门禁」或「日常到此为止」）`)
+    }
+  }
+
+  for (const rel of MERGE_AUTHORITY_DOCS) {
+    const txt = filesMap[rel]
+    if (txt === undefined) continue
+    for (const rule of PUSH_TIER_RULE) {
+      if (rule.everywhere !== true) continue
+      if (!rule.any.some((re) => re.test(txt))) {
+        failures.push(`${rel} 里缺「${rule.what}」这条提单模板底线`)
+      }
+    }
+  }
+
+  for (const [rel, txt] of Object.entries(filesMap)) {
+    if (txt === undefined) continue
+    const stale = STALE_DAILY_END.exec(txt)
+    if (stale) {
+      const line = txt.slice(0, stale.index).split('\n').length
+      failures.push(`${rel} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
+    }
+  }
+
+  return { ok: failures.length === 0, failures }
+}
 
 export const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']
 export const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m

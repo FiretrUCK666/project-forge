@@ -312,6 +312,7 @@
         "kit/skills/dev-plan/scripts/doc-audit.mjs",
         "kit/skills/dev-plan/scripts/doc-audit-helpers.mjs",
         "kit/skills/dev-plan/scripts/triage-rules.mjs",
+        "kit/skills/lib/plan-index.mjs",
         "kit/skills/lib/plan-sync.mjs",
         "kit/skills/lib/plan-exit-gate.mjs",
         "kit/skills/lib/doc-slice-graph.mjs",
@@ -381,7 +382,9 @@
         "scripts/dev/fixtures-gates-retro-routing.mjs",
         "scripts/dev/injections-data-trace-sync.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-r6b-plan.mjs",
+        "scripts/dev/injections-data-r6b.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
@@ -444,7 +447,9 @@
         "kit/skills/dev-flow/scripts/flow-intake.mjs",
         "kit/skills/dev-flow/scripts/flow-lifecycle.mjs",
         "kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs",
         "kit/skills/dev-flow/scripts/flow-merge.mjs",
+        "kit/skills/dev-flow/scripts/flow-merge-claim.mjs",
         "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
         "kit/skills/lib/workflow-policy.mjs",
         "kit/skills/lib/pr-template-hydrate.mjs",
@@ -522,7 +527,11 @@
         "scripts/dev/injections-data-trace-sync.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
-        "scripts/dev/fixtures-w6c-context-brief.mjs"
+        "scripts/dev/fixtures-w6c-context-brief.mjs",
+        "scripts/dev/fixtures-r6a-state.mjs",
+        "scripts/dev/injections-data-r6a.mjs",
+        "scripts/dev/fixtures-r6d-contracts.mjs",
+        "scripts/dev/injections-data-r6d.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -735,7 +744,9 @@
         "docs/archive/specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md",
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-r6c-gates.mjs",
+        "scripts/dev/injections-data-r6c.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"
@@ -785,7 +796,9 @@
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/injections-data-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-r6d-contracts.mjs",
+        "scripts/dev/injections-data-r6d.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -927,7 +940,9 @@
         }
       ],
       "testRefs": [
-        "scripts/dev/fixtures-flow-truth.mjs"
+        "scripts/dev/fixtures-flow-truth.mjs",
+        "scripts/dev/fixtures-r6d-contracts.mjs",
+        "scripts/dev/injections-data-r6d.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"

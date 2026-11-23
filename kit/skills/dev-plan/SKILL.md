@@ -37,7 +37,7 @@ metadata:
 | **外部 PR 审查** | 0 文档 | 直接移交 `dev-flow` + `dev-review` 只读隔离扫描 |
 | **Case 1**（问答 / 错别字 / 单行） | **0 文档** | 不写多余文档，直接转交执行并跑对应校验 |
 | **Case 2**（明确局部 Bugfix，不改契约） | **0 文档** | 强制 **Red-Green**：先补失败复现回归测试再修绿；触及高风险须独立审查 |
-| **Case 3**（L2 局部功能，不改外部契约） | 只建 `docs/todo/` | 澄清并冻结 `C1..Cn`，跑 `doc-plan.mjs audit` 自净化直通（非平凡 Todo 建议走 Critique） |
+| **Case 3**（L2 局部功能，不改外部契约） | 只建 `docs/todo/` | 澄清并冻结 `C1..Cn`，跑 `doc-plan.mjs audit` **自净化直通（Critique 仅建议，不强制）** |
 | **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`；**一份 SPEC 装不下时再加 `docs/prd/`** | 跑 `audit` -> **独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审；全历史换人 + 3 轮硬停损 `STOP_LOSS_ESCALATE`，支持 `critique-reject`/`critique-override`）-> 交人 `approve` |
 | **Case 5**（与 `docs/TDD.md` 或生效 SPEC 冲突） | **阻断拆解** | 先修订 `docs/TDD.md` 并经独立确认后再续 |
 
@@ -53,8 +53,8 @@ metadata:
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 
-- **不可自审、全历史换人与 3 轮停损锁**：禁用 `owner: null`（`INVALID_OWNER`），禁跨轮把 `triage` 高档降回低档（`BLOCKED_TRIAGE_DOWNGRADE`）；`interactive` 模式 `clarify` 须带 `--by user` 消解全部待决小节。`critique-pass` / `critique-reject` 写入 `ledger.planCritique`，硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用历史审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`）；连轮同阻或第 3 轮退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），仅人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后由维护者 `approve`（`--skip-critique-reason` 仅 `single-session + --human-approved` 放行，否则走独立 Critique）。**批准只由 `approve` 写入**（`link --approve` 报 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY`），并支持 `--multi-spec` 与活跃 SPEC 反查总控 PRD。
-- **抗压缩单源恢复、`impl` 工作树默认隔离与角色续聊**：随时可跑 `doc-plan.mjs next --handoff`（与 `flow.mjs next` 共享状态机）从磁盘无损恢复 `1:N` 总控 PRD/切片、`findings`、中断半成品工作树归属与人类三态拍板出口（含 `--plan-only` 纯文档 PRD/Issue 团队异步交付）。在已有提交的 Git 默认分支上，`doc-plan.mjs init` 默认自动建 `.worktrees/impl-<taskId>/` 隔离规划（除非显式 `--in-place`）；`planner` 返工优先向既有原写手子代理发送续聊指令，支持断连后新派读盘接手，仅只读探索不建工作树；**勘察与澄清严禁未经用户要求擅自调用外部 `webfetch`/`websearch` 抓取远端代码或猜测网页**，一律以本地仓源码与常青文档为准。
+- **不可自审、全历史换人与 3 轮停损锁**：禁用 `owner: null`（`INVALID_OWNER`），禁跨轮把 `triage` 高档降回低档（`BLOCKED_TRIAGE_DOWNGRADE`）；`interactive` 模式 `clarify` 须带 `--by user` 消解全部待决小节。`critique-pass` / `critique-reject` 写入 `ledger.planCritique`，硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用历史审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`）；连轮同阻或第 3 轮退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），仅人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后由维护者 `approve`（**`--host-mode single-session --human-approved` 配 `--skip-critique-reason` 仅限无子代理能力单会话宿主且经人授权时使用，多代理宿主严禁借此绕过**）。**批准只由 `approve` 写入**（`link --approve` 报 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY`），并支持 `--multi-spec` 与活跃 SPEC 反查总控 PRD。
+- **抗压缩单源恢复、默认隔离与外部调研边界（Repo-Path Grounding）**：随时可跑 `doc-plan.mjs next --handoff`（与 `flow.mjs next` 共享状态机）从磁盘无损恢复 `1:N` 总控 PRD/切片、`findings`、中断半成品工作树归属与人类三态拍板出口（含 `--plan-only`）。在已有提交的 Git 默认分支上，`doc-plan.mjs init` 默认自动建 `.worktrees/impl-<taskId>/` 隔离规划（除非显式 `--in-place`；若先跑 `flow.mjs start --planning --task <id>`，则 `init --task <id>` 自动复用该工作树不重开）；`planner` 返工优先向既有原写手子代理发送续聊指令，仅只读探索不建工作树；**允许在需求澄清、技术选型或用户明确要求时调用 `webfetch`/`websearch` 做外部调研（须注明外部来源），但任何写入规划文档的仓内文件路径、符号与命令必须经 `doc-locate`/`repo-map`/`verifyDocClaims` 在本仓验真（Repo-Path Grounding）**。
 - **波次移交 `dev-flow`**：单任务 `audit`/`approve` 通过后按 `[NEXT STEP]` 移交 `dev-flow`（`flow.mjs start`）；多切片协同可配合 `flow.mjs start --after <parent>` 起堆叠子分支或 `flow.mjs batch plan` 按文件互斥划分波次。未装配兄弟技能时退化为原生 Git 指引。
 
 ## 标准命令流
@@ -67,7 +67,7 @@ node ".agents/skills/dev-plan/scripts/doc-plan.mjs" next [--file "<docPath>"] [-
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--plan-mode interactive | autonomous]
 
 # 2. 按统一模板生成文档（commits > 0 默认分支自动入隔离规划 worktree；--in-place 原地落盘）
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|tdd|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune]
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|tdd|pair|all> --slug "<slug>" --title "<标题>" [--owner <id> | --agent <id>] [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune]
 
 # 3. 多轮互动澄清落盘与规划内审自净化（实质性校验零字数门槛、跨轮防退化比对、Mermaid 16/12、Frontmatter 互链）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" clarify --file "docs/specs/<file>" --question "<问题>" --decision "<结论>" [--by user] [--criterion "<追加 C 项>"]

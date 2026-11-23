@@ -1,16 +1,16 @@
 ---
 kind: todo
 title: 八大技能契约零漂移、提示词去臃肿与提交风格防抖
-status: active
+status: done
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
 pr: null
-branch: feat/r6-arch-plan
+branch: feat/r6d-skills-contract-debloat
 owner: plan-r6-arch
 plan_mode: interactive
 approved: true
-done_at: null
+done_at: 2026-11-24
 task_id: r6d-skills-contract-debloat
 planned_at: 1853e2257b47936b97aed07377c98d2d7a117bb8
 related_prd: ../prd/261124-r6-arch-hardening-prd.md
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-r6d-skills-contract-debloat-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / 基线 | `feat/r6-arch-plan` @ `1853e22` |
+| 分支 / 基线 | `feat/r6d-skills-contract-debloat` @ `1853e22` |
 | 任务编号 | `r6d-skills-contract-debloat` |
-| 负责人 / 审批 | plan-r6-arch / `false` |
+| 负责人 / 审批 | plan-r6-arch / `true` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-r6d-skills-contract-debloat-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/archive/specs/261124-r6d-skills-contract-debloat-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -43,10 +43,10 @@ related_spec: ../specs/261124-r6d-skills-contract-debloat-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C13: 将 `doc-plan-ops.mjs`、`edit-gate.mjs`、`review-context.mjs`、`govern-state.mjs` 剩余 4 处默认分支调用切至 `isDefaultBranch`；清零 `SKILL.md` 幽灵参数，对齐 `flow.mjs` `printHelp()` 与 `kit/skills/dev-*/SKILL.md` 必传参数，扩展 `cli-parity.mjs` 校验全部 `SKILL.md` 与 `printNextStep`。
-- [ ] C14: 先解绑 `scripts/dev/preflight-contract-rules.mjs` 多文件全文复制强锁，再清理 `SKILL.md`、`AGENTS.md`、`templates/agents-project.md`、`references/*.md`、`kit/skills/dev-*/SKILL.md` 与 `docs/TDD.md` 重复副本（保留完整关键信息，无硬压字节死线）。
-- [ ] C15: 完整落地 A1/A2/A3、统一 `Case 1` 原地微调与 `--planning` 自动隔离、前置 `single-session + --human-approved`、松绑外部调研配仓内路径硬回落门禁及弹性探索启发式（无固定文件数与简报行数死线）。
-- [ ] C16: 同步 `docs/TDD.md` 与 `docs/feature-map.json`，运行 `equip.mjs .` 与 `compose-agents.mjs .`，跑通全量门禁矩阵与故障注入并在最终 PR 归档总控 PRD。
+- [x] C13: 将 `doc-plan-ops.mjs`、`edit-gate.mjs`、`review-context.mjs`、`govern-state.mjs` 剩余 4 处默认分支调用切至 `isDefaultBranch`；清零 `SKILL.md` 幽灵参数，对齐 `flow.mjs` `printHelp()` 与 `kit/skills/dev-*/SKILL.md` 必传参数，扩展 `cli-parity.mjs` 校验全部 `SKILL.md` 与 `printNextStep`。
+- [x] C14: 先解绑 `scripts/dev/preflight-contract-rules.mjs` 多文件全文复制强锁，再清理 `SKILL.md`、`AGENTS.md`、`templates/agents-project.md`、`references/*.md`、`kit/skills/dev-*/SKILL.md` 与 `docs/TDD.md` 重复副本（保留完整关键信息，无硬压字节死线）。
+- [x] C15: 完整落地 A1/A2/A3、统一 `Case 1` 原地微调与 `--planning` 自动隔离、前置 `single-session + --human-approved`、松绑外部调研配仓内路径硬回落门禁及弹性探索启发式（无固定文件数与简报行数死线）。
+- [x] C16: 同步 `docs/TDD.md` 与 `docs/feature-map.json`，运行 `equip.mjs .` 与 `compose-agents.mjs .`，跑通全量门禁矩阵与故障注入并在最终 PR 归档总控 PRD。
 
 ## 执行步骤
 
@@ -64,9 +64,9 @@ related_spec: ../specs/261124-r6d-skills-contract-debloat-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（接手人先查本行与关联分支最新提交）
+- **当前状态**：`已完成 (done)`（`r6d` 全部验收条款 `C13..C16` 与总控 PRD `C1..C16` 已收口并通过门禁）
 - **待拍板事项**：无
-- **下一步第一件事**：确认 Wave 1 A/B/C 全数合并后，在隔离 `.worktrees/impl-r6d-skills-contract-debloat` 先写 `scripts/dev/fixtures-r6d-contracts.mjs` (new)。
+- **下一步第一件事**：完成 `finalize` 成对归档、`verify` 实证绑定并提交 PR。
 
 ## 澄清与补充记录
 
@@ -76,6 +76,6 @@ related_spec: ../specs/261124-r6d-skills-contract-debloat-spec.md
 
 ## 完成后的记录
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --jobs 6` 513 项通过 / 0 失败（含 `--domain r6d-contracts` 4 项）；`node scripts/dev/verify-injections.mjs --jobs 4` 408 条故障注入全红（含 `I630..I634`）；`node scripts/dev/e2e-zip-harness.mjs` 240 条目 E2E 场景 A–L 全通（49694 ms）；`node scripts/dev/bench.mjs` 6/6 项预算内；`node scripts/dev/preflight.mjs` 41 项读数 0 失败；`node scripts/dev/gap-coverage.mjs` 21 条全覆盖；`node scripts/dev/cli-parity.mjs` 264 条命令零漂移；`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`（22765 字节）、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit .`、`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .` 与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 全通过。
+- **文档同步检查**：已同步更新 `docs/TDD.md`、`docs/feature-map.json`、`AGENTS.md`、`.agents/skills/` 与总控 PRD `docs/archive/prd/261124-r6-arch-hardening-prd.md`，并在合并前随本分支成对归档。
+- **遗留问题**：无

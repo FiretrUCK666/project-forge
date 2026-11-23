@@ -175,24 +175,24 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
   还没有远端时按 `local-only` 运作，通过本地特性分支与临时 `--detach` 试合推进主干；高风险或 `one-way` 变更仍须独立审查，新增提案可走 `flow.mjs intake` 离线分诊。
 <!-- project-forge: endif -->
 
-- **第二步：纯调度分波、五档分流与三正交策略**——主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查均派独立隔离代理。跑 `flow.mjs next --handoff`（`Wave 1 >= 2` 就绪 `docs/specs/*.md` 并行）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 -> 澄清 -> 设计 -> 实现 -> 评审 -> 实证测试-形式验证 -> 验收 -> 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项（未就绪阻断 `BLOCKED_PLAN_NOT_READY`；隔离规划用 `init --worktree` + `start --planning`）：
+- **第二步：纯调度分波、五档分流与三正交策略**——主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查均派独立隔离代理（**`--host-mode single-session --human-approved` 仅限无子代理能力单会话宿主且经人授权时使用，多代理宿主严禁借此绕过**）。跑 `flow.mjs next --handoff`（`Wave 1 >= 2` 就绪 `docs/specs/*.md` 并行）或 `doc-plan.mjs triage`；**弹性探索与外部调研**：目标收敛且不污染主上下文时直接跑 `doc-locate`/`repo-map`，广度高或不确定性强时派并行只读 `explore`；需要澄清/选型时允许外部调研（注明来源），但写入文档的仓内路径、符号与命令必经本地验真。在 `commits > 0` 默认分支上 `doc-plan.mjs init` 默认自动隔离到 `.worktrees/impl-<taskId>/`（若先 `flow.mjs start --planning` 则同位复用，无需建双工作树）：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |
-  | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑对应检验（`docs:`） |
+  | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，允许原地微调，跑对应检验（`docs:`） |
   | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写失败测试再修（Red-Green，`fix:`）** |
-  | **Case 3** | `L2` 功能调整，不改外部契约 | `{{WORK_DIR}}` 建 Todo 冻结 `C1..Cn`；跑 `doc-plan.mjs audit` |
+  | **Case 3** | `L2` 功能调整，不改外部契约 | `{{WORK_DIR}}` 建 Todo 冻结 `C1..Cn`；跑 `doc-plan.mjs audit` 自净化直通（Critique 仅建议） |
   | **Case 4** | `L3` 跨模块/契约变更或高风险 | `docs/specs/` + `{{WORK_DIR}}` Todo；经 `audit` + 3 轮 Critique（禁自审）-> `approve` |
   | **Case 5** | 与 `docs/TDD.md`（若存在）或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**（若存在），内审获批后继续 |
 
   风险定级：`low`（非可执行文本，走 `runLowRiskDocStaticCheck`）/ `medium` / `high`（高风险/`one-way`/Case>=4 须独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 1-4 在隔离 `impl` 位派 `impl` 代理。
 
-- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 可原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。**只读探索转任何文件写改（含仅补测试归 Case 2/3、治理修复与归档校准）必先 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack`。**
+- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 允许原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。**只读探索转任何非 `Case 1` 文件写改（含仅补测试归 Case 2/3、治理修复与归档校准）必先 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack`。**
 
 <!-- project-forge: if has-remote -->
 - **第四步：认领与 PR 前文档同步**——**谁改代码谁认领（`Case >= 2` 校 `claimedAt`）并负责 `finalize`/`verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）/`submit --agent <id>`**（禁协调/审查者代提，仅 `single-session + --human-approved` 豁免）；同名作者拦截 `BLOCKED_AUTHOR_IS_IMPLEMENTER`；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危；PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对归档，`1:N` PRD 走四态），`submit` 零写回跟踪文件。
 
-- **第五步：独立审查与合并**——**独立审查通过（`--enforce-gates`、`reviewToken` 绑定、`fail` 为空）后由审查者直接合**（Round 2+ 换全新上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮停损约束；UI 变更缺真实 `--artifact`/`--visual-blocked-reason` 阻断；触高风险须故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR，merge 核四态）。合前强校三方 `headSha` 与干净工作区。
+- **第五步：独立审查与合并**——**独立审查通过（`--enforce-gates`、`reviewToken` 绑定、`fail` 为空、`reviewPassedHead === HEAD`）后由审查者直接合（A3 亦允许由调度者执行 `flow.mjs merge`，仍严禁实施者自合）**（Round 2+ 换全新上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮停损约束；UI 变更缺真实 `--artifact`/`--visual-blocked-reason` 阻断；触高风险须故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR，merge 核四态）。合前强校三方 `headSha` 与干净工作区。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo 完成记录与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、随同分支提交；
@@ -211,7 +211,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 <!-- project-forge: if no-remote -->
 - **第四步：任务留痕与合并前文档同步**——**谁改代码谁认领并负责 `finalize`/`verify`/`submit`**，一任务一特性分支；合入前跑 `flow.mjs finalize` 完成勾选与成对归档（`1:N` 总控 PRD 走四态），`submit` 校验干净状态并同步审查槽。
 
-- **第五步：独立审查与本地试合**——**独立审查通过（`fail` 为空）后由审查者直接合入 `{{DEFAULT_BRANCH}}`**（Round 2+ 换全新上下文，受全历史换人与 3 轮停损约束；**仅弱化门禁须人点头**；「取舍」写 `merge-authority: human` 收回人合）。本地合入经 `--detach` 试合复测后 `--ff-only` 推进主干。
+- **第五步：独立审查与本地试合**——**独立审查通过（`fail` 为空、`reviewPassedHead === HEAD`）后由审查者直接合入 `{{DEFAULT_BRANCH}}`（A3 亦允许由调度者执行 `flow.mjs merge`，仍严禁实施者自合）**（Round 2+ 换全新上下文，受全历史换人与 3 轮停损约束；**仅弱化门禁须人点头**；「取舍」写 `merge-authority: human` 收回人合）。本地合入经 `--detach` 试合复测后 `--ff-only` 推进主干。
 
 - **第六步：本地合入收尾与 Worktree 清理**——1. 合并前完成 Todo 记录与归档；2. `flow.mjs merge` 推进 `{{DEFAULT_BRANCH}}`；3. `git switch {{DEFAULT_BRANCH}}` 核对主干；4. 列出 worktree 与本地分支干净清单，**问到人点头才删**（`flow.mjs cleanup --confirm --preview-hash <hash>`）。
 

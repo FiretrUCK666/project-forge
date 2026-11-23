@@ -615,7 +615,11 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   const repoRoot = roots.workTreeRoot
 
   if (sub === 'cycle') {
-    const prevCycle = opts.reset ? null : loadCycleState(roots.mainRoot)
+    const incomingGoal = String(opts.goal ?? '').trim()
+    const prevLoaded = opts.reset ? null : loadCycleState(roots.mainRoot)
+    const prevCycle = (prevLoaded && (!incomingGoal || !prevLoaded.goal || incomingGoal === prevLoaded.goal))
+      ? prevLoaded
+      : null
     const mergedHist = mergeCycleHistory(prevCycle?.progressHistory ?? [], opts['progress-history'])
     const mergedGates = mergeCycleGates(prevCycle?.pendingGates ?? [], opts['pending-gates'])
     const plan = buildCyclePlan({

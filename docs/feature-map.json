@@ -299,7 +299,9 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -496,6 +498,7 @@
       ],
       "businessFlows": [
         "双轴身份探测、全局 intake 分诊与 Worktree 隔离启动",
+        "Case 2/3/4 开工确定性 Issue 绑定（先复用、八类豁免、质量建单回链与 BLOCKED_MISSING_ISSUE_BINDING）",
         "归档锁 finalize、分层 verify、submit 提审、试合 merge 与销毁 scratch 清理",
         "按切片依赖拓扑排波次并为就绪切片生成交接包",
         "校验 Actor/HostMode/Slot 隔离边界、previewHash 安全删分支及波次调度闭环"
@@ -546,7 +549,9 @@
         "scripts/dev/fixtures-r7-rootfix.mjs",
         "scripts/dev/injections-data-r7.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -658,7 +663,9 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -824,7 +831,9 @@
         "scripts/dev/fixtures-r7-rootfix.mjs",
         "scripts/dev/injections-data-r7.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -894,7 +903,9 @@
         }
       ],
       "testRefs": [
-        "scripts/dev/fixtures-flow-truth.mjs"
+        "scripts/dev/fixtures-flow-truth.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#关键不变量"
@@ -972,7 +983,9 @@
         "scripts/dev/fixtures-r7-rootfix.mjs",
         "scripts/dev/injections-data-r7.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"

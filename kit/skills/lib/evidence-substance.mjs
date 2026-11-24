@@ -125,6 +125,32 @@ export function evaluateReleaseReason(raw, { subject = '放行理由', minChars 
   return { ok: true, code: null, reason: null, cleaned: stripped }
 }
 
+/**
+ * 校验豁免/覆写原因（如 `--no-issue --reason`）：
+ * 缺失返回 `MISSING_OVERRIDE_REASON`，水话或占位返回 `BLOCKED_SHALLOW_OVERRIDE_REASON`。
+ */
+export function validateOverrideReason(raw, { subject = '豁免理由', minChars = 4 } = {}) {
+  const trimmed = String(raw ?? '').trim()
+  if (!trimmed) {
+    return {
+      ok: false,
+      code: 'MISSING_OVERRIDE_REASON',
+      reason: `${subject}不能为空，请通过 --reason "<具体原因>" 说明依据。`,
+      cleaned: '',
+    }
+  }
+  const base = evaluateTextSubstance(trimmed, { minChars, subject })
+  if (!base.ok) {
+    return {
+      ok: false,
+      code: 'BLOCKED_SHALLOW_OVERRIDE_REASON',
+      reason: base.reason,
+      cleaned: '',
+    }
+  }
+  return { ok: true, code: null, reason: null, cleaned: base.cleaned }
+}
+
 /** 把一段理由排成账本里的一行，附上「谁在什么时候因为什么放的行」。 */
 export function formatReleaseRecord({ kind, reason, by = null, at = null, bypassed = [] }) {
   const stamp = at ?? new Date().toISOString()

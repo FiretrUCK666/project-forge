@@ -193,7 +193,7 @@ export function registerR5PlanFlowCases(cases) {
     try {
       gitInit(dir)
       gitSync(dir, ['remote', 'add', 'origin', 'https://git.example.org/org/demo.git'])
-      const stRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'off-task', '--slug', 'off-task', '--case', '2', '--json'], { cwd: dir })
+      const stRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'off-task', '--slug', 'off-task', '--case', '2', '--no-issue', '--reason', '回归夹具测试 generic-git 离线提交', '--json'], { cwd: dir })
       if (stRes.status !== 0) return `generic-git start 失败：${stRes.stderr}`
       const wt = join(dir, '.worktrees', 'impl-off-task')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const a = 2\n')

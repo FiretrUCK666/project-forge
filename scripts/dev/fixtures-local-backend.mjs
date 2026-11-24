@@ -195,10 +195,10 @@ export function registerStageBLoopCases(cases) {
     try {
       equip(dir, { tier: 'full', noBackup: true })
       const spInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'spec', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place', '--json',
+        'init', '--kind', 'spec', '--slug', 'custom-slug', '--title', '本地单绑定', '--owner', 'spec-writer', '--in-place', '--json',
       ], { cwd: dir })
       const tdInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'todo', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place', '--json',
+        'init', '--kind', 'todo', '--slug', 'custom-slug', '--title', '本地单绑定', '--owner', 'spec-writer', '--in-place', '--json',
       ], { cwd: dir })
       if (spInit.status !== 0 || tdInit.status !== 0) {
         return `doc-plan init 失败：sp=${spInit.stderr}, td=${tdInit.stderr}`
@@ -208,7 +208,7 @@ export function registerStageBLoopCases(cases) {
         writeFileSync(join(dir, tdRel), readFileSync(join(dir, tdRel), 'utf8')
           .replace(/<[^>]+>/g, '修改 `src/app.mjs`'), 'utf8')
       }
-      gitCommitFast(dir, 'docs: add pre-created issue 1 spec and todo')
+      gitCommitFast(dir, 'docs: add pre-created custom-slug spec and todo')
 
       const roots = await resolveRepoRoots(dir)
       const origOut = process.stdout.write.bind(process.stdout)
@@ -219,7 +219,8 @@ export function registerStageBLoopCases(cases) {
       try {
         startRes = await handleStart({ 'create-issue': true, title: '主功能工单', case: '3', implementer: 'alice', todo: tdRel, json: true }, roots)
         if (startRes.exitCode !== 0) return `local-only start --create-issue 失败：${startRes.exitCode}`
-        const matchedSpec = findMatchingDocStrict(dir, 'docs/specs', 'issue-1', 'issue-1', [1])
+        const ledgerStart0 = readTaskLedger(dir, 'issue-1')
+        const matchedSpec = findMatchingDocStrict(join(dir, ledgerStart0.worktreePath), 'docs/specs', 'issue-1', 'issue-1', [1])
         if (!matchedSpec || !matchedSpec.includes('custom-slug')) {
           return `findMatchingDocStrict 未按 frontmatter issue: 1 兜底匹配：${matchedSpec}`
         }

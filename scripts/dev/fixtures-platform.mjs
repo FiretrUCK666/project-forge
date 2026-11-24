@@ -81,7 +81,7 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
 
     gitInit(dirGeneric, { branch: 'main', name: 't', email: 't@t.t', origin: 'https://git.internal.corp/team/repo.git' })
 
-    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-gen', '--case', '2', '--agent', 'alice', '--slug', 'gen', '--json'], { cwd: dirGeneric })
+    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-gen', '--case', '2', '--agent', 'alice', '--slug', 'gen', '--no-issue', '--reason', '回归夹具测试 generic-git 合流阻断', '--json'], { cwd: dirGeneric })
     if (st.status !== 0) return `generic-git start 失败：${st.stderr}`
     const l = JSON.parse(st.stdout)
     if (l.role !== 'generic-git' || l.providerId !== 'generic-git') return `generic-git 角色错误：${st.stdout}`

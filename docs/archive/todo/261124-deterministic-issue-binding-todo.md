@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: Case 2/3/4 开工确定性 Issue 绑定闭环
-status: active
+status: done
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -10,7 +10,7 @@ branch: feat/deterministic-issue-binding
 owner: plan-issue-bind
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-24
 task_id: deterministic-issue-binding
 planned_at: 5c10a036ba96757b6af8b3fd6897860db9963122
 related_prd: null
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-deterministic-issue-binding-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/deterministic-issue-binding` @ `5c10a03` |
 | 任务编号 | `deterministic-issue-binding` |
 | 负责人 / 审批 | plan-issue-bind / `false` |
 | 规划态 | `interactive`（单向门，与 SPEC 对齐） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-deterministic-issue-binding-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/archive/specs/261124-deterministic-issue-binding-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -45,10 +45,10 @@ related_spec: ../specs/261124-deterministic-issue-binding-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C1: `flow.mjs start` 对非豁免 `Case 2/3/4` 按「`--issue` -> `ledger` -> 关联 `SPEC`/`Todo`/`PRD`」复用已有工单不重复建单；`Case 3/4` 携带 `plan-index.mjs` 验真的 `SPEC`/`Todo`（或显式 `--create-issue`/`--body`/`--body-file`）自动经 `createIssueForStart` 走 `hydrateIssueBody -> validateIssueBodyQuality -> TaskBackend.createIssue` 建单并回写账本与文档 Frontmatter；无文档且无有效正文/单号的 `Case 2` 返回 `BLOCKED_MISSING_ISSUE_BINDING`（`EXIT.FACT = 3`）；`Case 1`/`--planning`/`--allow-plan-bootstrap`（无显式建单）/`--external-pr`/`contributor-fork`/`clone-readonly`/`no-auto-issue`/`--no-issue --reason` 正确豁免且可审计；`cli-parity.mjs`、`subcommand-parity.mjs` 与 `exit-code-parity.mjs` 零失败。
-- [ ] C2: 全量 `scripts/dev/` 既有测试与 E2E 夹具（含 `fixtures.mjs --jobs 6`、`e2e-zip-harness.mjs`、`e2e-scenarios-evolution.mjs`、`e2e-scenarios-lifecycle.mjs`、`blind-run-harness.mjs`）诚实对齐新契约且不弱化任何门禁，退出码全部为 `0`。
-- [ ] C3: `references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`templates/agents-project.md`、`docs/TDD.md`、`docs/feature-map.json` 同步完毕，`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`（`0` 个「缺」）、`node scripts/dev/preflight.mjs`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 与 `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit .` 全绿。
-- [ ] C4: 新增 `scripts/dev/fixtures-issue-binding.mjs` (new) 与 `scripts/dev/injections-data-issue-binding.mjs` (new) 覆盖全部正反边界与故障注入，`node scripts/dev/fixtures.mjs --domain issue-binding` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿，且改动后所有 `.mjs` 文件均 `<= 800` 行、零第三方依赖、零 emoji。
+- [x] C1: `flow.mjs start` 对非豁免 `Case 2/3/4` 按「`--issue` -> `ledger` -> 关联 `SPEC`/`Todo`/`PRD`」复用已有工单不重复建单；`Case 3/4` 携带 `plan-index.mjs` 验真的 `SPEC`/`Todo`（或显式 `--create-issue`/`--body`/`--body-file`）自动经 `createIssueForStart` 走 `hydrateIssueBody -> validateIssueBodyQuality -> TaskBackend.createIssue` 建单并回写账本与文档 Frontmatter；无文档且无有效正文/单号的 `Case 2` 返回 `BLOCKED_MISSING_ISSUE_BINDING`（`EXIT.FACT = 3`）；`Case 1`/`--planning`/`--allow-plan-bootstrap`（无显式建单）/`--external-pr`/`contributor-fork`/`clone-readonly`/`no-auto-issue`/`--no-issue --reason` 正确豁免且可审计；`cli-parity.mjs`、`subcommand-parity.mjs` 与 `exit-code-parity.mjs` 零失败。
+- [x] C2: 全量 `scripts/dev/` 既有测试与 E2E 夹具（含 `fixtures.mjs --jobs 6`、`e2e-zip-harness.mjs`、`e2e-scenarios-evolution.mjs`、`e2e-scenarios-lifecycle.mjs`、`blind-run-harness.mjs`）诚实对齐新契约且不弱化任何门禁，退出码全部为 `0`。
+- [x] C3: `references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`templates/agents-project.md`、`docs/TDD.md`、`docs/feature-map.json` 同步完毕，`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`（`0` 个「缺」）、`node scripts/dev/preflight.mjs`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 与 `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit .` 全绿。
+- [x] C4: 新增 `scripts/dev/fixtures-issue-binding.mjs` (new) 与 `scripts/dev/injections-data-issue-binding.mjs` (new) 覆盖全部正反边界与故障注入，`node scripts/dev/fixtures.mjs --domain issue-binding` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿，且改动后所有 `.mjs` 文件均 `<= 800` 行、零第三方依赖、零 emoji。
 
 ## 执行步骤
 
@@ -75,7 +75,7 @@ related_spec: ../specs/261124-deterministic-issue-binding-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（规划起草完毕，待 `doc-plan.mjs audit` 核验后移交独立 Critique 与 `approve`）
+- **当前状态**：`已完成 (done)`（规划起草完毕，待 `doc-plan.mjs audit` 核验后移交独立 Critique 与 `approve`）
 - **待拍板事项**：无
 - **下一步第一件事**：由独立 Critique 评审本 SPEC 与 Todo，获批后实施者转入实施认领并按 Red-Green 顺序推进。
 
@@ -87,6 +87,6 @@ related_spec: ../specs/261124-deterministic-issue-binding-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --jobs 6`（526 项通过，0 项失败）；`node scripts/dev/verify-injections.mjs --jobs 4`（428 条判据全部捕获）；`node scripts/dev/blind-run-harness.mjs`（executed=17, succeeded=17, errorOnly=0, skipped=2, ok=true）；`node scripts/dev/bench.mjs`（6/6 项在预算内）；`node scripts/dev/preflight.mjs`（41 项读数，0 失败）；`node scripts/review.mjs .`（可以交付，0 缺）；`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict`（0 finding）；`node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit .`（22/22 OK，Zombies=0，StaleTools=0）；`node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --json`（ok=true，blockers=0）；`finalize` + 提交后将再跑全量 `preflight.mjs` 与 `e2e-zip-harness.mjs` 并经 `flow verify --mode gate` 绑定最终 `HEAD`。
+- **文档同步检查**：`references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`templates/agents-project.md`、`AGENTS.md`、`docs/TDD.md`、`docs/feature-map.json` 已同步；`equip.mjs . --check`、`compose-agents.mjs . --check` 与 `sync-toc.mjs --check` 通过。
+- **遗留问题**：无。

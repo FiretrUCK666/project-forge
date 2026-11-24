@@ -185,7 +185,7 @@ export function registerParallelDispatchCases(cases) {
     const dir = makeRichGitRepo()
     try {
       const roots = await resolveRepoRoots(dir)
-      await captureIo(() => handleStart({ task: 'sync-t', slug: 'sync-t', case: '2', implementer: 'dev-a', json: true }, roots))
+      await captureIo(() => handleStart({ task: 'sync-t', slug: 'sync-t', case: '2', implementer: 'dev-a', 'no-issue': true, reason: '回归夹具聚焦 plan-sync 幂等性', json: true }, roots))
 
       // 1) local-only 写入本地事件日志并显式报 NOT_APPLICABLE（绝不伪造 synced: true）
       const localRes = await syncPlanPhaseToBackend({

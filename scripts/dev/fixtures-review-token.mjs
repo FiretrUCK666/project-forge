@@ -45,7 +45,7 @@ export function registerIssue52Cases(cases) {
     const dir = makeIssue52Repo()
     try {
       const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 't52', '--slug', 'c1-slug', '--case', '2', '--implementer', 'alice', '--json',
+        'start', '--task', 't52', '--slug', 'c1-slug', '--case', '2', '--implementer', 'alice', '--no-issue', '--reason', '回归夹具测试 review token 幂等性', '--json',
       ], { cwd: dir })
       if (startRes.status !== 0) return `start t52 失败：${startRes.stderr}`
 

@@ -83,7 +83,7 @@ export function registerStageBLoopB5Cases(cases) {
     try {
       // Q3 负向：既无 smoke-verify 也未写 none 时禁止以 full 放行
       const q3Roots = await resolveRepoRoots(noSmokeDir)
-      await withQuietIo(() => handleStart({ task: 'q3-t', case: '2', slug: 'q3-t', implementer: 'alice', json: true }, q3Roots))
+      await withQuietIo(() => handleStart({ task: 'q3-t', case: '2', slug: 'q3-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 smoke-verify 未配置阻断', json: true }, q3Roots))
       await seedExploredFor(noSmokeDir, 'q3-t')
       const q3Wt = join(noSmokeDir, '.worktrees', 'impl-q3-t')
       writeFileSync(join(q3Wt, 'src/app.mjs'), 'export const q = 2\n')
@@ -95,7 +95,7 @@ export function registerStageBLoopB5Cases(cases) {
 
       // 正向豁免：显式 smoke-verify: none 免除 E2E 门禁
       const noneRoots = await resolveRepoRoots(noneDir)
-      await withQuietIo(() => handleStart({ task: 'none-t', case: '2', slug: 'none-t', implementer: 'alice', json: true }, noneRoots))
+      await withQuietIo(() => handleStart({ task: 'none-t', case: '2', slug: 'none-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 smoke-verify none 豁免', json: true }, noneRoots))
       await seedExploredFor(noneDir, 'none-t')
       const noneWt = join(noneDir, '.worktrees', 'impl-none-t')
       writeFileSync(join(noneWt, 'src/app.mjs'), 'export const n = 2\n')
@@ -108,7 +108,7 @@ export function registerStageBLoopB5Cases(cases) {
 
       // 主场景：full 不可顶替 smoke；仅跑 smoke 不给 --e2e-evidence 亦阻断；review 未观察禁止 --include-diff 与 pass
       const roots = await resolveRepoRoots(dir)
-      await withQuietIo(() => handleStart({ task: 'c15-t', case: '2', slug: 'c15-t', implementer: 'alice', json: true }, roots))
+      await withQuietIo(() => handleStart({ task: 'c15-t', case: '2', slug: 'c15-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 E2E 观察硬门禁', json: true }, roots))
       await seedExploredFor(dir, 'c15-t')
       const wt = join(dir, '.worktrees', 'impl-c15-t')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const run = () => "ok-v2"\n')
@@ -153,7 +153,7 @@ export function registerStageBLoopB5Cases(cases) {
       gitInit(empDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
       try {
         const eRoots = await resolveRepoRoots(empDir)
-        await withQuietIo(() => handleStart({ task: 'e-t', case: '2', slug: 'e-t', implementer: 'alice', json: true }, eRoots))
+        await withQuietIo(() => handleStart({ task: 'e-t', case: '2', slug: 'e-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦审查侧 E2E 观察阻断', json: true }, eRoots))
         await seedExploredFor(empDir, 'e-t')
         const eWt = join(empDir, '.worktrees', 'impl-e-t')
         writeFileSync(join(eWt, 'src/app.mjs'), 'export const run = () => "v2"\n')
@@ -201,7 +201,7 @@ export function registerStageBLoopB5Cases(cases) {
       if (mergeOk.res.exitCode !== 0) return `c15-t merge 失败：${mergeOk.err}`
 
       // E2E 失败自动写入 signals.jsonl(e2e.runtime-fail)、脱敏 Evidence/Unknowns/NextSteps 与 escalation 建单
-      await withQuietIo(() => handleStart({ task: 'c15-fail', case: '2', slug: 'c15-fail', implementer: 'alice', json: true }, roots))
+      await withQuietIo(() => handleStart({ task: 'c15-fail', case: '2', slug: 'c15-fail', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 E2E 失败脱敏建单', json: true }, roots))
       const failWt = join(dir, '.worktrees', 'impl-c15-fail')
       writeFileSync(join(failWt, 'test/smoke.mjs'), "console.error('leak token=ghp_1234567890abcdef1234567890abcdef12 path=/Users/secretdev/proj'); process.exit(4)\n")
       gitCommitFast(failWt, 'test: failing smoke with secret path', { updateOnly: true })
@@ -255,7 +255,7 @@ export function registerStageBLoopB5Cases(cases) {
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     try {
       const roots = await resolveRepoRoots(dir)
-      await withQuietIo(() => handleStart({ task: 'a6-t', case: '2', slug: 'a6-t', implementer: 'alice', json: true }, roots))
+      await withQuietIo(() => handleStart({ task: 'a6-t', case: '2', slug: 'a6-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦三方 headSha 校验', json: true }, roots))
       await seedExploredFor(dir, 'a6-t')
       const wt = join(dir, '.worktrees', 'impl-a6-t')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const a = 2\n')

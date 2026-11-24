@@ -190,7 +190,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 - **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 允许原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。**只读探索转任何非 `Case 1` 文件写改（含仅补测试归 Case 2/3、治理修复与归档校准）必先 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack`。**
 
 <!-- project-forge: if has-remote -->
-- **第四步：认领与 PR 前文档同步**——**谁改代码谁认领（`Case >= 2` 校 `claimedAt`）并负责 `finalize`/`verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）/`submit --agent <id>`**（禁协调/审查者代提，仅 `single-session + --human-approved` 豁免）；同名作者拦截 `BLOCKED_AUTHOR_IS_IMPLEMENTER`；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危；PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对归档，`1:N` PRD 走四态），`submit` 零写回跟踪文件。
+- **第四步：认领、确定性 Issue 绑定与 PR 前文档同步**——`flow.mjs start` 对 `Case >= 2` 先复用已有单据，非豁免（豁免含 `no-auto-issue` 取舍与 `--no-issue --reason`）时 `Case 3/4` 由验真文档自动建单回链、`Case 2` 无单且缺合规 `--body`/`--body-file` 报 `BLOCKED_MISSING_ISSUE_BINDING`。**谁改代码谁认领（`Case >= 2` 校 `claimedAt`）并负责 `finalize`/`verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）/`submit --agent <id>`**（禁协调/审查者代提，仅 `single-session + --human-approved` 豁免）；同名作者拦截 `BLOCKED_AUTHOR_IS_IMPLEMENTER`；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危；PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对归档，`1:N` PRD 走四态），`submit` 零写回跟踪文件。
 
 - **第五步：独立审查与合并**——**独立审查通过（`--enforce-gates`、`reviewToken` 绑定、`fail` 为空、`reviewPassedHead === HEAD`）后由审查者直接合（A3 亦允许由调度者执行 `flow.mjs merge`，仍严禁实施者自合）**（Round 2+ 换全新上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮停损约束；UI 变更缺真实 `--artifact`/`--visual-blocked-reason` 阻断；触高风险须故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR，merge 核四态）。合前强校三方 `headSha` 与干净工作区。
 
@@ -209,7 +209,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 - **同步不变量**：本节改动须与协作判据同提交对齐；指路只用标题名。
 <!-- project-forge: endif -->
 <!-- project-forge: if no-remote -->
-- **第四步：任务留痕与合并前文档同步**——**谁改代码谁认领并负责 `finalize`/`verify`/`submit`**，一任务一特性分支；合入前跑 `flow.mjs finalize` 完成勾选与成对归档（`1:N` 总控 PRD 走四态），`submit` 校验干净状态并同步审查槽。
+- **第四步：任务留痕、确定性本地建单与合并前文档同步**——`flow.mjs start` 对 `Case >= 2` 先复用已有单据，非豁免（`no-auto-issue` 取舍或 `--no-issue --reason`）时 `Case 3/4` 自动建本地工单回链、`Case 2` 缺单且无 `--body-file` 报 `BLOCKED_MISSING_ISSUE_BINDING`；**谁改代码谁认领并负责 `finalize`/`verify`/`submit`**，一任务一特性分支；合入前跑 `flow.mjs finalize` 完成勾选与成对归档（`1:N` 总控 PRD 走四态），`submit` 校验干净状态并同步审查槽。
 
 - **第五步：独立审查与本地试合**——**独立审查通过（`fail` 为空、`reviewPassedHead === HEAD`）后由审查者直接合入 `{{DEFAULT_BRANCH}}`（A3 亦允许由调度者执行 `flow.mjs merge`，仍严禁实施者自合）**（Round 2+ 换全新上下文，受全历史换人与 3 轮停损约束；**仅弱化门禁须人点头**；「取舍」写 `merge-authority: human` 收回人合）。本地合入经 `--detach` 试合复测后 `--ff-only` 推进主干。
 

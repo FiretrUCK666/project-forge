@@ -138,7 +138,7 @@ export function registerVerifyToolsCases(cases) {
       }
 
       // 2. 启动 task-1，通过 verify-tools create --draft-only 写仓外探针（工作区保持 0 污染）
-      await withQuietIo(() => handleStart({ task: 't-sc-1', case: '2', slug: 'sc1', files: 'src/order.mjs' }, roots))
+      await withQuietIo(() => handleStart({ task: 't-sc-1', case: '2', slug: 'sc1', files: 'src/order.mjs', 'no-issue': true, reason: '回归夹具聚焦 scratch 路径校验' }, roots))
       const draft1 = await runAbsAsync(VT_SCRIPT, ['create', '--feature', 'orders', '--task', 't-sc-1', '--draft-only', '--json'], { cwd: dir })
       if (draft1.status !== 0) return `create --draft-only 失败：${draft1.stderr}`
       const d1 = JSON.parse(draft1.stdout)
@@ -165,7 +165,7 @@ export function registerVerifyToolsCases(cases) {
       if (hintsAfterOne.length !== 0) return `仅 1 个 PR 不应触发固化提示：${JSON.stringify(hintsAfterOne)}`
 
       // 4. 启动 task-2，再写仓外探针后走 abort 销毁 -> 累计 2 个不同 taskId -> audit 与 review-pack 均输出固化提示
-      await withQuietIo(() => handleStart({ task: 't-sc-2', case: '2', slug: 'sc2', files: 'src/order.mjs' }, roots))
+      await withQuietIo(() => handleStart({ task: 't-sc-2', case: '2', slug: 'sc2', files: 'src/order.mjs', 'no-issue': true, reason: '回归夹具聚焦 abort scratch 销毁' }, roots))
       const sc2 = ensureTaskScratchDir(roots.gitDir, 't-sc-2', roots.mainRoot, { featureId: 'orders', modules: ['src/order.mjs'] })
       writeFileSync(join(sc2.dir, 'probe2.mjs'), 'console.log("p2")\n', 'utf8')
       const ab2 = await withQuietIo(() => handleAbort({ task: 't-sc-2', confirm: true, json: true }, roots))
@@ -335,7 +335,7 @@ export function registerVerifyToolsCases(cases) {
       // 5. flow verify 同样拦截水话 --e2e-evidence（先恢复主仓干净以满足 Case >= 2 脏 main 硬门禁）
       gitSync(dir, ['checkout', '--', 'src/core.mjs'])
       const roots = await resolveRepoRoots(dir)
-      await withQuietIo(() => handleStart({ task: 'fluff-t', case: '2', slug: 'fluff', implementer: 'dev' }, roots))
+      await withQuietIo(() => handleStart({ task: 'fluff-t', case: '2', slug: 'fluff', implementer: 'dev', 'no-issue': true, reason: '回归夹具聚焦水话 e2e-evidence 拦截' }, roots))
       const wtFluff = join(dir, '.worktrees', 'impl-fluff-t')
       writeFileSync(join(wtFluff, 'src/core.mjs'), 'export function calc(n) { return n + 3 }\n', 'utf8')
       gitCommitFast(wtFluff, 'feat: calc change', { updateOnly: true })

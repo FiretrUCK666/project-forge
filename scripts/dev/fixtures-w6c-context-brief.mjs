@@ -49,7 +49,7 @@ function makeTodoDoc({ taskId, owner = 'lead-p', impactPath = 'src/billing.mjs' 
     '## 任务范围与验证基准',
     '',
     `- **影响路径**：\`${impactPath}\``,
-    '- **本期不做**：none',
+    '- **本期不做**：不动 `README.md` 与外部配置',
     '- **门型与回滚路径**：two-way',
     '',
     '## 验收标准与执行清单',

@@ -30,8 +30,8 @@ const SUBCOMMANDS = subcommandNamesFor('flow')
  * 不是「记录里的」。所以这里按子命令收窄注册，传了就按用法错误拒绝。
  */
 const GENERATED_BODY_SUBCOMMANDS = new Set(['submit', 'rework'])
-/** 只允许建单与评论写正文的子命令（那里的正文是内容本身）。 */
-const CONTENT_BODY_SUBCOMMANDS = new Set(['issue', 'milestone', 'intake', 'next', 'claim', 'release'])
+/** 只允许建单、开工绑定与评论写正文的子命令（那里的正文是内容本身）。 */
+const CONTENT_BODY_SUBCOMMANDS = new Set(['start', 'issue', 'milestone', 'intake', 'next', 'claim', 'release'])
 
 function printHelp() {
   process.stdout.write([
@@ -42,7 +42,7 @@ function printHelp() {
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
     '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
     '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
-    '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--spec <path>] [--todo <path>] [--prd <path>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
+    '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--no-issue --reason "<原因>"] [--body "<内容>" | --body-file <路径>] [--spec <path>] [--todo <path>] [--prd <path>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--case <1..5>] [--spec <path>] [--todo <path>] [--prd <path>] [--files <a,b>] [--body "<内容>" | --body-file <路径>] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
     '  close     --issue <N> [--into <targetIssue>] --reason "<原因>" [--task <id>] [--json]',
     '  milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--title "<标题>"] [--description "<描述>"] [--due <ISO>] [--issue <N>] [--pr <N>] [--task <id>] [--state open|closed|all] [--json]',
@@ -72,7 +72,7 @@ async function main(argv) {
         'probe-auth', 'parallel', 'draft', 'confirm', 'force',
         'keep-branch', 'keep-worktree', 'only-review-worktree', 'keep-local-branch', 'keep-remote-branch',
         'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync', 'include-master-prd',
-        'create-issue', 'takeover', 'reset-review-slot',
+        'create-issue', 'no-issue', 'takeover', 'reset-review-slot',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd', 'offline',
         'ack-no-issue-context', 'apply', 'dry-run', 'skip-edit-gate', 'skip-govern', 'strict-lifecycle', 'run-govern-hook',
         'allow-plan-bootstrap', 'planning', 'all', 'single-session',

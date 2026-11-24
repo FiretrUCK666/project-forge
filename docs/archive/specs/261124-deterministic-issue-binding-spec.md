@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Case 2/3/4 开工确定性 Issue 绑定闭环
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -11,7 +11,7 @@ branch: feat/deterministic-issue-binding
 owner: plan-issue-bind
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-issue-bind, round=1, sha=b5391c0eaea2, summary=独立只读 Critique 通过：SPEC 与 Todo 的 73 项路径/符号（68 已有 + 5 明确新增）、8 类豁免边界、先复用不重复、Case 3/4 质量建单回链、Case 2 BLOCKED_MISSING_ISSUE_BINDING 阻断、flow-inspect.mjs<=800 行（当前792行）、CONTENT_BODY_SUBCOMMANDS 与 cli-parity 对齐、C1-C4 双向夹具及故障注入预演均自洽可执行。)"
 related_prd: null
 related_todo: ../todo/261124-deterministic-issue-binding-todo.md
@@ -25,13 +25,13 @@ scope_files: [kit/skills/lib/exit-codes.mjs, kit/skills/dev-flow/scripts/flow.mj
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块状态机、退出码与协作契约变更；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/deterministic-issue-binding` / 未关联 / 未关联 |
 | 负责人 / 内审状态 | plan-issue-bind / `passed` |
 | 规划态 | `interactive`（单向门与 L3 契约变更） |
-| 关联 PRD / Todo | 无（单切片装得下）/ `docs/todo/261124-deterministic-issue-binding-todo.md` / `../todo/261124-deterministic-issue-binding-todo.md` |
+| 关联 PRD / Todo | 无（单切片装得下）/ `docs/archive/todo/261124-deterministic-issue-binding-todo.md` / `docs/archive/todo/261124-deterministic-issue-binding-todo.md` |
 
 - **变更一句话**：为 `flow.mjs start` 的 `Case 2/3/4` 建立「豁免边界 -> 复用不重 -> 质量建单回链 -> `BLOCKED_MISSING_ISSUE_BINDING` 硬阻断」的确定性 Issue 绑定闭环，打通 `--no-issue --reason` / `--body` / `--body-file` 与 `AGENTS.md` `no-auto-issue` 取舍键并同步全仓测试夹具与契约。
 
@@ -158,10 +158,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `flow.mjs start` 对非豁免 `Case 2/3/4` 按「`--issue` -> `ledger` -> 关联 `SPEC`/`Todo`/`PRD`」复用已有工单不重复建单；`Case 3/4` 携带 `plan-index.mjs` 验真的 `SPEC`/`Todo`（或显式 `--create-issue`/`--body`/`--body-file`）自动经 `createIssueForStart` 走 `hydrateIssueBody -> validateIssueBodyQuality -> TaskBackend.createIssue` 建单并回写账本与文档 Frontmatter；无文档且无有效正文/单号的 `Case 2` 返回 `BLOCKED_MISSING_ISSUE_BINDING`（`EXIT.FACT = 3`）；`Case 1`/`--planning`/`--allow-plan-bootstrap`（无显式建单）/`--external-pr`/`contributor-fork`/`clone-readonly`/`no-auto-issue`/`--no-issue --reason` 正确豁免且可审计；`cli-parity.mjs`、`subcommand-parity.mjs` 与 `exit-code-parity.mjs` 零失败。
-- [ ] C2: 全量 `scripts/dev/` 既有测试与 E2E 夹具（含 `fixtures.mjs --jobs 6`、`e2e-zip-harness.mjs`、`e2e-scenarios-evolution.mjs`、`e2e-scenarios-lifecycle.mjs`、`blind-run-harness.mjs`）诚实对齐新契约且不弱化任何门禁，退出码全部为 `0`。
-- [ ] C3: `references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`templates/agents-project.md`、`docs/TDD.md`、`docs/feature-map.json` 同步完毕，`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`（`0` 个「缺」）、`node scripts/dev/preflight.mjs`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 与 `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit .` 全绿。
-- [ ] C4: 新增 `scripts/dev/fixtures-issue-binding.mjs` (new) 与 `scripts/dev/injections-data-issue-binding.mjs` (new) 覆盖全部正反边界与故障注入，`node scripts/dev/fixtures.mjs --domain issue-binding` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿，且改动后所有 `.mjs` 文件均 `<= 800` 行、零第三方依赖、零 emoji。
+- [x] C1: `flow.mjs start` 对非豁免 `Case 2/3/4` 按「`--issue` -> `ledger` -> 关联 `SPEC`/`Todo`/`PRD`」复用已有工单不重复建单；`Case 3/4` 携带 `plan-index.mjs` 验真的 `SPEC`/`Todo`（或显式 `--create-issue`/`--body`/`--body-file`）自动经 `createIssueForStart` 走 `hydrateIssueBody -> validateIssueBodyQuality -> TaskBackend.createIssue` 建单并回写账本与文档 Frontmatter；无文档且无有效正文/单号的 `Case 2` 返回 `BLOCKED_MISSING_ISSUE_BINDING`（`EXIT.FACT = 3`）；`Case 1`/`--planning`/`--allow-plan-bootstrap`（无显式建单）/`--external-pr`/`contributor-fork`/`clone-readonly`/`no-auto-issue`/`--no-issue --reason` 正确豁免且可审计；`cli-parity.mjs`、`subcommand-parity.mjs` 与 `exit-code-parity.mjs` 零失败。
+- [x] C2: 全量 `scripts/dev/` 既有测试与 E2E 夹具（含 `fixtures.mjs --jobs 6`、`e2e-zip-harness.mjs`、`e2e-scenarios-evolution.mjs`、`e2e-scenarios-lifecycle.mjs`、`blind-run-harness.mjs`）诚实对齐新契约且不弱化任何门禁，退出码全部为 `0`。
+- [x] C3: `references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`templates/agents-project.md`、`docs/TDD.md`、`docs/feature-map.json` 同步完毕，`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`（`0` 个「缺」）、`node scripts/dev/preflight.mjs`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --strict` 与 `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit .` 全绿。
+- [x] C4: 新增 `scripts/dev/fixtures-issue-binding.mjs` (new) 与 `scripts/dev/injections-data-issue-binding.mjs` (new) 覆盖全部正反边界与故障注入，`node scripts/dev/fixtures.mjs --domain issue-binding` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全绿，且改动后所有 `.mjs` 文件均 `<= 800` 行、零第三方依赖、零 emoji。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -177,6 +177,6 @@ flowchart LR
 
 > 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：在 `flow-start-helpers.mjs` 落地 `validateStartIssueFlags`、`collectDocIssueNumbers`、`evaluateIssueBindingExemption`（8 类豁免 + `validateOverrideReason`）与 `resolveOrBindStartIssue`（先复用 `--issue` / `ledger` / 规划文档 `issue:`，再判定 8 类豁免，Case 3/4 经 `plan-index.mjs` 验真文档后走 `createIssueForStart -> hydrateIssueBody -> validateIssueBodyQuality` 自动建单并回写账本与文档 Frontmatter，Case 2 无合规正文也无豁免返回 `BLOCKED_MISSING_ISSUE_BINDING` / `EXIT.FACT=3`）；在 `flow-inspect.mjs` 与 `promotePlanningToStarted` 严格于 `runStartPlanGate`、`checkStartAuthorSeparation` 与 `checkStartMainCleanAndSlot` 通过后接入绑定防孤儿单并控制 `flow-inspect.mjs` 在 `773` 行（`<= 800`）；对齐全部 `scripts/dev/` 夹具与 E2E/盲跑场景，新增 `fixtures-issue-binding.mjs` 与 `injections-data-issue-binding.mjs`（`I806`–`I811`）。
+- **与草案的差异**：按独立 Critique 建议在 `kit/skills/lib/evidence-substance.mjs` 新增 `validateOverrideReason`（委托 `evaluateTextSubstance`）；在 `flow-issues.mjs` 补充 `workTreeRoot` 透传与空影响路径时回退 `planCtx.verifiedDocRefs` 保证孤立最小 `SPEC`/`Todo` 自动建单质量过线；支持 `--create-issue` 省略 `--task`/`--slug` 时按新建单号重算 `taskId=issue-<N>` 以对齐 `fixtures-local-backend.mjs`；因 `runStartPlanGate` 迁入 `flow-start-helpers.mjs`，同步校准既有注入 `I255`、`I350` 与 `fixtures-r6a-state.mjs` `c4-cas` 夹具以保持 `I607` 独立互斥判定。
+- **关联同步文件**：`kit/skills/lib/exit-codes.mjs`、`kit/skills/lib/evidence-substance.mjs`、`kit/skills/lib/ledger.mjs`、`kit/skills/dev-flow/scripts/{flow,flow-inspect,flow-start-helpers,flow-issues}.mjs`、`kit/skills/dev-flow/SKILL.md`、`.agents/skills/`、`references/collaboration.md`、`templates/agents-project.md`、`AGENTS.md`、`docs/TDD.md`、`docs/feature-map.json`、`scripts/dev/fixtures-issue-binding.mjs`、`scripts/dev/injections-data-issue-binding.mjs`。

@@ -268,6 +268,10 @@ export function createDefaultLedger(partial = {}) {
     archivedPrdFile: partial.archivedPrdFile ?? null,
     privateDocsDir: partial.privateDocsDir ?? null,
     linkedIssues: Array.isArray(partial.linkedIssues) ? partial.linkedIssues : [],
+    /** 开工期确定性 Issue 绑定审计记录（reused / created / exempt）。 */
+    issueBinding: partial.issueBinding && typeof partial.issueBinding === 'object' && !Array.isArray(partial.issueBinding)
+      ? partial.issueBinding
+      : null,
     /**
      * 验收标准的冻结指纹。
      *

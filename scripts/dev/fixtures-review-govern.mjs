@@ -470,7 +470,7 @@ export function registerReviewGovernCases(cases) {
         return `signals.jsonl 未在 verify/record/rework 时自动写入（concurrent write 缺失）：${JSON.stringify(sigInit)}`
       }
 
-      await handleStart({ task: 'c3-t', case: '2', slug: 'c3-t', implementer: 'alice' }, roots)
+      await handleStart({ task: 'c3-t', case: '2', slug: 'c3-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦信号与治理复盘' }, roots)
       await handleClaim({ task: 'c3-t', agent: 'alice' }, roots)
       await seedExploredFor(dir, 'c3-t')
       const wt = join(dir, '.worktrees', 'impl-c3-t')

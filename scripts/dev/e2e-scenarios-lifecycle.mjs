@@ -649,7 +649,7 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
   // 真实非零 E2E 失败 -> 脱敏诊断包 + 建单 -> 修复后复绿并解锁 --include-diff -> generic-git 人类签字放行 merge
   const flowJ = join(repoJ, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revJ = join(repoJ, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
-  assertOk(runNodeScript(flowJ, ['start', '--task', 'j1', '--case', '2', '--slug', 'j1', '--implementer', 'alice'], repoJ, env), 'Scenario J start')
+  assertOk(runNodeScript(flowJ, ['start', '--task', 'j1', '--case', '2', '--slug', 'j1', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证故障诊断与脱敏建单'], repoJ, env), 'Scenario J start')
   assertOk(runNodeScript(flowJ, ['claim', '--task', 'j1', '--agent', 'alice'], repoJ, env), 'Scenario J claim')
   assertOk(runNodeScript(flowJ, ['explore', '--task', 'j1'], repoJ, env), 'Scenario J explore')
   const wtJ = join(repoJ, '.worktrees', 'impl-j1')

@@ -280,7 +280,7 @@ export function registerEditPyramidCases(cases) {
         return `旧无指纹 signals.jsonl 读时补全失败：${JSON.stringify(legEv)}`
       }
 
-      const startRes = await withQuietIo(() => handleStart({ task: 'c6-t', case: '2', slug: 'c6-t', implementer: 'alice', json: true }, roots))
+      const startRes = await withQuietIo(() => handleStart({ task: 'c6-t', case: '2', slug: 'c6-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦倒金字塔复盘升级', json: true }, roots))
       if (startRes.res?.exitCode && startRes.res.exitCode !== 0) {
         return `handleStart 失败：exit=${startRes.res.exitCode}, out=${startRes.out}, err=${startRes.err}`
       }

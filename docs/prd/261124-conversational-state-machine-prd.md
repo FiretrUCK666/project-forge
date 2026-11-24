@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: 对话记忆、全周期两态状态机与契约瘦身
-status: draft
+status: active
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -20,7 +20,7 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 关联 Issue / PR | `#169` / 未关联 |
 | 提出方 / 负责人 | planner-conv-arch |

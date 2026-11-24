@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: CLI 契约归一化、Skill 预算门禁与常青瘦身
-status: draft
+status: approved
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -10,7 +10,7 @@ pr: null
 branch: feat/conv-arch-plan
 owner: planner-conv-arch
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=2213a625664b, summary=切片 3 SPEC 体积基线精确（dev-govern 15572B / dev-review 15030B），14KB 告警与 16KB 硬限门禁及 C9-C12 同步链路完整可验)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/cli.mjs, kit/skills/lib/subcommand-meta.mjs, kit/sk
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（公共 CLI 契约归一化、体积门禁引入与全套文档对齐；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/conv-arch-plan` / `#169` / 未关联 |
-| 负责人 / 内审状态 | planner-conv-arch / `pending` |
+| 负责人 / 内审状态 | planner-conv-arch / `passed` |
 | 规划态 | `interactive`（关键设计与 5 项决策已确认，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261124-conversational-state-machine-prd.md` / `docs/todo/261124-ergonomics-and-budget-debloat-todo.md` |
+| 关联 PRD / Todo | `../prd/261124-conversational-state-machine-prd.md` / `../todo/261124-ergonomics-and-budget-debloat-todo.md` |
 
 - **变更一句话**：归一化公共 CLI 参数与 `[NEXT STEP]` / `nextSteps` 输出，落地 14KB/16KB Skill 体积门禁并完成全部 `SKILL.md` 与常青文档瘦身同步。
 

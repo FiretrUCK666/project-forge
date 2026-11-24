@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: CLI 契约归一化、Skill 预算门禁与常青瘦身
-status: draft
+status: active
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -15,27 +15,8 @@ task_id: ergonomics-and-budget-debloat
 planned_at: 6416a330632fa28180080e3ad87f825c49724caf
 related_prd: ../prd/261124-conversational-state-machine-prd.md
 related_spec: ../specs/261124-ergonomics-and-budget-debloat-spec.md
-depends_on:
-  - conversational-lifecycle-model
-scope_files:
-  - kit/skills/lib/cli.mjs
-  - kit/skills/lib/subcommand-meta.mjs
-  - kit/skills/lib/tool-owned.mjs
-  - kit/skills/dev-plan/scripts/doc-plan.mjs
-  - kit/skills/dev-flow/scripts/flow.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-review/scripts/review-pack.mjs
-  - kit/skills/*/SKILL.md
-  - scripts/lib/protocol.mjs
-  - scripts/dev/preflight.mjs
-  - scripts/dev/preflight-suite.mjs
-  - scripts/dev/fixtures*.mjs
-  - templates/agents-project.md
-  - AGENTS.md
-  - docs/TDD.md
-  - references/collaboration.md
-  - README.md
-  - README.en.md
+depends_on: [conversational-lifecycle-model]
+scope_files: [kit/skills/lib/cli.mjs, kit/skills/lib/subcommand-meta.mjs, kit/skills/lib/tool-owned.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-review/scripts/review-pack.mjs, "kit/skills/*/SKILL.md", scripts/lib/protocol.mjs, scripts/dev/preflight.mjs, scripts/dev/preflight-suite.mjs, "scripts/dev/fixtures*.mjs", templates/agents-project.md, AGENTS.md, docs/TDD.md, references/collaboration.md, README.md, README.en.md]
 ---
 
 # CLI 契约归一化、Skill 预算门禁与常青瘦身
@@ -44,13 +25,13 @@ scope_files:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/conv-arch-plan` @ `6416a33` |
 | 任务编号 | `ergonomics-and-budget-debloat` |
 | 负责人 / 审批 | planner-conv-arch / `false` |
 | 规划态 | `interactive`（全部核心决策已拍板确认） |
-| 关联 Issue / PR / SPEC | `#169` / 未关联 / `docs/specs/261124-ergonomics-and-budget-debloat-spec.md` |
+| 关联 Issue / PR / SPEC | `#169` / 未关联 / `../specs/261124-ergonomics-and-budget-debloat-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261124-ergonomics-and-budget-debloat-spec.md`。
 
@@ -99,7 +80,7 @@ scope_files:
 
 ## 断点与遗留决策
 
-- **当前状态**：`draft`（等待 Wave 2 合并及本 SPEC 独立 Critique 并 `approve`）
+- **当前状态**：`进行中`（等待 Wave 2 合并及本 SPEC 独立 Critique 并 `approve`）
 - **待拍板事项**：无
 - **下一步第一件事**：对 `docs/specs/261124-ergonomics-and-budget-debloat-spec.md` 执行 `doc-plan.mjs audit` 并移交独立 Critic 评审。
 

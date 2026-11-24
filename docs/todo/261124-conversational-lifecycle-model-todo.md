@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 对话记忆、全周期两态状态机与受控重开
-status: draft
+status: active
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -15,25 +15,8 @@ task_id: conversational-lifecycle-model
 planned_at: 6416a330632fa28180080e3ad87f825c49724caf
 related_prd: ../prd/261124-conversational-state-machine-prd.md
 related_spec: ../specs/261124-conversational-lifecycle-model-spec.md
-depends_on:
-  - core-state-integrity
-scope_files:
-  - kit/skills/lib/session-state.mjs
-  - kit/skills/lib/session-orient.mjs
-  - kit/skills/lib/mutability.mjs
-  - kit/skills/lib/doc-substantive.mjs
-  - kit/skills/lib/doc-slice-graph.mjs
-  - kit/skills/lib/plan-next.mjs
-  - kit/skills/lib/workflow-policy-next.mjs
-  - kit/skills/dev-plan/scripts/doc-plan.mjs
-  - kit/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - kit/skills/dev-plan/scripts/doc-audit.mjs
-  - kit/skills/dev-explore/scripts/doc-locate.mjs
-  - kit/skills/dev-explore/scripts/repo-map.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
-  - kit/skills/dev-flow/scripts/flow-next.mjs
-  - kit/skills/dev-flow/scripts/flow-cleanup.mjs
-  - scripts/dev/fixtures*.mjs
+depends_on: [core-state-integrity]
+scope_files: [kit/skills/lib/session-state.mjs, kit/skills/lib/session-orient.mjs, kit/skills/lib/mutability.mjs, kit/skills/lib/doc-substantive.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/lib/plan-next.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-explore/scripts/doc-locate.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-next.mjs, kit/skills/dev-flow/scripts/flow-cleanup.mjs, "scripts/dev/fixtures*.mjs"]
 ---
 
 # 对话记忆、全周期两态状态机与受控重开
@@ -42,13 +25,13 @@ scope_files:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/conv-arch-plan` @ `6416a33` |
 | 任务编号 | `conversational-lifecycle-model` |
 | 负责人 / 审批 | planner-conv-arch / `false` |
 | 规划态 | `interactive`（全部核心决策已拍板确认） |
-| 关联 Issue / PR / SPEC | `#169` / 未关联 / `docs/specs/261124-conversational-lifecycle-model-spec.md` |
+| 关联 Issue / PR / SPEC | `#169` / 未关联 / `../specs/261124-conversational-lifecycle-model-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261124-conversational-lifecycle-model-spec.md`。
 
@@ -97,7 +80,7 @@ scope_files:
 
 ## 断点与遗留决策
 
-- **当前状态**：`draft`（等待 Wave 1 合并及本 SPEC 独立 Critique 并 `approve`）
+- **当前状态**：`进行中`（等待 Wave 1 合并及本 SPEC 独立 Critique 并 `approve`）
 - **待拍板事项**：无
 - **下一步第一件事**：对 `docs/specs/261124-conversational-lifecycle-model-spec.md` 执行 `doc-plan.mjs audit` 并移交独立 Critic 评审。
 

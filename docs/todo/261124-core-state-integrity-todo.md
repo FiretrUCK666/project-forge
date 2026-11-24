@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 核心状态完整性与工作流闭环加固
-status: draft
+status: active
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -16,28 +16,7 @@ planned_at: 6416a330632fa28180080e3ad87f825c49724caf
 related_prd: ../prd/261124-conversational-state-machine-prd.md
 related_spec: ../specs/261124-core-state-integrity-spec.md
 depends_on: []
-scope_files:
-  - kit/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - kit/skills/lib/critique-store.mjs
-  - kit/skills/lib/critique-rounds.mjs
-  - kit/skills/lib/critique-diff.mjs
-  - kit/skills/lib/plan-next.mjs
-  - kit/skills/dev-flow/scripts/flow-sync.mjs
-  - kit/skills/dev-flow/scripts/flow-merge.mjs
-  - kit/skills/dev-flow/scripts/flow-cleanup.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs
-  - kit/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - kit/skills/dev-explore/scripts/repo-map.mjs
-  - kit/skills/dev-review/scripts/review-pack.mjs
-  - kit/skills/dev-review/scripts/review-diff.mjs
-  - kit/skills/dev-review/scripts/review-ledger.mjs
-  - kit/skills/dev-review/scripts/review-locks.mjs
-  - kit/skills/dev-review/scripts/review-empirical.mjs
-  - kit/skills/lib/criteria-lock.mjs
-  - kit/skills/lib/handoff-package.mjs
-  - scripts/dev/fixtures*.mjs
+scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/critique-store.mjs, kit/skills/lib/critique-rounds.mjs, kit/skills/lib/critique-diff.mjs, kit/skills/lib/plan-next.mjs, kit/skills/dev-flow/scripts/flow-sync.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-flow/scripts/flow-cleanup.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-diff.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/lib/criteria-lock.mjs, kit/skills/lib/handoff-package.mjs, "scripts/dev/fixtures*.mjs"]
 ---
 
 # 核心状态完整性与工作流闭环加固
@@ -46,13 +25,13 @@ scope_files:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/conv-arch-plan` @ `6416a33` |
 | 任务编号 | `core-state-integrity` |
 | 负责人 / 审批 | planner-conv-arch / `false` |
 | 规划态 | `interactive`（全部核心决策已拍板确认） |
-| 关联 Issue / PR / SPEC | `#169` / 未关联 / `docs/specs/261124-core-state-integrity-spec.md` |
+| 关联 Issue / PR / SPEC | `#169` / 未关联 / `../specs/261124-core-state-integrity-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261124-core-state-integrity-spec.md`。
 
@@ -95,7 +74,7 @@ scope_files:
 
 ## 断点与遗留决策
 
-- **当前状态**：`draft`（待 SPEC 经独立 Critique 并 `approve` 后启动 Wave 1 实施）
+- **当前状态**：`进行中`（待 SPEC 经独立 Critique 并 `approve` 后启动 Wave 1 实施）
 - **待拍板事项**：无
 - **下一步第一件事**：对 `docs/specs/261124-core-state-integrity-spec.md` 执行 `doc-plan.mjs audit` 并移交独立 Critic 评审。
 

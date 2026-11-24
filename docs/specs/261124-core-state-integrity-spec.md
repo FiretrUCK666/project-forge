@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 核心状态完整性与工作流闭环加固
-status: draft
+status: approved
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -10,7 +10,7 @@ pr: null
 branch: feat/conv-arch-plan
 owner: planner-conv-arch
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=e7ce56a830f6, summary=切片 1 SPEC 路径与缺陷根因均已核实存在，C1-C4 具备正反 fixture 与故障注入可证伪性)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
@@ -27,13 +27,13 @@ scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/criti
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、状态机契约修复与高风险门禁；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/conv-arch-plan` / `#169` / 未关联 |
-| 负责人 / 内审状态 | planner-conv-arch / `pending` |
+| 负责人 / 内审状态 | planner-conv-arch / `passed` |
 | 规划态 | `interactive`（关键设计与 5 项决策已确认，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261124-conversational-state-machine-prd.md` / `docs/todo/261124-core-state-integrity-todo.md` |
+| 关联 PRD / Todo | `../prd/261124-conversational-state-machine-prd.md` / `../todo/261124-core-state-integrity-todo.md` |
 
 - **变更一句话**：修复规划澄清与 Critique 账本、Flow 生命周期与自合防线、Review 槽位钉住及 Criteria 冻结与交接包中的全部状态完整性缺口。
 

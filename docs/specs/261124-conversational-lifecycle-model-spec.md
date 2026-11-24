@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 对话记忆、全周期两态状态机与受控重开
-status: draft
+status: approved
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -10,7 +10,7 @@ pr: null
 branch: feat/conv-arch-plan
 owner: planner-conv-arch
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=98678a7a3107, summary=切片 2 SPEC v2 多主题记忆与 OPEN/LOCKED 两态模型边界清晰，新模块 mutability.mjs (<=200L) 与 C5-C8 断言完整可测)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/session-state.mjs, kit/skills/lib/session-orient.mj
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（Schema v2 迁移、跨技能两态状态机与受控重开；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/conv-arch-plan` / `#169` / 未关联 |
-| 负责人 / 内审状态 | planner-conv-arch / `pending` |
+| 负责人 / 内审状态 | planner-conv-arch / `passed` |
 | 规划态 | `interactive`（关键设计与 5 项决策已确认，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261124-conversational-state-machine-prd.md` / `docs/todo/261124-conversational-lifecycle-model-todo.md` |
+| 关联 PRD / Todo | `../prd/261124-conversational-state-machine-prd.md` / `../todo/261124-conversational-lifecycle-model-todo.md` |
 
 - **变更一句话**：升级 `session-state.mjs` 至 v2 多主题对话记忆并落地单源 `OPEN` / `LOCKED` 两态状态机、`dropped` 终态与 `flow rework --reopen` 守卫。
 

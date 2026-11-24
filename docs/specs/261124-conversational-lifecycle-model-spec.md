@@ -12,31 +12,13 @@ owner: planner-conv-arch
 plan_mode: interactive
 approved: false
 implemented: false
-plan_critique: pending
-task_id: conversational-lifecycle-model
+plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=98678a7a3107, summary=切片 2 SPEC v2 多主题记忆与 OPEN/LOCKED 两态模型边界清晰，新模块 mutability.mjs (<=200L) 与 C5-C8 断言完整可测)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
 related_todo: ../todo/261124-conversational-lifecycle-model-todo.md
-depends_on:
-  - core-state-integrity
-scope_files:
-  - kit/skills/lib/session-state.mjs
-  - kit/skills/lib/session-orient.mjs
-  - kit/skills/lib/mutability.mjs
-  - kit/skills/lib/doc-substantive.mjs
-  - kit/skills/lib/doc-slice-graph.mjs
-  - kit/skills/lib/plan-next.mjs
-  - kit/skills/lib/workflow-policy-next.mjs
-  - kit/skills/dev-plan/scripts/doc-plan.mjs
-  - kit/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - kit/skills/dev-plan/scripts/doc-audit.mjs
-  - kit/skills/dev-explore/scripts/doc-locate.mjs
-  - kit/skills/dev-explore/scripts/repo-map.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
-  - kit/skills/dev-flow/scripts/flow-next.mjs
-  - kit/skills/dev-flow/scripts/flow-cleanup.mjs
-  - scripts/dev/fixtures*.mjs
-high_risk_paths:
-  - kit/
+high_risk_paths: [kit/]
+task_id: conversational-lifecycle-model
+depends_on: [core-state-integrity]
+scope_files: [kit/skills/lib/session-state.mjs, kit/skills/lib/session-orient.mjs, kit/skills/lib/mutability.mjs, kit/skills/lib/doc-substantive.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/lib/plan-next.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-explore/scripts/doc-locate.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-next.mjs, kit/skills/dev-flow/scripts/flow-cleanup.mjs, "scripts/dev/fixtures*.mjs"]
 ---
 
 # 对话记忆、全周期两态状态机与受控重开 — 功能设计规范（SPEC）

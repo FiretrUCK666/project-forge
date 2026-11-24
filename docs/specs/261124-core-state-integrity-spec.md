@@ -12,35 +12,13 @@ owner: planner-conv-arch
 plan_mode: interactive
 approved: false
 implemented: false
-plan_critique: pending
-task_id: core-state-integrity
+plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=e7ce56a830f6, summary=切片 1 SPEC 路径与缺陷根因均已核实存在，C1-C4 具备正反 fixture 与故障注入可证伪性)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
 related_todo: ../todo/261124-core-state-integrity-todo.md
+high_risk_paths: [kit/]
+task_id: core-state-integrity
 depends_on: []
-scope_files:
-  - kit/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - kit/skills/lib/critique-store.mjs
-  - kit/skills/lib/critique-rounds.mjs
-  - kit/skills/lib/critique-diff.mjs
-  - kit/skills/lib/plan-next.mjs
-  - kit/skills/dev-flow/scripts/flow-sync.mjs
-  - kit/skills/dev-flow/scripts/flow-merge.mjs
-  - kit/skills/dev-flow/scripts/flow-cleanup.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs
-  - kit/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - kit/skills/dev-explore/scripts/repo-map.mjs
-  - kit/skills/dev-review/scripts/review-pack.mjs
-  - kit/skills/dev-review/scripts/review-diff.mjs
-  - kit/skills/dev-review/scripts/review-ledger.mjs
-  - kit/skills/dev-review/scripts/review-locks.mjs
-  - kit/skills/dev-review/scripts/review-empirical.mjs
-  - kit/skills/lib/criteria-lock.mjs
-  - kit/skills/lib/handoff-package.mjs
-  - scripts/dev/fixtures*.mjs
-high_risk_paths:
-  - kit/
+scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/critique-store.mjs, kit/skills/lib/critique-rounds.mjs, kit/skills/lib/critique-diff.mjs, kit/skills/lib/plan-next.mjs, kit/skills/dev-flow/scripts/flow-sync.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-flow/scripts/flow-cleanup.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-diff.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/lib/criteria-lock.mjs, kit/skills/lib/handoff-package.mjs, "scripts/dev/fixtures*.mjs"]
 ---
 
 # 核心状态完整性与工作流闭环加固 — 功能设计规范（SPEC）

@@ -12,37 +12,13 @@ owner: planner-conv-arch
 plan_mode: interactive
 approved: false
 implemented: false
-plan_critique: pending
-task_id: ergonomics-and-budget-debloat
+plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=2213a625664b, summary=切片 3 SPEC 体积基线精确（dev-govern 15572B / dev-review 15030B），14KB 告警与 16KB 硬限门禁及 C9-C12 同步链路完整可验)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
 related_todo: ../todo/261124-ergonomics-and-budget-debloat-todo.md
-depends_on:
-  - conversational-lifecycle-model
-scope_files:
-  - kit/skills/lib/cli.mjs
-  - kit/skills/lib/subcommand-meta.mjs
-  - kit/skills/lib/tool-owned.mjs
-  - kit/skills/dev-plan/scripts/doc-plan.mjs
-  - kit/skills/dev-flow/scripts/flow.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-review/scripts/review-pack.mjs
-  - kit/skills/*/SKILL.md
-  - scripts/lib/protocol.mjs
-  - scripts/dev/preflight.mjs
-  - scripts/dev/preflight-suite.mjs
-  - scripts/dev/fixtures*.mjs
-  - templates/agents-project.md
-  - AGENTS.md
-  - docs/TDD.md
-  - references/collaboration.md
-  - README.md
-  - README.en.md
-high_risk_paths:
-  - kit/
-  - scripts/lib/
-  - scripts/dev/preflight.mjs
-  - templates/
-  - AGENTS.md
+high_risk_paths: [kit/, scripts/lib/, scripts/dev/preflight.mjs, templates/, AGENTS.md]
+task_id: ergonomics-and-budget-debloat
+depends_on: [conversational-lifecycle-model]
+scope_files: [kit/skills/lib/cli.mjs, kit/skills/lib/subcommand-meta.mjs, kit/skills/lib/tool-owned.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-review/scripts/review-pack.mjs, "kit/skills/*/SKILL.md", scripts/lib/protocol.mjs, scripts/dev/preflight.mjs, scripts/dev/preflight-suite.mjs, "scripts/dev/fixtures*.mjs", templates/agents-project.md, AGENTS.md, docs/TDD.md, references/collaboration.md, README.md, README.en.md]
 ---
 
 # CLI 契约归一化、Skill 预算门禁与常青瘦身 — 功能设计规范（SPEC）

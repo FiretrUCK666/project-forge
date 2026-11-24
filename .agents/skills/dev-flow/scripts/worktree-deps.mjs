@@ -1,0 +1,776 @@
+#!/usr/bin/env node
+/**
+ * worktree-deps.mjs —— Workspace 感知的 Worktree 共享依赖挂载与安全解绑引擎。
+ *
+ * 规则：
+ *   1. 按子包/生态独立比对锁文件 SHA256（单个子包变更只隔离该子包，不连坐其余子包）；
+ *   2. 探测到 npm/pnpm/yarn Workspace 本地软链或 Python editable `.venv` 指回主仓源码时自动局部隔离防毒化；
+ *   3. `samePath(main, wt)` 严禁自挂载/自解绑，半途失败原子回滚已建链接；
+ *   4. 清理前按「是不是链接」而不是「叫什么名字」全深度扫一遍 worktree，把指向外部的链接
+ *      逐个解绑并列出来，再校验主仓完好——`git worktree remove --force` 会跟随 junction，
+ *      而它不会替你判断那个链接指向哪里。
+ */
+
+import { spawnSync } from 'node:child_process'
+import {
+  existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync,
+  realpathSync, statSync, symlinkSync, unlinkSync,
+} from 'node:fs'
+import { basename, dirname, join, relative, resolve } from 'node:path'
+
+import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { canonicalPath, isInsideDir, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
+import { isPathInGitIndexFast } from '../../lib/git-fast.mjs'
+import { listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
+import { discoverWorkspacePackages } from '../../lib/profile.mjs'
+
+const NODE_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
+const VITE_CONFIG_NAMES = ['vite.config.ts', 'vite.config.mts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cts', 'vite.config.cjs']
+
+function detectPnpmWorkspace(mainAbs, cmpUnits = []) {
+  if (existsSync(join(mainAbs, 'pnpm-lock.yaml')) || existsSync(join(mainAbs, 'pnpm-workspace.yaml')) || existsSync(join(mainAbs, 'node_modules', '.pnpm'))) {
+    return true
+  }
+  return cmpUnits.some((u) => (u.lockfiles ?? []).some((lf) => (typeof lf === 'string' ? lf : lf?.path ?? '').endsWith('pnpm-lock.yaml')))
+}
+
+function detectViteConfigDirs(mainAbs, wtAbs, cmpUnits = []) {
+  const dirs = new Set([''])
+  for (const u of cmpUnits) if (u?.dirRel) dirs.add(u.dirRel)
+  for (const d of dirs) {
+    for (const root of [wtAbs, mainAbs]) {
+      if (VITE_CONFIG_NAMES.some((fn) => existsSync(d ? join(root, d, fn) : join(root, fn)))) return true
+      const pkg = readJsonSafe(d ? join(root, d, 'package.json') : join(root, 'package.json'))
+      if (pkg?.dependencies?.vite || pkg?.devDependencies?.vite) return true
+    }
+  }
+  return false
+}
+
+export function buildWorktreeMountHints(mainAbs, wtAbs, cmpUnits = [], mountedItems = []) {
+  const hasNodeMount = mountedItems.some((m) => /(?:^|\/)node_modules$/.test(String(m?.path ?? '')))
+  const isPnpm = detectPnpmWorkspace(mainAbs, cmpUnits)
+  const hasVite = detectViteConfigDirs(mainAbs, wtAbs, cmpUnits)
+  const envHints = {}
+  const hints = []
+  if (hasNodeMount && (isPnpm || mountedItems.some((m) => m.linkType === 'junction'))) {
+    envHints.npm_config_verify_deps_before_run = 'false'
+    hints.push('pnpm 共享挂载检测：已导出 npm_config_verify_deps_before_run=false（避免 pnpm 误判 junction node_modules 过期而重装）。')
+  }
+  if (hasNodeMount && hasVite) {
+    const allowPaths = [...new Set([canonicalPath(mainAbs), ...mountedItems.map((m) => m.target).filter(Boolean).map(canonicalPath)])]
+    hints.push(`Vite 跨路径放行提示：请在 vite.config.* 的 server.fs.allow 中加入 ${JSON.stringify(allowPaths)} 以放行共享 node_modules 真实路径。`)
+  }
+  return { envHints, hints, isPnpm, hasVite }
+}
+const PY_LOCKFILES = ['uv.lock', 'poetry.lock', 'Pipfile.lock', 'requirements.txt', 'requirements-dev.txt']
+const PYTHON_DEP_DIRS = ['.venv', 'venv']
+
+function lstatSafe(p) {
+  try { return lstatSync(p) } catch { return null }
+}
+
+function statSafe(p) {
+  try { return statSync(p) } catch { return null }
+}
+
+function hashLockfile(filePath) {
+  const st = statSafe(filePath)
+  if (!st || !st.isFile()) return null
+  if (filePath.toLowerCase().endsWith('.lockb')) return sha256File(filePath)
+  try {
+    const buf = readFileSync(filePath)
+    if (buf.subarray(0, 4096).includes(0)) return sha256File(filePath)
+    return sha256Text(buf.toString('utf8').replace(/\r\n/g, '\n'))
+  } catch {
+    return null
+  }
+}
+
+function collectCandidatePackageDirs(root) {
+  const dirs = new Set([''])
+  const disc = discoverWorkspacePackages(root)
+  for (const pkg of disc.packages) dirs.add(pkg.dirRel)
+  for (const depName of ['node_modules', ...PYTHON_DEP_DIRS]) {
+    if (existsSync(join(root, depName))) dirs.add('')
+  }
+  // 同时吸收含本地 node_modules/.venv 的非根目录子目录
+  const queue = ['']
+  let seen = 0
+  while (queue.length > 0 && seen < 1500) {
+    const rel = queue.shift()
+    const abs = rel ? join(root, rel) : root
+    let entries = []
+    try { entries = readdirSync(abs, { withFileTypes: true }) } catch { continue }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+      if (['.git', '.worktrees', 'dist', 'build', 'target', 'coverage', '.cache'].includes(entry.name)) continue
+      if (entry.name === 'node_modules' || PYTHON_DEP_DIRS.includes(entry.name)) {
+        dirs.add(rel)
+        continue
+      }
+      if (!entry.name.startsWith('.')) {
+        seen += 1
+        queue.push(rel ? `${rel}/${entry.name}` : entry.name)
+      }
+    }
+  }
+  return [...dirs].sort()
+}
+
+function compareUnitLocks(mainAbs, wtAbs, dirRel, lockNames) {
+  const lockfiles = []
+  const mismatches = []
+  for (const name of lockNames) {
+    const rel = dirRel ? `${dirRel}/${name}` : name
+    const mainHash = hashLockfile(join(mainAbs, rel))
+    const wtHash = hashLockfile(join(wtAbs, rel))
+    if (mainHash === null && wtHash === null) continue
+    lockfiles.push({ file: rel, mainHash, wtHash })
+    if (mainHash !== wtHash) {
+      mismatches.push({
+        file: rel,
+        mainHash,
+        wtHash,
+        reason: mainHash === null ? 'added-in-worktree' : wtHash === null ? 'removed-in-worktree' : 'hash-mismatch',
+      })
+    }
+  }
+  return { match: mismatches.length === 0, lockfiles, mismatches }
+}
+
+function detectNodeWorkspacePoisoning(mainAbs, nodeModulesAbs) {
+  if (!existsSync(nodeModulesAbs)) return null
+  const inspectEntry = (entryPath) => {
+    const st = lstatSafe(entryPath)
+    if (!st || !st.isSymbolicLink()) return null
+    try {
+      const targetReal = realpathSync.native(entryPath)
+      if (isInsideDir(targetReal, mainAbs) && !isInsideDir(targetReal, nodeModulesAbs)) {
+        return `Workspace 软链指回主仓源码 (${posixPath(relative(mainAbs, targetReal))})`
+      }
+    } catch { /* ignore broken link */ }
+    return null
+  }
+  try {
+    for (const e of readdirSync(nodeModulesAbs, { withFileTypes: true })) {
+      const full = join(nodeModulesAbs, e.name)
+      const direct = inspectEntry(full)
+      if (direct) return direct
+      if (e.name.startsWith('@') && e.isDirectory()) {
+        for (const sub of readdirSync(full, { withFileTypes: true })) {
+          const scoped = inspectEntry(join(full, sub.name))
+          if (scoped) return scoped
+        }
+      }
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+function detectPythonEditablePoisoning(mainAbs, venvAbs) {
+  if (!existsSync(venvAbs)) return null
+  const siteCandidates = []
+  for (const libBase of ['lib', 'lib64', 'Lib']) {
+    const p = join(venvAbs, libBase)
+    if (!existsSync(p)) continue
+    if (libBase === 'Lib') {
+      const sp = join(p, 'site-packages')
+      if (existsSync(sp)) siteCandidates.push(sp)
+      continue
+    }
+    try {
+      for (const pyDir of readdirSync(p)) {
+        if (!/^python/i.test(pyDir)) continue
+        const sp = join(p, pyDir, 'site-packages')
+        if (existsSync(sp)) siteCandidates.push(sp)
+      }
+    } catch { /* ignore */ }
+  }
+
+  for (const sp of siteCandidates) {
+    let entries = []
+    try { entries = readdirSync(sp, { withFileTypes: true }) } catch { continue }
+    for (const entry of entries) {
+      const full = join(sp, entry.name)
+      if (entry.isFile() && (entry.name.endsWith('.pth') || entry.name.endsWith('.egg-link'))) {
+        const txt = readTextSafe(full, 128 * 1024) ?? ''
+        for (const line of txt.split('\n')) {
+          const t = line.trim()
+          if (!t || t.startsWith('#') || t.startsWith('import ')) continue
+          const targetAbs = resolve(sp, t)
+          if (isInsideDir(targetAbs, mainAbs) && !isInsideDir(targetAbs, venvAbs)) {
+            return `Python editable 安装指回主仓（${entry.name} -> ${posixPath(relative(mainAbs, targetAbs))}）`
+          }
+        }
+      } else if (entry.isDirectory() && entry.name.endsWith('.dist-info')) {
+        const directUrl = readJsonSafe(join(full, 'direct_url.json'))
+        const isEditable = directUrl?.dir_info?.editable === true
+        const rawUrl = String(directUrl?.url ?? '')
+        if (isEditable && /^file:\/\//i.test(rawUrl)) {
+          try {
+            const urlPath = decodeURIComponent(new URL(rawUrl).pathname).replace(/^\/([A-Za-z]:)/, '$1')
+            if (isInsideDir(urlPath, mainAbs) && !isInsideDir(urlPath, venvAbs)) {
+              return `Python editable direct_url 指回主仓（${posixPath(relative(mainAbs, urlPath))}）`
+            }
+          } catch { /* ignore */ }
+        }
+      }
+    }
+  }
+  return null
+}
+
+/** 按子包与生态独立比对主仓与 worktree 锁文件。 */
+export function compareLockfiles(mainRoot, wtRoot) {
+  const mainAbs = canonicalPath(mainRoot)
+  const wtAbs = canonicalPath(wtRoot)
+  const dirs = new Set([...collectCandidatePackageDirs(mainAbs), ...collectCandidatePackageDirs(wtAbs)])
+
+  const lockfiles = []
+  const mismatches = []
+  const units = []
+
+  for (const dirRel of [...dirs].sort()) {
+    const nodeCmp = compareUnitLocks(mainAbs, wtAbs, dirRel, NODE_LOCKFILES)
+    if (nodeCmp.lockfiles.length > 0 || existsSync(join(mainAbs, dirRel, 'node_modules'))) {
+      units.push({ dirRel, ecosystem: 'node', depDir: 'node_modules', ...nodeCmp })
+      lockfiles.push(...nodeCmp.lockfiles)
+      mismatches.push(...nodeCmp.mismatches)
+    }
+
+    const pyCmp = compareUnitLocks(mainAbs, wtAbs, dirRel, PY_LOCKFILES)
+    const hasPyDir = PYTHON_DEP_DIRS.some((d) => existsSync(join(mainAbs, dirRel, d)))
+    if (pyCmp.lockfiles.length > 0 || hasPyDir) {
+      units.push({ dirRel, ecosystem: 'python', depDirs: PYTHON_DEP_DIRS, ...pyCmp })
+      lockfiles.push(...pyCmp.lockfiles)
+      mismatches.push(...pyCmp.mismatches)
+    }
+  }
+
+  const match = mismatches.length === 0
+  return {
+    match,
+    reason: match ? 'lockfile-match' : 'lockfile-changed',
+    checkedCount: lockfiles.length,
+    mismatches,
+    lockfiles,
+    units,
+  }
+}
+
+/** 按子包独立比对锁文件并防毒化探测，安全挂载可共享依赖（半途失败原子回滚；外部 PR 未扫未批硬阻断）。 */
+export function mountSharedDeps(mainRoot, wtRoot, opts = {}) {
+  const mainAbs = canonicalPath(mainRoot)
+  const wtAbs = canonicalPath(wtRoot)
+  if (!existsSync(wtAbs)) throw new Error(`目标 worktree 目录不存在：${wtAbs}`)
+  if (samePath(mainAbs, wtAbs)) throw new Error(`拒绝自挂载：mainRoot 与 worktree 指向同一目录 (${mainAbs})`)
+
+  if (!opts.allowUntrusted) {
+    const wtName = basename(wtAbs)
+    const stateDir = join(mainAbs, '.worktrees', '.state', 'tasks')
+    let matchedLedger = readJsonSafe(join(stateDir, `${wtName}.json`))
+    if (!matchedLedger && existsSync(stateDir)) {
+      try {
+        for (const fn of readdirSync(stateDir).filter((f) => f.endsWith('.json'))) {
+          const cand = readJsonSafe(join(stateDir, fn))
+          if (cand && (cand.reviewWorktreePath === `.worktrees/${wtName}` || cand.worktreePath === `.worktrees/${wtName}`)) {
+            matchedLedger = cand
+            break
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    if (/^review-pr-\d+$/.test(wtName) || matchedLedger?.role === 'inbound-external-pr') {
+      const scanOk = matchedLedger?.untrustedScanPassed === true
+      const approved = Boolean(matchedLedger?.untrustedApproved === true || matchedLedger?.humanApprovedExec === true)
+      if (!scanOk || !approved) {
+        const reason = !scanOk ? '尚未通过 --untrusted-scan 静态扫描' : '尚未获得人类安全授权'
+        throw new Error(`BLOCKED_UNTRUSTED_PR_UNSCANNED: 外部 PR 隔离位 (${wtName}) ${reason}，禁止挂载共享依赖。`)
+      }
+    }
+  }
+
+  const cmp = compareLockfiles(mainAbs, wtAbs)
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+  const mounted = []
+  const alreadyMounted = []
+  const isolatedUnits = []
+  const skipped = []
+  const createdThisRun = []
+
+  try {
+    for (const unit of cmp.units) {
+      if (unit.dirRel && !existsSync(join(wtAbs, unit.dirRel))) {
+        skipped.push({ path: unit.dirRel, reason: 'package-absent-in-worktree' })
+        continue
+      }
+      if (!unit.match) {
+        isolatedUnits.push({
+          dirRel: unit.dirRel || '.',
+          ecosystem: unit.ecosystem,
+          reason: 'lockfile-changed',
+          mismatches: unit.mismatches,
+        })
+        continue
+      }
+
+      const depNames = unit.ecosystem === 'node' ? ['node_modules'] : PYTHON_DEP_DIRS
+      for (const depName of depNames) {
+        const rel = unit.dirRel ? `${unit.dirRel}/${depName}` : depName
+        const src = join(mainAbs, rel)
+        const srcStat = statSafe(src)
+        if (!srcStat || !srcStat.isDirectory()) continue
+        const srcReal = canonicalPath(src)
+
+        const poisonReason = unit.ecosystem === 'node'
+          ? detectNodeWorkspacePoisoning(mainAbs, srcReal)
+          : detectPythonEditablePoisoning(mainAbs, srcReal)
+        if (poisonReason) {
+          isolatedUnits.push({
+            dirRel: unit.dirRel || '.',
+            ecosystem: unit.ecosystem,
+            path: posixPath(rel),
+            reason: unit.ecosystem === 'node' ? 'workspace-symlink-poisoning' : 'python-editable-poisoning',
+            detail: poisonReason,
+          })
+          continue
+        }
+
+        const dst = join(wtAbs, rel)
+        const dstLstat = lstatSafe(dst)
+        if (dstLstat) {
+          if (dstLstat.isSymbolicLink() && samePath(dst, srcReal)) {
+            alreadyMounted.push({ path: posixPath(rel), target: srcReal })
+          } else {
+            skipped.push({ path: posixPath(rel), reason: dstLstat.isSymbolicLink() ? 'existing-other-symlink' : 'existing-real-dir' })
+          }
+          continue
+        }
+
+        mkdirSync(dirname(dst), { recursive: true })
+        symlinkSync(srcReal, dst, linkType)
+        createdThisRun.push(dst)
+        mounted.push({ path: posixPath(rel), target: srcReal, linkType })
+      }
+    }
+  } catch (err) {
+    for (const created of createdThisRun.reverse()) {
+      try { unlinkSync(created) } catch { /* 回滚失败忽略 */ }
+    }
+    throw err
+  }
+
+  const mountedRelPaths = [...mounted, ...alreadyMounted].map((item) => item.path)
+  if (mountedRelPaths.length > 0) ensureMountedDepsExcluded(mainAbs, mountedRelPaths)
+
+  const hasShared = mounted.length > 0 || alreadyMounted.length > 0
+  let mode = 'none'
+  let reason = 'no-main-deps'
+  if (hasShared) {
+    mode = isolatedUnits.length > 0 ? 'partial' : 'shared'
+    reason = isolatedUnits.length > 0 ? 'partial-isolated' : 'lockfile-match'
+  } else if (isolatedUnits.length > 0) {
+    mode = 'isolated'
+    reason = isolatedUnits[0].reason
+  }
+
+  const mountHints = buildWorktreeMountHints(mainAbs, wtAbs, cmp.units, [...mounted, ...alreadyMounted])
+  return {
+    ok: true,
+    mode,
+    reason,
+    mismatches: cmp.mismatches,
+    mounted,
+    alreadyMounted,
+    mountedPaths: mountedRelPaths,
+    isolatedUnits,
+    skipped,
+    envHints: mountHints.envHints,
+    hints: mountHints.hints,
+  }
+}
+
+function resolveCommonGitDir(mainAbs) {
+  const dotGit = join(mainAbs, '.git')
+  const st = statSafe(dotGit)
+  if (!st) return null
+  if (st.isDirectory()) return dotGit
+  if (st.isFile()) {
+    const m = /^gitdir:\s*(.+)$/mi.exec(readTextSafe(dotGit) ?? '')
+    if (!m) return null
+    const actualGitDir = resolve(mainAbs, m[1].trim())
+    const commonRef = readTextSafe(join(actualGitDir, 'commondir'))
+    return commonRef?.trim() ? resolve(actualGitDir, commonRef.trim()) : actualGitDir
+  }
+  return null
+}
+
+function ensureMountedDepsExcluded(mainAbs, relPaths) {
+  if (!relPaths || relPaths.length === 0) return
+  const commonGitDir = resolveCommonGitDir(mainAbs)
+  if (!commonGitDir) return
+  const excludeFile = join(commonGitDir, 'info', 'exclude')
+  try {
+    mkdirSync(dirname(excludeFile), { recursive: true })
+    const cur = readTextSafe(excludeFile) ?? ''
+    const existing = new Set(cur.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')))
+    const toAdd = []
+    for (const rel of relPaths) {
+      const rule = `/${posixPath(rel).replace(/^\/+|\/+$/g, '')}`
+      if (rule.length > 1 && !existing.has(rule) && !toAdd.includes(rule)) toAdd.push(rule)
+    }
+    if (toAdd.length === 0) return
+    const prefix = cur.length > 0 && !cur.endsWith('\n') ? `${cur}\n` : cur
+    writeAtomic(excludeFile, `${prefix}${toAdd.join('\n')}\n`)
+  } catch { /* ignore non-writable exclude */ }
+}
+
+const MAX_SCAN_DEPTH = 24
+
+function normalizeLinkRel(p) {
+  const norm = posixPath(String(p ?? '').trim()).replace(/^(?:\.\/)+/, '').replace(/^\/+|\/+$/g, '')
+  return norm && norm !== '.' ? norm : ''
+}
+
+export function scanOutboundLinks(wtRoot) {
+  const wtAbs = canonicalPath(wtRoot)
+  const outbound = []
+  const internal = []
+  const broken = []
+  const truncatedPaths = []
+  let truncated = false
+  if (!existsSync(wtAbs)) return { outbound, internal, broken, truncated, truncatedPaths }
+
+  const walk = (absDir, relDir, depth) => {
+    if (depth > MAX_SCAN_DEPTH) {
+      truncated = true
+      truncatedPaths.push(posixPath(relDir || '.'))
+      return
+    }
+    let entries = []
+    try { entries = readdirSync(absDir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const abs = join(absDir, entry.name)
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name
+      // `.git` 是 worktree 的元数据，不是用户内容，删它是 `git worktree remove` 的本职。
+      if (rel === '.git') continue
+      const st = lstatSafe(abs)
+      if (!st) continue
+
+      if (st.isSymbolicLink()) {
+        let target = null
+        try { target = readlinkSync(abs) } catch { /* 悬空链接读不到目标 */ }
+        let resolved = null
+        try { resolved = realpathSync.native(abs) } catch { /* 目标可能已不存在 */ }
+        if (resolved === null) {
+          broken.push({ path: posixPath(rel), target })
+          outbound.push({ path: posixPath(rel), target, kind: 'unresolved', resolved: null })
+          continue
+        }
+        if (isInsideDir(resolved, wtAbs)) internal.push({ path: posixPath(rel), target })
+        else outbound.push({ path: posixPath(rel), target, kind: 'outside', resolved: posixPath(resolved) })
+        continue
+      }
+
+      // junction 在 Windows 上 lstat 也报 symlink，这里兜的是「真目录里还嵌着链接」。
+      if (entry.isDirectory()) walk(abs, rel, depth + 1)
+    }
+  }
+
+  walk(wtAbs, '', 0)
+  return { outbound, internal, broken, truncated, truncatedPaths }
+}
+
+export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup', mountedPaths = [], dryRun = false } = {}) {
+  const mainAbs = canonicalPath(mainRoot)
+  const wtAbs = canonicalPath(wtRoot)
+  if (samePath(mainAbs, wtAbs)) throw new Error(`拒绝自解绑：mainRoot 与 worktree 指向同一目录 (${mainAbs})`)
+  if (!existsSync(wtAbs)) {
+    return {
+      ok: true,
+      unmounted: [],
+      unmountedInternal: [],
+      skipped: [],
+      blocked: [],
+      truncated: false,
+      scanned: { outbound: 0, internal: 0, broken: 0 },
+      note: 'worktree-absent',
+    }
+  }
+
+  const allowed = new Set((allowOutbound ?? []).map(normalizeLinkRel).filter(Boolean))
+  const mountedSet = new Set(
+    (mountedPaths ?? []).map((p) => normalizeLinkRel(typeof p === 'string' ? p : p?.path)).filter(Boolean),
+  )
+  // 默认档（cleanup）下一步是 `git worktree remove`：必须全树 fail-closed 扫描未获准外链、悬空链接与深度截断。
+  // 依赖清场档（deps）worktree 不会消失：若账本已提供精确 mountedPaths，则只对预期槽位单次 lstat 精准解绑，免全树递归遍历。
+  const strict = mode !== 'deps'
+
+  if (!strict && mountedSet.size > 0) {
+    const unmounted = []
+    const skipped = []
+    const verifiedTargets = []
+    for (const rel of mountedSet) {
+      const abs = join(wtAbs, rel)
+      const st = lstatSafe(abs)
+      if (!st || !st.isSymbolicLink()) continue
+      const fastTracked = isPathInGitIndexFast(wtAbs, rel)
+      const isTracked = fastTracked !== null
+        ? fastTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isTracked) {
+        skipped.push({ path: rel, reason: 'tracked-in-git' })
+        continue
+      }
+      let targetBefore = null
+      let resolvedBefore = null
+      try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
+      try { resolvedBefore = realpathSync.native(abs) } catch { /* ignore */ }
+      if (!dryRun) {
+        unlinkSync(abs)
+        if (lstatSafe(abs) !== null) throw new Error(`解绑链接失败，路径仍然存在：${abs}`)
+        if (resolvedBefore) verifiedTargets.push({ path: rel, resolved: posixPath(resolvedBefore) })
+        unmounted.push({ path: rel, target: targetBefore ?? resolvedBefore, source: 'tool-mounted', label: '工具挂载，自动解绑' })
+      }
+    }
+    const missingTargets = verifiedTargets.filter((item) => !existsSync(item.resolved))
+    if (missingTargets.length > 0) {
+      throw new Error(`安全校验失败：解绑之后外部目标不见了（${missingTargets.map((m) => `${m.path} -> ${m.resolved}`).join(', ')}）`)
+    }
+    return {
+      ok: true,
+      unmounted,
+      unmountedInternal: [],
+      skipped,
+      blocked: [],
+      truncated: false,
+      fastGuided: true,
+      scanned: { outbound: unmounted.length + skipped.length, internal: 0, broken: 0 },
+    }
+  }
+
+  const scan = scanOutboundLinks(wtAbs)
+
+  const unmounted = []
+  const unmountedInternal = []
+  const skipped = []
+  const blocked = []
+  const outboundPlan = []
+
+  const before = scan.outbound.map((item) => ({ path: item.path, resolved: item.resolved }))
+
+  if (strict && scan.truncated) {
+    const spots = scan.truncatedPaths.length > 0 ? scan.truncatedPaths : ['.']
+    for (const tp of spots) {
+      blocked.push({ path: tp, target: null, reason: 'scan-truncated', resolved: null })
+    }
+  }
+
+  for (const link of scan.outbound) {
+    if (link.kind === 'unresolved') {
+      // 解不出来的悬空链接：cleanup 档不能删（连带删什么不知道），deps 档可以解绑。
+      if (strict) {
+        blocked.push({ path: link.path, target: link.target, reason: 'unresolved-target' })
+        continue
+      }
+      outboundPlan.push({ link, source: 'deps-mode' })
+      continue
+    }
+    const isToolMounted = mountedSet.has(link.path) && Boolean(link.resolved) && isInsideDir(link.resolved, mainAbs)
+    const isAllowed = allowed.has(link.path)
+    if (strict && !isToolMounted && !isAllowed) {
+      blocked.push({ path: link.path, target: link.target, reason: 'points-outside-worktree', resolved: link.resolved })
+      continue
+    }
+    const source = isToolMounted ? 'tool-mounted' : (isAllowed ? 'allow-outbound' : 'deps-mode')
+    outboundPlan.push({ link, source })
+  }
+
+  if ((strict && blocked.length > 0) || dryRun) {
+    return {
+      ok: blocked.length === 0,
+      unmounted,
+      unmountedInternal,
+      skipped,
+      blocked,
+      truncated: Boolean(scan.truncated),
+      scanned: { outbound: scan.outbound.length, internal: scan.internal.length, broken: scan.broken.length },
+    }
+  }
+
+  for (const { link, source } of outboundPlan) {
+    const abs = join(wtAbs, link.path)
+
+    // 已被 Git 跟踪的链接：删除档一律解绑，不许豁免（git 删含链接的目录时会跟着链接走进去）；
+    // 只有「worktree 不消失」的依赖清场档（deps）才跳过，避免把工作区弄脏。
+    const fastTracked = isPathInGitIndexFast(wtAbs, link.path)
+    const isTracked = fastTracked !== null
+      ? fastTracked
+      : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+    if (isTracked) {
+      if (!strict) {
+        skipped.push({ path: link.path, reason: 'tracked-in-git' })
+        continue
+      }
+      if (strict) {
+        // 记下来，回执里要能看见「这一条是被 Git 跟踪的」——排查时这是关键信息。
+        skipped.push({ path: link.path, reason: 'tracked-in-git-but-unlinked' })
+      }
+    }
+
+    let targetBefore = null
+    try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
+    unlinkSync(abs)
+    if (lstatSafe(abs) !== null) throw new Error(`解绑链接失败，路径仍然存在：${abs}`)
+    unmounted.push({
+      path: link.path,
+      target: targetBefore ?? link.resolved ?? link.target,
+      source,
+      ...(source === 'tool-mounted' ? { label: '工具挂载，自动解绑' } : {}),
+    })
+  }
+
+  // 删除档还要先解绑 worktree 内部链接（只删链接本身、内容留在即将拆除的 worktree 内），
+  // 防止 Windows `git worktree remove --force` 在内部 junction 处报 Directory not empty。
+  if (strict) {
+    for (const link of scan.internal) {
+      const abs = join(wtAbs, link.path)
+      if (!lstatSafe(abs)?.isSymbolicLink()) continue
+      const fastInternalTracked = isPathInGitIndexFast(wtAbs, link.path)
+      const isInternalTracked = fastInternalTracked !== null
+        ? fastInternalTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isInternalTracked) skipped.push({ path: link.path, reason: 'tracked-internal-in-git-but-unlinked' })
+      let targetBefore = null
+      try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
+      unlinkSync(abs)
+      if (lstatSafe(abs) !== null) throw new Error(`解绑内部链接失败，路径仍然存在：${abs}`)
+      unmountedInternal.push({ path: link.path, target: targetBefore ?? link.target })
+    }
+  }
+
+  // 解绑只允许动链接本身，绝不允许连带目标内容。逐个复核目标还在。
+  const missingTargets = before
+    .filter((item) => item.resolved)
+    .filter((item) => !existsSync(item.resolved))
+  if (missingTargets.length > 0) {
+    throw new Error(`安全校验失败：解绑之后外部目标不见了（${missingTargets.map((m) => `${m.path} -> ${m.resolved}`).join(', ')}）`
+      + '——解绑只该删链接，不该碰目标内容')
+  }
+
+  return {
+    ok: blocked.length === 0,
+    unmounted,
+    unmountedInternal,
+    skipped,
+    blocked,
+    truncated: Boolean(scan.truncated),
+    scanned: { outbound: scan.outbound.length, internal: scan.internal.length, broken: scan.broken.length },
+  }
+}
+
+function printHelp() {
+  process.stdout.write([
+    '用法：node .agents/skills/dev-flow/scripts/worktree-deps.mjs <mount|unmount|scan|status> --main <主仓> --worktree <工作树> [选项]',
+    '',
+    '  mount    按子包独立比对锁文件并防毒化探测，安全挂载共享依赖',
+    '  unmount  全深度扫出指向外部的链接并逐个解绑（清场重挂默认档；删 worktree 请加 --strict）',
+    '  scan     只报告 worktree 里的外链，不做任何修改',
+    '  status   按子包与生态比对锁文件状态并输出差异',
+    '',
+    '选项：',
+    '  --main <path>             主仓库根目录',
+    '  --worktree <path>         目标 worktree 目录',
+    '  --task <id>               关联任务 ID（同步写回账本 mountedDepsByWorktree）',
+    '  --allow-outbound <path>   显式放行待解绑外链（可重复）',
+    '  --strict                  删 worktree 前的严格外链校验档',
+    '  --json                    输出结构化 JSON',
+  ].join('\n') + '\n')
+}
+
+function main(argv) {
+  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') { printHelp(); return 0 }
+  let cli
+  try {
+    cli = parseStandardCli(argv, {
+      subcommands: ['mount', 'unmount', 'scan', 'status'],
+      valueFlags: ['main', 'worktree', 'task'],
+      multiFlags: ['allow-outbound'],
+      booleanFlags: ['strict'],
+      usageHint: 'worktree-deps.mjs <mount|unmount|scan|status> --main <dir> --worktree <dir>',
+    })
+  } catch (err) {
+    process.stderr.write(`${err.message}\n`)
+    return 2
+  }
+  if (cli.help) { printHelp(); return 0 }
+  if (!cli.opts.main || !cli.opts.worktree) {
+    process.stderr.write('错误：必须指定 --main <主仓目录> 与 --worktree <工作树目录>\n')
+    return 2
+  }
+
+  try {
+    let res
+    if (cli.sub === 'status') res = compareLockfiles(cli.opts.main, cli.opts.worktree)
+    else if (cli.sub === 'scan') res = scanOutboundLinks(cli.opts.worktree)
+    else if (cli.sub === 'mount') {
+      res = mountSharedDeps(cli.opts.main, cli.opts.worktree)
+      if (res.envHints) {
+        for (const [k, v] of Object.entries(res.envHints)) process.env[k] = String(v)
+      }
+      const mainAbs = canonicalPath(cli.opts.main)
+      const wtAbs = canonicalPath(cli.opts.worktree)
+      const wtRel = posixPath(relative(mainAbs, wtAbs))
+      const matchedLedger = cli.opts.task
+        ? readTaskLedger(mainAbs, sanitizeTaskId(cli.opts.task))
+        : listTaskLedgers(mainAbs).find((l) => (l.worktreePath && posixPath(l.worktreePath) === wtRel) || (l.reviewWorktreePath && posixPath(l.reviewWorktreePath) === wtRel))
+      if (matchedLedger?.taskId) {
+        recordMountedDepsInLedger(matchedLedger, wtRel, res)
+        writeTaskLedger(mainAbs, matchedLedger)
+        res.ledgerUpdated = true
+        res.taskId = matchedLedger.taskId
+        res.mountedDepsByWorktree = matchedLedger.mountedDepsByWorktree
+      }
+    } else if (cli.sub === 'unmount') {
+      // 这个子命令的本职是「清场以便重挂依赖」，所以默认走 deps 档（worktree 不会消失）。
+      // 要删 worktree 就必须显式加 --strict，让「跟随 junction 递归删除」这道闸生效。
+      res = unmountSharedDeps(cli.opts.main, cli.opts.worktree, {
+        allowOutbound: cli.opts['allow-outbound'],
+        mode: cli.opts.strict ? 'cleanup' : 'deps',
+      })
+    } else throw new Error(`未知子命令：${cli.sub}`)
+
+    if (cli.json) {
+      process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
+    } else {
+      process.stdout.write(`worktree-deps (${cli.sub}): ${JSON.stringify(res)}\n`)
+      for (const h of res.hints ?? []) process.stdout.write(`[HINT] ${h}\n`)
+      if (cli.sub === 'unmount' && res.ok === false) {
+        process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree 里有 ${res.blocked.length} 条指向外部的链接未获准删除。`
+          + '`git worktree remove --force` 会跟随 junction 递归删除，删了主仓那些目标就没了。\n')
+        for (const one of res.blocked) {
+          process.stderr.write(`  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）\n`)
+        }
+        process.stderr.write('确认这些目标可以切断后，用 --allow-outbound <路径> 逐个列出再重跑；不存在「全部放行」开关。\n')
+        return 4
+      }
+      printNextStep([
+        cli.sub === 'unmount'
+          ? '外链已解绑且主仓完好，可安全执行 git worktree remove。'
+          : '可在 worktree 中直接运行项目命令；清理前务必先执行 unmount。',
+      ], { repoRoot: cli.opts.main })
+    }
+    if (cli.sub === 'unmount' && res.ok === false) return 4
+    return 0
+  } catch (err) {
+    process.stderr.write(`worktree-deps 错误：${err instanceof Error ? err.message : String(err)}\n`)
+    return 1
+  }
+}
+
+export { main as runCli }
+
+if (isMainModule(import.meta.url, process.argv[1])) {
+  void flushAndExit(main(process.argv.slice(2)))
+}

@@ -31,8 +31,8 @@ export const INJECTIONS_CONV_S1 = [
     id: 'I904',
     what: 'assertWellFormedMarkdownBody 绕过单行折叠多节标题检测',
     file: 'kit/skills/lib/pr-template-hydrate.mjs',
-    from: '      if (hMatches.length >= 2) {',
-    to: '      if (false && hMatches.length >= 2) {',
+    from: '  if (!text) return',
+    to: '  if (true || !text) return',
     expect: 'Conv-S1 C2b',
   },
   {

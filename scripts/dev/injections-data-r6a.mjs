@@ -35,7 +35,7 @@ export const INJECTIONS_R6A_STATE = [
     what: '绕过 flow-merge.mjs A3 实施者自合并 BLOCKED_SELF_MERGE 拦截',
     file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-merge.mjs'],
-    from: '  if (callerActor && !allowSingleSessionSelf && (requiresReview || (hasDevReview && Number(ledger.caseType ?? 3) >= 2)) && implementerSet.has(callerActor)) {',
+    from: "  if (callerActor && !allowSingleSessionSelf && (requiresReview || (hasDevReview && Number(ledger.caseType ?? 3) >= 2) || Boolean(opts['reviewer-id'])) && implementerSet.has(callerActor)) {",
     to: '  if (false && callerActor && !allowSingleSessionSelf && implementerSet.has(callerActor)) {',
     expect: 'R6A-C3: generic-git',
   },

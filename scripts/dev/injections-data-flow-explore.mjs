@@ -28,8 +28,8 @@ export const INJECTIONS_FLOW_EXPLORE = [
     what: 'flow start Tier 2 违规自动伪造 explored 证据',
     file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-inspect.mjs'],
-    from: "    status: isPlanning ? 'planning' : 'started',\n    planning: isPlanning,\n    explored: null,",
-    to: "    status: isPlanning ? 'planning' : 'started',\n    planning: isPlanning,\n    explored: { at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1, by: 'start' },",
+    from: "    status: isPlanning ? 'planning' : 'started',\n    planning: isPlanning,\n    planBootstrap: isBootstrap,\n    explored: null,",
+    to: "    status: isPlanning ? 'planning' : 'started',\n    planning: isPlanning,\n    planBootstrap: isBootstrap,\n    explored: { at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1, by: 'start' },",
     expect: 'flow start [NEXT STEP] 在 Tier 2',
   },
   {
@@ -37,8 +37,8 @@ export const INJECTIONS_FLOW_EXPLORE = [
     what: 'flow start Tier 1 违规自动伪造 explored 证据',
     file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-inspect.mjs'],
-    from: "      status: isPlanning ? 'planning' : 'started',\n      planning: isPlanning,\n      explored: null,",
-    to: "      status: isPlanning ? 'planning' : 'started',\n      planning: isPlanning,\n      explored: { at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1, by: 'start' },",
+    from: "      status: isPlanning ? 'planning' : 'started',\n      planning: isPlanning,\n      planBootstrap: isBootstrap,\n      explored: null,",
+    to: "      status: isPlanning ? 'planning' : 'started',\n      planning: isPlanning,\n      planBootstrap: isBootstrap,\n      explored: { at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1, by: 'start' },",
     expect: 'flow start [NEXT STEP] 在 Tier 2',
   },
   {

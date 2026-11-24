@@ -530,7 +530,7 @@ export function registerEmpiricalCycleCases(cases) {
     gitInit(noneDir, { branch: 'main', name: 'dev', email: 'dev@emp.test' })
     try {
       const roots = await resolveRepoRoots(noneDir)
-      const st = await handleStart({ task: 'none-ui', case: '2', slug: 'none-ui', implementer: 'alice' }, roots)
+      const st = await handleStart({ task: 'none-ui', case: '2', slug: 'none-ui', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦视觉实证参数校验' }, roots)
       if (st.exitCode !== 0) return `none-ui start 失败：${st.exitCode}`
       const wt = join(noneDir, '.worktrees', 'impl-none-ui')
       writeFileSync(join(wt, 'src/View.tsx'), 'export const View = () => "v2"\n')
@@ -562,7 +562,7 @@ export function registerEmpiricalCycleCases(cases) {
     gitInit(cmdDir, { branch: 'main', name: 'dev', email: 'dev@emp.test' })
     try {
       const roots = await resolveRepoRoots(cmdDir)
-      await handleStart({ task: 'cmd-ui', case: '2', slug: 'cmd-ui', implementer: 'alice' }, roots)
+      await handleStart({ task: 'cmd-ui', case: '2', slug: 'cmd-ui', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦附件跨 HEAD 绑定校验' }, roots)
       const wt = join(cmdDir, '.worktrees', 'impl-cmd-ui')
       writeFileSync(join(wt, 'src/View.tsx'), 'export const View = () => "v2"\n')
       gitCommitFast(wt, 'feat: cmd-ui v2', { updateOnly: true })

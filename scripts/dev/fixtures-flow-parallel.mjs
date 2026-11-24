@@ -111,13 +111,13 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
 
   try {
     const roots = await resolveRepoRoots(dir)
-    const pStart = await handleStart({ task: 'parent-t', slug: 'parent', case: '2', implementer: 'dev-a' }, roots)
+    const pStart = await handleStart({ task: 'parent-t', slug: 'parent', case: '2', implementer: 'dev-a', 'no-issue': true, reason: '回归夹具聚焦父子堆叠分支' }, roots)
     if (pStart.exitCode !== 0) return `父任务 start 失败：${pStart.exitCode}`
     const pRoot = join(dir, '.worktrees', 'impl-parent-t')
     writeFileSync(join(pRoot, 'parent-file.mjs'), 'export const p = 1\n')
     gitCommitFast(pRoot, 'feat: parent work', { files: ['parent-file.mjs'] })
 
-    const cStart = await handleStart({ task: 'child-t', slug: 'child', after: 'parent-t', case: '2', implementer: 'dev-a' }, roots)
+    const cStart = await handleStart({ task: 'child-t', slug: 'child', after: 'parent-t', case: '2', implementer: 'dev-a', 'no-issue': true, reason: '回归夹具聚焦堆叠子分支同步' }, roots)
     if (cStart.exitCode !== 0) return `子任务 --after start 失败：${cStart.exitCode}`
     await seedExploredFor(dir, 'child-t')
     const cRoot = join(dir, '.worktrees', 'impl-child-t')
@@ -254,9 +254,9 @@ cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调�
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resolveRepoRoots(dir)
 
-    await handleStart({ task: 'ta', slug: 'ta', case: '2', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
-    await handleStart({ task: 'tb', slug: 'tb', case: '2', files: 'src/b.mjs', implementer: 'dev-a' }, roots)
-    await handleStart({ task: 'tc', slug: 'tc', case: '2', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
+    await handleStart({ task: 'ta', slug: 'ta', case: '2', files: 'src/a.mjs', implementer: 'dev-a', 'no-issue': true, reason: '回归夹具聚焦并行波次调度' }, roots)
+    await handleStart({ task: 'tb', slug: 'tb', case: '2', files: 'src/b.mjs', implementer: 'dev-a', 'no-issue': true, reason: '回归夹具聚焦并行波次调度' }, roots)
+    await handleStart({ task: 'tc', slug: 'tc', case: '2', files: 'src/a.mjs', implementer: 'dev-a', 'no-issue': true, reason: '回归夹具聚焦并行波次调度' }, roots)
     await seedExploredFor(dir, 'ta', 'tb', 'tc')
 
     const disjBad = await handleBatch({ _: ['check-disjoint'], tasks: 'ta,tc' }, roots)

@@ -151,7 +151,7 @@ async function runNodeOwnSkillsDay2AndUpgrade(tracker, envExtra) {
     const flow = join(dir, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
     const revPack = join(dir, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
 
-    const stRes = runNode(flow, ['start', '--task', 'd2', '--case', '2', '--slug', 'd2', '--implementer', 'alice'], dir, envExtra)
+    const stRes = runNode(flow, ['start', '--task', 'd2', '--case', '2', '--slug', 'd2', '--implementer', 'alice', '--no-issue', '--reason', '盲测场景验证 Node 生态闭环'], dir, envExtra)
     const exRes = runNode(flow, ['explore', '--task', 'd2'], dir, envExtra)
     const wt = join(dir, '.worktrees', 'impl-d2')
     writeFileSync(join(wt, 'src', 'engine.mjs'), 'export const compute = (x) => x * 3\n', 'utf8')
@@ -173,7 +173,8 @@ async function runNodeOwnSkillsDay2AndUpgrade(tracker, envExtra) {
     const tok = await issueTokenFor(dir, 'd2', 1)
     const recRes = runNode(revPack, ['record', '--task', 'd2', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d2', '--review-token', tok, '--evidence', 'NODE_SMOKE_OK', '--json'], join(dir, '.worktrees', 'review-d2'), envExtra)
     const mRes = runNode(flow, ['merge', '--task', 'd2'], dir, envExtra)
-    const cRes = runNode(flow, ['cleanup', '--task', 'd2', '--confirm'], dir, envExtra)
+    const cPreview = JSON.parse(runNode(flow, ['cleanup', '--task', 'd2', '--json'], dir, envExtra).stdout || '{}')
+    const cRes = runNode(flow, ['cleanup', '--task', 'd2', '--confirm', '--preview-hash', cPreview.previewHash ?? ''], dir, envExtra)
     assertStep(
       tracker,
       'node:day2-fix-e2e-review-merge-cleanup',
@@ -230,7 +231,7 @@ async function runPythonBlindSample(tracker, envExtra) {
     })
     gitCommitFast(dir, 'chore: configure python smoke')
     const flow = join(dir, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
-    runNode(flow, ['start', '--task', 'py1', '--case', '2', '--slug', 'py1', '--implementer', 'bob'], dir, envExtra)
+    runNode(flow, ['start', '--task', 'py1', '--case', '2', '--slug', 'py1', '--implementer', 'bob', '--no-issue', '--reason', '盲测场景验证 Python 生态测试'], dir, envExtra)
     await seedExploredFor(dir, 'py1')
     const wt = join(dir, '.worktrees', 'impl-py1')
     writeFileSync(join(wt, 'src', 'calc.py'), 'def add(a, b):\n    return int(a) + int(b)\n', 'utf8')
@@ -323,7 +324,8 @@ async function runZeroHintAndWeakModelGuard(tracker, sandbox, envExtra) {
     )
 
     // 2. 弱模型守卫：缺 E2E 实证时 --include-diff 与 pass 必拦，实证后解锁 diff 与实质核查焦点
-    runNode(flow, ['start', '--task', 'w1', '--case', '2', '--slug', 'w1', '--implementer', 'alice'], dir, envExtra)
+    runNode(flow, ['start', '--task', 'w1', '--case', '2', '--slug', 'w1', '--implementer', 'alice', '--no-issue', '--reason', '盲测场景验证弱模型先实证守卫'], dir, envExtra)
+    runNode(flow, ['claim', '--task', 'w1', '--agent', 'alice'], dir, envExtra)
     await seedExploredFor(dir, 'w1')
     const wt = join(dir, '.worktrees', 'impl-w1')
     writeFileSync(join(wt, 'src', 'app.mjs'), 'export const run = () => "v2"\n', 'utf8')

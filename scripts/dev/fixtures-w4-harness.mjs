@@ -179,7 +179,7 @@ export function registerW4HarnessCases(cases) {
     try {
       gitInit(dir)
       const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'local-c2', '--case', '2', '--agent', 'impl-local', '--dir', dir, '--json',
+        'start', '--task', 'local-c2', '--case', '2', '--agent', 'impl-local', '--no-issue', '--reason', '回归夹具聚焦 local-only claimedAt 校验', '--dir', dir, '--json',
       ], { cwd: dir })
       if (st.status !== 0) return `local-only start 失败：${st.stderr || st.stdout}`
       const { readTaskLedger, writeTaskLedger } = await import('../../kit/skills/lib/ledger.mjs')
@@ -451,7 +451,7 @@ export function registerW4HarnessCases(cases) {
       }
 
       const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'r2-open', '--case', '2', '--agent', 'impl-1', '--dir', dir, '--json',
+        'start', '--task', 'r2-open', '--case', '2', '--agent', 'impl-1', '--no-issue', '--reason', '回归夹具聚焦 Round 2 未闭合项阻断', '--dir', dir, '--json',
       ], { cwd: dir })
       if (st.status !== 0) return `start 失败：${st.stderr}`
       await seedExploredFor(dir, 'r2-open')

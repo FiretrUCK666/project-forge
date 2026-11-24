@@ -433,7 +433,7 @@ cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触
     }
 
     // 启动流转分支后只修改 src/api.mjs 并提交，检验 doc-plan triage / review-pack / flow finalize
-    const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--implementer', 'alice', '--dir', dir, '--json'])
+    const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--implementer', 'alice', '--no-issue', '--reason', '回归夹具聚焦耦合文档自同步', '--dir', dir, '--json'])
     if (startRes.status !== 0) return `flow.mjs start 失败：${startRes.stderr}`
     await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['claim', '--task', 'c29-t1', '--agent', 'alice', '--dir', dir])
     const c29Wt = join(dir, JSON.parse(startRes.stdout).worktreePath)

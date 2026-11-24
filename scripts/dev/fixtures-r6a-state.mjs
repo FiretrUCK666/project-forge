@@ -104,6 +104,7 @@ function seedAuditedSpecAndTodo(dir, { taskId = 'slice-demo', slug = 'slice-demo
     '## 改动清单',
     `- ${refPath}`,
     '- `hasSkillSupport`',
+    '- **本期不做**：不动 `README.md`',
     '',
   ].join('\n')
   const specInitial = buildSpec(critique)
@@ -122,6 +123,8 @@ function seedAuditedSpecAndTodo(dir, { taskId = 'slice-demo', slug = 'slice-demo
     '',
     `# ${slug} Todo`,
     '',
+    `- **影响路径**：\`${refPath}\``,
+    '- **本期不做**：不动 `README.md`',
     `- [ ] C1: edit \`${refPath}\``,
     '',
   ].join('\n')
@@ -373,7 +376,7 @@ export function registerR6aStateCases(cases) {
       const roots = await resolveRepoRoots(dir)
       const { specRel: s2, todoRel: t2 } = seedAuditedSpecAndTodo(dir, { taskId: 'c4-cas', slug: 'c4-cas', audited: true, validRefs: true })
       gitCommitFast(dir, 'docs: add cas plan')
-      await withCaptureIo(() => handleStart({ task: 'c4-cas', case: '3', spec: s2, todo: t2, json: true, agent: 'agent-a' }, roots))
+      await withCaptureIo(() => handleStart({ task: 'c4-cas', case: '3', spec: s2, todo: t2, json: true, agent: 'agent-a', 'no-issue': true, reason: 'Git-Ref CAS 原子认领租约并发互斥夹具' }, roots))
       const claimA = await withCaptureIo(() => handleClaim({ task: 'c4-cas', agent: 'agent-a', json: true }, roots))
       assert.equal(claimA.res.exitCode, EXIT.OK)
       const refExists = gitSync(dir, ['show-ref', '--verify', '--quiet', 'refs/pf/claims/c4-cas'])

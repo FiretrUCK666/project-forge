@@ -54,8 +54,8 @@ export const INJECTIONS_PLAN_WAVE = [
   {
     id: 'I255',
     what: 'flow start 不再在 planGate 阻断时返回，门禁算完就地丢掉',
-    file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
-    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-inspect.mjs'],
+    file: 'kit/skills/dev-flow/scripts/flow-start-helpers.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-start-helpers.mjs'],
     from: '  if (planGate.blocked) {',
     to: '  if (false && planGate.blocked) {',
     expect: '规划退场门禁接入 flow start',

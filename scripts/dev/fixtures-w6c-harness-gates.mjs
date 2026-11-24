@@ -558,7 +558,7 @@ export function registerW6cHarnessGatesCases(cases) {
       const origTodo = readFileSync(todoAbs, 'utf8')
       writeFileSync(todoAbs, origTodo.replace('owner: plan-w6', 'owner: forged-other'), 'utf8')
       const tamperedStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'prov-t', '--case', '2', '--agent', 'impl-b', '--todo', initJson.file, '--json',
+        'start', '--task', 'prov-t', '--case', '2', '--agent', 'impl-b', '--todo', initJson.file, '--no-issue', '--reason', '测试来源防篡改校验', '--json',
       ], { cwd: dir })
       if (tamperedStart.status !== 3 || !`${tamperedStart.stdout}${tamperedStart.stderr}`.includes('BLOCKED_PROVENANCE_TAMPERED')) {
         return `手工篡改 owner 未被 start 拦截 BLOCKED_PROVENANCE_TAMPERED：exit=${tamperedStart.status} out=${tamperedStart.stdout} err=${tamperedStart.stderr}`
@@ -568,7 +568,7 @@ export function registerW6cHarnessGatesCases(cases) {
         'link', initJson.file, '--task', 'prov-t', '--json',
       ], { cwd: dir })
       const postLinkStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'prov-t', '--case', '2', '--agent', 'impl-b', '--todo', initJson.file, '--json',
+        'start', '--task', 'prov-t', '--case', '2', '--agent', 'impl-b', '--todo', initJson.file, '--no-issue', '--reason', '测试来源防篡改校验', '--json',
       ], { cwd: dir })
       if (postLinkStart.status !== 3 || !`${postLinkStart.stdout}${postLinkStart.stderr}`.includes('BLOCKED_PROVENANCE_TAMPERED')) {
         return `普通 link 洗白了已篡改基线：link=${plainLink.status} start=${postLinkStart.status} out=${postLinkStart.stdout}`
@@ -585,7 +585,7 @@ export function registerW6cHarnessGatesCases(cases) {
 
       // 原作者 plan-w6 尝试以 --agent plan-w6 启动 -> BLOCKED_AUTHOR_IS_IMPLEMENTER
       const selfAuthStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'prov-t', '--case', '2', '--agent', 'plan-w6', '--todo', initJson.file, '--json',
+        'start', '--task', 'prov-t', '--case', '2', '--agent', 'plan-w6', '--todo', initJson.file, '--no-issue', '--reason', '测试作者分离校验', '--json',
       ], { cwd: dir })
       if (selfAuthStart.status !== 3 || !`${selfAuthStart.stdout}${selfAuthStart.stderr}`.includes('BLOCKED_AUTHOR_IS_IMPLEMENTER')) {
         return `交接后原规划作者未被拦截 BLOCKED_AUTHOR_IS_IMPLEMENTER：exit=${selfAuthStart.status} out=${selfAuthStart.stdout}`
@@ -593,7 +593,7 @@ export function registerW6cHarnessGatesCases(cases) {
 
       // 正向：隔离实施子代理 --agent impl-b（尽管宿主 git user.name === plan-w6）合法通过 start 与 claim
       const okStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'prov-t', '--case', '2', '--agent', 'impl-b', '--todo', initJson.file, '--json',
+        'start', '--task', 'prov-t', '--case', '2', '--agent', 'impl-b', '--todo', initJson.file, '--no-issue', '--reason', '测试隔离代理正常启动', '--json',
       ], { cwd: dir })
       if (okStart.status !== 0) return `git user.name 与 owner 同名时误杀了隔离代理 impl-b：exit=${okStart.status} out=${okStart.stdout} err=${okStart.stderr}`
 
@@ -678,7 +678,7 @@ export function registerW6cHarnessGatesCases(cases) {
       gitCommitFast(dir, 'chore: green profile for task flow', { updateOnly: true })
       const roots = await resolveRepoRoots(dir)
 
-      await withQuietIo(() => handleStart({ task: 'doc-ok', case: '2', slug: 'doc-ok', implementer: 'alice' }, roots))
+      await withQuietIo(() => handleStart({ task: 'doc-ok', case: '2', slug: 'doc-ok', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦文档静态检查' }, roots))
       await withQuietIo(() => handleClaim({ task: 'doc-ok', agent: 'alice' }, roots))
       const wtOk = join(dir, '.worktrees/impl-doc-ok')
       writeFileSync(join(wtOk, 'docs/legacy.md'), '# Legacy\n\nIntro line v2.\n\n[legacy-dead](missing-legacy.md)\n', 'utf8')
@@ -699,7 +699,7 @@ export function registerW6cHarnessGatesCases(cases) {
       if (recOk.res !== 0) return `修改含历史死链老文档无关行 record pass 被误拦：exit=${recOk.res} err=${recOk.err} out=${recOk.out}`
 
       // 4. 反例：在老文档第 3 行新增死链 -> --include-diff 与 record --verdict pass 必须同时拦截 BLOCKED_STATIC_DOC_CHECK_FAILED
-      await withQuietIo(() => handleStart({ task: 'doc-bad', case: '2', slug: 'doc-bad', implementer: 'alice' }, roots))
+      await withQuietIo(() => handleStart({ task: 'doc-bad', case: '2', slug: 'doc-bad', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦死链拦截' }, roots))
       await withQuietIo(() => handleClaim({ task: 'doc-bad', agent: 'alice' }, roots))
       const wtBad = join(dir, '.worktrees/impl-doc-bad')
       writeFileSync(join(wtBad, 'docs/legacy.md'), '# Legacy\n\n[added-dead](added-missing.md)\n\n[legacy-dead](missing-legacy.md)\n', 'utf8')

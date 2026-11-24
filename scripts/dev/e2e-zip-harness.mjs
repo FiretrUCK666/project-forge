@@ -255,7 +255,7 @@ async function runScenarioD(pkgRoot, sandbox, env) {
 
   const flowD1 = join(repoD1, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD1 = join(repoD1, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
-  const startD1 = JSON.parse(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--implementer', 'alice', '--json'], repoD1, env).stdout)
+  const startD1 = JSON.parse(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证 local-only 完整流转', '--json'], repoD1, env).stdout)
   if (startD1.explored !== null) {
     throw new Error(`Scenario D1 expected explored === null on start, got ${JSON.stringify(startD1.explored)}`)
   }
@@ -296,7 +296,7 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   runGit(repoD2, ['commit', '-qm', 'chore: equip'])
   const flowD2 = join(repoD2, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD2 = join(repoD2, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
-  assertOk(runNodeScript(flowD2, ['start', '--task', 'd2', '--case', '2', '--slug', 'd2', '--implementer', 'alice'], repoD2, env), 'Scenario D2 start')
+  assertOk(runNodeScript(flowD2, ['start', '--task', 'd2', '--case', '2', '--slug', 'd2', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证 generic-git 合流门禁'], repoD2, env), 'Scenario D2 start')
   assertOk(runNodeScript(flowD2, ['claim', '--task', 'd2', '--agent', 'alice'], repoD2, env), 'Scenario D2 claim')
   assertOk(runNodeScript(flowD2, ['explore', '--task', 'd2'], repoD2, env), 'Scenario D2 explore')
   const wtD2 = join(repoD2, '.worktrees', 'impl-d2')
@@ -417,7 +417,7 @@ async function runScenarioF(pkgRoot, sandbox, env) {
   if (depBlock.exitCode !== 3) throw new Error(`Scenario F expected BLOCKED_UNRESOLVED_DEPENDENCY (exit=3), got ${depBlock.exitCode}`)
 
   const flowF = join(repoF, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
-  assertOk(runNodeScript(flowF, ['start', '--task', 'p1', '--case', '2', '--slug', 'parent', '--implementer', 'alice'], repoF, env), 'Scenario F parent start')
+  assertOk(runNodeScript(flowF, ['start', '--task', 'p1', '--case', '2', '--slug', 'parent', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证父子堆叠分支'], repoF, env), 'Scenario F parent start')
   assertOk(runNodeScript(flowF, ['claim', '--task', 'p1', '--agent', 'alice'], repoF, env), 'Scenario F parent claim')
   assertOk(runNodeScript(flowF, ['explore', '--task', 'p1'], repoF, env), 'Scenario F parent explore')
   const wtP = join(repoF, '.worktrees', 'impl-p1')
@@ -425,7 +425,7 @@ async function runScenarioF(pkgRoot, sandbox, env) {
   runGit(wtP, ['add', '-A'])
   runGit(wtP, ['commit', '-qm', 'parent work'])
 
-  assertOk(runNodeScript(flowF, ['start', '--task', 'c1', '--case', '2', '--slug', 'child', '--after', 'p1', '--implementer', 'alice'], repoF, env), 'Scenario F child --after start')
+  assertOk(runNodeScript(flowF, ['start', '--task', 'c1', '--case', '2', '--slug', 'child', '--after', 'p1', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证堆叠子分支'], repoF, env), 'Scenario F child --after start')
   assertOk(runNodeScript(flowF, ['claim', '--task', 'c1', '--agent', 'alice'], repoF, env), 'Scenario F child claim')
   assertOk(runNodeScript(flowF, ['explore', '--task', 'c1'], repoF, env), 'Scenario F child explore')
   const wtC = join(repoF, '.worktrees', 'impl-c1')
@@ -451,9 +451,9 @@ async function runScenarioG(pkgRoot, sandbox, env) {
   const flowG = join(repoG, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revG = join(repoG, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
 
-  assertOk(runNodeScript(flowG, ['start', '--task', 'ta', '--case', '2', '--slug', 'ta', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start ta')
-  assertOk(runNodeScript(flowG, ['start', '--task', 'tb', '--case', '2', '--slug', 'tb', '--files', 'src/b.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tb')
-  assertOk(runNodeScript(flowG, ['start', '--task', 'tc', '--case', '2', '--slug', 'tc', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tc')
+  assertOk(runNodeScript(flowG, ['start', '--task', 'ta', '--case', '2', '--slug', 'ta', '--files', 'src/a.mjs', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证并行波次调度'], repoG, env), 'Scenario G start ta')
+  assertOk(runNodeScript(flowG, ['start', '--task', 'tb', '--case', '2', '--slug', 'tb', '--files', 'src/b.mjs', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证并行波次调度'], repoG, env), 'Scenario G start tb')
+  assertOk(runNodeScript(flowG, ['start', '--task', 'tc', '--case', '2', '--slug', 'tc', '--files', 'src/a.mjs', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证并行波次调度'], repoG, env), 'Scenario G start tc')
   assertOk(runNodeScript(flowG, ['explore', '--task', 'ta'], repoG, env), 'Scenario G explore ta')
   assertOk(runNodeScript(flowG, ['explore', '--task', 'tb'], repoG, env), 'Scenario G explore tb')
   assertOk(runNodeScript(flowG, ['explore', '--task', 'tc'], repoG, env), 'Scenario G explore tc')

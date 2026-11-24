@@ -7,8 +7,9 @@
 export const INJECTIONS_PARALLEL_DISPATCH = [
   {
     id: 'I350',
-    what: 'flow-inspect 忽略 --planning 限制放行常规未过审 start',
-    file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
+    what: 'flow-start-helpers 忽略 --planning 限制放行常规未过审 start',
+    file: 'kit/skills/dev-flow/scripts/flow-start-helpers.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-start-helpers.mjs'],
     from: '  const planGate = evaluatePlanExitGate(gateRoot, {',
     to: '  return { blocked: false }\n  const planGate = evaluatePlanExitGate(gateRoot, {',
     expect: 'C1：规划隔离 --planning',

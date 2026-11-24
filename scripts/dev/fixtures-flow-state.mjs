@@ -78,7 +78,7 @@ export function registerFlowStateCases(cases) {
     gitInit(qOnlyDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     try {
       const roots = await resolveRepoRoots(qOnlyDir)
-      await handleStart({ task: 'q1', case: '2', slug: 'q1', implementer: 'alice' }, roots)
+      await handleStart({ task: 'q1', case: '2', slug: 'q1', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 quick-only 验证拦截' }, roots)
       await handleClaim({ task: 'q1', agent: 'alice' }, roots)
       await seedExploredFor(qOnlyDir, 'q1')
       const wtq = join(qOnlyDir, '.worktrees', 'impl-q1')
@@ -130,7 +130,7 @@ export function registerFlowStateCases(cases) {
         return `idle next 异常：${JSON.stringify(nextIdle)}`
       }
 
-      await handleStart({ task: 'c1-code', case: '2', slug: 'c1-code', implementer: 'alice' }, roots)
+      await handleStart({ task: 'c1-code', case: '2', slug: 'c1-code', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 quick 旁路与 submit 权责锁' }, roots)
       await handleClaim({ task: 'c1-code', agent: 'alice' }, roots)
       await seedExploredFor(dir, 'c1-code')
       const wt1 = join(dir, '.worktrees', 'impl-c1-code')
@@ -186,7 +186,7 @@ export function registerFlowStateCases(cases) {
         if (okAlice.exitCode !== 0) return `原实施者 alice submit 被误拦：exit=${okAlice.exitCode}`
       } finally { rmTree(bare) }
 
-      await handleStart({ task: 'c1-doc', case: '2', slug: 'c1-doc' }, roots)
+      await handleStart({ task: 'c1-doc', case: '2', slug: 'c1-doc', 'no-issue': true, reason: '回归夹具聚焦多任务 ambiguous 探测' }, roots)
       const nextAmb = (await handleNext({ json: true }, roots)).payload
       if (nextAmb.phase !== 'ambiguous' || nextAmb.ownerRole !== 'coordinator' || (nextAmb.candidates?.length ?? 0) < 2) {
         return `多任务 ambiguous next 异常：${JSON.stringify(nextAmb)}`
@@ -231,13 +231,13 @@ export function registerFlowStateCases(cases) {
       }
 
       // 分支已在 mainRoot 检出 -> 拦截 BLOCKED_BRANCH_IN_USE (exit 3)
-      const clash = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-bad', '--case', '2', '--branch', 'main'], { cwd: committed })
+      const clash = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-bad', '--case', '2', '--branch', 'main', '--no-issue', '--reason', '回归夹具验证分支冲突拦截'], { cwd: committed })
       if (clash.status !== 3 || !clash.stderr.includes('BLOCKED_BRANCH_IN_USE')) {
         return `已被占用分支未拦截：exit=${clash.status}, err=${clash.stderr}`
       }
 
       const mainSha = gitSync(committed, ['rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).stdout.trim()
-      const sCom = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-wt', '--case', '2', '--slug', 'c2-wt', '--implementer', 'alice', '--json'], { cwd: committed })).stdout)
+      const sCom = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c2-wt', '--case', '2', '--slug', 'c2-wt', '--implementer', 'alice', '--no-issue', '--reason', '回归夹具验证 Tier 2 worktree 隔离', '--json'], { cwd: committed })).stdout)
       if (sCom.isolation !== 'worktree' || sCom.worktreePath !== '.worktrees/impl-c2-wt' || sCom.baseSha !== mainSha) {
         return `有提交仓 Case 2 未进 Tier 2 或 baseSha 不对：${JSON.stringify(sCom)}`
       }
@@ -362,7 +362,7 @@ export function registerFlowStateCases(cases) {
 
     try {
       const roots = await resolveRepoRoots(dir)
-      await handleStart({ task: 'm1b', case: '2', slug: 'm1b', implementer: 'alice' }, roots)
+      await handleStart({ task: 'm1b', case: '2', slug: 'm1b', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦试合回滚与清理' }, roots)
       await handleClaim({ task: 'm1b', agent: 'alice' }, roots)
       await seedExploredFor(dir, 'm1b')
       const wt = join(dir, readTaskLedger(dir, 'm1b').worktreePath)
@@ -454,7 +454,7 @@ export function registerFlowStateCases(cases) {
       const { handleClaim: hClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
       const { handleRecord: hRecord, handleOverride: hOverride } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
       const roots = await resRoots(dir)
-      await hStart({ task: 'c4-lk', case: '2', slug: 'c4-lk', implementer: 'alice' }, roots)
+      await hStart({ task: 'c4-lk', case: '2', slug: 'c4-lk', implementer: 'alice', 'no-issue': true, reason: '六锁拦截与轮次停损验证夹具' }, roots)
       await hClaim({ task: 'c4-lk', agent: 'alice' }, roots)
       await seedExploredFor(dir, 'c4-lk')
       const st = readTaskLedger(dir, 'c4-lk')

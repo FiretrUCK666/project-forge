@@ -347,7 +347,7 @@ export function registerIssue50Cases(cases) {
         return `planning 态任务 merge 未按 exit 3 BLOCKED_PLAN_NOT_READY 阻断：${JSON.stringify(mBlockedPlan)}`
       }
 
-      const stExp = await handleStart({ task: 't-exp', slug: 'exp-gate', case: '2', implementer: 'dev-a' }, roots)
+      const stExp = await handleStart({ task: 't-exp', slug: 'exp-gate', case: '2', implementer: 'dev-a', 'no-issue': true, reason: '回归夹具聚焦探索门禁检查' }, roots)
       if (stExp.exitCode !== 0) return `t-exp start 失败：${stExp.exitCode}`
       const clExp = await handleClaim({ task: 't-exp', agent: 'dev-a' }, roots)
       if (clExp.exitCode !== 0) return `t-exp claim 失败：${clExp.exitCode}`

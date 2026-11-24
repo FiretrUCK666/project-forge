@@ -167,7 +167,7 @@ async function runScenarioK(pkgRoot, sandbox, env, h) {
 
   const flowK = join(repoK, '.agents/skills/dev-flow/scripts/flow.mjs')
   const revK = join(repoK, '.agents/skills/dev-review/scripts/review-pack.mjs')
-  h.assertOk(h.runNodeScript(flowK, ['start', '--task', 'tk', '--case', '2', '--slug', 'tk', '--implementer', 'alice'], repoK, env), 'Scenario K start')
+  h.assertOk(h.runNodeScript(flowK, ['start', '--task', 'tk', '--case', '2', '--slug', 'tk', '--implementer', 'alice', '--no-issue', '--reason', 'E2E 场景验证先实证后 diff 门禁'], repoK, env), 'Scenario K start')
   h.assertOk(h.runNodeScript(flowK, ['explore', '--task', 'tk'], repoK, env), 'Scenario K explore')
   const wtK = join(repoK, '.worktrees/impl-tk')
   writeFileSync(join(wtK, 'src/orders.mjs'), 'export const createOrder = (id) => ({ id, ok: true, v: 2 })\n', 'utf8')

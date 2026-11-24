@@ -211,7 +211,7 @@ function buildAndValidateIssueBody({
   rawExplicitBody = undefined,
   opts = {},
 }) {
-  const workRoot = roots.workTreeRoot ?? roots.mainRoot
+  const workRoot = opts.workTreeRoot ?? roots.workTreeRoot ?? roots.mainRoot
   const planDocPaths = [opts.spec, opts.todo, opts.prd].filter(Boolean)
   const planCtx = planDocPaths.length > 0
     ? extractPlanDocContext(workRoot, planDocPaths, { mainRoot: roots.mainRoot })
@@ -219,8 +219,15 @@ function buildAndValidateIssueBody({
 
   let fields
   if (!rawExplicitBody && planCtx && planCtx.verifiedDocRefs.length > 0) {
-    const scopeFiles = opts.files || (planCtx.files.length > 0 ? planCtx.files : undefined)
-    const affectedText = (planCtx.files.length > 0 ? planCtx.files : ['见关联设计文档']).slice(0, 8).map((f) => `\`${f}\``).join('、')
+    const optFilesList = opts.files
+      ? String(opts.files).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+      : []
+    const scopeFilesList = optFilesList.length > 0 ? optFilesList : planCtx.files
+    const scopeFiles = scopeFilesList.length > 0 ? scopeFilesList : undefined
+    const affectedText = (scopeFilesList.length > 0 ? scopeFilesList : planCtx.verifiedDocRefs)
+      .slice(0, 8)
+      .map((f) => `\`${f}\``)
+      .join('、')
     fields = {
       title,
       caseType,
@@ -298,9 +305,14 @@ export async function createIssueForStart({
     mainRoot: roots.mainRoot,
     gitDir: roots.gitDir,
   })
-  const rawTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
+  const workRoot = opts.workTreeRoot ?? roots.workTreeRoot ?? roots.mainRoot
+  const planDocPaths = [opts.spec, opts.todo, opts.prd].filter(Boolean)
+  const planCtx = planDocPaths.length > 0
+    ? extractPlanDocContext(workRoot, planDocPaths, { mainRoot: roots.mainRoot })
+    : null
+  const rawTitle = String(opts.title ?? (planCtx?.title || null) ?? opts.slug ?? prelimTaskId).trim()
   const issueTitle = formatWorkTitle(rawTitle, caseType)
-  const rawExplicitBody = resolveExplicitBodyText(roots.mainRoot, opts)
+  const rawExplicitBody = resolveExplicitBodyText(workRoot, opts)
   const built = buildAndValidateIssueBody({
     roots,
     title: rawTitle,

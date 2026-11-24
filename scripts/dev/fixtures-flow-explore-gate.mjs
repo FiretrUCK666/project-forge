@@ -85,7 +85,7 @@ export function registerFlowExploreGateCases(cases) {
       // 2) Tier 2 local-only without --issue（W4A C1 自动认领 local-only 无 Issue 任务）
       const localRoots = await resolveRepoRoots(localDir)
       const stLocal = await withCaptureIo(() => handleStart({
-        task: 't-loc', slug: 'loc-fix', case: '2', implementer: 'alice',
+        task: 't-loc', slug: 'loc-fix', case: '2', implementer: 'alice', 'no-issue': true, reason: '本地无工单自动认领验证夹具',
       }, localRoots))
       if (stLocal.res.exitCode !== 0) return `Tier 2 本地 start 失败：exit=${stLocal.res.exitCode}, err=${stLocal.err}`
       if (!readTaskLedger(localDir, 't-loc')?.claimedAt) {
@@ -102,7 +102,7 @@ export function registerFlowExploreGateCases(cases) {
       // 3) Tier 1 unborn repo (commits === 0)
       const emptyRoots = await resolveRepoRoots(emptyCommitDir)
       const stEmpty = await withCaptureIo(() => handleStart({
-        task: 't-t1', slug: 'init-fix', case: '2', implementer: 'alice',
+        task: 't-t1', slug: 'init-fix', case: '2', implementer: 'alice', 'no-issue': true, reason: 'Tier 1 未提交仓库引导夹具',
       }, emptyRoots))
       if (stEmpty.res.exitCode !== 0) return `Tier 1 start 失败：exit=${stEmpty.res.exitCode}, err=${stEmpty.err}`
       if (!stEmpty.out.includes('[NEXT STEP]') || !stEmpty.out.includes('claim --task t-t1')) {
@@ -145,7 +145,7 @@ export function registerFlowExploreGateCases(cases) {
       }
 
       // 正向 1：正常 Case 2 启动，无需手工 explore 即可 submit 放行
-      await withCaptureIo(() => handleStart({ task: 'c2-code', slug: 'c2-code', case: '2', implementer: 'alice', json: true }, roots))
+      await withCaptureIo(() => handleStart({ task: 'c2-code', slug: 'c2-code', case: '2', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦提交探索门禁', json: true }, roots))
       await withCaptureIo(() => handleClaim({ task: 'c2-code', agent: 'alice', json: true }, roots))
       const wtC2 = join(dir, '.worktrees', 'impl-c2-code')
       writeFileSync(join(wtC2, 'src/app.mjs'), 'export const value = 2\n')

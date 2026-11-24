@@ -567,7 +567,7 @@ export function registerStageBLoopB4bCases(cases) {
       if (lC1.branch !== 'main' || lC1.worktreePath !== null || lC1.milestone !== 7) {
         return `Case 1 原地微调或裸 Milestone URL 失败：${JSON.stringify(lC1)}`
       }
-      const stDocs = await withQuietIo(() => handleStart({ _: ['https://github.com/acme/c22/milestone/7'], task: 'docs-task', case: '2', slug: 'fix-typo', implementer: 'alice', json: true }, roots))
+      const stDocs = await withQuietIo(() => handleStart({ _: ['https://github.com/acme/c22/milestone/7'], task: 'docs-task', case: '2', slug: 'fix-typo', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 Milestone URL 与试合恢复', json: true }, roots))
       if (stDocs.res.exitCode !== 0) return `Case 2 start 失败：${stDocs.err}`
       const lDocs = readTaskLedger(dir, 'docs-task')
       if (lDocs.branch !== 'fix/fix-typo' || lDocs.milestone !== 7) return `Case 2 分支或裸 Milestone URL 失败：${JSON.stringify(lDocs)}`

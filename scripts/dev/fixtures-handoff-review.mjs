@@ -603,7 +603,7 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
 
     // 3. flow-batch merge-queue（正向真合并 + 反向绝不虚报 merged）
     for (const [tid, pr] of [["mq-pos", 91], ["mq-neg", 92]]) {
-      await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", tid, "--case", "2", "--slug", tid, "--implementer", "alice"], { cwd: dir })
+      await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", tid, "--case", "2", "--slug", tid, "--implementer", "alice", "--no-issue", "--reason", "回归夹具测试 merge-queue"], { cwd: dir })
       await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["claim", "--task", tid, "--agent", "alice"], { cwd: dir })
       await seedExploredFor(dir, tid)
       const wt = join(dir, ".worktrees", `impl-${tid}`)
@@ -627,7 +627,7 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
     }
 
     // 4. flow-sync（有 prNumber / parentPrNumber 时无需 --probe-auth 自动联网探通道；无则不探）
-    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-pr", "--case", "2", "--slug", "sy-pr", "--base", "old-base", "--implementer", "alice"], { cwd: dir })
+    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-pr", "--case", "2", "--slug", "sy-pr", "--base", "old-base", "--implementer", "alice", "--no-issue", "--reason", "回归夹具测试 flow sync"], { cwd: dir })
     const wtSy = join(dir, ".worktrees", "impl-sy-pr")
     writeFileSync(join(wtSy, "sy-pr.mjs"), "export const s = 1\n")
     gitCommitFast(wtSy, "sy-pr commit", { files: ["sy-pr.mjs"], name: "alice", email: "alice@example.com" })
@@ -638,14 +638,14 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
     if (!syJson?.prBaseUpdate?.ok || !readFileSync(logSy, "utf8").includes("pr edit 95")) {
       return `flow-sync 有 prNumber 时未自动触发 probeForWrite：status=${syRes.status}, out=${syRes.stdout}, err=${syRes.stderr}`
     }
-    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-par", "--case", "2", "--slug", "sy-par", "--base", "old-base", "--implementer", "alice"], { cwd: dir })
+    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-par", "--case", "2", "--slug", "sy-par", "--base", "old-base", "--implementer", "alice", "--no-issue", "--reason", "回归夹具测试 flow sync"], { cwd: dir })
     writeTaskLedger(dir, { ...readTaskLedger(dir, "sy-par"), parentBranch: "main", parentPrNumber: 94 })
     const logSyPar = join(sb, "sy-par.log")
     const syParRes = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["sync", "--task", "sy-par", "--json"], { cwd: dir, env: childEnv(true, logSyPar), windowsHide: true })
     if (syParRes.status !== 0 || !readFileSync(logSyPar, "utf8").includes("pr view 94")) {
       return `flow-sync 有 parentPrNumber 时未自动触发 probeForWrite：status=${syParRes.status}, log=${existsSync(logSyPar) ? readFileSync(logSyPar, "utf8") : "none"}`
     }
-    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-none", "--case", "2", "--slug", "sy-none", "--base", "old-base", "--implementer", "alice"], { cwd: dir })
+    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-none", "--case", "2", "--slug", "sy-none", "--base", "old-base", "--implementer", "alice", "--no-issue", "--reason", "回归夹具测试 flow sync"], { cwd: dir })
     const logSyNone = join(sb, "sy-none.log")
     const syNoneRes = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["sync", "--task", "sy-none", "--onto", "main", "--json"], { cwd: dir, env: childEnv(true, logSyNone), windowsHide: true })
     if (syNoneRes.status !== 0 || existsSync(logSyNone)) {
@@ -744,7 +744,7 @@ cases.push(["记审查结论必须交实证佐证", async () => {
     const { handleStart } = await import("../../kit/skills/dev-flow/scripts/flow-inspect.mjs")
     const { resolveRepoRoots } = await import("../../kit/skills/lib/shared.mjs")
     const roots = await resolveRepoRoots(dir)
-    await handleStart({ task: "ev", case: "2", slug: "ev" }, roots)
+    await handleStart({ task: "ev", case: "2", slug: "ev", "no-issue": true, reason: "回归夹具聚焦审查实证拦截" }, roots)
 
     const base = { task: "ev", round: "1", verdict: "pass", "reviewer-id": "rev-x", "no-enforce-gates": true }
 

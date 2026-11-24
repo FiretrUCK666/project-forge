@@ -11,9 +11,10 @@ import { join, resolve } from 'node:path'
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import {
-  applyLocalAutoClaim, calibrateLedgerBaseBranch, checkStartAuthorSeparation, checkStartMainCleanAndSlot,
-  checkStartTriageDowngrade, emitBlockedStart, inheritExploredCredentials, markStartTriageConsumed,
-  promotePlanningToStarted, resolveStartIdentity,
+  ackInboundExternalPr, applyLocalAutoClaim, calibrateLedgerBaseBranch, checkStartAuthorSeparation,
+  checkStartMainCleanAndSlot, checkStartTriageDowngrade, collectDocIssueNumbers, emitBlockedStart,
+  inheritExploredCredentials, markStartTriageConsumed, promotePlanningToStarted,
+  resolveOrBindStartIssue, resolveStartIdentity, runStartPlanGate, validateStartIssueFlags,
 } from './flow-start-helpers.mjs'
 import { fetchGitClaimRefs } from './flow-merge-claim.mjs'
 import { workTypePrefix } from '../../lib/escalation.mjs'
@@ -33,14 +34,12 @@ import {
   recordMountedDepsInLedger, sanitizeTaskId, updateTaskLedger,
 } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
-import { evaluatePlanExitGate, formatPlanExitGate, PLAN_BOOTSTRAP_FLAG } from '../../lib/plan-exit-gate.mjs'
 import {
   cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parseMilestoneNumber, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveWorkspaceIdentity,
+  parseRemoteUrls, probeGitHubEnv, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { createTaskBackend } from '../../lib/task-backend.mjs'
 import {
   assertNoDuplicatePrForTask, checkUnresolvedDependencies, resolveExternalCollaborationGraph,
 } from '../../lib/task-graph.mjs'
@@ -238,56 +237,6 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   }
 }
 
-function readSpecIssueInt(rootDir, specRel) {
-  if (!rootDir || !specRel) return null
-  const abs = join(rootDir, specRel)
-  const raw = existsSync(abs) ? readTextSafe(abs) : null
-  const n = raw ? Number(parseDocFrontmatter(raw)?.data?.issue) : NaN
-  return Number.isInteger(n) && n > 0 ? n : null
-}
-
-function runStartPlanGate(gateRoot, { caseType, slug, taskId, issue, docs, opts, planCritique = null }) {
-  const planGate = evaluatePlanExitGate(gateRoot, {
-    caseType, slug, taskId, issue, docs,
-    allowBootstrap: Boolean(opts[PLAN_BOOTSTRAP_FLAG]),
-    reusePrRef: Boolean(opts['pr-ref']),
-    planCritique,
-  })
-  const lines = formatPlanExitGate(planGate)
-  if (planGate.blocked) {
-    if (opts.json) process.stdout.write(`${JSON.stringify(planGate, null, 2)}\n`)
-    else for (const line of lines) process.stderr.write(`${line}\n`)
-    return { blocked: true, exitCode: planGate.exitCode ?? EXIT.FACT }
-  }
-  if (!opts.json) for (const line of lines) process.stderr.write(`${line}\n`)
-  return { blocked: false }
-}
-
-async function ackInboundExternalPr(roots, state, prNumber, opts = {}) {
-  const originFull = githubRepoFull(state.remoteUrls?.origin)
-  const upstreamFull = githubRepoFull(state.remoteUrls?.upstream)
-  const targetRepo = upstreamFull ?? state.declaredRepo ?? originFull ?? null
-  let client = opts._ghClient ?? opts._ghProbe?.client ?? null
-  if (!client && !opts._backend && targetRepo) {
-    const probe = await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} }).catch(() => null)
-    client = probe?.client ?? null
-  }
-  const backend = opts._backend ?? createTaskBackend({
-    role: 'maintainer', providerId: state.identity?.providerId ?? 'none', targetRepo, client, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
-  })
-  if (!backend?.capabilities?.api || (!client && !opts._backend)) {
-    return { synced: false, labelSynced: false, skipped: true, reason: 'offline-or-no-client' }
-  }
-  const body = `<!-- pf:inbound-external-pr pr=${prNumber} -->\n已受理外部贡献 PR #${prNumber}，正在隔离审查工作树执行不可信安全扫描与规范评审。`
-  try {
-    const commentRes = await backend.postComment({ repo: targetRepo, number: prNumber, body, deduplicate: true })
-    const labelRes = await backend.addLabels({ repo: targetRepo, number: prNumber, labels: ['external-contribution'], isPr: true })
-    return { synced: commentRes?.ok !== false, labelSynced: labelRes?.ok !== false, error: null }
-  } catch (err) {
-    return { synced: false, labelSynced: false, error: err?.message ?? String(err) }
-  }
-}
-
 export async function handleStart(opts, roots) {
   if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
   const op = await detectInProgressGitOp(roots.mainRoot, { wtGitDir: resolveGitDirFast(roots.mainRoot), statusEntries: [] })
@@ -302,6 +251,8 @@ export async function handleStart(opts, roots) {
   const prFromFlag = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : (parsedPos.prs[0]?.number ?? null)
   let prNumber = externalPr ?? prFromFlag
   const wantCreateIssue = Boolean(opts['create-issue'])
+  const flagErr = validateStartIssueFlags(opts, linkedIssues)
+  if (flagErr.blocked) return emitBlockedStart(opts, flagErr)
   const prelimTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : (prNumber ? `pr-${prNumber}` : null)))
   if (!prelimTaskId && !wantCreateIssue) {
     throw new Error('start 需要传 --task <taskId>（或提供 --slug / --issue / --pr / --external-pr / --create-issue）')
@@ -410,23 +361,15 @@ export async function handleStart(opts, roots) {
   }
 
   let createdIssue = null
-  if (wantCreateIssue && linkedIssues.length === 0) {
-    const { createIssueForStart } = await import('./flow-issues.mjs')
-    const cr = await createIssueForStart({
-      roots, state, role, providerId, prelimTaskId, caseType, opts,
-    })
-    if (cr.exitCode !== 0) return { exitCode: cr.exitCode }
-    createdIssue = cr.createdIssue
-    linkedIssues.push(createdIssue.number)
-  }
+  const hasExplicitTaskOrSlug = Boolean(opts.task || opts.slug || linkedIssues.length > 0 || effectiveExternalPr || prNumber)
 
   const defaultPrTask = effectiveExternalPr ? `review-pr-${effectiveExternalPr}` : (prNumber ? `pr-${prNumber}` : null)
   const milestoneVal = opts.milestone !== undefined
     ? (parseMilestoneNumber(opts.milestone) ?? String(opts.milestone).trim())
     : (parsedPos.milestones?.[0]?.number ?? state.inputs.milestones?.[0]?.number ?? null)
   const rawTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : (defaultPrTask ?? (opts.title ? slugify(opts.title) : prelimTaskId))))
-  const taskId = sanitizeTaskId(rawTaskId)
-  const slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
+  let taskId = sanitizeTaskId(rawTaskId)
+  let slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
 
   const isPlanning = Boolean(opts.planning)
   await fetchGitClaimRefs(roots.mainRoot, { remoteUrls: state.remoteUrls ?? {}, role, opts })
@@ -440,8 +383,7 @@ export async function handleStart(opts, roots) {
     if (opts.spec) existing.specFile = opts.spec
     if (opts.prd) existing.prdFile = opts.prd
     const existingWorkRootPre = existing.worktreePath ? resolve(roots.mainRoot, existing.worktreePath) : roots.mainRoot
-    const specIssuePre = readSpecIssueInt(existsSync(existingWorkRootPre) ? existingWorkRootPre : roots.mainRoot, existing.specFile)
-      ?? readSpecIssueInt(roots.mainRoot, existing.specFile)
+    const specIssuePre = collectDocIssueNumbers(roots, [existing.specFile], existingWorkRootPre)[0] ?? null
     if (specIssuePre && !linkedIssues.includes(specIssuePre)) linkedIssues.push(specIssuePre)
     const newlyBoundIssues = linkedIssues.filter((n) => !(existing.linkedIssues ?? []).includes(n))
     if (linkedIssues.length > 0) existing.linkedIssues = [...new Set([...(existing.linkedIssues ?? []), ...linkedIssues])]
@@ -456,12 +398,30 @@ export async function handleStart(opts, roots) {
     if ((existing.status === 'planning' || existing.planning === true) && !isPlanning) {
       const promo = await promotePlanningToStarted({
         roots, existing, existingWorkRootPre, slug, taskId, opts, runStartPlanGate,
-        role, providerId, baseBranch: state.defaultBranch ?? null, baseSha: state.head,
+        state, linkedIssues, role, providerId, baseBranch: state.defaultBranch ?? null, baseSha: state.head,
       })
       if (promo.blocked) return { exitCode: promo.exitCode }
+      createdIssue = promo.createdIssue ?? null
     } else if (isPlanning && (existing.status === 'planning' || existing.status === 'planned')) {
       existing.status = 'planning'
       existing.planning = true
+      if (!existing.issueBinding) existing.issueBinding = { mode: 'exempt', exemptKind: 'planning', reason: '--planning 隔离规划阶段暂不绑定工单', at: new Date().toISOString() }
+    } else if (!isPlanning && existing.isolation !== 'review-pr' && (!(existing.linkedIssues ?? []).length || opts['create-issue'] || opts['no-issue'] || !existing.issueBinding)) {
+      const rebind = await resolveOrBindStartIssue({
+        roots, docRoot: existsSync(existingWorkRootPre) ? existingWorkRootPre : roots.mainRoot,
+        state, role: existing.role || role, providerId: existing.providerId || providerId,
+        prelimTaskId: taskId, caseType: opts.case !== undefined ? Number(opts.case) : existing.caseType,
+        isPlanning: false, externalPr: effectiveExternalPr, linkedIssues,
+        docs: { spec: existing.specFile, todo: existing.todoFile, prd: existing.prdFile },
+        ledger: existing, opts, implementerId: existing.implementerId ?? null,
+      })
+      if (rebind.blocked) {
+        if (!rebind.alreadyEmitted) emitBlockedStart(opts, rebind)
+        return { exitCode: rebind.exitCode }
+      }
+      existing.issueBinding = rebind.issueBinding
+      if (rebind.linkedIssues.length > 0) existing.linkedIssues = [...new Set([...(existing.linkedIssues ?? []), ...rebind.linkedIssues])]
+      createdIssue = rebind.createdIssue ?? null
     }
     if (!isPlanning && existing.role === 'local-only' && role !== 'local-only') { existing.role = role; existing.providerId = providerId }
     if (!existing.baseSha && state.head) existing.baseSha = state.head
@@ -573,18 +533,16 @@ export async function handleStart(opts, roots) {
   const depMeta = state.inputs?.graph?.externalDependencies?.length ? { dependsOn: state.inputs.graph.externalDependencies } : {}
   const { startIdentity, implementerId } = resolveStartIdentity({ isPlanning, state, opts })
 
-  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
-  const activePrForStart = effectiveExternalPr ?? prNumber ?? null
-  const {
-    issueContext, issueContextUnavailable, prContext, prContextUnavailable, prPatch,
-  } = await resolveAndHydrateTaskContexts({
-    mainRoot: roots.mainRoot, gitDir: roots.gitDir, remoteUrls: state.remoteUrls ?? {},
-    providerId, role, targetRepo, issueNumbers: linkedIssues, prNumber: activePrForStart, opts,
-  })
-
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
 
   if (effectiveExternalPr) {
+    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+    const {
+      issueContext, issueContextUnavailable, prContext, prContextUnavailable, prPatch,
+    } = await resolveAndHydrateTaskContexts({
+      mainRoot: roots.mainRoot, gitDir: roots.gitDir, remoteUrls: state.remoteUrls ?? {},
+      providerId, role, targetRepo, issueNumbers: linkedIssues, prNumber: effectiveExternalPr, opts,
+    })
     const reviewRel = `.worktrees/review-pr-${effectiveExternalPr}`
     const reviewAbs = join(roots.mainRoot, reviewRel)
     let targetSha = opts['pr-ref'] ?? null
@@ -645,12 +603,11 @@ export async function handleStart(opts, roots) {
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId, linkedIssues)
   const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId, linkedIssues)
 
-  const specIssueNew = readSpecIssueInt(roots.mainRoot, initialSpec)
-  if (specIssueNew && !linkedIssues.includes(specIssueNew)) linkedIssues.push(specIssueNew)
+  const specIssueNew = collectDocIssueNumbers(roots, [initialSpec], roots.mainRoot)[0] ?? null
 
   if (!isPlanning) {
     const gateRes = runStartPlanGate(roots.mainRoot, {
-      caseType, slug, taskId, issue: linkedIssues[0] ?? null,
+      caseType, slug, taskId, issue: linkedIssues[0] ?? specIssueNew ?? null,
       docs: { spec: initialSpec, todo: initialTodo, prd: initialPrd },
       opts,
       planCritique: existing?.planCritique ?? null,
@@ -666,6 +623,35 @@ export async function handleStart(opts, roots) {
     return emitBlockedStart(opts, authCheck)
   }
 
+  const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, { caseType, commits: state.commits })
+  if (!slotChk.ok) {
+    return emitBlockedStart(opts, slotChk)
+  }
+
+  const bindRes = await resolveOrBindStartIssue({
+    roots, docRoot: roots.mainRoot, state, role, providerId, prelimTaskId: taskId,
+    caseType, isPlanning, externalPr: effectiveExternalPr, linkedIssues,
+    docs: { spec: initialSpec, todo: initialTodo, prd: initialPrd },
+    ledger: existing, opts, implementerId,
+  })
+  if (bindRes.blocked) {
+    if (!bindRes.alreadyEmitted) emitBlockedStart(opts, bindRes)
+    return { exitCode: bindRes.exitCode }
+  }
+  createdIssue = bindRes.createdIssue ?? null
+  if (!hasExplicitTaskOrSlug && linkedIssues[0]) {
+    taskId = sanitizeTaskId(`issue-${linkedIssues[0]}`)
+    if (!opts.slug && !opts.title) slug = slugify(taskId)
+  }
+
+  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const {
+    issueContext, issueContextUnavailable, prContext, prContextUnavailable, prPatch,
+  } = await resolveAndHydrateTaskContexts({
+    mainRoot: roots.mainRoot, gitDir: roots.gitDir, remoteUrls: state.remoteUrls ?? {},
+    providerId, role, targetRepo, issueNumbers: linkedIssues, prNumber: prNumber ?? null, opts,
+  })
+
   if (state.commits === 0 || (caseType === 1 && !Boolean(opts.parallel) && !Boolean(opts.worktree))) {
     const inPlaceOnExisting = state.commits > 0 && caseType === 1
     if (!inPlaceOnExisting) {
@@ -680,7 +666,7 @@ export async function handleStart(opts, roots) {
       baseBranch, baseSha,
       worktreePath: null, reviewWorktreePath: inPlaceOnExisting ? null : `.worktrees/review-${taskId}`,
       todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-      linkedIssues, prNumber, implementerId,
+      linkedIssues, issueBinding: bindRes.issueBinding, prNumber, implementerId,
       account: startIdentity.account, verifiedPlatformLogin: startIdentity.verifiedPlatformLogin, agent: startIdentity.agent,
       issueContext, issueContextUnavailable,
       prContext, prContextUnavailable, ...prPatch,
@@ -712,11 +698,6 @@ export async function handleStart(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, { caseType, commits: state.commits })
-  if (!slotChk.ok) {
-    return emitBlockedStart(opts, slotChk)
-  }
-
   // commits > 0 且 Case >= 2 全量进入 Tier 2 Worktree 隔离，不再允许在主仓原地切换分支
   const implRel = `.worktrees/impl-${taskId}`
   const reviewRel = `.worktrees/review-${taskId}`
@@ -741,7 +722,7 @@ export async function handleStart(opts, roots) {
     taskId, slug, caseType, tier: 2, isolation: 'worktree', role, providerId, branch, baseBranch, baseSha,
     worktreePath: implRel, reviewWorktreePath: reviewRel, depsMode: depMount.mode,
     todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-    linkedIssues, prNumber, implementerId,
+    linkedIssues, issueBinding: bindRes.issueBinding, prNumber, implementerId,
     account: startIdentity.account, verifiedPlatformLogin: startIdentity.verifiedPlatformLogin, agent: startIdentity.agent,
     issueContext, issueContextUnavailable,
     prContext, prContextUnavailable, ...prPatch,
@@ -757,7 +738,7 @@ export async function handleStart(opts, roots) {
   if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId, linkedIssues)
   if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId, linkedIssues)
   if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId, linkedIssues)
-  const specIssueWt = readSpecIssueInt(implAbs, ledger.specFile)
+  const specIssueWt = collectDocIssueNumbers(roots, [ledger.specFile], implAbs)[0] ?? null
   if (specIssueWt && !ledger.linkedIssues.includes(specIssueWt)) {
     ledger.linkedIssues = [...ledger.linkedIssues, specIssueWt]
   }

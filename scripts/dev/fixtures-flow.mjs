@@ -39,7 +39,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resolveRepoRoots(dir)
 
-    const s1 = await handleStart({ task: 't-w2', case: '2', slug: 'w2-gate', implementer: 'alice' }, roots)
+    const s1 = await handleStart({ task: 't-w2', case: '2', slug: 'w2-gate', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 verify/merge 门禁' }, roots)
     if (s1.exitCode !== 0) return `start t-w2 失败：${s1.exitCode}`
     await handleClaim({ task: 't-w2', agent: 'alice' }, roots)
     await seedExploredFor(dir, 't-w2')
@@ -71,7 +71,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     if (mApproved.exitCode !== 0) return `--human-approved merge 失败：exit=${mApproved.exitCode}`
 
     // 4. 反面证伪：新增测试断言（非弱化）无 --human-approved 直接合并放行
-    const s2 = await handleStart({ task: 't-w2-clean', case: '2', slug: 'w2-clean', implementer: 'alice' }, roots)
+    const s2 = await handleStart({ task: 't-w2-clean', case: '2', slug: 'w2-clean', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦增量测试合并门禁' }, roots)
     if (s2.exitCode !== 0) return `start t-w2-clean 失败：${s2.exitCode}`
     await handleClaim({ task: 't-w2-clean', agent: 'alice' }, roots)
     await seedExploredFor(dir, 't-w2-clean')
@@ -417,7 +417,7 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
     const { handleClaim, handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const roots = await resRoots(ciDir)
-    const st = await handleStart({ task: 'ci-t', case: '2', slug: 'ci-t', implementer: 'alice', 'clone-choice': 'standalone' }, roots)
+    const st = await handleStart({ task: 'ci-t', case: '2', slug: 'ci-t', issue: '88', implementer: 'alice', 'clone-choice': 'standalone' }, roots)
     if (st.exitCode !== 0) return `ciDir start 失败：${st.exitCode}`
     await handleClaim({ task: 'ci-t', agent: 'alice' }, roots)
     await seedExploredFor(ciDir, 'ci-t')
@@ -555,7 +555,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     if (dpBad.status === 0) return 'doc-plan --issue 误放行了 PR URL'
 
     const stPrPos = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-      'start', 'https://github.com/acme/demo/pull/88', '--pr-ref', 'HEAD', '--json',
+      'start', 'https://github.com/acme/demo/pull/88', '--pr-ref', 'HEAD', '--no-issue', '--reason', '复用已有PR88验证URL位置参数', '--json',
     ], { cwd: urlDir })
     if (stPrPos.status !== 0 || JSON.parse(stPrPos.stdout).prNumber !== 88) {
       return `flow start 位置 PR URL 失败：${stPrPos.stdout} ${stPrPos.stderr}`
@@ -603,7 +603,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
       .replace(/^approved: false$/m, 'approved: true')
       .replace(/^plan_critique: pending$/m, 'plan_critique: passed'))
     gitCommitFast(urlDir, 'spec todo', { files: [spRel] })
-    const stNote = await startUrl({ task: 'note-case', slug: 'note-case', case: '4', spec: spRel, implementer: 'url-dev' }, urlRoots)
+    const stNote = await startUrl({ task: 'note-case', slug: 'note-case', case: '4', spec: spRel, implementer: 'url-dev', 'no-issue': true, reason: '回归夹具聚焦 finalize 实现说明拦截' }, urlRoots)
     if (stNote.exitCode !== 0) return `note-case start 失败：${stNote.exitCode}`
     await claimUrl({ task: 'note-case', agent: 'url-dev' }, urlRoots)
     await seedExploredFor(urlDir, 'note-case')

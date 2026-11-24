@@ -154,7 +154,7 @@ export function registerFlowCleanupCases(cases) {
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
     try {
       const roots = await resolveRepoRoots(dir)
-      const s1 = await handleStart({ task: 'c2-auto', case: '2', slug: 'c2-auto', implementer: 'impl' }, roots)
+      const s1 = await handleStart({ task: 'c2-auto', case: '2', slug: 'c2-auto', implementer: 'impl', 'no-issue': true, reason: '回归夹具聚焦 worktree 依赖清理' }, roots)
       if (s1.exitCode !== 0) return `start 失败：${s1.exitCode}`
       await handleClaim({ task: 'c2-auto', agent: 'impl' }, roots)
       await seedExploredFor(dir, 'c2-auto')
@@ -225,7 +225,7 @@ export function registerFlowCleanupCases(cases) {
       }
 
       // 反证：账本有 mountedDeps=['node_modules'] 但工作树里 node_modules 被调包指向仓外目录时，必须阻断
-      const sForge = await handleStart({ task: 'c2-forge', case: '2', slug: 'c2-forge' }, roots)
+      const sForge = await handleStart({ task: 'c2-forge', case: '2', slug: 'c2-forge', 'no-issue': true, reason: '回归夹具聚焦伪造外链拦截' }, roots)
       if (sForge.exitCode !== 0) return `start c2-forge 失败：${sForge.exitCode}`
       const lForge = readTaskLedger(dir, 'c2-forge')
       const wtForge = join(dir, lForge.worktreePath)
@@ -238,7 +238,7 @@ export function registerFlowCleanupCases(cases) {
       await handleAbort({ task: 'c2-forge', confirm: true, force: true, 'allow-outbound': ['node_modules', 'packages/app/node_modules'], json: true }, roots)
 
       // 反证：账本有 depsMode='shared' 但 mountedDeps=[] 时，不得自动放行任何链接
-      const s2 = await handleStart({ task: 'c2-shortcut', case: '2', slug: 'c2-shortcut' }, roots)
+      const s2 = await handleStart({ task: 'c2-shortcut', case: '2', slug: 'c2-shortcut', 'no-issue': true, reason: '回归夹具聚焦 mountedDeps 空清单拦截' }, roots)
       if (s2.exitCode !== 0) return `start s2 失败：${s2.exitCode}`
       const l2 = readTaskLedger(dir, 'c2-shortcut')
       l2.depsMode = 'shared'
@@ -289,7 +289,7 @@ export function registerFlowCleanupCases(cases) {
       const roots = await resolveRepoRoots(dir)
       // 对照验证：仅存在内部 junction 时，只做 unlink 不会删掉目录与分支，而部分 Windows Git 在未解绑前直接 `git worktree remove --force`
       // 会以 Directory not empty 失败（newer Git for Windows 已兼容，故用跨版本确定性对照：只 unlink 不删目录 vs cleanup 完整两步）。
-      const ctrl = await handleStart({ task: 'c3-ctrl', case: '2', slug: 'c3-ctrl' }, roots)
+      const ctrl = await handleStart({ task: 'c3-ctrl', case: '2', slug: 'c3-ctrl', 'no-issue': true, reason: '回归夹具聚焦内部 junction 解绑' }, roots)
       if (ctrl.exitCode !== 0) return `对照 start 失败：${ctrl.exitCode}`
       const lCtrl = readTaskLedger(dir, 'c3-ctrl')
       const wtCtrl = join(dir, lCtrl.worktreePath)
@@ -305,7 +305,7 @@ export function registerFlowCleanupCases(cases) {
         return '对照：只做 unlink 时工作树目录与分支应仍存在，须由 cleanup 执行两步删除'
       }
 
-      const st = await handleStart({ task: 'c3-main', case: '2', slug: 'c3-main' }, roots)
+      const st = await handleStart({ task: 'c3-main', case: '2', slug: 'c3-main', 'no-issue': true, reason: '回归夹具聚焦内部 junction 清理' }, roots)
       if (st.exitCode !== 0) return `start 失败：${st.exitCode}`
       const l = readTaskLedger(dir, 'c3-main')
       const implAbs = join(dir, l.worktreePath)
@@ -339,7 +339,7 @@ export function registerFlowCleanupCases(cases) {
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
     try {
       const roots = await resolveRepoRoots(dir)
-      const st = await handleStart({ task: 'c4-depth', case: '2', slug: 'c4-depth' }, roots)
+      const st = await handleStart({ task: 'c4-depth', case: '2', slug: 'c4-depth', 'no-issue': true, reason: '回归夹具聚焦外链深度上限拦截' }, roots)
       if (st.exitCode !== 0) return `start 失败：${st.exitCode}`
       const l = readTaskLedger(dir, 'c4-depth')
       const implAbs = join(dir, l.worktreePath)
@@ -423,7 +423,7 @@ export function registerFlowCleanupCases(cases) {
 
       // 2. review-diff syncTier2ReviewSlotIfNeeded（走 callReviewDepsHelper + { mode: 'deps' }）+ runTrialMerge 端到端
       const roots = await resolveRepoRoots(dir)
-      const started = await handleStart({ task: 'c5-tm', case: '2', slug: 'c5-tm', implementer: 'impl' }, roots)
+      const started = await handleStart({ task: 'c5-tm', case: '2', slug: 'c5-tm', implementer: 'impl', 'no-issue': true, reason: '回归夹具聚焦试合与共享依赖' }, roots)
       if (started.exitCode !== 0) return `start c5-tm 失败：${started.exitCode}`
       const { handleClaim: claimC5 } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
       await claimC5({ task: 'c5-tm', agent: 'impl' }, roots)
@@ -470,7 +470,7 @@ export function registerFlowCleanupCases(cases) {
       // 3. 干净工作树含已提交跟踪的外链（core.symlinks=true）时，不传 --force 运行 cleanup --confirm --allow-outbound 也必须能删掉
       const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
       gitSync(dir, ['config', 'core.symlinks', 'true'])
-      const stTracked = await handleStart({ task: 'c1-tracked-clean', case: '2', slug: 'c1-tracked-clean' }, roots)
+      const stTracked = await handleStart({ task: 'c1-tracked-clean', case: '2', slug: 'c1-tracked-clean', 'no-issue': true, reason: '回归夹具聚焦已跟踪外链清理' }, roots)
       if (stTracked.exitCode !== 0) return `start c1-tracked-clean 失败：${stTracked.exitCode}`
       const lTr = readTaskLedger(dir, 'c1-tracked-clean')
       const wtTr = join(dir, lTr.worktreePath)

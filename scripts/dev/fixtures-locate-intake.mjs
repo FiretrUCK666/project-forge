@@ -502,7 +502,7 @@ export function registerLocateIntakeCases(cases) {
       if (!mqMissingCaught) return 'flow-batch merge-queue 未拦截缺失任务账本'
 
       // 3. 实时自举 Bug 修复：手动 git rebase origin/main 后 baseSha 滞后不误算已合入主干文件，且 flow sync 识别已基于目标分支
-      const stRes = await withQuietIo(() => handleStart({ task: 'rb-t1', case: '2', slug: 'rb-t1', agent: 'impl-a' }, roots))
+      const stRes = await withQuietIo(() => handleStart({ task: 'rb-t1', case: '2', slug: 'rb-t1', agent: 'impl-a', 'no-issue': true, reason: '回归夹具聚焦变基基线校准' }, roots))
       if (stRes.res.exitCode !== 0) return `start rb-t1 失败：${JSON.stringify(stRes.res)}`
       await withQuietIo(() => handleClaim({ task: 'rb-t1', agent: 'impl-a' }, roots))
       await withQuietIo(() => handleExplore({ task: 'rb-t1', by: 'impl-a' }, roots))

@@ -548,7 +548,7 @@ export function registerOnboardingCases(cases) {
           const ex = await handleExplore({ task: taskId }, roots)
           if (ex.exitCode !== 0) return `explore(${mode}/${role}) 失败：${ex.exitCode}`
         } else {
-          const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--agent', 'alice', '--json'])
+          const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--agent', 'alice', '--no-issue', '--reason', '回归夹具验证多角色生命周期矩阵', '--json'])
           if (stCli.status !== 0) return `cli start(${mode}/${role}) 失败：${stCli.stderr}`
           if (role === 'generic-git') {
             const clCli = runLocal(dir, flowRel, ['claim', '--task', taskId, '--agent', 'alice'])
@@ -642,7 +642,9 @@ export function registerOnboardingCases(cases) {
           case: String(caseType),
           slug: taskId,
           implementer: 'alice',
-          ...(caseType >= 4 ? { spec: 'docs/specs/261118-issue88-mx-spec.md', todo: 'docs/todo/261118-issue88-mx-todo.md' } : {}),
+          ...(caseType >= 4
+            ? { spec: 'docs/specs/261118-issue88-mx-spec.md', todo: 'docs/todo/261118-issue88-mx-todo.md' }
+            : { 'no-issue': true, reason: '回归夹具聚焦高风险门禁触发源' }),
         }, roots)
         if (s.exitCode !== 0) return `no-dev-review high-risk(${label}) start 失败：${s.exitCode}`
         const ex = await handleExplore({ task: taskId }, roots)

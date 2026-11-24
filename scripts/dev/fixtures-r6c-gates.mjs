@@ -359,7 +359,7 @@ export function registerR6cGatesCases(cases) {
     const fakeGh = createFakeGhEnv({})
     try {
       // 1. Low-risk pure non-executable doc single-session: same actor record without token succeeds
-      const sDoc = await runAbsAsync(FLOW_SCRIPT, ['start', '--task', 'doc-c12', '--case', '2', '--dir', dir])
+      const sDoc = await runAbsAsync(FLOW_SCRIPT, ['start', '--task', 'doc-c12', '--case', '2', '--no-issue', '--reason', '回归夹具测试低风险单会话免审', '--dir', dir])
       if (sDoc.status !== 0) return `doc-c12 flow start 失败：${sDoc.stdout} ${sDoc.stderr}`
       await seedExploredFor(dir, 'doc-c12')
       await runAbsAsync(FLOW_SCRIPT, ['claim', '--task', 'doc-c12', '--agent', 'alice', '--dir', dir])

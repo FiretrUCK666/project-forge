@@ -6,8 +6,9 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-import { AGENTS_MAX_BYTES, conditionMarkers, templateVarsOf } from '../lib/protocol.mjs'
+import { AGENTS_MAX_BYTES, conditionMarkers, parseMarkers, templateVarsOf } from '../lib/protocol.mjs'
 
 let e2eDepsPromise
 function loadE2eDeps() {
@@ -19,6 +20,7 @@ function loadE2eDeps() {
       import('../handoff.mjs'),
     ]).then(([ca, sv, rv, hf]) => ({
       renderAgentsTemplate: ca.renderAgentsTemplate,
+      contractHealth: ca.contractHealth,
       runSurvey: sv.survey,
       reviewProject: rv.reviewProject,
       handoffScan: hf.scan,
@@ -92,43 +94,41 @@ async function checkTemplateRender({ ROOT, fail, note }) {
 }
 
 async function checkRunsOnRealTarget({ ROOT, readText, fail, note }) {
-  const [surveyRes, handoffRes, reviewRes, statusRes, checkRes] = await Promise.all([
-    runAsync(ROOT, 'survey.mjs', [ROOT]),
-    runAsync(ROOT, 'handoff.mjs', [ROOT, '--json']),
-    runAsync(ROOT, 'review.mjs', [ROOT, '--json']),
-    runAsync(ROOT, 'compose-agents.mjs', [ROOT, '--status']),
-    runAsync(ROOT, 'compose-agents.mjs', [ROOT, '--check'], { timeout: 60000 }),
-  ])
-
-  const calls = [
-    { script: 'survey.mjs', what: '勘察', res: surveyRes },
-    { script: 'handoff.mjs', what: '交棒扫描', res: handoffRes },
-    { script: 'review.mjs', what: '交付体检', res: reviewRes },
-    { script: 'compose-agents.mjs', what: '契约状态', res: statusRes },
-  ]
-  for (const call of calls) {
-    if (call.res.status !== 0) {
-      let detail = (call.res.stderr || '').trim().split('\n').find((line) => line && !/^\s+at /.test(line)) ?? ''
-      if (!detail && call.res.stdout) {
-        try {
-          const parsed = JSON.parse(call.res.stdout)
-          const miss = Array.isArray(parsed?.missing)
-            ? parsed.missing
-            : (Array.isArray(parsed?.results) ? parsed.results.filter((r) => r.level === 'missing') : [])
-          if (miss.length > 0) detail = miss.slice(0, 3).map((m) => `${m.id}: ${m.summary}`).join('；')
-        } catch { /* not json */ }
-        if (!detail) detail = call.res.stdout.trim().split('\n').find((l) => l.trim()) ?? ''
-      }
-      fail(`${call.script} 在真实项目上跑${call.what}失败（退出 ${call.res.status}）：${detail.slice(0, 200)}`)
-    }
-  }
-  note(`真目标：${calls.length} 个入口都在本仓库上跑通（不是只在临时目录里跑）`)
-
-  if (checkRes.status !== 0) {
-    fail(`本仓库自己的 AGENTS.md 没通过自举校验：${(checkRes.stderr || checkRes.stdout || '').trim().split('\n').slice(0, 6).join(' / ')}`)
+  const { runSurvey, reviewProject, handoffScan, contractHealth } = await loadE2eDeps()
+  const facts = await runSurvey(ROOT)
+  if (!facts || !facts.target) {
+    fail('survey.mjs 在真实项目上跑勘察失败：返回结果缺少 target')
     return
   }
-  const agentsBytes = Buffer.byteLength(readText(join(ROOT, 'AGENTS.md')), 'utf8')
+  const hRes = handoffScan(ROOT)
+  if (!hRes || typeof hRes.total !== 'number') {
+    fail('handoff.mjs 在真实项目上跑交棒扫描失败：返回结果缺少 total')
+    return
+  }
+  const [revRes, health] = await Promise.all([
+    reviewProject(ROOT, { facts }),
+    contractHealth(ROOT, { facts }),
+  ])
+  const missing = revRes?.missing ?? []
+  if (missing.length > 0) {
+    fail(`review.mjs 在真实项目上跑交付体检失败：${missing.slice(0, 3).map((m) => `${m.id}: ${m.title}`).join('；')}`)
+  }
+  note('真目标：4 个入口都在本仓库上跑通（不是只在临时目录里跑）')
+
+  const agentsText = readText(join(ROOT, 'AGENTS.md'))
+  const fills = parseMarkers(agentsText, 'AGENTS.md').filter((m) => m.kind === 'fill')
+  const contractIssues = [
+    ...(health.broken ?? []).map((b) => `标记没成对：${b}`),
+    ...(fills.length > 0 ? [`还有 ${fills.length} 处未填占位`] : []),
+    ...(health.missing ?? []).map((m) => `缺节：${m}`),
+    ...(health.drifted ?? []).map((d) => `漂移：${d}`),
+    ...(health.oversize ? [`体积超限（${health.bytes} > ${AGENTS_MAX_BYTES}）`] : []),
+  ]
+  if (contractIssues.length > 0) {
+    fail(`本仓库自己的 AGENTS.md 没通过自举校验：${contractIssues.slice(0, 6).join(' / ')}`)
+    return
+  }
+  const agentsBytes = Buffer.byteLength(agentsText, 'utf8')
   if (agentsBytes > AGENTS_MAX_BYTES) {
     fail(`本仓库自己的 AGENTS.md 体积 ${agentsBytes} 字节超过上限 ${AGENTS_MAX_BYTES}`)
     return
@@ -136,8 +136,85 @@ async function checkRunsOnRealTarget({ ROOT, readText, fail, note }) {
   note(`自举：本仓库自己的 AGENTS.md（${agentsBytes} 字节 <= ${AGENTS_MAX_BYTES}）标记成对、没有未填占位、该有的节都在`)
 }
 
+const SMOKE_CHILD_CODE = [
+  "import { existsSync, readFileSync } from 'node:fs';",
+  "import { join } from 'node:path';",
+  'const tmp = process.env.PF_SMOKE_TMP;',
+  'const { runCli } = await import(process.env.PF_COMPOSE_URL);',
+  'const { reviewProject } = await import(process.env.PF_REVIEW_URL);',
+  'const { scan: handoffScan } = await import(process.env.PF_HANDOFF_URL);',
+  'const origOut = process.stdout.write.bind(process.stdout);',
+  'const origErr = process.stderr.write.bind(process.stderr);',
+  'const noop = () => true;',
+  'process.stdout.write = noop;',
+  'process.stderr.write = noop;',
+  'const failures = [];',
+  'const c1 = await runCli([tmp]);',
+  "if (c1 !== 0 || !existsSync(join(tmp, 'AGENTS.md'))) failures.push('compose-agents 没生成 AGENTS.md');",
+  'else {',
+  "  const before = readFileSync(join(tmp, 'AGENTS.md'));",
+  '  const c2 = await runCli([tmp]);',
+  "  if (c2 !== 0) failures.push('compose-agents 第二遍跑失败');",
+  "  const after = readFileSync(join(tmp, 'AGENTS.md'));",
+  "  if (!before.equals(after)) failures.push('compose-agents 不幂等：第二遍改了文件');",
+  "  for (const bad of ['.project-forge', join('scripts', 'review-record.mjs')]) {",
+  '    if (existsSync(join(tmp, bad))) failures.push(`compose-agents 在目标项目里留下了 ${bad}——侵入面必须为零`);',
+  '  }',
+  "  const [check1, revRes, h1Report] = await Promise.all([runCli([tmp, '--check']), reviewProject(tmp), Promise.resolve(handoffScan(tmp))]);",
+  "  if (check1 === 0) failures.push('AGENTS.md 还有未填占位，但 --check 放行了');",
+  "  if (!revRes.missing.some((m) => m.id === 'agents.unfilled')) failures.push('review 没报出 AGENTS.md 里未填的占位');",
+  "  if (h1Report.clean !== false) failures.push('AGENTS.md 里还有标记，handoff --verify 却说干净');",
+  "  await runCli([tmp, '--clean']);",
+  '  const h2Report = handoffScan(tmp);',
+  '  if (!h2Report.clean || h2Report.markers.length > 0) failures.push(`剥掉标记之后 handoff 仍说脏：${JSON.stringify(h2Report.markers)}`);',
+  '}',
+  'process.stdout.write = origOut;',
+  'process.stderr.write = origErr;',
+  'process.stdout.write(JSON.stringify({ failures }));',
+].join('\n')
+
+function runSmokeInSingleChild(ROOT, tmp) {
+  return new Promise((done) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', SMOKE_CHILD_CODE], {
+      env: {
+        ...process.env,
+        PF_SMOKE_TMP: tmp,
+        PF_COMPOSE_URL: pathToFileURL(join(ROOT, 'scripts', 'compose-agents.mjs')).href,
+        PF_REVIEW_URL: pathToFileURL(join(ROOT, 'scripts', 'review.mjs')).href,
+        PF_HANDOFF_URL: pathToFileURL(join(ROOT, 'scripts', 'handoff.mjs')).href,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    const out = []
+    const err = []
+    const timer = setTimeout(() => { try { child.kill() } catch { /* ignore */ } }, 60000)
+    timer.unref?.()
+    child.stdout?.on('data', (c) => out.push(c))
+    child.stderr?.on('data', (c) => err.push(c))
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      const stdout = Buffer.concat(out).toString('utf8')
+      const stderr = Buffer.concat(err).toString('utf8')
+      if (code !== 0) {
+        done({ failures: [`端到端冒烟子进程失败（退出 ${code}）：${(stderr || stdout).trim().split('\n')[0]}`] })
+        return
+      }
+      try {
+        done(JSON.parse(stdout))
+      } catch (e) {
+        done({ failures: [`端到端冒烟子进程输出解析失败：${e.message}`] })
+      }
+    })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      done({ failures: [`端到端冒烟子进程启动失败：${error.message}`] })
+    })
+  })
+}
+
 async function smoke({ ROOT, fail, note }) {
-  const { runSurvey, reviewProject, handoffScan } = await loadE2eDeps()
+  const { runSurvey } = await loadE2eDeps()
   const tmp = mkdtempSync(join(tmpdir(), 'pf-smoke-'))
   try {
     writeFileSync(join(tmp, 'package.json'), JSON.stringify({
@@ -154,35 +231,8 @@ async function smoke({ ROOT, fail, note }) {
     if (facts.maturity !== 'greenfield') fail(`空白项目的 maturity 应为 greenfield，实际是 ${facts.maturity}`)
     if (!facts.ecosystem.kinds.includes('node')) fail(`应识别出 node 生态，实际是 ${facts.ecosystem.kinds.join(',')}`)
 
-    const c1 = await runAsync(ROOT, 'compose-agents.mjs', [tmp])
-    if (c1.status !== 0 || !existsSync(join(tmp, 'AGENTS.md'))) { fail('compose-agents 没生成 AGENTS.md'); return }
-
-    const before = readFileSync(join(tmp, 'AGENTS.md'))
-    const c2 = await runAsync(ROOT, 'compose-agents.mjs', [tmp])
-    if (c2.status !== 0) fail('compose-agents 第二遍跑失败')
-    const after = readFileSync(join(tmp, 'AGENTS.md'))
-    if (!before.equals(after)) fail('compose-agents 不幂等：第二遍改了文件')
-
-    for (const bad of ['.project-forge', join('scripts', 'review-record.mjs')]) {
-      if (existsSync(join(tmp, bad))) fail(`compose-agents 在目标项目里留下了 ${bad}——侵入面必须为零`)
-    }
-
-    const [check1, revRes, h1Report] = await Promise.all([
-      runAsync(ROOT, 'compose-agents.mjs', [tmp, '--check']),
-      reviewProject(tmp),
-      Promise.resolve(handoffScan(tmp)),
-    ])
-    if (check1.status === 0) fail('AGENTS.md 还有未填占位，但 --check 放行了')
-    if (!revRes.missing.some((m) => m.id === 'agents.unfilled')) {
-      fail('review 没报出 AGENTS.md 里未填的占位')
-    }
-    if (h1Report.clean !== false) fail('AGENTS.md 里还有标记，handoff --verify 却说干净')
-
-    await runAsync(ROOT, 'compose-agents.mjs', [tmp, '--clean'])
-    const h2Report = handoffScan(tmp)
-    if (!h2Report.clean || h2Report.markers.length > 0) {
-      fail(`剥掉标记之后 handoff 仍说脏：${JSON.stringify(h2Report.markers)}`)
-    }
+    const res = await runSmokeInSingleChild(ROOT, tmp)
+    for (const msg of res.failures ?? []) fail(msg)
   } finally {
     try { rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) } catch { /* 留给系统清理 */ }
   }
@@ -193,7 +243,7 @@ export async function runE2eChecks(ctx) {
   await Promise.all([
     checkTemplateRender(ctx).catch((err) => ctx.fail(`模板渲染异常：${err instanceof Error ? err.message : String(err)}`)),
     checkHelps(ctx),
-    checkRunsOnRealTarget(ctx),
+    checkRunsOnRealTarget(ctx).catch((err) => ctx.fail(`真目标异常：${err instanceof Error ? err.message : String(err)}`)),
     smoke(ctx).catch((err) => ctx.fail(`端到端冒烟异常：${err instanceof Error ? err.message : String(err)}`)),
   ])
 }

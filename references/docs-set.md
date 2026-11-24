@@ -18,6 +18,7 @@
   2. **非长青/过期/无效文档**：归档至 `docs/archive/` 或标出无效残片确认清理，防止污染 `doc-locate`；
   3. **既有脚本、工具、数据模型与 CI**：融入 `Dev Profile`、`docs/feature-map.json` 与 `docs/TDD.md`（`tdd-shape.mjs` 裁剪），标出失效脚本清理建议；
   4. **既有 AI 约定**（`AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.agents/skills/<custom>/`）：做语义去重与无损融合；勘察发现的原仓遗留问题统一通过 `TaskBackend` 建本地/远端 Issue 按正常流程分步修清。随时可通过 `equip.mjs` 与 `compose-agents.mjs` 无损补齐缺失资产。
+- **单一平台中性 Issue 质量契约（5 项结构底线）**：所有托管建单入口（`flow.mjs issue create`、`flow.mjs start --create-issue`、`escalation.mjs` 与 `govern-audit.mjs issues --apply-issues`）共用唯一 `hydrateIssueBody -> validateIssueBodyQuality -> TaskBackend.createIssue` 通道，不设字数/字节死线与双模式开关，严格校验：① 背景/现象与基线（或已知局限）；② 影响面与严重度（含数据/API/权限/安全/兼容性触及判定）；③ 客观依据（由 `plan-index.mjs` 查盘核实真实设计文档则免抄全文，无真实设计文档须自包含源码/命令/复现证据与期望方案，伪造文档路径直接阻断）；④ 可判伪 `C1..Cn` 验收标准；⑤ 明确排除对象的 `不在本次范围 / Out of Scope`；缺项或占位套话统一以 `BLOCKED_ISSUE_QUALITY_INCOMPLETE`（退出码 `3`）阻断。
 
 ## 二、四层设计文档体系（`docs/`）
 

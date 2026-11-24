@@ -549,7 +549,17 @@ export function registerParallelDispatchCases(cases) {
       if (!okSkip.ok || !okSkip.skipped) return `合法 --no-escalate 未跳过：${JSON.stringify(okSkip)}`
       const autoLocal = await autoEscalateBlockingFindings({
         repoRoot: dir,
-        item: { source: 'review', outOfScope: true, severity: 'high', title: 'out-of-scope defect', summary: 'fix elsewhere', taskId: 'c7b' },
+        item: {
+          source: 'review',
+          outOfScope: true,
+          severity: 'high',
+          title: 'out-of-scope defect',
+          summary: 'fix elsewhere',
+          files: ['src/core/a.mjs'],
+          reproEvidence: 'src/core/a.mjs:12 out-of-scope high finding',
+          pocCommand: 'node -e "process.exit(1)"',
+          taskId: 'c7b',
+        },
       })
       if (!autoLocal.ok || !autoLocal.local || !autoLocal.number) return `local-only 默认自动建单失败：${JSON.stringify(autoLocal)}`
 

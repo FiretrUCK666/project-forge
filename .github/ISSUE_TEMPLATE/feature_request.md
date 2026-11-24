@@ -38,9 +38,9 @@ assignees: ''
 ## 影响范围
 
 <!--
-这一项决定它要走多长的流程：
-- 会不会改变现有行为、让已经在用的人需要改自己的代码；
-- 会不会碰到高风险区。本仓库的高风险路径是 `scripts/lib/`、`scripts/dev/preflight.mjs`、`templates/`、`kit/`、`SKILL.md`、`AGENTS.md`、`.github/workflows/`、`.gitattributes`——它们的错误不会当场失败，而是让门禁从此少查一项。
+这一项决定它要走多长的流程，请写明受影响模块/范围、严重度（critical/high/medium/low）及边界判断：
+- 会不会改变现有行为、让已经在用的人需要改自己的代码（API/契约/兼容性）；
+- 会不会碰到高风险区（认证、权限、数据持久化、安全）。本仓库的高风险路径是 `scripts/lib/`、`scripts/dev/preflight.mjs`、`templates/`、`kit/`、`SKILL.md`、`AGENTS.md`、`.github/workflows/`、`.gitattributes`——它们的错误不会当场失败，而是让门禁从此少查一项。
 
 碰到任何一种，它就不能靠一次改动直接合进去，需要先讨论清楚。
 -->
@@ -69,6 +69,10 @@ assignees: ''
 
 - [ ] C1: 
 - [ ] C2: 
+
+## 不在本次范围
+
+<!-- 明确列出本次不做、不改动的模块或边界，避免实施过程中顺手扩 scope。 -->
 
 ## 关联的设计产物
 

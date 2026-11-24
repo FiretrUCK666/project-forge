@@ -498,8 +498,21 @@ async function finishAudit({
       _ghClient: opts._ghClient,
     })
     if (applyResult.error) {
+      const failCode = applyResult.exitCode ?? 1
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify({
+          ok: false,
+          blocked: Boolean(applyResult.blocked || applyResult.code),
+          code: applyResult.code ?? 'BLOCKED_APPLY_ISSUES_FAILED',
+          exitCode: failCode,
+          error: applyResult.error,
+          missing: applyResult.missing ?? [],
+          reasons: applyResult.reasons ?? [],
+          applyResult,
+        }, null, 2)}\n`)
+      }
       process.stderr.write(`Error: ${applyResult.error}\n`)
-      return 1
+      return failCode
     }
   }
 

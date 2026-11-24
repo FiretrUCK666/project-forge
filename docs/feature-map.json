@@ -72,7 +72,9 @@
         "docs/archive/specs/261118-issue74-b4a-heterogeneous-survey-spec.md",
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#3-外部项目治理与跨代升级s1-s4",
@@ -244,7 +246,9 @@
         "scripts/dev/fixtures-repo-alignment.mjs",
         "scripts/dev/injections-data-repo-alignment.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#模块与目录职责",
@@ -293,7 +297,9 @@
         "scripts/dev/fixtures-locate-intake.mjs",
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -430,7 +436,9 @@
         "scripts/dev/fixtures-edit-pyramid.mjs",
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#八个技能分工与确定性阻断点"
@@ -455,6 +463,7 @@
         "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
         "kit/skills/lib/workflow-policy.mjs",
         "kit/skills/lib/pr-template-hydrate.mjs",
+        "kit/skills/lib/issue-quality.mjs",
         "kit/skills/lib/issue-template-hydrate.mjs",
         "kit/skills/lib/task-backend.mjs",
         "kit/skills/lib/task-backend-local.mjs",
@@ -535,7 +544,9 @@
         "scripts/dev/fixtures-r6d-contracts.mjs",
         "scripts/dev/injections-data-r6d.mjs",
         "scripts/dev/fixtures-r7-rootfix.mjs",
-        "scripts/dev/injections-data-r7.mjs"
+        "scripts/dev/injections-data-r7.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -581,7 +592,9 @@
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/injections-data-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全",
@@ -643,7 +656,9 @@
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/injections-data-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -668,6 +683,7 @@
         "kit/skills/dev-govern/scripts/release-prep-collect.mjs",
         "kit/skills/dev-govern/scripts/release-prep-lib.mjs",
         "kit/skills/lib/escalation.mjs",
+        "kit/skills/lib/issue-quality.mjs",
         "kit/skills/lib/issue-template-hydrate.mjs",
         "kit/skills/lib/signals.mjs",
         "kit/skills/dev-govern/SKILL.md",
@@ -702,7 +718,9 @@
         "scripts/dev/fixtures-w4-harness.mjs",
         "scripts/dev/injections-data-w4-harness.mjs",
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
-        "scripts/dev/injections-data-w5-blind-fixes.mjs"
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱三先最小运行复现poc-first与整类根治tier-1--tier-2",
@@ -804,7 +822,9 @@
         "scripts/dev/fixtures-r6d-contracts.mjs",
         "scripts/dev/injections-data-r6d.mjs",
         "scripts/dev/fixtures-r7-rootfix.mjs",
-        "scripts/dev/injections-data-r7.mjs"
+        "scripts/dev/injections-data-r7.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -950,7 +970,9 @@
         "scripts/dev/fixtures-r6d-contracts.mjs",
         "scripts/dev/injections-data-r6d.mjs",
         "scripts/dev/fixtures-r7-rootfix.mjs",
-        "scripts/dev/injections-data-r7.mjs"
+        "scripts/dev/injections-data-r7.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"

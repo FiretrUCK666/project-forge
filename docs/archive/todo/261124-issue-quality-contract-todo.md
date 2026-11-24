@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 单一平台中性 Issue 质量契约与门禁
-status: active
+status: done
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -10,7 +10,7 @@ branch: feat/issue-quality-contract
 owner: plan-issue-contract
 plan_mode: autonomous
 approved: false
-done_at: null
+done_at: 2026-11-24
 task_id: issue-quality-contract
 planned_at: 35917ac5e4084845e8638252990db27fbda4cc7f
 related_prd: null
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-issue-quality-contract-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/issue-quality-contract` @ `35917ac` |
 | 任务编号 | `issue-quality-contract` |
 | 负责人 / 审批 | plan-issue-contract / `false` |
 | 规划态 | `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-issue-quality-contract-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/archive/specs/261124-issue-quality-contract-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -45,11 +45,11 @@ related_spec: ../specs/261124-issue-quality-contract-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C1: 单一事实驱动 Issue 质量校验落地（`kit/skills/lib/issue-quality.mjs` (new) 实现 `validateIssueBodyQuality` 5 项底线与 `plan-index.mjs` 查盘，`kit/skills/lib/exit-codes.mjs` 注册 `BLOCKED_ISSUE_QUALITY_INCOMPLETE`，`kit/skills/lib/issue-template-hydrate.mjs` 移除空洞套话与静默删节且绝不留空白占位，无第二套模式）。
-- [ ] C2: 富证据自动建单器落地（`kit/skills/lib/escalation.mjs` 的 `buildIssues` 与 `buildEscalationIssuePayload` 自动携带 `file:line`、模块影响面、严重度依据、已核实基线与未测局限、`C1..Cn` 与明确 `Out of Scope`，兼容全部 `TaskBackend` 后端且 UTF-8 安全零 emoji）。
-- [ ] C3: 单一入口门禁收口与 `verify-tools run --stale` 排序修复（`flow.mjs issue create` 支持 `--spec`/`--todo`/`--prd`，全托管建单入口强制走 `hydrateIssueBody -> validateIssueBodyQuality -> createIssue`，`cli-parity.mjs` 0 漂移，现有 `fixtures*.mjs` 建单正文升级合规，`verify-tools.mjs run --stale` 将自检置后并一次性通过）。
-- [ ] C4: 模板、档案与契约同步完成（更新 `templates/issue-*.md`、`.github/ISSUE_TEMPLATE/*.md`、`docs/TDD.md`、`docs/feature-map.json`、`references/docs-set.md`、`references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-govern/SKILL.md`，并执行 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`）。
-- [ ] C5: 双向测试与故障注入全绿（新增 `scripts/dev/fixtures-issue-quality.mjs` (new) 与 `scripts/dev/injections-data-issue-quality.mjs` (new) 覆盖全部 9 个正反场景与 5 项注入，且 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`gap-coverage.mjs`、`govern-audit.mjs audit .`、`verify-tools.mjs audit` 全部退出码 `0`）。
+- [x] C1: 单一事实驱动 Issue 质量校验落地（`kit/skills/lib/issue-quality.mjs` (new) 实现 `validateIssueBodyQuality` 5 项底线与 `plan-index.mjs` 查盘，`kit/skills/lib/exit-codes.mjs` 注册 `BLOCKED_ISSUE_QUALITY_INCOMPLETE`，`kit/skills/lib/issue-template-hydrate.mjs` 移除空洞套话与静默删节且绝不留空白占位，无第二套模式）。
+- [x] C2: 富证据自动建单器落地（`kit/skills/lib/escalation.mjs` 的 `buildIssues` 与 `buildEscalationIssuePayload` 自动携带 `file:line`、模块影响面、严重度依据、已核实基线与未测局限、`C1..Cn` 与明确 `Out of Scope`，兼容全部 `TaskBackend` 后端且 UTF-8 安全零 emoji）。
+- [x] C3: 单一入口门禁收口与 `verify-tools run --stale` 排序修复（`flow.mjs issue create` 支持 `--spec`/`--todo`/`--prd`，全托管建单入口强制走 `hydrateIssueBody -> validateIssueBodyQuality -> createIssue`，`cli-parity.mjs` 0 漂移，现有 `fixtures*.mjs` 建单正文升级合规，`verify-tools.mjs run --stale` 将自检置后并一次性通过）。
+- [x] C4: 模板、档案与契约同步完成（更新 `templates/issue-*.md`、`.github/ISSUE_TEMPLATE/*.md`、`docs/TDD.md`、`docs/feature-map.json`、`references/docs-set.md`、`references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-govern/SKILL.md`，并执行 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`）。
+- [x] C5: 双向测试与故障注入全绿（新增 `scripts/dev/fixtures-issue-quality.mjs` (new) 与 `scripts/dev/injections-data-issue-quality.mjs` (new) 覆盖全部 9 个正反场景与 5 项注入，且 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`gap-coverage.mjs`、`govern-audit.mjs audit .`、`verify-tools.mjs audit` 全部退出码 `0`）。
 
 ## 执行步骤
 
@@ -70,9 +70,9 @@ related_spec: ../specs/261124-issue-quality-contract-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（等待独立 Critique 与 `approve`）
+- **当前状态**：`已完成 (done)`，无遗留。
 - **待拍板事项**：无
-- **下一步第一件事**：由独立 Critique 评审 `docs/specs/261124-issue-quality-contract-spec.md` 与本 Todo 并由维护者 `approve` 后转入实施。
+- **下一步第一件事**：归档并绑定门禁证据后提交 PR 等待独立审查。
 
 ## 澄清与补充记录
 
@@ -83,5 +83,11 @@ related_spec: ../specs/261124-issue-quality-contract-spec.md
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/dev/preflight.mjs`：通过（0 项失败，41 项读数）。
+  - `node scripts/dev/fixtures.mjs --jobs 6`：523 项通过，0 项失败。
+  - `node scripts/dev/verify-injections.mjs --jobs 4`：422 条故障注入全部精准捕获，0 失败。
+  - `node scripts/dev/e2e-zip-harness.mjs`：真包沙盒 A–L 场景全通（242 包条目）。
+  - `node scripts/dev/bench.mjs`：6/6 项均在预算内通过。
+  - `node scripts/dev/cli-parity.mjs`、`gap-coverage.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`govern-audit.mjs audit . --strict`、`edit-gate.mjs --changed --json`、`verify-tools.mjs run --stale`（22/22）与 `verify-tools.mjs audit .` 全部退出码 `0`。
+- **文档同步检查**：已同步 `templates/issue-*.md`、`.github/ISSUE_TEMPLATE/*.md`、`docs/TDD.md`、`docs/feature-map.json`、`references/docs-set.md`、`references/collaboration.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-govern/SKILL.md`、`.agents/skills/`（`equip.mjs .`）与 `AGENTS.md`（`compose-agents.mjs .`）。
+- **遗留问题**：无。

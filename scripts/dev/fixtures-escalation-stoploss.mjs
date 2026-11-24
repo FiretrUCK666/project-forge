@@ -148,7 +148,16 @@ export function registerStageBLoopB4bCases(cases) {
       if (!locRes.ok || locRes.tier !== 'escalated-issue' || !locRes.local || !locRes.number) {
         return `local-only escalateToBackend 失败：${JSON.stringify(locRes)}`
       }
-      const govApply = await applyIssuesToBackend(dir, [{ title: '治理想单', body: '待修', labels: ['governance'] }])
+      const govApply = await applyIssuesToBackend(dir, [{
+        title: '治理想单',
+        summary: '`README.md:1` 需要同步治理想单结构',
+        files: ['README.md'],
+        severity: 'medium',
+        reproEvidence: 'README.md:1 governance check finding',
+        pocCommand: 'node -e "process.exit(0)"',
+        criteria: ['C1: 修复 `README.md` 治理想单检查'],
+        labels: ['governance'],
+      }])
       if (!govApply.applied?.length || govApply.applied[0].local !== true) {
         return `govern-state applyIssuesToBackend 建单异常：${JSON.stringify(govApply)}`
       }

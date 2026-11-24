@@ -63,9 +63,10 @@
   4. **外部 Fork 防污染**：若 `contributor-fork` 且上游未接入 `docs/`，私有规划存于 `.worktrees/.state/private-docs/<taskId>/` 绝不混入 PR diff。
 - **六个双写节点、双层正交身份与统一中文评论标签**：认领/释放（Issue，统一使用 `认领人` / `原认领人`）、已提 PR（PR 正文与 Issue 均使用 `实施人` + `Fixes #N`/`refs #N`）、审查退回/通过（PR 与 Issue 均输出 `审查人`、`实施人`、`审查来源`、`实证核验`、`逐条标准状态`、`故障注入记录`、`止损记录` 及完整 `Must Fix`/`Should Fix`/`Pre-existing`/`本轮消解`）、返工已提交（PR 与 Issue 使用 `实施人` + 新 HEAD 短哈希）、已合并（PR 与 Issue 使用 `审查人` / `实施人`）以及 `flow.mjs intake` 业务分诊（使用 `分诊人`）；无远端或通用远端经 `TaskBackend` 同步双写至本地工单（`flow.mjs issue`）。全部节点统一经 `resolveIdentityLayers` + `formatAttribution` 渲染：仅当托管后端声明 `capabilities.mention === true` 且通过实测验证平台登录名（`verifiedPlatformLogin === true`）时输出 `@handle`，其余平台、未验证/`git config user.name` 及任意代理代号一律反引号包裹，缺失真实账号时省略而不捏造 `@maintainer`。`review-pack.mjs record` 按职责区分 PR 完整审查单（标题统一以 `审核不通过（退回）/审核通过 · Round N` 开头 + 四字段 + `对比基线` + `验收标准逐条核对` 表（缺规划文件时自动回退解析 `issueContext`/`prContext` 复选框）+ `Must Fix` 编号位置/根因/`Should Fix`/`Pre-existing` + `pf-state`）与 Issue 摘要单（`审核不通过（退回）/审核通过 · Round N` + 逐条状态/标签 + `实证核验` + `Must Fix` `file:line` 核心原因 + `pf-state`）**实时双写到 PR 与 Issue** 并按裁决贴 `changes-requested` / `reviewed` 标签；`contributor-fork` 设标签遇 403 自动降级仅发评论，离线或 `mcp-delegate` 无直连凭据时会在 `githubSync.delegatedPayloads` 原样吐出各目标完整正文与 `statePayload` 供宿主 MCP 直接双写，绝不阻塞或临场手写变形。含中文/非 ASCII 正文一律先写系统临时目录 UTF-8 文件再以 `--body-file` / JSON 体提交并回读删除临时文件，绝不在命令行直接拼接中文。
 
-## 五、收到别人的 Issue
+## 五、收到别人的 Issue 与建单质量底线
 
-- 用 `templates/issue-bug-report.md` 与 `templates/issue-feature-request.md` 收齐最小复现条件、环境与预期差异；信息不足先温柔补问，不凭猜测定责，再决定是否按 Case 2..4 认领处理。
+- 用 `templates/issue-bug-report.md` 与 `templates/issue-feature-request.md` 收齐最小复现条件、影响面与严重度、预期差异、可判伪 `C1..Cn` 与 `不在本次范围`；信息不足先温柔补问，不凭猜测定责，再决定是否按 Case 2..4 认领处理。
+- **全部托管建单统一门禁**：`flow.mjs issue create`（支持 `--spec`/`--todo`/`--prd` 自动提取上下文）、`flow.mjs start --create-issue`、`escalation.mjs` 与 `govern-audit.mjs issues --apply-issues` 在写入任何 `TaskBackend` 前强制经过 `hydrateIssueBody -> validateIssueBodyQuality`（5 项结构底线 + `plan-index.mjs` 真实设计文档查盘判定），未达标或引用虚假设计文档统一以 `BLOCKED_ISSUE_QUALITY_INCOMPLETE`（退出码 `3`）阻断。
 
 ## 六、审别人提进来的 PR（含外部供应链门禁）
 

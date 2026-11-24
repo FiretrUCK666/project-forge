@@ -115,7 +115,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 ## 执行与安全护栏
 
 - **只读先行与不擅自删目录**：`--audit-only`、`--plan-only`、`reconcile`、`cluster`、`sample`、`release-prep` 与不带 `--apply-issues` 的 `--issues` 均为只读；清理任何 `.worktrees/`（尤其 `no_own_commits`）前必须列清单请人确认并先解绑依赖链接。
-- **Issue UTF-8 安全提交**：带 `--apply-issues` 时一律写系统临时目录 UTF-8 文件配合 `gh issue create --body-file` 提交并删除临时文件。
+- **Issue 富证据与 UTF-8 安全提交**：`govern-audit.mjs issues` 产出自包含 `file:line`、模块影响面与严重度依据、已核实基线与未测局限、`C1..Cn` 与明确 `Out of Scope` 的治理想单载荷；带 `--apply-issues` 时经 `validateIssueBodyQuality`（不合规退出码 `3` 报 `BLOCKED_ISSUE_QUALITY_INCOMPLETE`）并通过临时 UTF-8 `--body-file` 提交后删除临时文件。
 - **规则下沉与去熵**：真实审查漏出或运行时复发满 `2` 次的同类故障，必须下沉为确定性形式静态检查或静态门禁脚本，防止反复靠人工读代码拦错；同步清理死代码、废弃路径与冗余分支，保持代码库精简。
 - **探索转非 `Case 1` 写改强制隔离**：`Case 1` 纯问答/错别字/单行格式允许原地微调；从只读体检/探索转入**任何非 `Case 1` 文件写改**（含治理修复、常青文档/功能地图校准与归档校准，仅补测试归 Case 2/3）时，必先走 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack` 独立审查闭环，严禁直接修改主干。
 - **验证收口**：修复与下沉完成后运行 `AGENTS.md` 中的全部验证命令与静态/实证门禁，再使用 `dev-review`（`review-pack.mjs --local`）收尾确认。

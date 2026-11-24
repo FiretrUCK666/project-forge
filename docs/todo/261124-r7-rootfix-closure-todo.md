@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: Round-7 盲测 10 项跨项目架构级根因统一根治
-status: draft
+status: active
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-r7-rootfix-closure-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/r7-rootfix-closure` @ `0b61646` |
 | 任务编号 | `r7-rootfix-closure` |
 | 负责人 / 审批 | plan-r7-rootfix / `false` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/specs/261124-r7-rootfix-closure-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-r7-rootfix-closure-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 

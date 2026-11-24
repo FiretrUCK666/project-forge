@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Round-7 盲测 10 项跨项目架构级根因统一根治
-status: draft
+status: approved
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -10,53 +10,14 @@ pr: null
 branch: feat/r7-rootfix-closure
 owner: plan-r7-rootfix
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-r7-rootfix, round=1, sha=90cb43582391, summary=C1..C7完整覆盖Round-7全部10项取证根因且为跨生态通用单源架构，含新退出码与note注册、800行拆分方案、equip/compose-agents/双向夹具与故障注入预演，路径核验真实无幻觉。)"
 related_prd: null
 related_todo: ../todo/261124-r7-rootfix-closure-todo.md
+high_risk_paths: [kit/, scripts/lib/]
 task_id: r7-rootfix-closure
-scope_files:
-  - kit/skills/lib/exit-codes.mjs
-  - kit/skills/lib/critique-rounds.mjs
-  - kit/skills/lib/critique-store.mjs
-  - kit/skills/lib/subcommand-meta.mjs
-  - kit/skills/lib/plan-index.mjs
-  - kit/skills/lib/plan-exit-gate.mjs
-  - kit/skills/lib/plan-next.mjs
-  - kit/skills/lib/doc-templates.mjs
-  - kit/skills/lib/doc-template-render.mjs
-  - kit/skills/lib/doc-substantive.mjs
-  - kit/skills/lib/pending-decisions.mjs
-  - kit/skills/lib/doc-requirements.mjs
-  - kit/skills/lib/session-state.mjs
-  - kit/skills/lib/issue-template-hydrate.mjs
-  - kit/skills/lib/static-gates.mjs
-  - kit/skills/lib/task-backend-local.mjs
-  - kit/skills/templates/docs-todo.md
-  - kit/skills/dev-plan/SKILL.md
-  - kit/skills/dev-plan/scripts/doc-plan.mjs
-  - kit/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - kit/skills/dev-plan/scripts/doc-audit.mjs
-  - kit/skills/dev-plan/scripts/doc-audit-helpers.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - kit/skills/dev-flow/scripts/flow-merge.mjs
-  - kit/skills/dev-review/scripts/review-diff.mjs
-  - kit/skills/dev-verify-tools/scripts/verify-tools.mjs
-  - scripts/handoff.mjs
-  - scripts/lib/review-helpers.mjs
-  - scripts/lib/survey-docs.mjs
-  - scripts/review.mjs
-  - scripts/survey.mjs
-  - scripts/equip.mjs
-  - scripts/dev/bench.mjs
-  - references/docs-set.md
-  - docs/TDD.md
-  - docs/feature-map.json
-high_risk_paths:
-  - kit/
-  - scripts/lib/
+scope_files: [kit/skills/lib/exit-codes.mjs, kit/skills/lib/critique-rounds.mjs, kit/skills/lib/critique-store.mjs, kit/skills/lib/subcommand-meta.mjs, kit/skills/lib/plan-index.mjs, kit/skills/lib/plan-exit-gate.mjs, kit/skills/lib/plan-next.mjs, kit/skills/lib/doc-templates.mjs, kit/skills/lib/doc-template-render.mjs, kit/skills/lib/doc-substantive.mjs, kit/skills/lib/pending-decisions.mjs, kit/skills/lib/doc-requirements.mjs, kit/skills/lib/session-state.mjs, kit/skills/lib/issue-template-hydrate.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/task-backend-local.mjs, kit/skills/templates/docs-todo.md, kit/skills/dev-plan/SKILL.md, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan/scripts/doc-audit-helpers.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-review/scripts/review-diff.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, scripts/handoff.mjs, scripts/lib/review-helpers.mjs, scripts/lib/survey-docs.mjs, scripts/review.mjs, scripts/survey.mjs, scripts/equip.mjs, scripts/dev/bench.mjs, references/docs-set.md, docs/TDD.md, docs/feature-map.json]
 ---
 
 # Round-7 盲测 10 项跨项目架构级根因统一根治 — 功能设计规范（SPEC）
@@ -65,13 +26,13 @@ high_risk_paths:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/r7-rootfix-closure` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-r7-rootfix / `pending` |
+| 负责人 / 内审状态 | plan-r7-rootfix / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | 无 / `docs/todo/261124-r7-rootfix-closure-todo.md` |
+| 关联 PRD / Todo | 无 / `../todo/261124-r7-rootfix-closure-todo.md` |
 
 - **变更一句话**：将 Round-7 四条离线盲测通道双路取证证实的 10 项跨项目架构级根因一次性收敛为通用单源机制，消除规划停损误触、关联图审批脱节、路径/反引号误杀、流转状态串台、宿主软链误截断、多生态断言与 linter 探测盲区、供应链 diff 覆盖盲区及慢速 CI 性能预算反切。
 

@@ -1,0 +1,128 @@
+# 持续集成：把「本机能过」变成「换台机器也能过」。
+#
+# 这个项目没有构建步骤，所以检查覆盖：结构自检 + 缺口覆盖 + 行为断言 + 性能基准 +
+# 真包 E2E 沙盒 + 故障注入防空转复验 + 契约自举 + 套件同步 + 目录同步 + 用户包核对 + 交付体检。全程只用 Node。
+#
+# **这里的每一步都与 AGENTS.md 的「构建与验证」节是同一批命令。** 两处不一致时，本地按一份做、
+# CI 按另一份查，谁都没错，结果对不上。
+
+name: check
+
+on:
+  push:
+    branches: ['main']
+    tags: ['v*']
+  pull_request:
+    # `edited` 不能漏：提案正文会被改动，而改正文只触发这个事件。
+    types: [opened, synchronize, reopened, edited]
+
+# 只读权限：这个工作流从不写仓库。声明出来不只是「最小权限」的礼貌——
+# 不声明时拿到的是仓库默认设置，而默认被改成可写时，这套检查就悄悄多了一份写权限。
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # 真正干活的那一组。**它的名字会带上矩阵后缀**（如 `gates (ubuntu-latest, 18)`），
+  # 所以它不能是分支保护里那个必需检查——见下面 `check` 那个 job 的说明。
+  gates:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    # **跑三平台与双 Node 版本**（Node 18 下界与 Node 22 LTS，覆盖 Windows / macOS / Linux），
+    # 防止路径、行尾、PowerShell/Bash 差异或下界 API 兼容在用户机器上才暴露。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['18', '22']
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+        with:
+          # **必须取全历史**：下面「用户包内容」那一步要按标签与提交读文件，
+          # `git archive` 也要能看见历史对象。浅克隆下这些动作会读不到东西，
+          # 而读不到的表现不是报错，是**静默通过**——空清单等于「没越界」，
+          # 门禁于是绿着放行，它本该拦下的一件都没拦。
+          fetch-depth: 0
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 结构自检 + 端到端冒烟
+        run: node scripts/dev/preflight.mjs
+
+      - name: 勘察缺口与体检结论覆盖
+        run: node scripts/dev/gap-coverage.mjs
+
+      # 行为断言与结构自检是两件事，缺一不可：
+      # 结构自检查不出「判定写错了」——勘察把一个 CMake 项目判成纯文档目录时，
+      # 引用与格式全都正常。这类错误只能靠造出能证伪它的 fixture 发现。
+      - name: 行为断言（造临时项目实跑，正反双向）
+        run: node scripts/dev/fixtures.mjs
+
+      - name: 核心命令与快照性能基准
+        run: node scripts/dev/bench.mjs
+
+      - name: 真包解压 E2E 沙盒全链路实证
+        run: node scripts/dev/e2e-zip-harness.mjs
+
+      - name: 故障注入门禁防空转复验
+        run: node scripts/dev/verify-injections.mjs --jobs 4
+
+      # 这个仓库是这套规范的第一个用户：模板改了、自己那份没跟上时，这一条会红。
+      - name: 契约自举（标记成对 / 无未填占位 / 该有的节都在）
+        run: node scripts/compose-agents.mjs . --check
+
+      - name: 内置套件字节级一致性
+        run: node scripts/equip.mjs . --check
+
+      - name: README 的目录与标题是否同步
+        run: node scripts/sync-toc.mjs README.md README.en.md --check
+
+      # 上一条看的是工作区；这一条看的是**真跑出来的那份包**。
+      # 声明与实际是否一致，最终得由产出物自己回答。
+      - name: 用户包内容（真跑 git archive）
+        run: |
+          git archive --format=tar HEAD | tar -t > "${{ runner.temp }}/package-list.txt"
+          node scripts/dev/preflight.mjs --package "${{ runner.temp }}/package-list.txt"
+
+      # 这个仓库自己也过一遍交付体检。它是**工具的使用者**，不是旁观者。
+      #
+      # 只拦 [缺]（会出事的那一档）。[可以更好] 不拦：那一档里有一条是「标签还没打」，
+      # 而日常提交本来就还没打标签——把它也拦下，等于让「还没发版」变成构建失败。
+      - name: 自己过一遍交付门禁
+        run: |
+          node scripts/review.mjs . || {
+            echo "::error::这个仓库自己的交付体检没过。报了 [缺] 就改真东西，不要加 flag 把它压下去。"
+            exit 1
+          }
+
+      - name: 治理巡检审计
+        run: node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
+
+  # ── 分支保护要的那个检查 ─────────────────────────────────────────────
+  #
+  # 分支保护里写的是**检查名 `check`**，而矩阵里每个 job 报上来的名字都带后缀
+  # （`gates (ubuntu-latest, 18)` 等）。名字对不上，那个「必需检查」就永远不会出现，
+  # 提案会一直停在 `BLOCKED` ——而它看起来像「还在跑」，不像「永远跑不完」。
+  #
+  # 解法是让一个**不带矩阵**的 job 顶着这个名字，它只做一件事：等上面全部队列结束。
+  # 必须带 `if: always()` 并显式校验 `needs.gates.result == 'success'`；否则上游一旦失败，
+  # 汇总 job 会被标成 `skipped`，而 GitHub 分支保护把 `skipped` 当成放行（假绿）。
+  check:
+    needs: gates
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 全部平台与节点版本的门禁都过了
+        run: |
+          if [ "${{ needs.gates.result }}" != "success" ]; then
+            echo "::error::gates 未通过（result=${{ needs.gates.result }}），拒绝假绿放行。"
+            exit 1
+          fi
+          echo "gates 在 Ubuntu/Windows/macOS 与 Node 18/22 上都已经通过。"

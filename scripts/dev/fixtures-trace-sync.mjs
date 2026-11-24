@@ -53,8 +53,21 @@ export function registerTraceSyncCases(cases) {
       const roots = await resolveRepoRoots(dir)
 
       // 1) local-only 下 init --kind pair 传入全部 res.files 到 planSync
+      const validIssueBody = (lead) => [
+        '## 背景与现象',
+        lead,
+        '`src/app.mjs:1` 需要同步追踪。',
+        '## 影响面与严重度',
+        '影响 `src/app.mjs`；severity=medium；不涉及 API 与安全边界。',
+        '## 期望与方案',
+        '执行 `node -e "console.log(1)"` 验证同步正常。',
+        '## 验收标准',
+        '- [ ] C1: 验证 `src/app.mjs` 联动完成',
+        '## 不在本次范围',
+        '不动 `README.md`。',
+      ].join('\n')
       const localIss = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'issue', 'create', '--title', 'Pair Sync Tracking', '--body', 'User original body', '--json',
+        'issue', 'create', '--title', 'Pair Sync Tracking', '--body', validIssueBody('User original body'), '--json',
       ], { cwd: dir })
       if (localIss.status !== 0) return `创建本地工单失败：${localIss.stderr}`
       const locNum = JSON.parse(localIss.stdout).issue.number
@@ -213,8 +226,20 @@ export function registerTraceSyncCases(cases) {
       const roots = await resolveRepoRoots(dir)
 
       // 3a) 本地工单 + doc-plan init (不传 --issue) -> critique-pass -> approve -> doc-plan link --issue
+      const backfillBody = [
+        '## 背景与现象',
+        'User handwritten problem description. (`src/app.mjs:1`)',
+        '## 影响面与严重度',
+        '影响 `src/app.mjs`；severity=medium；无外部接口破坏。',
+        '## 期望与方案',
+        '通过 `node -e "console.log(1)"` 验证后绑回补。',
+        '## 验收标准',
+        '- [ ] C1: `src/app.mjs` 后绑回补成功',
+        '## 不在本次范围',
+        '不动其他目录。',
+      ].join('\n')
       const locIss = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'issue', 'create', '--title', 'Backfill Target', '--body', 'User handwritten problem description.', '--json',
+        'issue', 'create', '--title', 'Backfill Target', '--body', backfillBody, '--json',
       ], { cwd: dir })
       const locNum = JSON.parse(locIss.stdout).issue.number
 
@@ -433,8 +458,20 @@ export function registerTraceSyncCases(cases) {
       try {
         gitInit(locDir, { branch: 'main', name: 'Local', email: 'l@example.com' })
         gitCommitFast(locDir, 'init')
-        const iA = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['issue', 'create', '--title', 'Target', '--json'], { cwd: locDir })).stdout).issue.number
-        const iB = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['issue', 'create', '--title', 'Old', '--json'], { cwd: locDir })).stdout).issue.number
+        const closeBody = [
+          '## 背景与现象',
+          '`README.md:1` 本地归并测试工单。',
+          '## 影响面与严重度',
+          '影响 `README.md`；severity=low；不涉及代码与安全边界。',
+          '## 期望与方案',
+          '运行 `node -e "console.log(1)"` 后归并关闭。',
+          '## 验收标准',
+          '- [ ] C1: 完成 `README.md` 归并记录',
+          '## 不在本次范围',
+          '不修改源码文件。',
+        ].join('\n')
+        const iA = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['issue', 'create', '--title', 'Target', '--body', closeBody, '--json'], { cwd: locDir })).stdout).issue.number
+        const iB = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['issue', 'create', '--title', 'Old', '--body', closeBody, '--json'], { cwd: locDir })).stdout).issue.number
 
         const badSelf = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
           'close', '--issue', String(iB), '--into', String(iB), '--reason', 'bad',

@@ -195,13 +195,18 @@ export function registerStageBLoopCases(cases) {
     try {
       equip(dir, { tier: 'full', noBackup: true })
       const spInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'spec', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place',
+        'init', '--kind', 'spec', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place', '--json',
       ], { cwd: dir })
       const tdInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'todo', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place',
+        'init', '--kind', 'todo', '--slug', 'custom-slug', '--title', '本地单绑定', '--issue', '1', '--owner', 'spec-writer', '--in-place', '--json',
       ], { cwd: dir })
       if (spInit.status !== 0 || tdInit.status !== 0) {
         return `doc-plan init 失败：sp=${spInit.stderr}, td=${tdInit.stderr}`
+      }
+      const tdRel = JSON.parse(tdInit.stdout).file
+      if (tdRel) {
+        writeFileSync(join(dir, tdRel), readFileSync(join(dir, tdRel), 'utf8')
+          .replace(/<[^>]+>/g, '修改 `src/app.mjs`'), 'utf8')
       }
       gitCommitFast(dir, 'docs: add pre-created issue 1 spec and todo')
 
@@ -212,7 +217,7 @@ export function registerStageBLoopCases(cases) {
       let errBuf = ''
       process.stdout.write = () => true
       try {
-        startRes = await handleStart({ 'create-issue': true, title: '主功能工单', case: '3', implementer: 'alice', json: true }, roots)
+        startRes = await handleStart({ 'create-issue': true, title: '主功能工单', case: '3', implementer: 'alice', todo: tdRel, json: true }, roots)
         if (startRes.exitCode !== 0) return `local-only start --create-issue 失败：${startRes.exitCode}`
         const matchedSpec = findMatchingDocStrict(dir, 'docs/specs', 'issue-1', 'issue-1', [1])
         if (!matchedSpec || !matchedSpec.includes('custom-slug')) {
@@ -229,7 +234,20 @@ export function registerStageBLoopCases(cases) {
         takeoverRes = await handleClaim({ task: 'issue-1', agent: 'bob', takeover: true, reason: '接力处理', json: true }, roots)
         if (takeoverRes.exitCode !== 0) return `合法 --takeover 失败：${takeoverRes.exitCode}`
 
-        await handleIssue({ _: ['create'], title: '上游未完成', body: 'Depends on #1', json: true }, roots)
+        const depBody = [
+          'Depends on #1',
+          '## 背景与现象',
+          '`src/app.mjs:1` 依赖 #1 完成后再联动改造。',
+          '## 影响面与严重度',
+          '影响 `src/app.mjs`；severity=medium；不改持久化与安全边界。',
+          '## 期望与方案',
+          '待 #1 合并后运行 `node -e "console.log(1)"` 验证。',
+          '## 验收标准',
+          '- [ ] C1: 验证 `src/app.mjs` 返回 true',
+          '## 不在本次范围',
+          '不动 `README.md`。',
+        ].join('\n')
+        await handleIssue({ _: ['create'], title: '上游未完成', body: depBody, json: true }, roots)
         await handleIssue({ _: ['comment'], issue: '2', body: '补充详情', json: true }, roots)
         await handleIssue({ _: ['view'], issue: '2', json: true }, roots)
         await handleIssue({ _: ['list'], state: 'open', json: true }, roots)
@@ -290,7 +308,16 @@ export function registerStageBLoopCases(cases) {
       }
 
       // 治理想单直写 + 冷启动 + 绑定远端迁回
-      const govApply = await applyIssuesToBackend(dir, [{ title: '治理遗留项', body: '待修', labels: ['governance'] }])
+      const govApply = await applyIssuesToBackend(dir, [{
+        title: '治理遗留项',
+        summary: '`src/app.mjs:1` 存在待治理遗留告警',
+        files: ['src/app.mjs'],
+        severity: 'medium',
+        reproEvidence: 'src/app.mjs:1 static audit match',
+        pocCommand: 'node -e "process.exit(0)"',
+        criteria: ['C1: 修复 `src/app.mjs` 遗留问题并通过检查'],
+        labels: ['governance'],
+      }])
       if (!govApply.applied?.length || govApply.applied[0].local !== true) {
         return `local-only applyIssuesToBackend 建单失败：${JSON.stringify(govApply)}`
       }

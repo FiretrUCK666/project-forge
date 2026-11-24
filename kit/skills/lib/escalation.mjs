@@ -2,11 +2,13 @@
  * escalation.mjs —— C12 统一 Escalation 分级建单与 C22 工作类型前缀单源引擎。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-govern、dev-review、dev-flow 与 dev-plan 共用。
- * 所有远端写路径统一经 `probeForWrite` 探测，兼顾 `github` / `local-only` / `generic-git` 三态后端。
+ * 所有远端写路径统一经 `probeForWrite` 探测，兼顾 `github` / `local-only` / `generic-git` 三态后端，
+ * 并在写入任何后端前统一经 `validateIssueBodyQuality` 拦截低质量工单。
  */
 
 import { EXIT } from './exit-codes.mjs'
 import { gitRun, posixPath, sha256Text } from './git.mjs'
+import { validateIssueBodyQuality } from './issue-quality.mjs'
 import { hydrateIssueBody } from './issue-template-hydrate.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from './platform.mjs'
@@ -14,6 +16,7 @@ import { createTaskBackend } from './task-backend.mjs'
 
 const EXPLICIT_WORK_PREFIX_RE = /^(?:(?:docs|fix|feat|refactor|chore|test|ci|build|perf|style|revert)(?:\([^)]+\))?:\s+|\[[^\]]+\]\s*)/i
 const PF_SIG_RE = /\bpf-sig:([0-9a-f]{12})\b/i
+const STRUCTURED_ESCALATION_BODY_RE = /^##\s+(?:Evidence|Unknowns|NextSteps)\b/m
 
 /** 规范化错误摘要片段：剥离易变行号/列号、临时 worktree 前缀、盘符绝对路径与 SHA/时间戳，生成稳定签名输入。 */
 export function normalizeEscalationSignaturePart(text) {
@@ -161,8 +164,50 @@ function clampReproField(text) {
   return `${text.slice(0, keep)}…（已截断）`
 }
 
+function collectNormalizedItemFiles(item = {}) {
+  const list = [
+    ...(Array.isArray(item.files) ? item.files : (item.files ? [item.files] : [])),
+    ...(Array.isArray(item.stopLossPacket?.hotspotFiles) ? item.stopLossPacket.hotspotFiles : []),
+  ]
+  return [...new Set(list.map((f) => posixPath(String(f ?? '')).trim()).filter(Boolean))]
+}
+
+function inferModuleDirs(files = []) {
+  const dirs = new Set()
+  for (const f of files) {
+    const parts = posixPath(f).split('/').filter(Boolean)
+    if (parts.length >= 2) dirs.add(parts.slice(0, Math.min(3, parts.length - 1)).join('/'))
+    else if (parts.length === 1) dirs.add(parts[0])
+  }
+  return [...dirs]
+}
+
+function inferBoundaryImpact(cat, files = [], item = {}) {
+  const touched = []
+  const text = `${cat ?? ''} ${files.join(' ')} ${item.summary ?? ''} ${item.title ?? ''}`.toLowerCase()
+  if (/security|auth|token|secret|perm|credential/.test(text)) touched.push('安全与凭据权限')
+  if (/data|schema|sql|migration|ledger|state|cache/.test(text)) touched.push('持久化数据与状态账本')
+  if (/api|cli|subcommand|contract|schema|protocol|backend/.test(text)) touched.push('对外接口与契约')
+  if (/ci|workflow|release|hook|equip|gate/.test(text)) touched.push('CI 门禁与发布边界')
+  return touched.length > 0 ? `触及 ${touched.join('、')}` : '仅限局部实现层，不破坏数据持久化、API 契约与权限安全边界'
+}
+
+function enrichStructuredEscalationBody(baseBody, { impactText, severityBasis, criteria, outOfScopeText }) {
+  const parts = [baseBody.trimEnd()]
+  if (!/^##\s+(?:影响面与严重度|影响范围|范围与依据|Scope|Impact)\b/im.test(baseBody)) {
+    parts.push('', '## 影响面与严重度', '', [impactText, severityBasis ? `- 严重度依据：${severityBasis}` : null].filter(Boolean).join('\n'))
+  }
+  if (!/^##\s+(?:验收标准|Acceptance Criteria)\b/im.test(baseBody)) {
+    parts.push('', '## 验收标准', '', criteria.join('\n'))
+  }
+  if (!/^##\s+(?:不在本次范围|Out of Scope|非目标)\b/im.test(baseBody)) {
+    parts.push('', '## 不在本次范围', '', outOfScopeText)
+  }
+  return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 /**
- * 组装包含 Case、验收清单 C1..Cn、根因与单一 `[NEXT STEP]` 的标准 Escalation Issue 载荷。
+ * 组装包含 Case、影响面与严重度、验收清单 C1..Cn、Out of Scope、根因与单一 `[NEXT STEP]` 的标准 Escalation Issue 载荷。
  *
  * 复现证据字段在这里就按上限收敛：超限时截断并在正文里写明「已截断」，
  * 同时把原始校验错误挂在载荷上供调用方上报——静默接受会把整段日志抄进建单正文。
@@ -177,9 +222,18 @@ export function buildEscalationIssuePayload(item = {}, opts = {}) {
   const labels = [...new Set((Array.isArray(item.labels) && item.labels.length > 0 ? item.labels : [item.stopLoss ? 'stop-loss' : 'escalation'])
     .map((l) => String(l ?? '').trim())
     .filter(Boolean))]
+  const files = collectNormalizedItemFiles(item)
+  const fileScopeText = files.length > 0
+    ? files.slice(0, 8).map((f) => `\`${f}\``).join('、')
+    : (item.category ? `\`${item.category}\` 模块` : (item.taskId ? `任务 \`${item.taskId}\` 对应切片` : '涉及模块'))
+  const sevLabel = String(item.severity ?? (item.stopLoss || item.e2eBlocking ? 'high' : 'medium')).toLowerCase()
   const rawCriteria = Array.isArray(item.criteria) && item.criteria.length > 0
     ? item.criteria
-    : (item.summary ? [`核实并根治「${String(item.summary).trim()}」且补齐双向测试`] : ['补齐根因修复与回归验证且全量门禁通过'])
+    : [
+        pocCommand
+          ? `根治「${String(item.summary ?? title).trim()}」并使 \`${pocCommand}\` 通过（退出码 0）`
+          : `根治 ${fileScopeText} 中「${String(item.summary ?? title).trim()}」并补齐正反双向回归测试`,
+      ]
   const criteria = rawCriteria.map((c, idx) => {
     const text = String(c ?? '').trim()
     return /^- \[[ xX]\]\s+C\d+\b/.test(text) ? text : `- [ ] C${idx + 1}: ${text}`
@@ -187,27 +241,59 @@ export function buildEscalationIssuePayload(item = {}, opts = {}) {
   const rootCause = String(item.rootCause ?? item.reason ?? '同一阻塞或跨边界问题已超出局部热修承受上限，须拆出独立契约/架构根治。').trim()
   const nextStep = String(item.nextStep ?? 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --touches-contract --summary "Escalation follow-up"').trim()
   const repoRoot = opts?.repoRoot ?? item.repoRoot ?? item.mainRoot ?? null
+  const impactText = String(item.impact ?? '').trim()
+    || `- 受影响范围：${fileScopeText}（${inferBoundaryImpact(item.category, files, item)}）`
+  const severityBasis = String(item.severityBasis ?? '').trim()
+    || `severity=${sevLabel}${item.stopLoss ? '（触发停损熔断）' : ''}${item.e2eBlocking ? '（阻断 E2E 实证）' : ''}`
+  const explicitOutOfScope = typeof item.outOfScope === 'string' && item.outOfScope.trim()
+    ? item.outOfScope.trim()
+    : (typeof item.outOfScopeText === 'string' && item.outOfScopeText.trim() ? item.outOfScopeText.trim() : '')
+  const outOfScopeText = explicitOutOfScope
+    || `- 排除 ${fileScopeText} 与 \`${item.category ?? item.taskId ?? '本升级单'}\` 之外的无关模块重构与历史文档改写。`
+  const expectedText = String(item.expected ?? '').trim()
+    || (pocCommand
+      ? `修复 ${fileScopeText} 根因后重放 \`${pocCommand}\` 返回退出码 0。`
+      : `围绕 ${fileScopeText} 按根因收敛：${rootCause}`)
 
-  const rawHydrated = (typeof item.body === 'string' && item.body.trim())
+  const isBareRawBody = typeof item.body === 'string' && item.body.trim().length > 0
+    && !STRUCTURED_ESCALATION_BODY_RE.test(item.body)
+    && !item.impact && !item.outOfScopeText && !(Array.isArray(item.criteria) && item.criteria.length > 0)
+  let rawHydrated = (typeof item.body === 'string' && item.body.trim())
     ? hydrateIssueBody(repoRoot, caseType === 2 ? 'bug' : 'feature', { rawBody: item.body }).trim()
     : hydrateIssueBody(repoRoot, caseType === 2 ? 'bug' : 'feature', {
       title: item.title ?? item.summary ?? '未命名升级问题',
       summary: item.summary ?? rootCause,
       findingsSummary: item.findingsSummary,
+      baseline: item.baseline,
+      limitations: item.limitations,
+      impact: impactText,
+      severityBasis,
+      expected: expectedText,
       rootCause,
       caseType,
       source: item.source ?? 'escalation',
       tier: escalationTier,
       taskId: item.taskId,
       category: item.category,
-      severity: item.severity,
-      files: item.files,
+      severity: sevLabel,
+      files,
       reproEvidence,
       pocCommand,
       stopLossPacket: item.stopLossPacket,
       criteria,
+      outOfScope: outOfScopeText,
+      docRefs: item.docRefs,
       nextStep,
     }).trim()
+
+  if (typeof item.body === 'string' && item.body.trim() && !isBareRawBody) {
+    rawHydrated = enrichStructuredEscalationBody(rawHydrated, {
+      impactText,
+      severityBasis,
+      criteria,
+      outOfScopeText,
+    })
+  }
 
   const fingerprint = computeEscalationFingerprint(item)
   const body = rawHydrated.includes(fingerprint) ? rawHydrated : `${rawHydrated}\n\n<!-- ${fingerprint} -->`
@@ -231,7 +317,7 @@ export function buildEscalationIssuePayload(item = {}, opts = {}) {
   }
 }
 
-/** 将 dev-govern 审计发现按类别聚合并输出统一 Escalation 载荷列表。 */
+/** 将 dev-govern 审计发现按类别聚合并输出自包含富证据 Escalation 载荷列表。 */
 export function buildIssues(findings = [], opts = {}) {
   const actionable = (Array.isArray(findings) ? findings : []).filter((f) => f && f.severity !== 'info')
   const grouped = new Map()
@@ -241,18 +327,44 @@ export function buildIssues(findings = [], opts = {}) {
   }
   const issues = []
   for (const [cat, items] of grouped.entries()) {
-    const highest = items.some((x) => x.severity === 'critical') ? 'critical'
-      : items.some((x) => x.severity === 'high') ? 'high' : 'medium'
-    const files = [...new Set(items.map((x) => x.file).filter(Boolean))]
+    const sevCounts = { critical: 0, high: 0, medium: 0, low: 0 }
+    for (const x of items) {
+      const s = String(x.severity ?? 'medium').toLowerCase()
+      if (Object.prototype.hasOwnProperty.call(sevCounts, s)) sevCounts[s] += 1
+    }
+    const highest = sevCounts.critical > 0 ? 'critical'
+      : sevCounts.high > 0 ? 'high'
+        : sevCounts.medium > 0 ? 'medium' : 'low'
+    const files = [...new Set(items.map((x) => posixPath(x.file ?? '')).filter(Boolean))]
+    const modDirs = inferModuleDirs(files)
+    const formatLoc = (it) => {
+      const f = posixPath(it.file ?? '')
+      if (!f) return 'repo-level'
+      return it.line ? `${f}:${it.line}` : f
+    }
     const singleFile = files.length <= 1
     const rawTitle = `[govern/${cat}] Resolve ${items.length} ${cat} finding(s) (max severity: ${highest})`
     const findingsSummary = [
       `Findings detected by \`govern-audit\` (${cat}, max severity: ${highest}):`,
       '',
-      ...items.slice(0, 25).map((item, idx) =>
-        `${idx + 1}. **[${String(item.severity ?? 'medium').toUpperCase()}]** ${item.title}${item.action ? ` — Action: ${item.action}` : ''}`),
+      ...items.slice(0, 25).map((item, idx) => {
+        const loc = formatLoc(item)
+        const sev = String(item.severity ?? 'medium').toUpperCase()
+        return `${idx + 1}. **[${sev}]** \`${item.id ?? cat}\` at \`${loc}\` — ${item.title}${item.action ? ` (Action: ${item.action})` : ''}`
+      }),
       ...(items.length > 25 ? ['', `_...and ${items.length - 25} more items in category \`${cat}\`._`] : []),
     ].join('\n')
+    const pocCmd = `node ".agents/skills/dev-govern/scripts/govern-audit.mjs" audit . --categories ${cat} --json`
+    const affectedText = files.length > 0
+      ? files.slice(0, 8).map((f) => `\`${f}\``).join('、')
+      : `\`${cat}\` 作用域`
+    const modText = modDirs.length > 0 ? modDirs.slice(0, 6).map((d) => `\`${d}/\``).join('、') : `\`${cat}\``
+    const sevBasis = `最高严重度=${highest}（critical=${sevCounts.critical}, high=${sevCounts.high}, medium=${sevCounts.medium}, low=${sevCounts.low}，共 ${items.length} 条）`
+    const reproList = items.slice(0, 5).map((it) => `${formatLoc(it)} [${it.id ?? cat}]`)
+    const criteria = items.slice(0, 5).map((item, idx) =>
+      `- [ ] C${idx + 1}: 修复 \`${formatLoc(item)}\` 的 \`${item.id ?? cat}\` 并确保 \`${pocCmd}\` 零该项告警`)
+    const outOfScopeText = `- 排除 \`${cat}\` 之外的审计类别，以及未列入 ${affectedText} 的无关模块改造。`
+
     issues.push(buildEscalationIssuePayload({
       source: 'govern',
       category: cat,
@@ -263,9 +375,17 @@ export function buildIssues(findings = [], opts = {}) {
       singleFile,
       files,
       title: rawTitle,
-      summary: `${items.length} ${cat} finding(s) detected by govern-audit`,
+      summary: `${items.length} ${cat} finding(s) in ${modText} detected by govern-audit`,
       findingsSummary,
-      criteria: items.slice(0, 5).map((item, idx) => `- [ ] C${idx + 1}: Resolve \`${item.id}\``),
+      impact: `- 受波及模块：${modText}（涉及文件：${affectedText}）；${inferBoundaryImpact(cat, files)}`,
+      severityBasis: sevBasis,
+      baseline: `静态扫描 \`govern-audit\` 类别 \`${cat}\` 覆盖 ${files.length} 个文件，命中 ${items.length} 条告警（${sevBasis}）。`,
+      limitations: '仅完成静态规则扫描，未包含运行时业务路径、并发压力与外部接口真实调用验证。',
+      expected: `逐一收敛 ${affectedText} 中的 \`${cat}\` 问题并重跑 \`${pocCmd}\` 返回 0 条 \`critical/high\` 告警。`,
+      reproEvidence: reproList.join('；'),
+      pocCommand: pocCmd,
+      criteria,
+      outOfScopeText,
       nextStep: 'node ".agents/skills/dev-govern/scripts/govern-audit.mjs" plan .',
       labels: ['governance', cat],
     }, opts))
@@ -341,7 +461,7 @@ export function evaluateNoEscalateExemption({ noEscalate = false, reason = '' } 
 }
 
 /**
- * 统一 Escalation 建单出口：带未闭环标题去重与远端写入门禁，适配三态后端。
+ * 统一 Escalation 建单出口：带未闭环标题去重、质量底线校验与远端写入门禁，适配三态后端。
  */
 export async function escalateToBackend({
   backend = null,
@@ -375,6 +495,30 @@ export async function escalateToBackend({
       tier: 'inline-todo',
       action: 'record-inline-todo',
       title: payload.title,
+    }
+  }
+
+  const quality = validateIssueBodyQuality(payload.body, {
+    repoRoot,
+    mainRoot: item.mainRoot ?? repoRoot,
+    title: payload.title,
+    docRefs: item.docRefs,
+    spec: item.spec,
+    todo: item.todo,
+    prd: item.prd,
+  })
+  if (!quality.ok) {
+    return {
+      ok: false,
+      blocked: true,
+      code: quality.code,
+      exitCode: quality.exitCode,
+      tier: payload.escalationTier,
+      title: payload.title,
+      missing: quality.missing,
+      reasons: quality.reasons,
+      invalidDocRefs: quality.invalidDocRefs,
+      error: `${quality.code}: ${quality.reasons.join('；')}`,
     }
   }
 
@@ -463,6 +607,29 @@ export async function escalateToBackend({
 /** 批量把治理想单写入当前识别的 TaskBackend（`github` / `local-only` / `generic-git`）。 */
 export async function applyIssuesToBackend(repoRoot, issues, opts = {}) {
   if (!Array.isArray(issues) || issues.length === 0) return { applied: [], error: undefined }
+  for (const iss of issues) {
+    const payload = buildEscalationIssuePayload({ ...iss, forceIssue: true }, { repoRoot })
+    const q = validateIssueBodyQuality(payload.body, {
+      repoRoot,
+      mainRoot: iss?.mainRoot ?? repoRoot,
+      title: payload.title,
+      docRefs: iss?.docRefs,
+      spec: iss?.spec,
+      todo: iss?.todo,
+      prd: iss?.prd,
+    })
+    if (!q.ok) {
+      return {
+        applied: [],
+        blocked: true,
+        code: q.code,
+        exitCode: q.exitCode,
+        missing: q.missing,
+        reasons: q.reasons,
+        error: `${q.code}: ${q.reasons.join('；')}`,
+      }
+    }
+  }
   const resolved = await resolveEscalationBackend(repoRoot, opts)
   if (!resolved.ok) return { applied: [], error: resolved.error }
 
@@ -476,7 +643,19 @@ export async function applyIssuesToBackend(repoRoot, issues, opts = {}) {
       force: true,
       deduplicate: opts.deduplicate ?? false,
     })
-    if (!res.ok) return { applied: created, error: `Issue create failed: ${res.error ?? 'unknown error'}` }
+    if (!res.ok) {
+      return {
+        applied: created,
+        ...(res.blocked ? { blocked: true } : {}),
+        ...(res.code ? { code: res.code } : {}),
+        ...(res.exitCode ? { exitCode: res.exitCode } : {}),
+        ...(res.missing ? { missing: res.missing } : {}),
+        ...(res.reasons ? { reasons: res.reasons } : {}),
+        error: res.code === 'BLOCKED_ISSUE_QUALITY_INCOMPLETE'
+          ? res.error
+          : `Issue create failed: ${res.error ?? 'unknown error'}`,
+      }
+    }
     created.push({ title: res.title, url: res.url, number: res.number, ...(res.local ? { local: true } : {}) })
   }
   return { applied: created, error: undefined }

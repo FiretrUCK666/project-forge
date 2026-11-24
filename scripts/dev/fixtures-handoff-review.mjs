@@ -543,27 +543,40 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
     }
 
     // 1. flow.mjs start --create-issue（正向进 gh-cli 建单 + 反向进 ACTION_REQUIRED_CREATE_ISSUE_DELEGATED exit 4）
+    mkdirSync(join(dir, "docs", "todo"), { recursive: true })
+    const ciTodoRel = "docs/todo/261124-ci-create-todo.md"
+    writeFileSync(join(dir, ciTodoRel), [
+      "---", "kind: todo", "title: Real Issue", "status: active", "scope_files: [src/app.mjs]", "---", "",
+      "# Real Issue", "",
+      "## 任务范围与验证基准",
+      "- **影响路径**：`src/app.mjs`",
+      "- **本期不做**：不动 `README.md`",
+      "## 验收标准与执行清单",
+      "- [ ] C1: `src/app.mjs` 检查通过",
+    ].join("\n"), "utf8")
+    gitCommitFast(dir, "docs: add ci-create todo", { files: [ciTodoRel], name: "alice", email: "alice@example.com" })
     const logCiPos = join(sb, "ci-pos.log")
-    const ciPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-pos", "--slug", "ci-pos", "--create-issue", "--title", "Real Issue", "--case", "3", "--implementer", "alice", "--allow-plan-bootstrap", "--json"], { cwd: dir, env: childEnv(true, logCiPos), windowsHide: true })
+    const ciPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-pos", "--slug", "ci-pos", "--create-issue", "--title", "Real Issue", "--case", "3", "--todo", ciTodoRel, "--implementer", "alice", "--allow-plan-bootstrap", "--json"], { cwd: dir, env: childEnv(true, logCiPos), windowsHide: true })
     if (ciPos.status !== 0) return `start --create-issue 正向失败(${ciPos.status})：${ciPos.stderr || ciPos.stdout}`
     const ciPosJson = JSON.parse(ciPos.stdout)
     if (ciPosJson.createdIssue?.number !== 101 || !readFileSync(logCiPos, "utf8").includes("issue create")) {
       return `start --create-issue 未走 gh-cli 建单：${ciPos.stdout}`
     }
     const logCiNeg = join(sb, "ci-neg.log")
-    const ciNeg = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-neg", "--slug", "ci-neg", "--create-issue", "--title", "Neg Issue", "--case", "3", "--allow-plan-bootstrap", "--json"], { cwd: dir, env: childEnv(false, logCiNeg), windowsHide: true })
+    const ciNeg = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-neg", "--slug", "ci-neg", "--create-issue", "--title", "Neg Issue", "--case", "3", "--todo", ciTodoRel, "--allow-plan-bootstrap", "--json"], { cwd: dir, env: childEnv(false, logCiNeg), windowsHide: true })
     if (ciNeg.status !== 4 || !ciNeg.stdout.includes("ACTION_REQUIRED_CREATE_ISSUE_DELEGATED")) {
       return `start --create-issue 反向未阻断为 exit 4：status=${ciNeg.status}, out=${ciNeg.stdout}, err=${ciNeg.stderr}`
     }
 
     // 2. review-pack.mjs record（正向 real gh-cli 双写 + 反向 offlineOrNoCreds + delegatedPayloads）
     await seedExploredFor(dir, "ci-pos")
-    const wtPos = join(dir, ".worktrees", "impl-ci-pos")
-    writeFileSync(join(wtPos, "src/app.mjs"), "export const v = 3\n")
-    gitCommitFast(wtPos, "r1", { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
-    writeTaskLedger(dir, { ...readTaskLedger(dir, "ci-pos"), prNumber: 88, linkedIssues: [77] })
     const logRecPos = join(sb, "rec-pos.log")
     runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["claim", "--task", "ci-pos", "--agent", "alice"], { cwd: dir, env: childEnv(true, logRecPos), windowsHide: true })
+    const wtPos = join(dir, ".worktrees", "impl-ci-pos")
+    writeFileSync(join(wtPos, "src/app.mjs"), "export const v = 3\n")
+    gitSync(wtPos, ["add", "-A"])
+    gitCommitFast(wtPos, "r1", { name: "alice", email: "alice@example.com" })
+    writeTaskLedger(dir, { ...readTaskLedger(dir, "ci-pos"), prNumber: 88, linkedIssues: [77] })
     const vPos1 = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", "ci-pos", "--mode", "full"], { cwd: dir })
     if (vPos1.status !== 0) return `ci-pos r1 verify 失败：status=${vPos1.status}, err=${vPos1.stderr}`
     const recPos = runAbs("kit/skills/dev-review/scripts/review-pack.mjs", [

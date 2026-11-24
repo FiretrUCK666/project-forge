@@ -12,6 +12,7 @@ import { assertNoAsciiControlChars, printNextStep, validateCrossRepoTarget } fro
 import { buildIssueCloseComment, formatAttribution } from '../../lib/doc-comments.mjs'
 import { slugify } from '../../lib/docs.mjs'
 import { formatWorkTitle } from '../../lib/escalation.mjs'
+import { extractPlanDocContext, validateIssueBodyQuality } from '../../lib/issue-quality.mjs'
 import { hydrateIssueBody } from '../../lib/issue-template-hydrate.mjs'
 import { resolveTaskContext, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { closeLocalIssue, getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
@@ -201,6 +202,77 @@ export async function handleClose(opts, roots) {
   return { exitCode: EXIT.OK }
 }
 
+function buildAndValidateIssueBody({
+  roots,
+  title,
+  issueKind,
+  caseType = undefined,
+  taskId = undefined,
+  rawExplicitBody = undefined,
+  opts = {},
+}) {
+  const workRoot = roots.workTreeRoot ?? roots.mainRoot
+  const planDocPaths = [opts.spec, opts.todo, opts.prd].filter(Boolean)
+  const planCtx = planDocPaths.length > 0
+    ? extractPlanDocContext(workRoot, planDocPaths, { mainRoot: roots.mainRoot })
+    : null
+
+  let fields
+  if (!rawExplicitBody && planCtx && planCtx.verifiedDocRefs.length > 0) {
+    const scopeFiles = opts.files || (planCtx.files.length > 0 ? planCtx.files : undefined)
+    const affectedText = (planCtx.files.length > 0 ? planCtx.files : ['见关联设计文档']).slice(0, 8).map((f) => `\`${f}\``).join('、')
+    fields = {
+      title,
+      caseType,
+      taskId,
+      summary: planCtx.summary || `依据设计文档推进「${title}」。`,
+      impact: `影响路径：${affectedText}；severity=${Number(caseType) === 4 ? 'high' : 'medium'}；范围与边界以关联设计文档为准。`,
+      files: scopeFiles,
+      docRefs: planCtx.verifiedDocRefs,
+      criteria: planCtx.criteria.length > 0 ? planCtx.criteria : undefined,
+      outOfScope: planCtx.outOfScope || '未列入关联设计文档范围与本单验收标准的无关改动。',
+    }
+  } else {
+    fields = {
+      rawBody: rawExplicitBody,
+      title,
+      caseType,
+      taskId,
+      files: opts.files,
+      summary: rawExplicitBody ? undefined : opts.summary,
+      docRefs: planCtx?.verifiedDocRefs?.length ? planCtx.verifiedDocRefs : undefined,
+    }
+  }
+
+  const body = hydrateIssueBody(roots.mainRoot, issueKind, fields).trim()
+  const quality = validateIssueBodyQuality(body, {
+    repoRoot: workRoot,
+    mainRoot: roots.mainRoot,
+    title,
+    kind: issueKind,
+    spec: opts.spec,
+    todo: opts.todo,
+    prd: opts.prd,
+    docRefs: planCtx?.verifiedDocRefs ?? [],
+  })
+  if (!quality.ok) {
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({
+        ok: false,
+        blocked: true,
+        code: quality.code,
+        exitCode: quality.exitCode,
+        missing: quality.missing,
+        reasons: quality.reasons,
+        invalidDocRefs: quality.invalidDocRefs,
+      }, null, 2)}\n`)
+    }
+    process.stderr.write(`${quality.code}: ${quality.reasons.join('；')}\n`)
+    return { ok: false, exitCode: quality.exitCode, blocked: true, code: quality.code, quality }
+  }
+  return { ok: true, body, quality }
+}
+
 /** `flow.mjs start --create-issue` 共享建单逻辑（同时打通 `maintainer` / `local-only` / `generic-git`）。 */
 export async function createIssueForStart({
   roots, state, role, providerId, prelimTaskId, caseType, opts = {},
@@ -229,21 +301,19 @@ export async function createIssueForStart({
   const rawTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
   const issueTitle = formatWorkTitle(rawTitle, caseType)
   const rawExplicitBody = resolveExplicitBodyText(roots.mainRoot, opts)
-  const docRefs = [opts.spec, opts.todo, opts.prd].filter(Boolean).map((p) => `\`${p}\``).join('、')
-  const issueBody = hydrateIssueBody(
-    roots.mainRoot,
-    caseType === 2 ? 'bug' : 'feature',
-    {
-      rawBody: rawExplicitBody,
-      title: rawTitle,
-      caseType,
-      taskId: opts.task ?? slugify(opts.slug ?? rawTitle),
-      summary: `推进「${rawTitle}」任务（Case ${caseType}）。`,
-      docRefs,
-      files: opts.files,
-      criteria: [`完成「${rawTitle}」实现并通过对应正反双向测试与完整门禁`],
-    },
-  ).trim()
+  const built = buildAndValidateIssueBody({
+    roots,
+    title: rawTitle,
+    issueKind: caseType === 2 ? 'bug' : 'feature',
+    caseType,
+    taskId: opts.task ?? slugify(opts.slug ?? rawTitle),
+    rawExplicitBody,
+    opts,
+  })
+  if (!built.ok) {
+    return { exitCode: built.exitCode, blocked: true, code: built.code }
+  }
+  const issueBody = built.body
   const issueLabels = parseCsvList(opts.labels)
   const milestone = await resolveMilestoneId(
     backend,
@@ -292,9 +362,31 @@ export async function handleIssue(opts, roots) {
   }
 
   if (action === 'create') {
+    if (opts.mode !== undefined) {
+      const msg = 'issue create 采用单一平台中性质量契约，不支持 --mode 双轨参数'
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, error: msg }, null, 2)}\n`)
+      process.stderr.write(`Error: ${msg}\n`)
+      return { exitCode: EXIT.USAGE }
+    }
     const rawTitle = String(opts.title ?? pos[1] ?? '').trim()
     if (!rawTitle) throw new Error('issue create 需要传入 --title "<标题>"')
     const title = opts.case !== undefined ? formatWorkTitle(rawTitle, Number(opts.case)) : rawTitle
+    const createCase = opts.case !== undefined ? Number(opts.case) : undefined
+    const createLabels = parseCsvList(opts.labels)
+    const issueKind = createCase === 2 || createLabels.some((l) => /bug|fix|defect/i.test(l)) ? 'bug' : 'feature'
+    const explicitBody = resolveExplicitBodyText(roots.mainRoot, opts)
+    const built = buildAndValidateIssueBody({
+      roots,
+      title: rawTitle,
+      issueKind,
+      caseType: createCase,
+      rawExplicitBody: explicitBody,
+      opts,
+    })
+    if (!built.ok) {
+      return { exitCode: built.exitCode, blocked: true, code: built.code }
+    }
+    const body = built.body
     const ghProbe = useRemoteGh
       ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} })))
       : null
@@ -302,16 +394,6 @@ export async function handleIssue(opts, roots) {
       role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
     })
     const milestone = await resolveMilestoneId(backend, targetRepo, opts.milestone)
-    const createCase = opts.case !== undefined ? Number(opts.case) : undefined
-    const createLabels = parseCsvList(opts.labels)
-    const issueKind = createCase === 2 || createLabels.some((l) => /bug|fix|defect/i.test(l)) ? 'bug' : 'feature'
-    const explicitBody = resolveExplicitBodyText(roots.mainRoot, opts)
-    const body = hydrateIssueBody(roots.mainRoot, issueKind, {
-      rawBody: explicitBody,
-      title: rawTitle,
-      caseType: createCase,
-      summary: explicitBody ? undefined : `创建工单「${rawTitle}」。`,
-    }).trim()
     const res = await backend.createIssue({
       repo: targetRepo,
       title,

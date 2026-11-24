@@ -53,6 +53,7 @@ export async function handleAudit(opts, roots) {
   const duplicateFlows = []
   const flowOwner = new Map()
 
+  const selfRefreshId = String(process.env.PF_VERIFY_SELF_REFRESH_TOOL_ID ?? '').trim()
   for (const f of map.features) {
     for (const p of [...f.entrypoints, ...f.modules, ...f.testRefs]) {
       if (!p.endsWith('/') && !existsSync(join(workRoot, p))) {
@@ -87,7 +88,10 @@ export async function handleAudit(opts, roots) {
       const staleRes = await evaluateToolStaleness({
         repoRoot: workRoot, gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot, feature: f, tool, baseRef,
       })
-      if (staleRes.status === 'stale' || staleRes.status === 'missing-script') staleTools.push(staleRes)
+      if ((staleRes.status === 'stale' || staleRes.status === 'missing-script')
+        && !(selfRefreshId && tool.id === selfRefreshId && staleRes.status === 'stale')) {
+        staleTools.push(staleRes)
+      }
     }
   }
 

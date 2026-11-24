@@ -142,6 +142,13 @@ function buildToolCommand(tool, taskId) {
   return cmd
 }
 
+function isSelfAuditTool(tool, taskId) {
+  if (!tool) return false
+  if (tool.id === 'verify-tools-self-audit') return true
+  const cmd = buildToolCommand(tool, taskId)
+  return /\bverify-tools\.mjs\b[\s"']*audit\b/i.test(cmd)
+}
+
 function emitOut(opts, payload, lines) {
   if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
   else process.stdout.write(`${lines.join('\n')}\n`)
@@ -518,6 +525,13 @@ export async function handleRun(opts, roots) {
     emitOut(opts, payload, [`[verify-tools run --stale] ALL_FRESH（无过期或无基线验证工具，source=${mapSource}）`])
     return { exitCode: EXIT.OK, ...payload }
   }
+  if (staleOnly && candidateEntries.length > 1) {
+    candidateEntries.sort((a, b) => {
+      const aSelf = isSelfAuditTool(a.tool, taskId) ? 1 : 0
+      const bSelf = isSelfAuditTool(b.tool, taskId) ? 1 : 0
+      return aSelf - bSelf
+    })
+  }
 
   const results = []
   let blockedCode = null
@@ -585,6 +599,10 @@ export async function handleRun(opts, roots) {
 
     const cmdToRun = (staleness.status === 'stale' && liveE2eCmd) ? liveE2eCmd : buildToolCommand(tool, taskId)
     const usedLiveOverride = Boolean(staleness.status === 'stale' && liveE2eCmd)
+    const willRefreshSelf = Boolean(
+      isSelfAuditTool(tool, taskId)
+      && (refreshBaseline || staleOnly || (!usedLiveOverride && staleness.status === 'unbaselined')),
+    )
     let execRes
     let durationMs = 0
     if (staleOnly && cmdExecCache.has(cmdToRun)) {
@@ -593,7 +611,12 @@ export async function handleRun(opts, roots) {
       const t0 = performance.now()
       execRes = await execShellCommand(cmdToRun, workRoot, {
         timeout: 300000,
-        env: { ...wtEnv, PF_VERIFY_TASK_ID: taskId, PF_VERIFY_SCRATCH_DIR: resolveTaskScratchDir(roots.gitDir, taskId, roots.mainRoot) },
+        env: {
+          ...wtEnv,
+          PF_VERIFY_TASK_ID: taskId,
+          PF_VERIFY_SCRATCH_DIR: resolveTaskScratchDir(roots.gitDir, taskId, roots.mainRoot),
+          ...(willRefreshSelf ? { PF_VERIFY_SELF_REFRESH_TOOL_ID: tool.id } : {}),
+        },
       })
       durationMs = Math.round(performance.now() - t0)
       if (staleOnly) cmdExecCache.set(cmdToRun, execRes)

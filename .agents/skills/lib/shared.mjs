@@ -424,3 +424,10 @@ export {
   extractDocPaths,
   formatContextBriefLines,
 } from './context-brief.mjs'
+
+export {
+  ISSUE_QUALITY_RULES,
+  extractPlanDocContext,
+  extractPlanDocRefsFromText,
+  validateIssueBodyQuality,
+} from './issue-quality.mjs'

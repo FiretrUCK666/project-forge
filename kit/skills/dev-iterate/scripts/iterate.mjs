@@ -644,6 +644,8 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
           title: `dev-iterate cycle stop-loss (${plan.stopReason}): ${plan.goal || 'iteration loop'}`,
           summary: plan.stopDetail ?? `Stopped at round ${plan.roundsCompleted}`,
           rootCause: plan.stopDetail ?? `Cycle stopped by ${plan.stopReason}`,
+          reproEvidence: `roundsCompleted=${plan.roundsCompleted}, stopReason=${plan.stopReason}`,
+          pocCommand: 'node ".agents/skills/dev-iterate/scripts/iterate.mjs" plan --json',
           files: [],
           labels: ['dev-iterate', 'stop-loss'],
         },

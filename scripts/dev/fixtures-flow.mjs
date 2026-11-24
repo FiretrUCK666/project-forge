@@ -156,12 +156,13 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
   try {
     // 预先建一份 Todo，测试 start --create-issue 自动建单并联动重命名 todo 文件
     const gwInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 'gw-feat', '--title', 'Gateway 功能', '--owner', 'planner', '--in-place', '--json'], { cwd: dir })
+    let gwTodo
     if (gwInit.status === 0) {
-      const gwTodo = JSON.parse(gwInit.stdout).file
+      gwTodo = JSON.parse(gwInit.stdout).file
       if (gwTodo) { hydrateGeneratedDoc(join(dir, gwTodo), { filled: 'src/app.mjs', criteria: ['`src/app.mjs` ok'] }); gitCommitFast(dir, 'docs: gw todo') }
     }
     const roots = await resolveRepoRoots(dir)
-    const stRes = await handleStart({ 'create-issue': true, title: 'Gateway 功能', slug: 'gw-feat', case: '3', 'allow-plan-bootstrap': true, json: true, _ghClient: client }, roots)
+    const stRes = await handleStart({ 'create-issue': true, title: 'Gateway 功能', slug: 'gw-feat', case: '3', ...(gwTodo ? { todo: gwTodo } : {}), 'allow-plan-bootstrap': true, json: true, _ghClient: client }, roots)
     if (stRes.exitCode !== 0) return `start --create-issue 失败：exit=${stRes.exitCode}`
     const implAbs = join(dir, '.worktrees/impl-gw-feat')
     const ledger = JSON.parse(readFileSync(join(dir, '.worktrees/.state/tasks/gw-feat.json'), 'utf8'))

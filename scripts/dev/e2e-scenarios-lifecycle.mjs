@@ -388,7 +388,19 @@ async function runScenarioH(pkgRoot, sandbox, baseEnv, helpers) {
 
   const flowH = join(repoH, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revH = join(repoH, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
-  assertOk(runNodeScript(flowH, ['issue', 'create', '--title', '本地起步需求', '--json'], repoH, baseEnv), 'Scenario H local issue')
+  const hIssueBody = [
+    '## 背景与现象',
+    '`src/app.mjs:1` 返回值需要本地起步需求验证与远端迁移。',
+    '## 影响面与严重度',
+    '影响 `src/app.mjs`；severity=medium；无数据持久化或安全边界破坏。',
+    '## 期望与方案',
+    '修改后运行 `node test/smoke.mjs` 输出 `H_SMOKE_OK`。',
+    '## 验收标准',
+    '- [ ] C1: 运行 `node test/smoke.mjs` 退出码 0',
+    '## 不在本次范围',
+    '不动 `README.md`。',
+  ].join('\n')
+  assertOk(runNodeScript(flowH, ['issue', 'create', '--title', '本地起步需求', '--body', hIssueBody, '--json'], repoH, baseEnv), 'Scenario H local issue')
   if (runGit(repoH, ['status', '--porcelain']).stdout.trim()) throw new Error('Scenario H local issue dirtied git status')
 
   assertOk(runNodeScript(flowH, ['start', '--task', 'h1', '--case', '2', '--issue', '1', '--implementer', 'alice'], repoH, baseEnv), 'Scenario H h1 start')
@@ -403,7 +415,7 @@ async function runScenarioH(pkgRoot, sandbox, baseEnv, helpers) {
   assertOk(runNodeScript(flowH, ['merge', '--task', 'h1'], repoH, baseEnv), 'Scenario H h1 merge')
   helpers.cleanupWithHash(flowH, 'h1', repoH, baseEnv, 'Scenario H h1 cleanup')
 
-  assertOk(runNodeScript(flowH, ['issue', 'create', '--title', '待迁移本地单', '--milestone', 'v9-H', '--json'], repoH, baseEnv), 'Scenario H local issue #2')
+  assertOk(runNodeScript(flowH, ['issue', 'create', '--title', '待迁移本地单', '--body', hIssueBody, '--milestone', 'v9-H', '--json'], repoH, baseEnv), 'Scenario H local issue #2')
 
   // 添加 bare 远端 + HTTP mock GitHub -> create milestone -> migrate -> prefix/labels/milestone -> mergePr 504 alreadyMerged recovery
   const bareH = join(sandbox, 'bare-h.git')

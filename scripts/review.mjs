@@ -47,8 +47,8 @@ function finding(level, scope, id, title, extra = {}) {
  * 每条判据都必须给 `id` 与 `scope`——`id` 是「决定写在哪」的键，`scope` 是
  * `--scope` 局部验收的切面。没有 id 的结论就没法在项目里表态，也就永远消不掉。
  */
-export async function reviewProject(targetDir, { scopes } = {}) {
-  const facts = await survey(targetDir)
+export async function reviewProject(targetDir, { scopes, facts: precomputedFacts } = {}) {
+  const facts = precomputedFacts ?? await survey(targetDir)
   const root = facts.target.path
   const wants = (face) => !scopes || scopes.has(face)
 

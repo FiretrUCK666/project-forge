@@ -139,7 +139,19 @@ export async function runEvolutionBlindMatrix(tracker, sandbox, envExtra) {
 
     // Zero-Hint Scenario 1 & 3: Milestone natural-language flow + dev-iterate Day-2 native test generation (isolated worktree)
     const msCreate = runNode(flow, ['milestone', 'create', '--title', 'v10-GA', '--json'], dir, envExtra)
-    const issCreate = runNode(flow, ['issue', 'create', '--title', 'feat: add scheduler regression', '--milestone', '1', '--json'], dir, envExtra)
+    const issBody = [
+      '## 背景与现象',
+      '`src/scheduler.mjs:1` 缺少调度回归测试覆盖。',
+      '## 影响面与严重度',
+      '影响 `src/scheduler.mjs`；severity=medium；仅测试与调度逻辑，不触及安全与数据存储。',
+      '## 期望与方案',
+      '补充集成测试并执行 `node .agents/skills/dev-iterate/scripts/iterate.mjs run` 验证通过。',
+      '## 验收标准',
+      '- [ ] C1: 调度集成测试通过且 `iterate run` 退出码 0',
+      '## 不在本次范围',
+      '不动 `README.md`。',
+    ].join('\n')
+    const issCreate = runNode(flow, ['issue', 'create', '--title', 'feat: add scheduler regression', '--body', issBody, '--milestone', '1', '--json'], dir, envExtra)
     const iterMainBlocked = runNode(iterScript, ['generate', dir, '--focus', 'scheduler', '--tier', 'integration', '--write', '--json'], dir, envExtra)
     const iterWt = join(sandbox, 'wt-matrix-iterate')
     spawnSync('git', ['worktree', 'add', '-b', 'feat/matrix-iterate', iterWt, 'HEAD'], { cwd: dir, env: envExtra, stdio: 'pipe' })

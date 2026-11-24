@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Case 2/3/4 开工确定性 Issue 绑定闭环
-status: draft
+status: approved
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -10,32 +10,13 @@ pr: null
 branch: feat/deterministic-issue-binding
 owner: plan-issue-bind
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-issue-bind, round=1, sha=b5391c0eaea2, summary=独立只读 Critique 通过：SPEC 与 Todo 的 73 项路径/符号（68 已有 + 5 明确新增）、8 类豁免边界、先复用不重复、Case 3/4 质量建单回链、Case 2 BLOCKED_MISSING_ISSUE_BINDING 阻断、flow-inspect.mjs<=800 行（当前792行）、CONTENT_BODY_SUBCOMMANDS 与 cli-parity 对齐、C1-C4 双向夹具及故障注入预演均自洽可执行。)"
 related_prd: null
 related_todo: ../todo/261124-deterministic-issue-binding-todo.md
-scope_files:
-  - kit/skills/lib/exit-codes.mjs
-  - kit/skills/dev-flow/scripts/flow.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - kit/skills/dev-flow/scripts/flow-issues.mjs
-  - kit/skills/dev-flow/SKILL.md
-  - references/collaboration.md
-  - templates/agents-project.md
-  - AGENTS.md
-  - docs/TDD.md
-  - docs/feature-map.json
-high_risk_paths:
-  - kit/skills/lib/exit-codes.mjs
-  - kit/skills/dev-flow/scripts/flow.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - kit/skills/dev-flow/scripts/flow-issues.mjs
-  - kit/skills/dev-flow/SKILL.md
-  - templates/agents-project.md
-  - AGENTS.md
+high_risk_paths: [kit/skills/lib/exit-codes.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-flow/scripts/flow-issues.mjs, kit/skills/dev-flow/SKILL.md, templates/agents-project.md, AGENTS.md]
+scope_files: [kit/skills/lib/exit-codes.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-flow/scripts/flow-issues.mjs, kit/skills/dev-flow/SKILL.md, references/collaboration.md, templates/agents-project.md, AGENTS.md, docs/TDD.md, docs/feature-map.json]
 ---
 
 # Case 2/3/4 开工确定性 Issue 绑定闭环 — 功能设计规范（SPEC）
@@ -44,13 +25,13 @@ high_risk_paths:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块状态机、退出码与协作契约变更；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/deterministic-issue-binding` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-issue-bind / `pending` |
+| 负责人 / 内审状态 | plan-issue-bind / `passed` |
 | 规划态 | `interactive`（单向门与 L3 契约变更） |
-| 关联 PRD / Todo | 无（单切片装得下）/ `docs/todo/261124-deterministic-issue-binding-todo.md` |
+| 关联 PRD / Todo | 无（单切片装得下）/ `docs/todo/261124-deterministic-issue-binding-todo.md` / `../todo/261124-deterministic-issue-binding-todo.md` |
 
 - **变更一句话**：为 `flow.mjs start` 的 `Case 2/3/4` 建立「豁免边界 -> 复用不重 -> 质量建单回链 -> `BLOCKED_MISSING_ISSUE_BINDING` 硬阻断」的确定性 Issue 绑定闭环，打通 `--no-issue --reason` / `--body` / `--body-file` 与 `AGENTS.md` `no-auto-issue` 取舍键并同步全仓测试夹具与契约。
 

@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: Case 2/3/4 开工确定性 Issue 绑定闭环
-status: draft
+status: active
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-deterministic-issue-binding-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/deterministic-issue-binding` @ `5c10a03` |
 | 任务编号 | `deterministic-issue-binding` |
 | 负责人 / 审批 | plan-issue-bind / `false` |
 | 规划态 | `interactive`（单向门，与 SPEC 对齐） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/specs/261124-deterministic-issue-binding-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-deterministic-issue-binding-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -75,7 +75,7 @@ related_spec: ../specs/261124-deterministic-issue-binding-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`draft`（规划起草完毕，待 `doc-plan.mjs audit` 核验后移交独立 Critique 与 `approve`）
+- **当前状态**：`进行中`（规划起草完毕，待 `doc-plan.mjs audit` 核验后移交独立 Critique 与 `approve`）
 - **待拍板事项**：无
 - **下一步第一件事**：由独立 Critique 评审本 SPEC 与 Todo，获批后实施者转入实施认领并按 Red-Green 顺序推进。
 

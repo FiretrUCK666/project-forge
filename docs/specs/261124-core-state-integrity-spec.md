@@ -12,40 +12,13 @@ owner: planner-conv-arch
 plan_mode: interactive
 approved: false
 implemented: false
-plan_critique: pending
-task_id: core-state-integrity
+plan_critique: "passed (reviewer=critic-conv-arch-r2, round=2, sha=157a23dee0ff, summary=Round 2 复核通过：R1 minor 路径锚点（flow-lifecycle-hooks.mjs checkTaskSlotBoundaryOrEmit）已闭环，新增 planBootstrap 一等态、Part of #N、BLOCKED_MALFORMED_MARKDOWN_BODY、统一 C* 提取与 --summary 渲染、claim --agent 对齐及默认 feature-map 双向/Case 2 守卫均锚定真实源码且与 Todo 及总控 PRD C1..C4 一致，具备正反双向 fixture 可测性)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
 related_todo: ../todo/261124-core-state-integrity-todo.md
+high_risk_paths: [kit/]
+task_id: core-state-integrity
 depends_on: []
-scope_files:
-  - kit/skills/dev-plan/scripts/doc-plan-ops.mjs
-  - kit/skills/lib/critique-store.mjs
-  - kit/skills/lib/critique-rounds.mjs
-  - kit/skills/lib/critique-diff.mjs
-  - kit/skills/lib/plan-next.mjs
-  - kit/skills/dev-flow/scripts/flow-sync.mjs
-  - kit/skills/dev-flow/scripts/flow-merge.mjs
-  - kit/skills/dev-flow/scripts/flow-merge-claim.mjs
-  - kit/skills/dev-flow/scripts/flow-cleanup.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs
-  - kit/skills/dev-flow/scripts/flow-start-helpers.mjs
-  - kit/skills/dev-explore/scripts/repo-map.mjs
-  - kit/skills/dev-review/scripts/review-pack.mjs
-  - kit/skills/dev-review/scripts/review-diff.mjs
-  - kit/skills/dev-review/scripts/review-ledger.mjs
-  - kit/skills/dev-review/scripts/review-locks.mjs
-  - kit/skills/dev-review/scripts/review-empirical.mjs
-  - kit/skills/lib/criteria-lock.mjs
-  - kit/skills/lib/handoff-package.mjs
-  - kit/skills/lib/pr-template-hydrate.mjs
-  - kit/skills/lib/github-client.mjs
-  - kit/skills/lib/review-comment-render.mjs
-  - scripts/dev/fixtures*.mjs
-high_risk_paths:
-  - kit/
+scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/critique-store.mjs, kit/skills/lib/critique-rounds.mjs, kit/skills/lib/critique-diff.mjs, kit/skills/lib/plan-next.mjs, kit/skills/dev-flow/scripts/flow-sync.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-flow/scripts/flow-merge-claim.mjs, kit/skills/dev-flow/scripts/flow-cleanup.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-diff.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/lib/criteria-lock.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/pr-template-hydrate.mjs, kit/skills/lib/github-client.mjs, kit/skills/lib/review-comment-render.mjs, "scripts/dev/fixtures*.mjs"]
 ---
 
 # 核心状态完整性与工作流闭环加固 — 功能设计规范（SPEC）

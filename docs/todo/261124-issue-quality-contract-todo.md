@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 单一平台中性 Issue 质量契约与门禁
-status: draft
+status: active
 created: 2026-11-24
 updated: 2026-11-24
 issue: null
@@ -23,13 +23,13 @@ related_spec: ../specs/261124-issue-quality-contract-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / 基线 | `feat/issue-quality-contract` @ `35917ac` |
 | 任务编号 | `issue-quality-contract` |
 | 负责人 / 审批 | plan-issue-contract / `false` |
 | 规划态 | `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/specs/261124-issue-quality-contract-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261124-issue-quality-contract-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -70,7 +70,7 @@ related_spec: ../specs/261124-issue-quality-contract-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`draft`（等待独立 Critique 与 `approve`）
+- **当前状态**：`进行中`（等待独立 Critique 与 `approve`）
 - **待拍板事项**：无
 - **下一步第一件事**：由独立 Critique 评审 `docs/specs/261124-issue-quality-contract-spec.md` 与本 Todo 并由维护者 `approve` 后转入实施。
 

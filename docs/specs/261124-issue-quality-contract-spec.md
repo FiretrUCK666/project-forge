@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 单一平台中性 Issue 质量契约与门禁
-status: draft
+status: approved
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -10,47 +10,15 @@ pr: null
 branch: feat/issue-quality-contract
 owner: plan-issue-contract
 plan_mode: autonomous
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-issue-contract, round=1, sha=fd67be4f25e2, summary=Round 1 critique passed: verified 80 mechanical facts via critique-scope (73 existing symbols/paths match codebase, 7 planned new symbols/injection fixture path), single hydrateIssueBody->validateIssueBodyQuality->TaskBackend.createIssue channel with 5-item structural baseline, no --mode split, no length dead-lines, no platform/host binding, C1..C5 falsifiable, verify-tools run --stale self-audit post-ordering, existing fixture upgrades, equip/compose-agents sync, bidirectional fixtures & 5 fault injections, and <=800-line constraint.)"
 related_prd: null
 related_todo: ../todo/261124-issue-quality-contract-todo.md
+high_risk_paths: [kit/, templates/, AGENTS.md]
 task_id: issue-quality-contract
-scope_files:
-  - kit/skills/lib/issue-quality.mjs
-  - kit/skills/lib/issue-template-hydrate.mjs
-  - kit/skills/lib/escalation.mjs
-  - kit/skills/lib/exit-codes.mjs
-  - kit/skills/dev-flow/scripts/flow-issues.mjs
-  - kit/skills/dev-flow/scripts/flow.mjs
-  - kit/skills/dev-govern/scripts/govern-audit.mjs
-  - kit/skills/dev-govern/scripts/govern-state.mjs
-  - kit/skills/dev-verify-tools/scripts/verify-tools.mjs
-  - kit/skills/dev-flow/SKILL.md
-  - kit/skills/dev-govern/SKILL.md
-  - templates/issue-bug-report.md
-  - templates/issue-feature-request.md
-  - .github/ISSUE_TEMPLATE/bug_report.md
-  - .github/ISSUE_TEMPLATE/feature_request.md
-  - docs/TDD.md
-  - docs/feature-map.json
-  - references/docs-set.md
-  - references/collaboration.md
-  - AGENTS.md
-  - .agents/skills/**
-  - scripts/dev/fixtures-issue-quality.mjs
-  - scripts/dev/injections-data-issue-quality.mjs
-  - scripts/dev/fixtures-trace-sync.mjs
-  - scripts/dev/fixtures-local-backend.mjs
-  - scripts/dev/fixtures-escalation-stoploss.mjs
-  - scripts/dev/fixtures-handoff-review.mjs
-  - scripts/dev/fixtures-flow.mjs
-  - scripts/dev/fixtures-repo-alignment.mjs
+scope_files: [kit/skills/lib/issue-quality.mjs, kit/skills/lib/issue-template-hydrate.mjs, kit/skills/lib/escalation.mjs, kit/skills/lib/exit-codes.mjs, kit/skills/dev-flow/scripts/flow-issues.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-govern/scripts/govern-state.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-flow/SKILL.md, kit/skills/dev-govern/SKILL.md, templates/issue-bug-report.md, templates/issue-feature-request.md, .github/ISSUE_TEMPLATE/bug_report.md, .github/ISSUE_TEMPLATE/feature_request.md, docs/TDD.md, docs/feature-map.json, references/docs-set.md, references/collaboration.md, AGENTS.md, ".agents/skills/**", scripts/dev/fixtures-issue-quality.mjs, scripts/dev/injections-data-issue-quality.mjs, scripts/dev/fixtures-trace-sync.mjs, scripts/dev/fixtures-local-backend.mjs, scripts/dev/fixtures-escalation-stoploss.mjs, scripts/dev/fixtures-handoff-review.mjs, scripts/dev/fixtures-flow.mjs, scripts/dev/fixtures-repo-alignment.mjs]
 depends_on: []
-high_risk_paths:
-  - kit/
-  - templates/
-  - AGENTS.md
 ---
 
 # 单一平台中性 Issue 质量契约与门禁 — 功能设计规范（SPEC）
@@ -59,13 +27,13 @@ high_risk_paths:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/issue-quality-contract` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-issue-contract / `pending` |
+| 负责人 / 内审状态 | plan-issue-contract / `passed` |
 | 规划态 | `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | 无（单 SPEC 可覆盖） / `docs/todo/261124-issue-quality-contract-todo.md` |
+| 关联 PRD / Todo | 无（单 SPEC 可覆盖） / `../todo/261124-issue-quality-contract-todo.md` |
 
 - **变更一句话**：建立全托管建单入口唯一共用的 `hydrateIssueBody -> validateIssueBodyQuality -> TaskBackend.createIssue` 平台中性质量契约（5 项结构底线 + 自动查盘依据判定 + 富证据建单 + `BLOCKED_ISSUE_QUALITY_INCOMPLETE` 阻断），并修复 `verify-tools.mjs run --stale` 自检排序使单条命令一次全绿。
 

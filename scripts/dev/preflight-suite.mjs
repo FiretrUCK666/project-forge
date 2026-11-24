@@ -462,12 +462,13 @@ function walkDirFiles(dir, pred, out = []) {
 }
 
 /** 扫描 `kit/` 下全部 `.mjs` 与 `.md`，拦截本仓私有脚本、测试夹具及固定锚点泄漏。 */
-export function scanKitPrivateLeaks(ROOT) {
+export function scanKitPrivateLeaks(ROOT, readTextFn = null) {
   const leaks = []
   const files = walkDirFiles(join(ROOT, 'kit'), (f) => /\.(?:md|mjs)$/i.test(f))
+  const readRaw = typeof readTextFn === 'function' ? readTextFn : (abs) => readFileSync(abs, 'utf8')
   for (const abs of files) {
     const name = abs.slice(ROOT.length + 1).replace(/\\/g, '/')
-    const text = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
+    const text = readRaw(abs).replace(/\r\n/g, '\n')
     const lines = text.split('\n')
     const isMjs = name.endsWith('.mjs')
     const codeLines = isMjs ? buildLexedViews(text, 'mjs').codeLines : lines
@@ -509,7 +510,7 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
       if (m) fail(`${name} 第 ${i + 1} 行泄露了本仓私有路径「${m[0]}」——用户包里不存在该路径`)
     }
   }
-  for (const leak of scanKitPrivateLeaks(ROOT)) {
+  for (const leak of scanKitPrivateLeaks(ROOT, readText)) {
     fail(`内置套件自用泄漏：${leak}`)
   }
 
@@ -554,9 +555,11 @@ function checkHygiene({ ROOT, rel, walk, fail, changedSet }) {
     .filter((f) => !changedSet || changedSet.has(rel(f)))
   const home = homedir().replace(/\\/g, '/')
   const homeRe = home.length > 4 ? new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : undefined
+  const rawByFile = new Map()
   for (const file of files) {
     const name = rel(file)
     const raw = readFileSync(file, 'utf8')
+    rawByFile.set(file, raw)
     if (raw.startsWith('\uFEFF')) fail(`${name} 有 UTF-8 BOM`)
     if (EMOJI_RE.test(raw)) fail(`${name} 有 emoji 字符`)
     if (homeRe && homeRe.test(raw)) fail(`${name} 里有本机绝对路径`)
@@ -589,7 +592,7 @@ function checkHygiene({ ROOT, rel, walk, fail, changedSet }) {
     // 夹具的存在意义就是装错的样本：刻意保留履历例句是为了证明检测器抓得到。
     // 用同一条规则去判它，等于要求测谎仪自己不能说谎。
     if (/^scripts\/dev\/fixtures-[^/]+\.mjs$/.test(name)) continue
-    for (const hit of findChangelogVoice(readFileSync(file, 'utf8'), { file: name })) found.push(hit)
+    for (const hit of findChangelogVoice(rawByFile.get(file) ?? readFileSync(file, 'utf8'), { file: name })) found.push(hit)
   }
   const fresh = findNewChangelogVoice(found, baseline)
   for (const hit of fresh.slice(0, 5)) {
@@ -715,6 +718,8 @@ function checkExitCodeParity({ ROOT, readText, walk, fail, note }) {
   }
 }
 
+const yieldEventLoop = () => new Promise((resolveLoop) => setImmediate(resolveLoop))
+
 export async function runSuiteChecks(ctx) {
   const filterChanged = (abs) => !ctx.changedSet || ctx.changedSet.has(ctx.rel(abs))
   const allMjs = [
@@ -722,12 +727,13 @@ export async function runSuiteChecks(ctx) {
     ...ctx.walk(join(ctx.ROOT, 'kit', 'skills'), (f) => f.endsWith('.mjs')),
   ]
   const syntaxTargets = [...new Set(allMjs)].filter(filterChanged)
-  const syntaxErrors = await batchSyntaxCheck(syntaxTargets)
-  checkScripts(ctx, syntaxErrors)
+  // 语法检查走独立子进程，先发后等使其与无依赖的同步主线程检查重叠执行；
+  // 先行 await 平台语义对齐并在分片间让出事件循环，让并行 E2E 子进程得以持续推进。
+  const syntaxPromise = batchSyntaxCheck(syntaxTargets)
+  await checkPlatformSemanticParity(ctx)
   checkArchBoundaries(ctx)
   checkDevProfileParity(ctx)
   checkOrphanScripts(ctx)
-  await checkPlatformSemanticParity(ctx)
   checkOwnInstances(ctx)
   checkTeamAndTddContracts(ctx)
   checkEvergreenFreshness(ctx)
@@ -735,13 +741,19 @@ export async function runSuiteChecks(ctx) {
   checkTemplates(ctx)
   checkPlatformLock(ctx)
   checkStructureRules(ctx)
-  checkKitSuite(ctx, syntaxErrors)
+  await yieldEventLoop()
   checkCliParity(ctx)
   const subParity = evaluateSubcommandParity(ctx.ROOT)
   for (const message of subParity.failures) ctx.fail(`子命令对拍：${message}`)
   if (subParity.ok) ctx.note(`子命令对拍：${subParity.notes.join('、')} 全部与 SUBCOMMAND_META 对齐`)
   checkExitCodeParity(ctx)
+  await yieldEventLoop()
   checkKitWriteProbes(ctx)
   runKernelParityChecks(ctx)
+  await yieldEventLoop()
   checkHygiene(ctx)
+  const syntaxErrors = await syntaxPromise
+  checkScripts(ctx, syntaxErrors)
+  await yieldEventLoop()
+  checkKitSuite(ctx, syntaxErrors)
 }

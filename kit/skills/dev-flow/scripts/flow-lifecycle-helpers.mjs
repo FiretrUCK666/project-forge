@@ -190,7 +190,7 @@ export async function handleForkFinalize({ implRoot, roots, ledger, taskId, stZ,
 export function evaluateFlowMasterPrdGate(implRoot, {
   prdRel, specRel, todoRel, includeMasterPrd = false, ledger = null, isVerify = false, taskId = '',
 } = {}) {
-  if (!prdRel) return { blocked: false, checkPrdInFinalize: false, closure: null }
+  if (!prdRel || ledger?.planBootstrap === true) return { blocked: false, checkPrdInFinalize: false, closure: null }
   const closure = evaluateMasterPrdClosureState(implRoot, prdRel, {
     currentSpecRel: specRel, currentTodoRel: todoRel, includeMasterPrd,
   })
@@ -524,7 +524,7 @@ export function validatePlanningReadyForFinalize({ implRoot, ledger, taskId, spe
     taskId,
     issue: ledger?.linkedIssues?.[0] ?? null,
     docs: { spec: specRel, todo: todoRel, prd: prdRel },
-    allowBootstrap: false,
+    allowBootstrap: Boolean(ledger?.planBootstrap),
     planCritique: ledger?.planCritique ?? null,
   })
   if (planGate.blocked) return planGate
@@ -721,4 +721,53 @@ export async function collectTaskRuntimeSnapshot({
     nonDocChangesAfterFinalize, commitsAheadOfBase, opInProgress: Boolean(op.inProgress), opName: op.op ?? null,
     mergeState, taskRuntime, evaluated, phase: evaluated?.phase ?? null, profile, hasDevReview: effectiveHasDevReview,
   }
+}
+
+/**
+ * `planBootstrap` 提审时，将实际生成的 PRD 与切片 SPEC/Todo 列表同步写回关联总控 Issue，
+ * 替换占位产物描述并保留人类手写的其余正文。
+ */
+export async function syncBootstrapMasterIssueArtifacts({
+  backend, targetRepo, linkedIssues = [], ledger, changedFiles = [],
+} = {}) {
+  if (!ledger?.planBootstrap || !backend || !targetRepo || linkedIssues.length === 0) return []
+  const docs = [...new Set([
+    ledger.prdFile,
+    ledger.specFile,
+    ledger.todoFile,
+    ...(Array.isArray(changedFiles) ? changedFiles.map((f) => posixPath(f)).filter((f) => /^docs\/(?:prd|specs|todo)\/.*\.md$/.test(f)) : []),
+  ].filter(Boolean))].sort()
+  if (docs.length === 0) return []
+
+  const section = [
+    '## 规划产出文档',
+    '',
+    '<!-- pf:bootstrap-artifacts:begin -->',
+    ...docs.map((d) => `- \`${d}\``),
+    '<!-- pf:bootstrap-artifacts:end -->',
+  ].join('\n')
+
+  const out = []
+  for (const iss of linkedIssues) {
+    if (typeof backend.getIssue !== 'function' || typeof backend.updateIssueBody !== 'function') break
+    const got = await Promise.resolve(backend.getIssue(targetRepo, iss)).catch(() => null)
+    if (!got?.ok) continue
+    const curBody = String(got.body ?? '').replace(/\r\n/g, '\n')
+    let nextBody = curBody
+    if (/<!--\s*pf:bootstrap-artifacts:begin\s*-->[\s\S]*?<!--\s*pf:bootstrap-artifacts:end\s*-->/.test(curBody)) {
+      nextBody = curBody.replace(
+        /<!--\s*pf:bootstrap-artifacts:begin\s*-->[\s\S]*?<!--\s*pf:bootstrap-artifacts:end\s*-->/,
+        ['<!-- pf:bootstrap-artifacts:begin -->', ...docs.map((d) => `- \`${d}\``), '<!-- pf:bootstrap-artifacts:end -->'].join('\n'),
+      )
+    } else if (/^##\s+规划产出文档\s*$/m.test(curBody)) {
+      nextBody = curBody.replace(/^##\s+规划产出文档\s*\n[\s\S]*?(?=\n##\s+|$)/m, `${section}\n`)
+    } else {
+      nextBody = curBody.trim() ? `${curBody.trimEnd()}\n\n${section}\n` : `${section}\n`
+    }
+    if (nextBody !== curBody) {
+      const up = await Promise.resolve(backend.updateIssueBody({ repo: targetRepo, number: iss, body: nextBody })).catch((err) => ({ ok: false, error: err?.message }))
+      out.push({ issue: iss, updated: Boolean(up?.ok), docs })
+    }
+  }
+  return out
 }

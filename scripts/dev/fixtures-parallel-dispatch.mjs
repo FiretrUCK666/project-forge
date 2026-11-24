@@ -271,9 +271,18 @@ export function registerParallelDispatchCases(cases) {
       const { entry } = readPlanCritiqueEntrySync({ repoRoot: wt, mainRoot: dir, taskId: 'c3-t', relDoc: specRel })
       if (!entry || entry.rounds?.length !== 3) return `ledger.planCritique 未保存 3 轮记录：${JSON.stringify(entry)}`
 
-      // 停损后执行 critique-continue（不解锁 approve），并继续写 Round 4 critique-pass
+      // 停损后执行 critique-continue（不解锁 approve）
       const cont = await critiqueContinueDoc({ repoRoot: wt, mainRoot: dir, file: specRel, reason: '补充契约拆分后再复核', taskId: 'c3-t' })
       if (!cont.ok || cont.unlockApprove !== false) return `critique-continue 返回异常：${JSON.stringify(cont)}`
+
+      // 仅运行 critique-continue、尚未通过 Round 4 critique-pass 前 -> approve 必须仍触发 STOP_LOSS_ESCALATE
+      let lockedBeforeR4 = false
+      try {
+        approveSpec({ repoRoot: wt, mainRoot: dir, file: specRel, taskId: 'c3-t' })
+      } catch (e) {
+        lockedBeforeR4 = e.code === 'STOP_LOSS_ESCALATE'
+      }
+      if (!lockedBeforeR4) return '停损且仅运行 critique-continue 尚未跑完 Round 4 时竟放行了 approve'
 
       writeFileSync(join(wt, specRel), baseDoc.replace('- 不引入外部第三方依赖。', '- 不引入外部第三方依赖（v4-revised）。'))
       const r4 = await critiquePassDoc({ repoRoot: wt, mainRoot: dir, file: specRel, reviewer: 'crit-4', round: 4, summary: 'r4 pass', taskId: 'c3-t' })
@@ -286,14 +295,9 @@ export function registerParallelDispatchCases(cases) {
       const tamperedBasis = resolveApprovalBasis({ rel: specRel, docType: 'spec', text: tampered, data: { plan_critique: `passed (reviewer=crit-4, round=4, sha=${realSha})` } })
       if (tamperedBasis.hasBasis) return `篡改正文后旧 SHA 竟未阻断：${JSON.stringify(tamperedBasis)}`
 
-      // critique-continue 不解锁 approve -> 仍触发 STOP_LOSS_ESCALATE
-      let lockedByStopLoss = false
-      try {
-        approveSpec({ repoRoot: wt, mainRoot: dir, file: specRel, taskId: 'c3-t' })
-      } catch (e) {
-        lockedByStopLoss = e.code === 'STOP_LOSS_ESCALATE'
-      }
-      if (!lockedByStopLoss) return '停损且仅运行 critique-continue 后竟放行了 approve'
+      // Round 4 critique-pass 在 critique-continue 之后落地 -> 允许 approve 通过
+      const appOk = approveSpec({ repoRoot: wt, mainRoot: dir, file: specRel, taskId: 'c3-t' })
+      if (appOk.status !== 'approved') return `critique-continue 后经 Round 4 critique-pass 复核仍被历史停损误拦：${JSON.stringify(appOk)}`
 
       // 无 frontmatter 文档执行 critique-override 不再静默空操作
       const noFmPath = join(wt, 'docs/specs/261120-nofm-spec.md')

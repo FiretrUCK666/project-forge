@@ -317,13 +317,16 @@ export function registerR6cGatesCases(cases) {
       const egRev = await runAbsAsync(EDIT_SCRIPT, ['--changed', '--dir', revWt, '--files', 'docs/archive/todo/sib-old.md', '--json'])
       if (egRev.status !== 0) return `edit-gate 未识别 reviewWorktreePath 或误拦兄弟归档更新：${egRev.stdout} ${egRev.stderr}`
 
-      // 4. check-empirical unlocks --include-diff WITHOUT check-fault, while high-risk record --verdict pass STILL blocks until check-fault
+      // 4. 仅完成 check-empirical 尚未过 check-fault 时，--include-diff 与 pass 均须阻断（exit=3）；完成 check-fault fail+restore 后解锁
       const packMech = await runAbsAsync(RP_SCRIPT, ['--task', 'c11-t', '--dir', dir, '--json'])
       if (packMech.status !== 0) return `mechanical pack 失败：${packMech.stdout} ${packMech.stderr}`
       const empOk = await runAbsAsync(RP_SCRIPT, ['check-empirical', '--task', 'c11-t', '--dir', dir, '--cmd', 'node test/ok.test.mjs', '--e2e-evidence', 'run: node test/ok.test.mjs => exit 0', '--json'])
       if (empOk.status !== 0) return `check-empirical 失败：${empOk.stdout} ${empOk.stderr}`
-      const diffUnlocked = await runAbsAsync(RP_SCRIPT, ['--task', 'c11-t', '--dir', dir, '--include-diff', '--json'])
-      if (diffUnlocked.status !== 0) return `完成 check-empirical 后 --include-diff 不应被缺失 check-fault 阻塞：exit=${diffUnlocked.status} out=${diffUnlocked.stdout}`
+      const diffBlockedNoFault = await runAbsAsync(RP_SCRIPT, ['--task', 'c11-t', '--dir', dir, '--include-diff', '--json'])
+      const diffBlockedJson = JSON.parse(diffBlockedNoFault.stdout)
+      if (diffBlockedNoFault.status !== 3 || !diffBlockedJson.empiricalGate?.missingSteps?.includes('check-fault:fail')) {
+        return `缺 check-fault 时 --include-diff 应阻断并列出 check-fault:fail：exit=${diffBlockedNoFault.status} out=${diffBlockedNoFault.stdout}`
+      }
 
       const tok = await issueTokenFor(dir, 'c11-t', 1)
       const passWithoutFault = await runAbsAsync(RP_SCRIPT, [
@@ -334,6 +337,14 @@ export function registerR6cGatesCases(cases) {
       if (passWithoutFault.status !== 3 || !passWithoutFault.stdout.includes('故障注入')) {
         return `高风险未过 check-fault 时 record --verdict pass 未按预期阻断：exit=${passWithoutFault.status} out=${passWithoutFault.stdout}`
       }
+      writeFileSync(join(revWt, 'src/crit.mjs'), 'export const crit = (x) => x + 99\n', 'utf8')
+      const fFail = await runAbsAsync(RP_SCRIPT, ['check-fault', '--phase', 'fail', '--task', 'c11-t', '--dir', dir, '--cmd', 'node test/ok.test.mjs', '--json'])
+      if (fFail.status !== 0) return `check-fault fail 失败：${fFail.stdout} ${fFail.stderr}`
+      gitSync(revWt, ['checkout', '--', 'src/crit.mjs'])
+      const fRest = await runAbsAsync(RP_SCRIPT, ['check-fault', '--phase', 'restore', '--task', 'c11-t', '--dir', dir, '--cmd', 'node test/ok.test.mjs', '--json'])
+      if (fRest.status !== 0) return `check-fault restore 失败：${fRest.stdout} ${fRest.stderr}`
+      const diffUnlocked = await runAbsAsync(RP_SCRIPT, ['--task', 'c11-t', '--dir', dir, '--include-diff', '--json'])
+      if (diffUnlocked.status !== 0) return `完成 check-empirical + check-fault 后 --include-diff 应放行：exit=${diffUnlocked.status} out=${diffUnlocked.stdout}`
 
       // 5. verify-tools create exempts scratch/ probes from ZERO_ASSERTION_TEST
       const draftProbe = await runAbsAsync(VT_SCRIPT, ['create', '--dir', implWt, '--feature', 'crit', '--task', 'c11-t', '--modules', 'src/crit.mjs', '--draft-only', '--draft-file', 'probe.mjs', '--draft-content', 'import { crit } from "../../src/crit.mjs"\nif (crit(1) !== 3) process.exit(1)\n', '--json'])

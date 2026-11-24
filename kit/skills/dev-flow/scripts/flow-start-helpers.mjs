@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { extractDocBriefSeeds } from '../../lib/context-brief.mjs'
+import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { validateOverrideReason } from '../../lib/evidence-substance.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
@@ -495,6 +496,32 @@ export async function ackInboundExternalPr(roots, state, prNumber, opts = {}) {
   }
 }
 
+/**
+ * 若 `flow start` 绑定的 SPEC/Todo/PRD 在建账前已获批准（`approved: true` 或 `status: approved`），
+ * 补齐账本的 `criteriaFingerprint` / `criteriaFrozenFrom` / `criteriaFrozenAt`，
+ * 使后续 `submit` / `review-pack record` 仍可强制校验标准防篡改。
+ */
+export function backfillCriteriaFingerprint(docRoot, ledger) {
+  if (!docRoot || !ledger || ledger.criteriaFingerprint) return null
+  const candidates = [ledger.specFile, ledger.archivedSpecFile, ledger.todoFile, ledger.archivedTodoFile, ledger.prdFile, ledger.archivedPrdFile].filter(Boolean)
+  for (const rel of candidates) {
+    const abs = join(docRoot, rel)
+    if (!existsSync(abs)) continue
+    const text = readTextSafe(abs) ?? ''
+    const fm = parseDocFrontmatter(text)
+    const status = String(fm.data?.status ?? '').toLowerCase()
+    const isApproved = fm.data?.approved === true || status === 'approved' || status === 'implemented'
+    if (!isApproved) continue
+    const criteria = extractCriteria(text)
+    if (criteria.length === 0) continue
+    ledger.criteriaFingerprint = criteriaFingerprint(criteria)
+    ledger.criteriaFrozenFrom = rel
+    ledger.criteriaFrozenAt = ledger.criteriaFrozenAt ?? new Date().toISOString()
+    return ledger.criteriaFingerprint
+  }
+  return null
+}
+
 export async function promotePlanningToStarted({
   roots, existing, existingWorkRootPre, slug, taskId, opts, runStartPlanGate,
   state = {}, linkedIssues = [],
@@ -590,5 +617,6 @@ export async function promotePlanningToStarted({
     ledger: existing,
     implementerId: existing.implementerId,
   })
+  backfillCriteriaFingerprint(gateRoot, existing)
   return { blocked: false, createdIssue: bindRes.createdIssue ?? null }
 }

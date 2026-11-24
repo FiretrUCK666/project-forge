@@ -197,9 +197,9 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
     const txt = readTextSafe(p1) ?? readTextSafe(p2)
     if (!txt) return
     for (const line of txt.split('\n')) {
-      const m = /^- \[([ xX])\]\s+(C\d+)\s*:\s*(.+)$/.exec(line.trim())
+      const m = /^- \[([ xX])\]\s+(C\d+)\s*[:：]\s*(.+)$/.exec(line.trim())
       if (!m) continue
-      const id = m[2]
+      const id = m[2].toUpperCase()
       if (seen.has(id)) continue
       seen.add(id)
       criteria.push({ id, checked: m[1].toLowerCase() === 'x', text: m[3].trim(), source: posixPath(relPath) })
@@ -208,13 +208,15 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
 
   const sliceSpecRel = task?.privateSpecFile ?? task?.specFile ?? task?.archivedSpecFile ?? null
   readFrom(task?.privateSpecFile)
-  readFrom(task?.privateTodoFile)
   readFrom(task?.specFile)
-  readFrom(task?.todoFile)
   readFrom(task?.archivedSpecFile)
-  readFrom(task?.archivedTodoFile)
+  if (criteria.length === 0) {
+    readFrom(task?.privateTodoFile)
+    readFrom(task?.todoFile)
+    readFrom(task?.archivedTodoFile)
+  }
 
-  if (task?.privateDocsDir) {
+  if (criteria.length === 0 && task?.privateDocsDir) {
     const privDirAbs = join(mainRoot, task.privateDocsDir)
     if (existsSync(privDirAbs)) {
       try {
@@ -226,22 +228,38 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
   }
 
   // C22: 1:N 总控 PRD 不将全波未领条款注入当前切片审查包；仅当非共享 1:1 PRD 或无切片 SPEC/Todo 时读取 PRD 条款
-  for (const prdRel of [task?.privatePrdFile, task?.prdFile, task?.archivedPrdFile].filter(Boolean)) {
-    const sharedInRepo = isSharedMasterPrd(repoRoot, prdRel, sliceSpecRel) || isSharedMasterPrd(mainRoot, prdRel, sliceSpecRel)
-    if (criteria.length > 0 && sharedInRepo) continue
-    readFrom(prdRel)
+  if (criteria.length === 0) {
+    for (const prdRel of [task?.privatePrdFile, task?.prdFile, task?.archivedPrdFile].filter(Boolean)) {
+      const sharedInRepo = isSharedMasterPrd(repoRoot, prdRel, sliceSpecRel) || isSharedMasterPrd(mainRoot, prdRel, sliceSpecRel)
+      if (criteria.length > 0 && sharedInRepo) continue
+      readFrom(prdRel)
+    }
+  }
+
+  // planBootstrap 任务可能生成了多份 docs/(specs|todo|prd)/*.md 尚未归入单切片字段：按优先级扫描变更规划文档
+  if (criteria.length === 0 && task?.planBootstrap === true) {
+    const cands = (Array.isArray(task?.files) ? task.files : [])
+      .map((f) => posixPath(f).replace(/^\.\//, ''))
+      .filter((nf) => /^docs\/(?:specs|todo|prd)\/.*\.md$/.test(nf))
+    for (const dirRel of ['docs/specs', 'docs/todo', 'docs/prd']) {
+      for (const root of [repoRoot, mainRoot].filter(Boolean)) {
+        const dirAbs = join(root, dirRel)
+        if (!existsSync(dirAbs)) continue
+        try { for (const n of readdirSync(dirAbs).sort()) if (n.endsWith('.md')) cands.push(`${dirRel}/${n}`) } catch { /* ignore */ }
+      }
+    }
+    const ordered = ['docs/specs/', 'docs/todo/', 'docs/prd/'].flatMap((pfx) => cands.filter((p) => p.startsWith(pfx)))
+    for (const cand of [...new Set(ordered)]) { readFrom(cand); if (criteria.length > 0) break }
   }
 
   // Case 2 或外部 PR 无本地规划文件时，回退解析账本 issueContext 与 prContext 复选框
   if (criteria.length === 0) {
     for (const iss of Array.isArray(task?.issueContext) ? task.issueContext : []) {
-      const issLabel = iss?.number ? `issue#${iss.number}` : 'issue'
-      appendCriteriaFromText(iss?.body || iss?.summary || '', issLabel)
+      appendCriteriaFromText(iss?.body || iss?.summary || '', iss?.number ? `issue#${iss.number}` : 'issue')
     }
     if (task?.prContext && typeof task.prContext === 'object') {
       const prNum = task.prNumber ?? task.prContext.number ?? null
-      const prLabel = prNum ? `pr#${prNum}` : 'pr'
-      appendCriteriaFromText(task.prContext.body || task.prContext.summary || '', prLabel)
+      appendCriteriaFromText(task.prContext.body || task.prContext.summary || '', prNum ? `pr#${prNum}` : 'pr')
     }
   }
   return criteria

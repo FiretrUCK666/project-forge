@@ -101,24 +101,48 @@ export function mergeManagedPlanSummary(existingBody = '', summaryBlock = '') {
   return trimmed ? `${trimmed}\n\n${wrapped}` : wrapped
 }
 
-function collectPlanSummaryMeta({ repoRoot, mainRoot, ledger, files, phase, round, metaLabel }) {
-  const docList = normalizeSyncFiles(files, '')
-  for (const extra of [ledger?.prdFile, ledger?.specFile, ledger?.todoFile]) {
+export function collectPlanSummaryMeta({ repoRoot, mainRoot, ledger, files, phase, round, metaLabel, targetIssueNumber = null }) {
+  const allDocs = []
+  for (const extra of [...normalizeSyncFiles(files, ''), ledger?.specFile, ledger?.todoFile, ledger?.prdFile]) {
     const p = String(extra ?? '').replaceAll('\\', '/').trim()
-    if (p && !docList.includes(p)) docList.push(p)
+    if (p && !allDocs.includes(p)) allDocs.push(p)
   }
+
+  const readDocWithFm = (rel) => {
+    const abs = path.isAbsolute(rel) ? rel : (readTextSafe(path.join(repoRoot, rel)) !== undefined ? path.join(repoRoot, rel) : path.join(mainRoot, rel))
+    const raw = readTextSafe(abs)
+    if (!raw) return null
+    const fm = parseDocFrontmatter(raw)
+    const kind = String(fm?.data?.kind ?? '').toUpperCase() || (rel.includes('/specs/') ? 'SPEC' : rel.includes('/todo/') ? 'Todo' : 'PRD')
+    return { rel, raw, fm, kind }
+  }
+  const parsedDocs = allDocs.map(readDocWithFm).filter(Boolean)
+  const hasSliceSpec = parsedDocs.some((d) => d.kind === 'SPEC')
+  const targetNum = Number(targetIssueNumber)
+  const hasTargetNum = Number.isInteger(targetNum) && targetNum > 0
+  const sliceDocs = parsedDocs.filter((d) => {
+    if (d.kind !== 'PRD') return true
+    if (!hasSliceSpec) return true
+    const prdIssue = Number(d.fm?.data?.issue)
+    const isMaster = d.fm?.data?.multi_spec === true
+    if (isMaster) return hasTargetNum && prdIssue === targetNum
+    if (hasTargetNum && Number.isInteger(prdIssue) && prdIssue > 0 && prdIssue !== targetNum) return false
+    return true
+  })
+  const orderedDocs = [
+    ...sliceDocs.filter((d) => d.kind === 'SPEC'),
+    ...sliceDocs.filter((d) => d.kind === 'Todo'),
+    ...sliceDocs.filter((d) => d.kind !== 'SPEC' && d.kind !== 'Todo'),
+  ]
+  const docList = orderedDocs.map((d) => d.rel)
+
   const statusParts = []
   const critSeen = new Map()
   let critiqueText = ''
   let hasApproved = false
   let hasRejected = false
 
-  for (const rel of docList) {
-    const abs = path.isAbsolute(rel) ? rel : (readTextSafe(path.join(repoRoot, rel)) !== undefined ? path.join(repoRoot, rel) : path.join(mainRoot, rel))
-    const raw = readTextSafe(abs)
-    if (!raw) continue
-    const fm = parseDocFrontmatter(raw)
-    const kind = String(fm?.data?.kind ?? '').toUpperCase() || (rel.includes('/specs/') ? 'SPEC' : rel.includes('/todo/') ? 'Todo' : 'PRD')
+  for (const { fm, kind, raw } of orderedDocs) {
     const st = fm?.data?.status ? String(fm.data.status).trim() : null
     const approved = fm?.data?.approved === true || st === 'approved'
     if (approved && (kind === 'SPEC' || kind === 'Todo')) hasApproved = true
@@ -131,13 +155,19 @@ function collectPlanSummaryMeta({ repoRoot, mainRoot, ledger, files, phase, roun
     }
   }
 
-  const ledgerRounds = Object.values(ledger?.planCritique ?? {}).flatMap((e) => (Array.isArray(e?.rounds) ? e.rounds : []))
+  const isMasterTarget = hasTargetNum && parsedDocs.some((d) => d.kind === 'PRD' && d.fm?.data?.multi_spec === true && Number(d.fm?.data?.issue) === targetNum)
+  const fallbackKeys = hasSliceSpec && !isMasterTarget ? [ledger?.specFile, ledger?.todoFile].filter(Boolean) : []
+  const scopedEntries = [...new Set([...docList, ...fallbackKeys])]
+    .map((rel) => ledger?.planCritique?.[rel])
+    .filter((e) => e && Array.isArray(e.rounds))
+  const ledgerRounds = (scopedEntries.length > 0 ? scopedEntries : Object.values(ledger?.planCritique ?? {}))
+    .flatMap((e) => (Array.isArray(e?.rounds) ? e.rounds : []))
   if (!critiqueText && ledgerRounds.length > 0) {
     const last = ledgerRounds[ledgerRounds.length - 1]
     critiqueText = `${last.verdict ?? 'recorded'} (round=${last.round ?? round})`
   }
   if (!critiqueText) critiqueText = round > 0 ? `Round ${round}` : '未开始'
-  const critList = [...critSeen.values()]
+  const critList = [...critSeen.values()].sort((a, b) => Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)))
   const doneCount = critList.filter((c) => c.checked).length
   const criteriaText = critList.length > 0
     ? `${doneCount}/${critList.length} 已完成（${critList.map((c) => `${c.checked ? '[x]' : '[ ]'} ${c.id}`).join('、')}）`
@@ -231,13 +261,19 @@ async function syncLabelsForTarget(backend, { repo, number, targetLabel, isPr = 
   return addRes
 }
 
-async function syncIssueSummaryBody(backend, { repo, number, summaryBlock }) {
+export async function syncIssueSummaryBody(backend, { repo, number, summaryBlock, renamedPaths = [] }) {
   if (!summaryBlock || typeof backend?.getIssue !== 'function' || typeof backend?.updateIssueBody !== 'function') {
     return null
   }
   const curIss = await Promise.resolve(backend.getIssue({ repo, number })).catch(() => null)
   if (!curIss?.ok) return false
-  const nextBody = mergeManagedPlanSummary(curIss.body ?? '', summaryBlock)
+  let baseBody = String(curIss.body ?? '').replace(/\r\n/g, '\n')
+  for (const item of Array.isArray(renamedPaths) ? renamedPaths : []) {
+    if (item?.from && item?.to && item.from !== item.to) {
+      baseBody = baseBody.split(item.from).join(item.to)
+    }
+  }
+  const nextBody = mergeManagedPlanSummary(baseBody, summaryBlock)
   const curNorm = String(curIss.body ?? '').replace(/\r\n/g, '\n')
   if (nextBody === curNorm) return true
   const upd = await Promise.resolve(backend.updateIssueBody({ repo, number, body: nextBody })).catch(() => null)
@@ -276,11 +312,13 @@ export async function syncPlanPhaseToBackend(opts = {}) {
   const ledger = taskId ? readTaskLedger(mainRoot, taskId) : null
   const issueNums = normalizeIssueList(opts, ledger)
   const prNumber = opts.prNumber ?? ledger?.prNumber ?? null
-  const planMeta = collectPlanSummaryMeta({
-    repoRoot, mainRoot, ledger, files, phase, round, metaLabel: meta.label,
+  const renamedPaths = Array.isArray(opts.renamedPaths) ? opts.renamedPaths : []
+  const planMetaFor = (targetIssueNumber = null) => collectPlanSummaryMeta({
+    repoRoot, mainRoot, ledger, files, phase, round, metaLabel: meta.label, targetIssueNumber,
   })
+  const planMeta = planMetaFor(issueNums[0] ?? null)
   const digest = JSON.stringify({
-    relDoc, files: planMeta.docList, sha: opts.sha ?? '', reason: opts.reason ?? '', summary: opts.summary ?? '',
+    relDoc, files: planMeta.docList, renamedPaths, sha: opts.sha ?? '', reason: opts.reason ?? '', summary: opts.summary ?? '',
     ...(phase === 'plan-backfill' ? { issues: issueNums, status: planMeta.statusDisplay, critique: planMeta.critiqueText, criteria: planMeta.criteriaText } : {}),
   })
   const syncKey = buildPlanSyncKey(taskId, relDoc, phase, round, digest)
@@ -347,7 +385,8 @@ export async function syncPlanPhaseToBackend(opts = {}) {
         taskId: taskId ?? undefined, repo: targetRepo ?? 'local', number: issueNums[0] ?? 0, labels: [planMeta.effectiveLabel],
       })).catch(() => null)
       for (const num of issueNums) {
-        await syncIssueSummaryBody(backend, { repo: targetRepo ?? 'local', number: num, summaryBlock: planMeta.summaryBlock })
+        const metaNum = planMetaFor(num)
+        await syncIssueSummaryBody(backend, { repo: targetRepo ?? 'local', number: num, summaryBlock: metaNum.summaryBlock, renamedPaths })
       }
     }
     await recordPlanSyncKey(mainRoot, gitDir, taskId, syncKey)
@@ -379,12 +418,17 @@ export async function syncPlanPhaseToBackend(opts = {}) {
 
   for (const num of issueNums) {
     try {
-      const comment = await backend.postComment({
-        repo: targetRepo, number: num, body, statePayload: { phase, round, files, syncKey },
+      const metaNum = planMetaFor(num)
+      const numBody = buildPlanSyncBody({
+        phase, title: meta.title, relDoc, files: metaNum.docList, round,
+        summary: opts.summary, actor: opts.actor, sha: opts.sha, reason: opts.reason,
       })
-      const labelRes = await syncLabelsForTarget(backend, { repo: targetRepo, number: num, targetLabel: planMeta.effectiveLabel, isPr: false })
+      const comment = await backend.postComment({
+        repo: targetRepo, number: num, body: numBody, statePayload: { phase, round, files: metaNum.docList, syncKey },
+      })
+      const labelRes = await syncLabelsForTarget(backend, { repo: targetRepo, number: num, targetLabel: metaNum.effectiveLabel, isPr: false })
       if (comment?.ok === false) throw new Error(comment.reason || comment.error || 'postComment failed')
-      const bodyOk = await syncIssueSummaryBody(backend, { repo: targetRepo, number: num, summaryBlock: planMeta.summaryBlock })
+      const bodyOk = await syncIssueSummaryBody(backend, { repo: targetRepo, number: num, summaryBlock: metaNum.summaryBlock, renamedPaths })
       targets.push({ kind: 'issue', number: num, commentOk: true, labelOk: labelRes?.ok !== false, ...(bodyOk !== null ? { bodyOk } : {}) })
     } catch (err) {
       syncFailures.push({ kind: 'issue', number: num, phase, syncKey, error: err?.message ?? String(err) })

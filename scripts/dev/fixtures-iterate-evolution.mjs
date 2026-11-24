@@ -225,15 +225,15 @@ export function registerIterateEvolutionCases(cases) {
     const emptyDir = tmpProject({ 'README.md': '# docs-only\n' })
     try {
       gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
-      // 新增未登记核心模块 src/new-billing.mjs -> 触发告警，--strict-sync 时阻断
+      // 新增未登记核心模块 src/new-billing.mjs -> 默认阻断 BLOCKED_FEATURE_MAP_SYNC（仅 --no-tdd / no-tdd 豁免）
       mkdirSync(join(dir, 'src'), { recursive: true })
       writeFileSync(join(dir, 'src/new-billing.mjs'), 'export const bill = () => 1\n', 'utf8')
       gitCommitFast(dir, 'feat: add new billing module')
-      const warnRes = await checkFeatureMapSyncOnFinalize({ implRoot: dir, mainRoot: dir, ledger: { baseBranch: 'HEAD~1' }, opts: {} })
+      const defaultRes = await checkFeatureMapSyncOnFinalize({ implRoot: dir, mainRoot: dir, ledger: { baseBranch: 'HEAD~1' }, opts: {} })
       const strictRes = await checkFeatureMapSyncOnFinalize({ implRoot: dir, mainRoot: dir, ledger: { baseBranch: 'HEAD~1' }, opts: { 'strict-sync': true } })
-      const noTddRes = await checkFeatureMapSyncOnFinalize({ implRoot: dir, mainRoot: dir, ledger: { baseBranch: 'HEAD~1' }, opts: { 'strict-sync': true, 'no-tdd': true } })
-      if (!warnRes.ok || !warnRes.warning || !warnRes.uncovered?.includes('src/new-billing.mjs')) {
-        return `finalize 应告警未覆盖新增模块: ${JSON.stringify(warnRes)}`
+      const noTddRes = await checkFeatureMapSyncOnFinalize({ implRoot: dir, mainRoot: dir, ledger: { baseBranch: 'HEAD~1' }, opts: { 'no-tdd': true } })
+      if (defaultRes.ok || defaultRes.code !== 'BLOCKED_FEATURE_MAP_SYNC' || defaultRes.exitCode !== 1 || !defaultRes.uncovered?.includes('src/new-billing.mjs')) {
+        return `finalize 默认未阻断未覆盖新增模块: ${JSON.stringify(defaultRes)}`
       }
       if (strictRes.ok || strictRes.code !== 'BLOCKED_FEATURE_MAP_SYNC') {
         return `--strict-sync 下未阻断缺失同步: ${JSON.stringify(strictRes)}`

@@ -11,7 +11,7 @@ import { join, resolve } from 'node:path'
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import {
-  ackInboundExternalPr, applyLocalAutoClaim, calibrateLedgerBaseBranch, checkStartAuthorSeparation,
+  ackInboundExternalPr, applyLocalAutoClaim, backfillCriteriaFingerprint, calibrateLedgerBaseBranch, checkStartAuthorSeparation,
   checkStartMainCleanAndSlot, checkStartTriageDowngrade, collectDocIssueNumbers, emitBlockedStart,
   inheritExploredCredentials, markStartTriageConsumed, promotePlanningToStarted,
   resolveOrBindStartIssue, resolveStartIdentity, runStartPlanGate, validateStartIssueFlags,
@@ -378,10 +378,12 @@ export async function handleStart(opts, roots) {
     (existing.worktreePath && existsSync(join(roots.mainRoot, existing.worktreePath)))
     || (existing.isolation === 'review-pr' && existing.reviewWorktreePath && existsSync(join(roots.mainRoot, existing.reviewWorktreePath)))
     || existing.isolation === 'branch'
+    || (existing.isolation === 'in-place' && Number(existing.caseType) === 1)
   )) {
     if (opts.todo) existing.todoFile = opts.todo
     if (opts.spec) existing.specFile = opts.spec
     if (opts.prd) existing.prdFile = opts.prd
+    if (opts['allow-plan-bootstrap']) existing.planBootstrap = true
     const existingWorkRootPre = existing.worktreePath ? resolve(roots.mainRoot, existing.worktreePath) : roots.mainRoot
     const specIssuePre = collectDocIssueNumbers(roots, [existing.specFile], existingWorkRootPre)[0] ?? null
     if (specIssuePre && !linkedIssues.includes(specIssuePre)) linkedIssues.push(specIssuePre)
@@ -465,6 +467,7 @@ export async function handleStart(opts, roots) {
     if (milestoneVal && !existing.milestone) existing.milestone = milestoneVal
     await calibrateLedgerBaseBranch(roots.mainRoot, existing, state.defaultBranch)
     if (!isPlanning) inheritExploredCredentials({ mainRoot: roots.mainRoot, docRoot: existingWorkRoot, ledger: existing })
+    backfillCriteriaFingerprint(existingWorkRoot, existing)
     await updateTaskLedger(roots.mainRoot, existing.taskId, (cur) => ({ ...(cur ?? existing), ...existing }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...existing, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
@@ -599,9 +602,13 @@ export async function handleStart(opts, roots) {
     return await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
   }
 
-  const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId, linkedIssues)
-  const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId, linkedIssues)
-  const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId, linkedIssues)
+  const isBootstrap = Boolean(opts['allow-plan-bootstrap'])
+  const dirtyDocs = isBootstrap
+    ? (state.dirty ?? []).map((e) => posixPath(e.file ?? '')).filter((f) => /^docs\/(?:prd|specs|todo)\/.*\.md$/.test(f))
+    : []
+  const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/todo/')) ?? null
+  const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/specs/')) ?? null
+  const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/prd/')) ?? null
 
   const specIssueNew = collectDocIssueNumbers(roots, [initialSpec], roots.mainRoot)[0] ?? null
 
@@ -672,11 +679,13 @@ export async function handleStart(opts, roots) {
       prContext, prContextUnavailable, ...prPatch,
       status: isPlanning ? 'planning' : 'started',
       planning: isPlanning,
+      planBootstrap: isBootstrap,
       explored: null,
       ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     applyLocalAutoClaim(ledger, { role, isPlanning, implementerId, opts })
     if (!isPlanning) inheritExploredCredentials({ mainRoot: roots.mainRoot, docRoot: roots.mainRoot, ledger })
+    backfillCriteriaFingerprint(roots.mainRoot, ledger)
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })
@@ -728,6 +737,7 @@ export async function handleStart(opts, roots) {
     prContext, prContextUnavailable, ...prPatch,
     status: isPlanning ? 'planning' : 'started',
     planning: isPlanning,
+    planBootstrap: isBootstrap,
     explored: null,
     ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
   })
@@ -735,14 +745,22 @@ export async function handleStart(opts, roots) {
   recordMountedDepsInLedger(ledger, implRel, depMount)
 
   const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger, state.dirty)
-  if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId, linkedIssues)
-  if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId, linkedIssues)
-  if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId, linkedIssues)
+  if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/todo/')) ?? null
+  if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/specs/')) ?? null
+  if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/prd/')) ?? null
+  if (isBootstrap && (!ledger.todoFile || !ledger.specFile || !ledger.prdFile)) {
+    const wtSt = await gitStatusPorcelainZ(implAbs)
+    const wtDocs = (wtSt.entries ?? []).map((e) => posixPath(e.file ?? '')).filter((f) => /^docs\/(?:prd|specs|todo)\/.*\.md$/.test(f))
+    if (!ledger.prdFile) ledger.prdFile = wtDocs.find((f) => f.startsWith('docs/prd/')) ?? null
+    if (!ledger.specFile) ledger.specFile = wtDocs.find((f) => f.startsWith('docs/specs/')) ?? null
+    if (!ledger.todoFile) ledger.todoFile = wtDocs.find((f) => f.startsWith('docs/todo/')) ?? null
+  }
   const specIssueWt = collectDocIssueNumbers(roots, [ledger.specFile], implAbs)[0] ?? null
   if (specIssueWt && !ledger.linkedIssues.includes(specIssueWt)) {
     ledger.linkedIssues = [...ledger.linkedIssues, specIssueWt]
   }
   if (!isPlanning) inheritExploredCredentials({ mainRoot: roots.mainRoot, docRoot: implAbs, ledger })
+  backfillCriteriaFingerprint(implAbs, ledger)
   if (ledger.linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
   await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })

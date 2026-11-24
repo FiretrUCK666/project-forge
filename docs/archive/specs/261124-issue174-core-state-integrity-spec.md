@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: 核心状态完整性与工作流闭环加固
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
 updated: 2026-11-25
-issue: null
+issue: 174
 pr: null
-branch: feat/conv-arch-plan
+branch: feat/core-state-integrity
 owner: planner-conv-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-conv-arch-r2, round=2, sha=157a23dee0ff, summary=Round 2 复核通过：R1 minor 路径锚点（flow-lifecycle-hooks.mjs checkTaskSlotBoundaryOrEmit）已闭环，新增 planBootstrap 一等态、Part of #N、BLOCKED_MALFORMED_MARKDOWN_BODY、统一 C* 提取与 --summary 渲染、claim --agent 对齐及默认 feature-map 双向/Case 2 守卫均锚定真实源码且与 Todo 及总控 PRD C1..C4 一致，具备正反双向 fixture 可测性)"
-related_prd: ../prd/261124-conversational-state-machine-prd.md
-related_todo: ../todo/261124-core-state-integrity-todo.md
+related_prd: ../../prd/261124-conversational-state-machine-prd.md
+related_todo: ../todo/261124-issue174-core-state-integrity-todo.md
 high_risk_paths: [kit/]
 task_id: core-state-integrity
 depends_on: []
@@ -27,13 +27,13 @@ scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/criti
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、状态机契约修复与高风险门禁；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-25` |
-| 分支 / Issue / PR | `feat/conv-arch-plan` / `#169` / 未关联 |
+| 分支 / Issue / PR | `feat/core-state-integrity` / #174 / 未关联 |
 | 负责人 / 内审状态 | planner-conv-arch / `passed` |
 | 规划态 | `interactive`（关键设计与 5 项决策已确认，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261124-conversational-state-machine-prd.md` / `../todo/261124-core-state-integrity-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261124-conversational-state-machine-prd.md` / `docs/archive/todo/261124-issue174-core-state-integrity-todo.md` |
 
 - **变更一句话**：修复规划澄清与 Critique 账本、Flow 生命周期（含 `planBootstrap` 一等状态、`claim --agent`、Markdown 折叠防护与默认常青同步）、Review 槽位钉住及 Criteria/Handoff 渲染与冻结中的全部状态完整性缺口。
 
@@ -124,10 +124,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `clarifyDoc` 更新 `## 待拍板问题` 使 `doc-plan audit` 清空 `BLOCKED_PENDING_DECISIONS`；`approveSpec` 放行 `critique-continue` 后再 `critique-pass` 的文档；`critique-store.mjs` 用 `commondir` 解析 sidecar、合并 sidecar 历史并在 `persistPlanCritiqueEntry` 加文件锁；`critiqueContinueDoc` 写 `fromSha` 与 `roundBaseline`、撤销已批文档 `approved`、`pass`/`reject`/`override` 后置 `continued.active=false`、停损按 `roundBaseline` 计算、R2 范围纳入 `continued.reason` 且 `plan-next.mjs` 在编辑期保持 `continueActive`，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
-- [ ] C2: `flow-sync.mjs` 清洁 rebase 后清 `queueConflict` 与冲突重做状态、刷 `finalizedHead`、卸载传 `mountedPaths`；`flow-merge.mjs` 纳入 `opts['reviewer-id']` 阻断自合；`flow-merge-claim.mjs` `claim` 支持并继承 `--agent` 双层归属；`flow-cleanup.mjs` `handleAbort` 传 `remoteUrls`、校分支删除退出码并清残留；`flow-lifecycle.mjs`/`flow-inspect.mjs`/`repo-map.mjs` 落地本地 `lastSubmittedHead`、`handleVerify` 接入 `flow-lifecycle-hooks.mjs` `checkTaskSlotBoundaryOrEmit`、`in-place` 复用与 `updateTaskLedger` 原子写；`planBootstrap` 一等态保持文档绑定、不归档活跃文档、引导或未收口 1:N PR 自动生成 `Part of #<N>` 并同步规划清单回总控 Issue；`assertWellFormedMarkdownBody` 阻断折叠正文报 `BLOCKED_MALFORMED_MARKDOWN_BODY`；`checkFeatureMapSyncOnFinalize` 升级为默认 `BLOCKED_FEATURE_MAP_SYNC` 双向校验增删改名失效路径，且 Case 2 仅在增删改名核心模块时在 `verify` 联动校验，全部由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
-- [ ] C3: `review-pack.mjs` / `review-diff.mjs` / `review-ledger.mjs` / `review-locks.mjs` / `review-empirical.mjs` 与 `kit/skills/lib/review-comment-render.mjs` 在 `--include-diff` 与 `record` 严格钉住 `review-<id>` 与已审 `headSha`（不中途快进或读 `impl-<id>`），卸载传 `mountedPaths`，`evaluatePassBlockers` 用 `resolveEffectiveBaseSha`，`faultRequired=true` 强制 `check-fault:fail`/`restore`；`review-ledger.mjs` 按 `SPEC > Todo > PRD > planBootstrap 变更文档 > 关联 Issue 正文` 统一提取 `C1..Cn` 并在 Case 2/3/4 与引导 PR 渲染 `#### 验收标准逐条核对`，且 `buildReviewComments` 渲染审查 `--summary`，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
-- [ ] C4: `flow-lifecycle-finalize.mjs` 归档 SPEC 时同步更新 `criteriaFrozenFrom` 至 `docs/archive/specs/`；`flow-start-helpers.mjs` 为预建账前已批准文档回填 `criteriaFingerprint`；`criteria-lock.mjs` 移除死字段 `frozenCriteriaSnapshot` 并在 `submit` 与 `review-pack record` 强制 `checkFrozenCriteria`；`handoff-package.mjs` `buildHandoff` 复用统一优先级为 Case 2 抽取 `C1..Cn`，并渲染 `issueContext`/`prContext`、动态 `--section` 标题与 `## 怎么算做完` 中的 `smoke-verify`，由 `node scripts/dev/fixtures.mjs` 与 `node scripts/dev/preflight.mjs` 断言通过。
+- [x] C1: `clarifyDoc` 更新 `## 待拍板问题` 使 `doc-plan audit` 清空 `BLOCKED_PENDING_DECISIONS`；`approveSpec` 放行 `critique-continue` 后再 `critique-pass` 的文档；`critique-store.mjs` 用 `commondir` 解析 sidecar、合并 sidecar 历史并在 `persistPlanCritiqueEntry` 加文件锁；`critiqueContinueDoc` 写 `fromSha` 与 `roundBaseline`、撤销已批文档 `approved`、`pass`/`reject`/`override` 后置 `continued.active=false`、停损按 `roundBaseline` 计算、R2 范围纳入 `continued.reason` 且 `plan-next.mjs` 在编辑期保持 `continueActive`，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
+- [x] C2: `flow-sync.mjs` 清洁 rebase 后清 `queueConflict` 与冲突重做状态、刷 `finalizedHead`、卸载传 `mountedPaths`；`flow-merge.mjs` 纳入 `opts['reviewer-id']` 阻断自合；`flow-merge-claim.mjs` `claim` 支持并继承 `--agent` 双层归属；`flow-cleanup.mjs` `handleAbort` 传 `remoteUrls`、校分支删除退出码并清残留；`flow-lifecycle.mjs`/`flow-inspect.mjs`/`repo-map.mjs` 落地本地 `lastSubmittedHead`、`handleVerify` 接入 `flow-lifecycle-hooks.mjs` `checkTaskSlotBoundaryOrEmit`、`in-place` 复用与 `updateTaskLedger` 原子写；`planBootstrap` 一等态保持文档绑定、不归档活跃文档、引导或未收口 1:N PR 自动生成 `Part of #<N>` 并同步规划清单回总控 Issue；`assertWellFormedMarkdownBody` 阻断折叠正文报 `BLOCKED_MALFORMED_MARKDOWN_BODY`；`checkFeatureMapSyncOnFinalize` 升级为默认 `BLOCKED_FEATURE_MAP_SYNC` 双向校验增删改名失效路径，且 Case 2 仅在增删改名核心模块时在 `verify` 联动校验，全部由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
+- [x] C3: `review-pack.mjs` / `review-diff.mjs` / `review-ledger.mjs` / `review-locks.mjs` / `review-empirical.mjs` 与 `kit/skills/lib/review-comment-render.mjs` 在 `--include-diff` 与 `record` 严格钉住 `review-<id>` 与已审 `headSha`（不中途快进或读 `impl-<id>`），卸载传 `mountedPaths`，`evaluatePassBlockers` 用 `resolveEffectiveBaseSha`，`faultRequired=true` 强制 `check-fault:fail`/`restore`；`review-ledger.mjs` 按 `SPEC > Todo > PRD > planBootstrap 变更文档 > 关联 Issue 正文` 统一提取 `C1..Cn` 并在 Case 2/3/4 与引导 PR 渲染 `#### 验收标准逐条核对`，且 `buildReviewComments` 渲染审查 `--summary`，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
+- [x] C4: `flow-lifecycle-finalize.mjs` 归档 SPEC 时同步更新 `criteriaFrozenFrom` 至 `docs/archive/specs/`；`flow-start-helpers.mjs` 为预建账前已批准文档回填 `criteriaFingerprint`；`criteria-lock.mjs` 移除死字段 `frozenCriteriaSnapshot` 并在 `submit` 与 `review-pack record` 强制 `checkFrozenCriteria`；`handoff-package.mjs` `buildHandoff` 复用统一优先级为 Case 2 抽取 `C1..Cn`，并渲染 `issueContext`/`prContext`、动态 `--section` 标题与 `## 怎么算做完` 中的 `smoke-verify`，由 `node scripts/dev/fixtures.mjs` 与 `node scripts/dev/preflight.mjs` 断言通过。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -141,6 +141,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：已按 `C1..C4` 全量落地规划澄清与 Critique 状态机、Flow 生命周期与 `planBootstrap`、Markdown 防护与默认 `feature-map` 双向/Case 2 守卫、Review 槽位钉住/故障门禁/统一 `C1..Cn` 与 `--summary` 渲染、`criteria-lock`/`handoff-package` 修复；并同步补齐 `extractPlanDocContext` `C<N>` 去重、`plan-sync` 总控 PRD 隔离、`doc-renumber` 回刷 Issue 正文、PR `Part of #N`/`Fixes #N` 去重、`escalatedIssues` 追踪自动关闭与 `flow merge` 终态标签/摘要同步。
+- **与草案的差异**：补充注册 `BLOCKED_MALFORMED_MARKDOWN_BODY` 与 `BLOCKED_TDD_SYNC` 至 `kit/skills/lib/exit-codes.mjs` 以保持退出码门禁对拍；新增 `scripts/dev/fixtures-conv-s1.mjs`、`scripts/dev/fixtures-conv-s1-merge.mjs` 与 `scripts/dev/injections-data-conv-s1.mjs`（`I901..I911`）覆盖全部 Slice 1 正反双向测试与故障注入；并在 `flow-merge-claim.mjs` 精准区分 `multi_spec: true` 总控 Issue 与独立切片子 Issue，避免子单合入时被兄弟切片误拦关单。
+- **关联同步文件**：已运行 `node scripts/equip.mjs .` 保持 `.agents/skills/` 与 `kit/skills/` 字节一致，未修改 `SKILL.md` / `AGENTS.md` / `templates/`。

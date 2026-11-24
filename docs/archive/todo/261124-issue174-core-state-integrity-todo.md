@@ -1,20 +1,20 @@
 ---
 kind: todo
 title: 核心状态完整性与工作流闭环加固
-status: active
+status: done
 created: 2026-11-24
 updated: 2026-11-25
-issue: null
+issue: 174
 pr: null
-branch: feat/conv-arch-plan
+branch: feat/core-state-integrity
 owner: planner-conv-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-25
 task_id: core-state-integrity
 planned_at: 6416a330632fa28180080e3ad87f825c49724caf
-related_prd: ../prd/261124-conversational-state-machine-prd.md
-related_spec: ../specs/261124-core-state-integrity-spec.md
+related_prd: ../../prd/261124-conversational-state-machine-prd.md
+related_spec: ../specs/261124-issue174-core-state-integrity-spec.md
 depends_on: []
 scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/critique-store.mjs, kit/skills/lib/critique-rounds.mjs, kit/skills/lib/critique-diff.mjs, kit/skills/lib/plan-next.mjs, kit/skills/dev-flow/scripts/flow-sync.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, kit/skills/dev-flow/scripts/flow-merge-claim.mjs, kit/skills/dev-flow/scripts/flow-cleanup.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-diff.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/lib/criteria-lock.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/pr-template-hydrate.mjs, kit/skills/lib/github-client.mjs, kit/skills/lib/review-comment-render.mjs, "scripts/dev/fixtures*.mjs"]
 ---
@@ -25,15 +25,15 @@ scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/criti
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-24` / `2026-11-25` |
-| 分支 / 基线 | `feat/conv-arch-plan` @ `6416a33` |
+| 分支 / 基线 | `feat/core-state-integrity` @ `6416a33` |
 | 任务编号 | `core-state-integrity` |
 | 负责人 / 审批 | planner-conv-arch / `false` |
 | 规划态 | `interactive`（全部核心决策已拍板确认） |
-| 关联 Issue / PR / SPEC | `#169` / 未关联 / `../specs/261124-core-state-integrity-spec.md` |
+| 关联 Issue / PR / SPEC | #174 / 未关联 / `docs/archive/specs/261124-issue174-core-state-integrity-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261124-core-state-integrity-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261124-issue174-core-state-integrity-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -45,10 +45,10 @@ scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/criti
 
 ## 验收标准与执行清单
 
-- [ ] C1: 修复 `doc-plan-ops.mjs`（`clarifyDoc` 同步更新 `## 待拍板问题`、`approveSpec` 放行 `critique-continue` 后再 `critique-pass`）、`critique-store.mjs`（`commondir` 侧车、账本/sidecar 合并、`persistPlanCritiqueEntry` 加锁）及 `critique-rounds.mjs` / `critique-diff.mjs` / `plan-next.mjs`（`fromSha` + `roundBaseline`、`continued.active=false` 清理、按 `roundBaseline` 算停损、`continued.reason` 入 R2 作用域、撤销 `approved`、编辑期保留 `continueActive`），通过 `node scripts/dev/fixtures.mjs`。
-- [ ] C2: 修复 `flow-sync.mjs`（clean rebase 清 `queueConflict` 并刷 `finalizedHead`，卸载传 `mountedPaths`）、`flow-merge.mjs`（`callerActor` 含 `opts['reviewer-id']` 阻断自合）、`flow-merge-claim.mjs`（`claim --agent` 双层归属）、`flow-cleanup.mjs`（`handleAbort` 传 `remoteUrls`、校分支删除退出码、清残留）、`flow-lifecycle.mjs`（本地 `lastSubmittedHead` 与 `handleVerify` 接入 `flow-lifecycle-hooks.mjs` `checkTaskSlotBoundaryOrEmit`）、`flow-inspect.mjs`（`in-place` 复用）、`repo-map.mjs`（`updateTaskLedger` 原子更新）、`planBootstrap` 一等态（保绑定/不归档/自动 `Part of #N`/同步文档列表回总控 Issue）、`assertWellFormedMarkdownBody`（`BLOCKED_MALFORMED_MARKDOWN_BODY`）与默认 `BLOCKED_FEATURE_MAP_SYNC` 双向校验及 Case 2 结构漂移守卫，通过 `node scripts/dev/fixtures.mjs`。
-- [ ] C3: 修复 `review-pack.mjs` / `review-diff.mjs` / `review-ledger.mjs` / `review-locks.mjs` / `review-empirical.mjs` 与 `review-comment-render.mjs`（`--include-diff` 与 `record` 钉住 `review-<id>` 及已审 `headSha`、卸载传 `mountedPaths`、`evaluatePassBlockers` 用 `resolveEffectiveBaseSha`、`faultRequired` 强制 `check-fault:fail`/`restore`、统一 `C1..Cn` 提取优先级与 `--summary` 渲染），通过 `node scripts/dev/fixtures.mjs`。
-- [ ] C4: 修复 `criteria-lock.mjs` / `flow-lifecycle-finalize.mjs` / `flow-start-helpers.mjs` / `handoff-package.mjs`（归档重绑 `criteriaFrozenFrom`、启动回填 `criteriaFingerprint`、删死字段 `frozenCriteriaSnapshot`、`submit` 与 `review-pack record` 强制 `checkFrozenCriteria`、`buildHandoff` 复用统一优先级为 Case 2 抽 `C1..Cn`、渲染上下文与动态 `--section` 及 `smoke-verify`），通过 `node scripts/dev/fixtures.mjs` 与 `node scripts/dev/preflight.mjs`。
+- [x] C1: 修复 `doc-plan-ops.mjs`（`clarifyDoc` 同步更新 `## 待拍板问题`、`approveSpec` 放行 `critique-continue` 后再 `critique-pass`）、`critique-store.mjs`（`commondir` 侧车、账本/sidecar 合并、`persistPlanCritiqueEntry` 加锁）及 `critique-rounds.mjs` / `critique-diff.mjs` / `plan-next.mjs`（`fromSha` + `roundBaseline`、`continued.active=false` 清理、按 `roundBaseline` 算停损、`continued.reason` 入 R2 作用域、撤销 `approved`、编辑期保留 `continueActive`），通过 `node scripts/dev/fixtures.mjs`。
+- [x] C2: 修复 `flow-sync.mjs`（clean rebase 清 `queueConflict` 并刷 `finalizedHead`，卸载传 `mountedPaths`）、`flow-merge.mjs`（`callerActor` 含 `opts['reviewer-id']` 阻断自合）、`flow-merge-claim.mjs`（`claim --agent` 双层归属）、`flow-cleanup.mjs`（`handleAbort` 传 `remoteUrls`、校分支删除退出码、清残留）、`flow-lifecycle.mjs`（本地 `lastSubmittedHead` 与 `handleVerify` 接入 `flow-lifecycle-hooks.mjs` `checkTaskSlotBoundaryOrEmit`）、`flow-inspect.mjs`（`in-place` 复用）、`repo-map.mjs`（`updateTaskLedger` 原子更新）、`planBootstrap` 一等态（保绑定/不归档/自动 `Part of #N`/同步文档列表回总控 Issue）、`assertWellFormedMarkdownBody`（`BLOCKED_MALFORMED_MARKDOWN_BODY`）与默认 `BLOCKED_FEATURE_MAP_SYNC` 双向校验及 Case 2 结构漂移守卫，通过 `node scripts/dev/fixtures.mjs`。
+- [x] C3: 修复 `review-pack.mjs` / `review-diff.mjs` / `review-ledger.mjs` / `review-locks.mjs` / `review-empirical.mjs` 与 `review-comment-render.mjs`（`--include-diff` 与 `record` 钉住 `review-<id>` 及已审 `headSha`、卸载传 `mountedPaths`、`evaluatePassBlockers` 用 `resolveEffectiveBaseSha`、`faultRequired` 强制 `check-fault:fail`/`restore`、统一 `C1..Cn` 提取优先级与 `--summary` 渲染），通过 `node scripts/dev/fixtures.mjs`。
+- [x] C4: 修复 `criteria-lock.mjs` / `flow-lifecycle-finalize.mjs` / `flow-start-helpers.mjs` / `handoff-package.mjs`（归档重绑 `criteriaFrozenFrom`、启动回填 `criteriaFingerprint`、删死字段 `frozenCriteriaSnapshot`、`submit` 与 `review-pack record` 强制 `checkFrozenCriteria`、`buildHandoff` 复用统一优先级为 Case 2 抽 `C1..Cn`、渲染上下文与动态 `--section` 及 `smoke-verify`），通过 `node scripts/dev/fixtures.mjs` 与 `node scripts/dev/preflight.mjs`。
 
 ## 执行步骤
 
@@ -74,9 +74,9 @@ scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/criti
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（待 SPEC 经 Round 2 独立 Critic 复核并 `approve` 后启动 Wave 1 实施）
+- **当前状态**：`已完成 (done)`（待 SPEC 经 Round 2 独立 Critic 复核并 `approve` 后启动 Wave 1 实施）
 - **待拍板事项**：无
-- **下一步第一件事**：对 `docs/specs/261124-core-state-integrity-spec.md` 执行 `doc-plan.mjs audit` 并移交 Round 2 独立 Critic 评审。
+- **下一步第一件事**：对 `docs/archive/specs/261124-issue174-core-state-integrity-spec.md` 执行 `doc-plan.mjs audit` 并移交 Round 2 独立 Critic 评审。
 
 ## 澄清与补充记录
 
@@ -84,6 +84,6 @@ scope_files: [kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/criti
 
 ## 完成后的记录
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：完成 C1..C4、Issue/PR 同步防重复与 merge 终态收尾改造，并通过 `node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs --jobs 6`（含 `fixtures-conv-s1.mjs`、`fixtures-conv-s1-merge.mjs`）、`node scripts/dev/verify-injections.mjs --jobs 4`（含 `I901..I911`）、`node scripts/dev/e2e-zip-harness.mjs`、`node scripts/dev/bench.mjs` 与全套门禁检查。
+- **文档同步检查**：已运行 `node scripts/equip.mjs .` 同步 `.agents/skills/`，并通过 `compose-agents.mjs --check`、`review.mjs .`、`sync-toc.mjs --check`、`govern-audit.mjs audit . --strict` 与 `verify-tools.mjs audit .`。
+- **遗留问题**：无；总控 PRD `docs/prd/261124-conversational-state-machine-prd.md`（Issue `#169`）按 1:N 规划保持 `active` 与 `OPEN`，留待 Slice 2/3 收尾。

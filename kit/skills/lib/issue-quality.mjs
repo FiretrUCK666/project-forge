@@ -223,8 +223,9 @@ export function extractPlanDocContext(repoRoot, docPaths = [], opts = {}) {
   const invalidDocRefs = []
   const filesSet = new Set()
   const criteria = []
-  const seenCriteria = new Set()
+  const seenCriteriaIds = new Set()
   const outOfScopeLines = []
+  const seenOutOfScope = new Set()
   let title = ''
   let summary = ''
 
@@ -262,26 +263,36 @@ export function extractPlanDocContext(repoRoot, docPaths = [], opts = {}) {
       }
     }
 
-    const nonGoalInline = /^-\s+\*\*(?:本期不做|不改什么|不在本次范围|非目标)\*\*\s*[:：]\s*(.+)$/gm
-    for (const m of body.matchAll(nonGoalInline)) {
-      const v = m[1].trim()
-      if (v && !isStubValue(v)) outOfScopeLines.push(`- ${v}`)
-    }
-    const nonGoalSec = findMatchingSections(sections, ['不在本次范围', '本期不做', '非目标', 'Out of Scope'])[0]
-    if (nonGoalSec && outOfScopeLines.length === 0) {
-      for (const ln of nonGoalSec.text.split('\n').map((l) => l.trim()).filter(Boolean)) {
-        if (!ln.startsWith('|') && !ln.startsWith('#') && !isStubValue(ln)) outOfScopeLines.push(ln)
+    // 仅从第一个产出实质非目标的规划文档（SPEC 优先）采纳 Out of Scope，避免 SPEC 与 Todo 重复拼接
+    if (outOfScopeLines.length === 0) {
+      const pushOutOfScope = (lineText) => {
+        const clean = String(lineText ?? '').trim()
+        const norm = clean.replace(/^[-*]\s*/, '').replace(/\s+/g, ' ').toLowerCase()
+        if (!clean || !norm || seenOutOfScope.has(norm)) return
+        seenOutOfScope.add(norm)
+        outOfScopeLines.push(clean)
+      }
+      const nonGoalInline = /^-\s+\*\*(?:本期不做|不改什么|不在本次范围|非目标)\*\*\s*[:：]\s*(.+)$/gm
+      for (const m of body.matchAll(nonGoalInline)) {
+        const v = m[1].trim()
+        if (v && !isStubValue(v)) pushOutOfScope(`- ${v}`)
+      }
+      const nonGoalSec = findMatchingSections(sections, ['不在本次范围', '本期不做', '非目标', 'Out of Scope'])[0]
+      if (nonGoalSec && outOfScopeLines.length === 0) {
+        for (const ln of nonGoalSec.text.split('\n').map((l) => l.trim()).filter(Boolean)) {
+          if (!ln.startsWith('|') && !ln.startsWith('#') && !isStubValue(ln)) pushOutOfScope(ln)
+        }
       }
     }
 
     for (const info of scanLines(body)) {
       if (info.inFence) continue
-      const cm = /^\s*-\s+\[[ xX]\]\s+(C\d+\s*[:：]\s*.+)$/.exec(info.line)
+      const cm = /^\s*-\s+\[[ xX]\]\s+C(\d+)\s*[:：]\s*(.+)$/.exec(info.line)
       if (cm) {
-        const norm = `- [ ] ${cm[1].trim()}`
-        if (!seenCriteria.has(norm)) {
-          seenCriteria.add(norm)
-          criteria.push(norm)
+        const cid = `C${Number(cm[1])}`
+        if (!seenCriteriaIds.has(cid)) {
+          seenCriteriaIds.add(cid)
+          criteria.push(`- [ ] ${cid}: ${cm[2].trim()}`)
         }
       }
       if (filesSet.size < 8) {

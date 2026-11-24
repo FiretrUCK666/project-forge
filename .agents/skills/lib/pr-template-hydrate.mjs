@@ -9,10 +9,46 @@ import { join } from 'node:path'
 
 import { assertNoAsciiControlChars } from './cli.mjs'
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { evaluateMasterPrdClosureState } from './doc-substantive.mjs'
 import { evaluateObservationSubstance, formatArtifactEvidenceLines } from './empirical-artifacts.mjs'
+import { EXIT } from './exit-codes.mjs'
 import { formatWorkTitle } from './escalation.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { extractHeadlessSummary } from './markdown-scan.mjs'
+
+/**
+ * 校验待发送到 GitHub 的多节 Markdown 正文未被折叠成单行/双行。
+ * 若发现同一行内出现段中标题或总行数过少的多节标题，抛出 `BLOCKED_MALFORMED_MARKDOWN_BODY`。
+ */
+export function assertWellFormedMarkdownBody(body, label = 'markdown正文') {
+  const text = String(body ?? '').replace(/\r\n/g, '\n').trim()
+  if (!text) return
+  const lines = text.split('\n')
+  const nonEmptyLines = lines.filter((l) => l.trim().length > 0)
+  let inFence = false
+  let headingCount = 0
+  for (const rawLine of lines) {
+    if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const lineNoCode = rawLine.replace(/`[^`\n]*`/g, '')
+    const hMatches = lineNoCode.match(/(?:^|\s)#{2,6}\s+\S/g)
+    if (hMatches) {
+      headingCount += hMatches.length
+      if (hMatches.length >= 2) {
+        const err = new Error(`BLOCKED_MALFORMED_MARKDOWN_BODY: ${label} 出现同多行标题折叠到单行，请保留正常换行。`)
+        err.code = 'BLOCKED_MALFORMED_MARKDOWN_BODY'
+        err.exitCode = EXIT.FACT
+        throw err
+      }
+    }
+  }
+  if (headingCount >= 2 && nonEmptyLines.length <= 2) {
+    const err = new Error(`BLOCKED_MALFORMED_MARKDOWN_BODY: ${label} 存在 ${headingCount} 个章节标题但有效行数仅 ${nonEmptyLines.length} 行，疑似换行丢失。`)
+    err.code = 'BLOCKED_MALFORMED_MARKDOWN_BODY'
+    err.exitCode = EXIT.FACT
+    throw err
+  }
+}
 
 export function stripHtmlCommentsOutsideFences(md) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
@@ -335,6 +371,21 @@ function updateChecklistByEvidence(md, { verifyPassed, finalized, hasNoSecrets }
   })
 }
 
+function dedupRawBodyIssueRefs(rawBody, knownIssueNums = []) {
+  const seen = new Set(knownIssueNums.map(Number).filter((n) => Number.isInteger(n) && n > 0))
+  const out = []
+  for (const line of String(rawBody ?? '').replace(/\r\n/g, '\n').split('\n')) {
+    const m = /^\s*(?:fixes|closes|resolves|part\s+of)\s+#(\d+)\s*$/i.exec(line)
+    if (m) {
+      const n = Number(m[1])
+      if (seen.has(n)) continue
+      seen.add(n)
+    }
+    out.push(line)
+  }
+  return out.join('\n').trim()
+}
+
 /** 读取 `.github/pull_request_template.md`，剥离引导注释并基于 SPEC/Todo/`evidence.json` 填充实证 PR 正文。 */
 export function hydratePrTemplateBody({
   repoRoot,
@@ -352,15 +403,34 @@ export function hydratePrTemplateBody({
 } = {}) {
   if (rawBody) assertNoAsciiControlChars(String(rawBody), 'PR rawBody')
   const shortHead = String(currentHead ?? '').slice(0, 7) || 'unknown'
-  const fixesLine = (ledger?.linkedIssues ?? []).map((n) => `Fixes #${n}`).join('\n') || '无（独立变更任务）'
-  const docLinks = [ledger?.specFile, ledger?.todoFile, ledger?.prdFile].filter(Boolean)
-  const docSummary = docLinks.length > 0 ? docLinks.map((p) => `\`${p}\``).join('、') : `无（Case ${ledger?.caseType ?? 3}）`
-  const pfTag = `<!-- pf-state:${JSON.stringify({ taskId, action: 'pr-body', branch: ledger?.branch ?? null, headSha: currentHead || null })} -->`
-
   const specRel = ledger?.specFile ?? ledger?.archivedSpecFile
   const todoRel = ledger?.todoFile ?? ledger?.archivedTodoFile
+  const prdRel = ledger?.prdFile ?? ledger?.archivedPrdFile
   const specText = repoRoot && specRel && existsSync(join(repoRoot, specRel)) ? readTextSafe(join(repoRoot, specRel)) : ''
   const todoText = repoRoot && todoRel && existsSync(join(repoRoot, todoRel)) ? readTextSafe(join(repoRoot, todoRel)) : ''
+  const prdText = repoRoot && prdRel && existsSync(join(repoRoot, prdRel)) ? readTextSafe(join(repoRoot, prdRel)) : ''
+  const prdIssueNum = Number(parseDocFrontmatter(prdText).data?.issue)
+  const masterClosure = (repoRoot && prdRel)
+    ? evaluateMasterPrdClosureState(repoRoot, prdRel, { currentSpecRel: specRel, currentTodoRel: todoRel })
+    : null
+  const keepOpenMasterIssue = (n) => {
+    if (ledger?.planBootstrap === true) return true
+    if (!masterClosure?.applies || !masterClosure?.isMasterPrd) return false
+    if (masterClosure.state === 'ready-auto-close' || masterClosure.state === 'already-archived') return false
+    return Number(n) === prdIssueNum
+  }
+  const uniqueLinkedIssues = [...new Set(
+    (ledger?.linkedIssues ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0),
+  )]
+  const fixesLine = uniqueLinkedIssues
+    .map((n) => (keepOpenMasterIssue(n) ? `Part of #${n}` : `Fixes #${n}`))
+    .join('\n') || '无（独立变更任务）'
+  const bootstrapDocs = ledger?.planBootstrap
+    ? (Array.isArray(changedFiles) ? changedFiles.filter((f) => /^docs\/(?:prd|specs|todo)\/.*\.md$/.test(posixPath(f))) : [])
+    : []
+  const docLinks = [...new Set([specRel, todoRel, prdRel, ...bootstrapDocs].filter(Boolean))]
+  const docSummary = docLinks.length > 0 ? docLinks.map((p) => `\`${p}\``).join('、') : `无（Case ${ledger?.caseType ?? 3}）`
+  const pfTag = `<!-- pf-state:${JSON.stringify({ taskId, action: 'pr-body', branch: ledger?.branch ?? null, headSha: currentHead || null })} -->`
   const readableTitle = resolveReadablePrTitle(repoRoot, ledger)
 
   const specGoalBullets = extractMeaningfulBullets(extractMarkdownSectionText(specText, [/(?:目标|范围|概述|要解决的问题|背景|summary|overview|goal|motivation|background|context|problem)/i]), 3)
@@ -407,7 +477,7 @@ export function hydratePrTemplateBody({
   const tplRaw = tplPath && existsSync(tplPath) ? readTextSafe(tplPath) : null
   if (!tplRaw) {
     // 兜底正文用与模板同一份标题常量分段：模板缺段时不该另起一套说法。
-    return [
+    const fallbackRendered = [
       `## ${PR_SECTION_TITLES.summary}`, '', summaryText,
       '', `## ${PR_SECTION_TITLES.why}`, '', whyText,
       '', `## ${PR_SECTION_TITLES.issues}`, '', fixesLine,
@@ -415,6 +485,8 @@ export function hydratePrTemplateBody({
       '', `## ${PR_SECTION_TITLES.verify}`, '', verifyText,
       '', pfTag,
     ].join('\n')
+    assertWellFormedMarkdownBody(fallbackRendered, 'PR 模板兜底正文')
+    return fallbackRendered
   }
 
   let body = stripHtmlCommentsOutsideFences(tplRaw)
@@ -437,7 +509,7 @@ export function hydratePrTemplateBody({
     body = r.text
     if (r.matched) matchedCount += 1
   }
-  const cleanRawBody = String(rawBody ?? '').trim()
+  const cleanRawBody = dedupRawBodyIssueRefs(rawBody, uniqueLinkedIssues)
   if (matchedCount === 0) {
     const fallbackAppend = [
       `## ${PR_SECTION_TITLES.summary}`, '', summaryText,
@@ -452,5 +524,6 @@ export function hydratePrTemplateBody({
   body = updateChecklistByEvidence(body, { verifyPassed, finalized: Boolean(ledger?.finalized), hasNoSecrets: verifyPassed })
   const rendered = `${body.replace(/\n{3,}/g, '\n\n').trimEnd()}\n\n${pfTag}\n`
   assertNoAsciiControlChars(rendered, 'PR 模板渲染正文')
+  assertWellFormedMarkdownBody(rendered, 'PR 模板渲染正文')
   return rendered
 }

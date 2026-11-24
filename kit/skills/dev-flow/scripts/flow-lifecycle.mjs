@@ -9,6 +9,7 @@ import { existsSync, lstatSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { buildSubmitComments, docIsoDate, formatAttribution } from '../../lib/docs.mjs'
 import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text,
@@ -29,7 +30,10 @@ import {
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { handleFinalize } from './flow-lifecycle-finalize.mjs'
-import { assertSubmitOwnership, checkLifecyclePreconditions, checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook, runPreVerifyEditGateHook } from './flow-lifecycle-hooks.mjs'
+import {
+  assertSubmitOwnership, checkCase2StructuralDriftOnVerify, checkLifecyclePreconditions,
+  checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook, runPreVerifyEditGateHook,
+} from './flow-lifecycle-hooks.mjs'
 import {
   applySubmitPostActions,
   cmdContainsSubcommand,
@@ -42,6 +46,7 @@ import {
   handleVerifyE2eFailure,
   pickSignalBlameFile,
   recordVerifyEvidenceForFlow,
+  syncBootstrapMasterIssueArtifacts,
   syncReviewSlotForSubmit,
 } from './flow-lifecycle-helpers.mjs'
 
@@ -75,6 +80,8 @@ export async function handleVerify(opts, roots) {
   const workRel = ledger.worktreePath || (ledger.role === 'inbound-external-pr' ? ledger.reviewWorktreePath : null)
   const implRoot = workRel ? resolve(roots.mainRoot, workRel) : roots.mainRoot
   if (!existsSync(implRoot)) throw new Error(`工作区目录不存在：${implRoot}`)
+  const verifySlotOk = checkTaskSlotBoundaryOrEmit(roots.mainRoot, implRoot, ledger, opts)
+  if (!verifySlotOk.ok) return { exitCode: verifySlotOk.exitCode }
 
   const verifyPreCheck = checkLifecyclePreconditions(ledger, opts)
   if (!verifyPreCheck.ok) {
@@ -134,6 +141,25 @@ export async function handleVerify(opts, roots) {
 
   const op = await detectInProgressGitOp(implRoot, { wtGitDir: resolveGitDirFast(implRoot) })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突再执行 verify`)
+
+  if (Number(ledger.caseType) === 2) {
+    const snapC2 = await collectTaskRuntimeSnapshot({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, ledger, profile, hasDevReview, evaluateNext: false })
+    const c2Drift = await checkCase2StructuralDriftOnVerify({
+      mainRoot: roots.mainRoot,
+      implRoot,
+      ledger,
+      opts,
+      effectiveBase: snapC2.effectiveBaseSha,
+      changedFiles: snapC2.changedFiles,
+      statusEntries: snapC2.statusEntries,
+      diffText: snapC2.diffText,
+    })
+    if (!c2Drift.ok) {
+      if (opts.json) process.stdout.write(`${JSON.stringify(c2Drift, null, 2)}\n`)
+      process.stderr.write(`${c2Drift.message}\n`)
+      return { exitCode: c2Drift.exitCode ?? EXIT.ACTION }
+    }
+  }
 
   const keyByMode = { quick: 'quick-test', smoke: 'smoke-verify', full: 'full-test', gate: 'merge-gate' }
   const profileKey = keyByMode[mode]
@@ -418,6 +444,13 @@ export async function handleSubmit(opts, roots) {
     }
   }
 
+  const criteriaDrift = checkFrozenCriteria(ledger, implRoot)
+  if (criteriaDrift.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_CRITERIA_DRIFT', reason: criteriaDrift.message }, null, 2)}\n`)
+    process.stderr.write(criteriaDrift.message)
+    return { exitCode: EXIT.ACTION }
+  }
+
   if (ledger.lastVerifyExitCode !== 0 || (currentHead && ledger.verifiedHead !== currentHead)) {
     if (!ledger.verifiedHead) {
       process.stderr.write(`BLOCKED_NOT_VERIFIED: 提交前必须先运行并通过 flow.mjs verify --task ${taskId}。\n`)
@@ -515,6 +548,7 @@ export async function handleSubmit(opts, roots) {
   if (ledger.role === 'local-only') {
     const shortHead = currentHead?.slice(0, 7) ?? 'unknown'
     await postLocalLifecycleComments({ actionFallback: 'local-ready' })
+    ledger.lastSubmittedHead = currentHead
     ledger.status = 'local-ready'
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, reviewSlotSync }, null, 2)}\n`)
@@ -556,6 +590,7 @@ export async function handleSubmit(opts, roots) {
 
   if (isGenericGit) {
     await postLocalLifecycleComments({ targetRepo, pushRemote, actionFallback: 'submitted' })
+    ledger.lastSubmittedHead = currentHead
     ledger.status = ledger.role === 'contributor-fork' ? 'awaiting-upstream-merge' : 'submitted'
     ledger.deferredPush = deferredPush
     ledger.deferredPushReason = deferredPushReason
@@ -645,6 +680,12 @@ export async function handleSubmit(opts, roots) {
       }
       await applySubmitPostActions({ backend, targetRepo, prNumber: prResult.number, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: false })
     }
+  }
+
+  if (ledger.planBootstrap === true && (ledger.linkedIssues ?? []).length > 0) {
+    await syncBootstrapMasterIssueArtifacts({
+      backend, targetRepo, linkedIssues: ledger.linkedIssues ?? [], ledger, changedFiles: changedForVisual,
+    })
   }
 
   ledger.lastSubmittedHead = currentHead

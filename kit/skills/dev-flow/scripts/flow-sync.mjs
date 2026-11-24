@@ -150,7 +150,8 @@ export async function handleSync(opts = {}, roots) {
   if (ledger.tier === 2 && newHeadSha && ledger.reviewWorktreePath) {
     const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
     if (existsSync(reviewAbs)) {
-      const revUm = unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
+      const mountedPaths = ledger.mountedDepsByWorktree?.[ledger.reviewWorktreePath] ?? ledger.mountedDeps ?? []
+      const revUm = unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps', mountedPaths })
       if (!revUm?.ok) throw new Error(`sync 前解绑审查槽共享依赖失败：${JSON.stringify(revUm?.blocked ?? [])}`)
       reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, newHeadSha, { resetDirty: true })
       const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
@@ -173,6 +174,15 @@ export async function handleSync(opts = {}, roots) {
   ledger.lastSync = { ...roundBaseSha, syncedAt: new Date().toISOString() }
   ledger.baseBranch = targetBaseBranch
   ledger.baseSha = newBaseSha
+  ledger.queueConflict = false
+  ledger.queueConflictReason = null
+  ledger.queueConflictAt = null
+  if (ledger.status === 'rework') {
+    ledger.status = (newHeadSha === prevHeadSha && ledger.verifiedHead === newHeadSha) ? 'verified' : 'started'
+  }
+  if (ledger.finalized && !alreadyBasedOnTarget) {
+    ledger.finalizedHead = newHeadSha
+  }
   if (newHeadSha !== prevHeadSha) {
     ledger.verifiedHead = null
     ledger.reviewPassed = false

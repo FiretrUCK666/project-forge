@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { execSafe } from './git.mjs'
+import { assertWellFormedMarkdownBody } from './pr-template-hydrate.mjs'
 import {
   DEFAULT_GITHUB_CONCURRENCY, addLabelsWithEnsureAndReadback, closePrViaRest,
   createLabelViaApi, mapWithConcurrency, normalizeLabelList,
@@ -277,6 +278,7 @@ export function createGitHubClient({
         return { ok: false, error: 'missing-repo-number-or-body' }
       }
       const normalizedBody = String(cfg.body).replace(/\r\n/g, '\n')
+      assertWellFormedMarkdownBody(normalizedBody, 'Issue 正文')
       if (tier === 'gh-cli' || tier === 'node-https-token') {
         const res = tier === 'gh-cli'
           ? await withUtf8TempFile('pf-issue-patch', JSON.stringify({ body: normalizedBody }), (tmp) => (
@@ -367,6 +369,7 @@ export function createGitHubClient({
 
     async postComment({ repo, number, body, statePayload = {}, deduplicate = true, existingComments = null } = {}) {
       const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
+      assertWellFormedMarkdownBody(normalizedBody, '评论正文')
       const hasState = statePayload && typeof statePayload === 'object' && Object.keys(statePayload).length > 0
       const fp = hasState ? computeWriteBackFingerprint(normalizedBody, statePayload) : null
       const finalState = hasState ? { ...statePayload, writeBackFingerprint: statePayload.writeBackFingerprint ?? fp } : {}
@@ -460,6 +463,7 @@ export function createGitHubClient({
 
     async createPr({ targetRepo, head, base, title, body, draft = false } = {}) {
       const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
+      assertWellFormedMarkdownBody(normalizedBody, 'PR 正文')
       const [headOwner, headBranch] = String(head ?? '').includes(':') ? String(head).split(':') : [undefined, String(head ?? '')]
       const tryReuseConcurrent = async () => {
         if (!targetRepo || !headBranch) return null
@@ -559,6 +563,7 @@ export function createGitHubClient({
       const cleanTitle = String(title ?? '').trim()
       if (!repo || !cleanTitle) return { ok: false, error: 'missing-repo-or-title' }
       const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
+      assertWellFormedMarkdownBody(normalizedBody, 'Issue 正文')
       const cleanLabels = normalizeLabelList(labels)
       const msVal = milestone?.number ?? milestone?.title ?? milestone
       if (tier === 'gh-cli') {

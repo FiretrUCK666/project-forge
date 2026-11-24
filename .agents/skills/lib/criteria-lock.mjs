@@ -138,9 +138,7 @@ export function checkFrozenCriteria(ledger, implRoot) {
 
   // 账本只存指纹不存原文，所以能确定「变了」，但说不出逐条差异——
   // 这时候老实说「去对照上一版提交」，比编一段细节可信。
-  const detail = ledger.frozenCriteriaSnapshot
-    ? describeCriteriaDrift(compareCriteria(extractCriteria(ledger.frozenCriteriaSnapshot), nowCriteria))
-    : '账本里只存了指纹没存原文，请对照上一版提交核对'
+  const detail = '账本里只存了指纹没存原文，请对照上一版提交核对'
   return {
     blocked: true,
     message: `BLOCKED_CRITERIA_DRIFT: ${frozenFrom} 的验收标准在批准之后被改过（${detail}）。\n`

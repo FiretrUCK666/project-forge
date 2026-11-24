@@ -318,8 +318,31 @@ function sectionAliasesMatch(findingLow, section) {
   return false
 }
 
+function matchesContinuedReason(findingText, continuedReason) {
+  const cleanReason = String(continuedReason ?? '').trim()
+  if (!cleanReason) return false
+  const fNorm = normCritItemText(findingText)
+  const rNorm = normCritItemText(cleanReason)
+  if (fNorm && rNorm && (fNorm === rNorm || (rNorm.length >= 4 && fNorm.includes(rNorm)) || (fNorm.length >= 4 && rNorm.includes(fNorm)))) {
+    return true
+  }
+  const fAnchors = extractCAnchors(findingText)
+  const rAnchors = extractCAnchors(cleanReason)
+  if (fAnchors.length > 0 && fAnchors.some((a) => rAnchors.includes(a))) return true
+  const fLow = String(findingText ?? '').toLowerCase()
+  const rCodeTokens = [...cleanReason.matchAll(/`([^`\n]{2,})`/g)].map((m) => m[1].trim().toLowerCase())
+  if (rCodeTokens.some((tok) => fLow.includes(tok))) return true
+  const rTokens = [...new Set(
+    cleanReason.toLowerCase()
+      .split(/[\s、，,。；;：:（）()[\]【】/\\|"'`]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2 && !/^(?:补充|修改|完善|增加|调整|重新|继续|复核|说明|以及|或者|进行|关于|需要)$/.test(t)),
+  )]
+  return rTokens.some((tok) => fLow.includes(tok))
+}
+
 /**
- * R2+ 增量收敛区间锁：新阻塞项必须命中未闭环前轮阻塞项、落入变更行/变更章节内，或对应确定性 auditDoc 失败；
+ * R2+ 增量收敛区间锁：新阻塞项必须命中未闭环前轮阻塞项、落入变更行/变更章节内、命中 `critique-continue` 指示范围或对应确定性 auditDoc 失败；
  * 指向未动旧行/旧章节的新增主观挑刺一律报 `BLOCKED_OUT_OF_SCOPE_CRITIQUE`（exit 3）。
  */
 export function evaluateRound2CritiqueScope({
@@ -330,6 +353,7 @@ export function evaluateRound2CritiqueScope({
   openPriorBlockers = [],
   usedSummaryFallback = false,
   auditFailure = false,
+  continuedReason = '',
   file = '',
   reviewer = '',
 } = {}) {
@@ -350,6 +374,7 @@ export function evaluateRound2CritiqueScope({
     const low = txt.toLowerCase()
 
     if (matchesOpenBlocker(txt, openPriorBlockers)) continue
+    if (continuedReason && matchesContinuedReason(txt, continuedReason)) continue
 
     const lineHits = extractLineMentions(txt)
     if (lineHits.some((ln) => diff.changedLineRanges.some(([s, e]) => ln >= s && ln <= e))) continue

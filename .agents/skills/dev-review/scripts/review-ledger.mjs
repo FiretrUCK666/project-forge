@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
+import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { artifactPathsOf, mergeArtifactRecords, normalizeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { autoEscalateBlockingFindings, buildEscalationIssuePayload, evaluateNoEscalateExemption } from '../../lib/escalation.mjs'
 import { posixPath } from '../../lib/git.mjs'
@@ -137,15 +138,23 @@ export async function handleRecord(opts, roots) {
     process.stderr.write(`${msg}\n`)
     return EXIT.USAGE
   }
-  const targetRoot = (baseLedger.worktreePath && existsSync(resolve(mainRoot, baseLedger.worktreePath)))
-    ? resolve(mainRoot, baseLedger.worktreePath)
-    : ((baseLedger.reviewWorktreePath && existsSync(resolve(mainRoot, baseLedger.reviewWorktreePath)))
-        ? resolve(mainRoot, baseLedger.reviewWorktreePath)
+  const targetRoot = (baseLedger.reviewWorktreePath && existsSync(resolve(mainRoot, baseLedger.reviewWorktreePath)))
+    ? resolve(mainRoot, baseLedger.reviewWorktreePath)
+    : ((baseLedger.worktreePath && existsSync(resolve(mainRoot, baseLedger.worktreePath)))
+        ? resolve(mainRoot, baseLedger.worktreePath)
         : workTreeRoot)
 
   const headSha = opts.head
-    ? await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, opts.head)
-    : await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, 'HEAD')
+    ? await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, opts.head, { preferReviewSlot: true })
+    : await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, 'HEAD', { preferReviewSlot: true })
+
+  const criteriaDrift = checkFrozenCriteria(baseLedger, targetRoot)
+  if (criteriaDrift.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_CRITERIA_DRIFT', exitCode: EXIT.ACTION, taskId, round, headSha, error: criteriaDrift.message }, null, 2)}\n`)
+    else process.stdout.write(criteriaDrift.message)
+    process.stderr.write(criteriaDrift.message)
+    return EXIT.ACTION
+  }
 
   const optionalLowRiskRecord = opts['review-token'] === undefined
     ? await isOptionalLowRiskReview({ mainRoot, targetRoot, baseLedger })
@@ -565,7 +574,7 @@ export async function handleRecord(opts, roots) {
   const nextSteps = resolveRecordNextSteps({ taskId, verdict, round, role: updated.role, providerId: updated.providerId, mainRoot, excludedReviewers })
   const githubSync = await syncReviewToGitHub({
     mainRoot, workTreeRoot: targetRoot, ledger: updated, round, verdict, headSha, reviewerId, implementerId,
-    empiricalSummary: reviewEmpirical, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems, nextSteps, opts,
+    empiricalSummary: reviewEmpirical, summary: opts.summary ?? '', stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems, nextSteps, opts,
   })
   if (Array.isArray(githubSync.syncFailures) && githubSync.syncFailures.length > 0) {
     await updateTaskLedger(mainRoot, taskId, (cur) => ({

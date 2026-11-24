@@ -30,7 +30,7 @@ jobs:
   # 所以它不能是分支保护里那个必需检查——见下面 `check` 那个 job 的说明。
   gates:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     # **跑三平台与双 Node 版本**（Node 18 下界与 Node 22 LTS，覆盖 Windows / macOS / Linux），
     # 防止路径、行尾、PowerShell/Bash 差异或下界 API 兼容在用户机器上才暴露。
     strategy:

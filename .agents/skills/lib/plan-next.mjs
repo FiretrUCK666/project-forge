@@ -21,7 +21,7 @@ import { gitStatusPorcelainZ, posixPath, readTextSafe } from './git.mjs'
 import { readTaskLedger, sanitizeTaskId } from './ledger.mjs'
 import { analyzePendingDecisions, normalizePlanMode } from './pending-decisions.mjs'
 import { resolveCritiqueReadiness } from './plan-exit-gate.mjs'
-import { indexPlanDocs, inferPlanDocKind, isPlanDocApproved } from './plan-index.mjs'
+import { indexPlanDocs, inferPlanDocKind, isPlanDocApproved, resolveLinkedPlanGraph } from './plan-index.mjs'
 import { readPreInitState } from './session-state.mjs'
 
 const TERMINAL_PLAN_STATUSES = new Set(['done', 'archived', 'implemented', 'superseded', 'dropped'])
@@ -319,10 +319,40 @@ export async function evaluatePlanNextState({
     nextAction = '规划内审与结构检查均已通过；请用户做最终拍板：Approve（转实现或 Plan-Only 团队交付）/ Dismiss（打回 planner 修订）/ Keep planning（继续澄清）。'
     command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${relDoc}"`
   } else if (planOnly) {
-    phase = 'plan-only-handoff'
-    ownerRole = 'coordinator'
-    nextAction = '规划已批准（Plan-Only 团队异步交付）：将规划文档 PR 合入默认分支并确认 Master Issue 已同步切片清单后停下，等待其他成员各自认领 readySlices。'
-    command = 'node ".agents/skills/dev-flow/scripts/flow.mjs" next'
+    const graph = resolveLinkedPlanGraph({
+      repoRoot: selectedDoc.root || repoRoot,
+      mainRoot: effMain,
+      file: relDoc,
+      doc: selectedDoc,
+      allDocs,
+    })
+    const graphUnready = graph.nodes.filter((n) => {
+      if (n.inert) return false
+      if (!isPlanDocApproved(n)) return true
+      if (n.kind === 'prd' || n.kind === 'spec') {
+        const { entry: nEntry } = readPlanCritiqueEntrySync({
+          repoRoot: n.root || selectedDoc.root, mainRoot: effMain, gitDir,
+          taskId: n.taskId ?? effTask, fmData: n.data, relDoc: n.rel,
+        })
+        return resolveCritiqueReadiness({ rel: n.rel, kind: n.kind, docType: n.kind, text: n.text, data: n.data, ledgerEntry: nEntry }).blocked
+      }
+      return false
+    })
+    if (graphUnready.length > 0) {
+      const targetNode = graphUnready[0]
+      phase = targetNode.kind === 'todo' ? 'needs-spec-approval' : 'needs-critique'
+      ownerRole = targetNode.kind === 'todo' ? 'human' : 'critic'
+      blockingReasons.push('BLOCKED_PLAN_NOT_READY')
+      nextAction = `关联规划图仍有未就绪节点 ${targetNode.rel} (status=${targetNode.status})，须整图审批就绪后才可进入 Plan-Only 团队交付。`
+      command = targetNode.kind === 'todo'
+        ? `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${targetNode.data?.related_spec ? targetNode.rel : relDoc}"`
+        : `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" next --file "${targetNode.rel}" --plan-only --handoff`
+    } else {
+      phase = 'plan-only-handoff'
+      ownerRole = 'coordinator'
+      nextAction = '规划已批准（Plan-Only 团队异步交付）：将规划文档 PR 合入默认分支并确认 Master Issue 已同步切片清单后停下，等待其他成员各自认领 readySlices。'
+      command = 'node ".agents/skills/dev-flow/scripts/flow.mjs" next'
+    }
   } else {
     phase = 'ready-for-impl'
     ownerRole = 'implementer'

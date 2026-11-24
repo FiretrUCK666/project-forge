@@ -34,7 +34,7 @@ export const DOC_TEMPLATE_VARS = Object.freeze({
     'DOOR', 'ROLLBACK', 'HIGH_RISK', 'FAULT_INJECTION', 'TDD_REF',
   ]),
   todo: Object.freeze([
-    'TITLE', 'TODAY', 'ISSUE', 'ISSUE_LABEL', 'BRANCH', 'OWNER', 'OWNER_LABEL',
+    'TITLE', 'STATUS', 'TODAY', 'ISSUE', 'ISSUE_LABEL', 'BRANCH', 'OWNER', 'OWNER_LABEL',
     'TASK_ID', 'HEAD_SHA', 'HEAD_SHA_SHORT', 'SCOPE_PATHS', 'REUSABLE', 'NON_GOALS',
     'DOOR', 'ROLLBACK', 'QUICK_CMD', 'CRITERIA',
   ]),

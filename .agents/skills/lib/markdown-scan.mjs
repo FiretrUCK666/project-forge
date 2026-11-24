@@ -308,3 +308,29 @@ export function extractHeadlessSummary(text, { maxLength = 180 } = {}) {
   if (para) return para
   return truncateText(firstAnyHeading, maxLength)
 }
+
+/**
+ * 剥除 Markdown 围栏代码块与行内反引号片段（支持单反引号与多反引号包裹），
+ * 供占位符检查与核心节实质性扫描隔离代码参数示例（如 `` `--top <n>` ``）。
+ */
+export function stripMarkdownCodeSpans(text, { preserveBareAngle = false } = {}) {
+  const src = String(text ?? '')
+  if (!src.includes('`') && !src.includes('~')) return src
+  const spans = fencedSpans(src)
+  let out = src
+  if (spans.length > 0) {
+    let buf = ''
+    let cursor = 0
+    for (const [a, b] of spans) {
+      if (a > cursor) buf += src.slice(cursor, a)
+      buf += '\n'
+      cursor = Math.max(cursor, b)
+    }
+    if (cursor < src.length) buf += src.slice(cursor)
+    out = buf
+  }
+  return out.replace(/(`+)([^\n]*?)\1/g, (full, _ticks, inner) => {
+    if (preserveBareAngle && /^\s*<[^>\n]+>\s*$/.test(inner)) return full
+    return ''
+  })
+}

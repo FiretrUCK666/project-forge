@@ -15,7 +15,7 @@ export const INJECTIONS_ITERATE_EVOLUTION = [
     id: 'I211',
     what: 'validateGeneratedTestQuality 不再拦截零断言测试代码',
     file: 'kit/skills/lib/test-inventory.mjs',
-    from: '  if (!ASSERTION_RE.test(codeOnly)) {',
+    from: '  if (!hasBehavioralAssertion(codeOnly, { ext })) {',
     to: '  if (false) {',
     expect: 'dev-iterate 双入口定靶',
   },

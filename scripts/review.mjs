@@ -17,13 +17,13 @@ import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, parseMarkers } from './lib/protoco
 import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
 import { inspectKitManifestForReview, validateDevProfileRegion } from './lib/agents-sections.mjs'
 import {
-  checkEslintAgentsIgnore,
   checkGovernancePrdCoverage,
   collectMissingRemoteCapabilities,
   collectReleaseTagIssues,
   collectSecretsSummary,
   collectStaleCommandsInfo,
   collectUnfilledReleaseNotes,
+  detectToolingAgentsIgnoreGaps,
   findDoNotEditTrackedBuildOverlap,
   findTradeoffContradictions,
   inspectContract,
@@ -460,10 +460,17 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   }
 
   if (!decisions.has('no-kit')) {
-    const eslintGap = checkEslintAgentsIgnore(root)
+    const toolingGaps = detectToolingAgentsIgnoreGaps(root)
+    const eslintGap = toolingGaps.find((g) => g.tool === 'eslint')
     if (eslintGap) {
       add(finding('notice', 'kit', 'kit.eslint-agents-ignore',
         `检测到 ESLint 配置（\`${eslintGap.configFile}\`）未忽略 \`.agents/**\`——装配技能套件后 lint 会扫描 \`.agents/skills/\` 产生大量噪音；建议${eslintGap.advice}`))
+    }
+    const otherGaps = toolingGaps.filter((g) => g.tool !== 'eslint')
+    if (otherGaps.length > 0) {
+      const detail = otherGaps.map((g) => `${g.tool}（\`${g.configFile}\`：${g.advice}）`).join('；')
+      add(finding('notice', 'kit', 'kit.tooling-agents-ignore',
+        `检测到原生静态/格式化配置未忽略 \`.agents/**\`——装配技能套件后可能扫描 \`.agents/skills/\` 产生噪音；建议${detail}`))
     }
   }
 

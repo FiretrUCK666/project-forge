@@ -16,7 +16,7 @@ import {
 } from '../../lib/profile-sniffer.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
-  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, isMetaTestHarness, isTestOrFixtureFile, stripCodeCommentsLines,
+  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, hasBehavioralAssertion, isMetaTestHarness, isTestOrFixtureFile, stripCodeCommentsLines,
 } from '../../lib/static-gates.mjs'
 import {
   cmdCoversTestFile, collectConfiguredTestEntries, collectTestInventory, expandVerificationCommands,
@@ -207,7 +207,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
     const codeLines = stripCodeCommentsLines(info.text, ext)
     const codeOnlyText = codeLines.join('\n')
     const classInfo = extractTestClassInheritance(codeOnlyText, ext)
-    const hasAssertions = ASSERTION_RE.test(codeOnlyText)
+    const hasAssertions = hasBehavioralAssertion(codeOnlyText, { ext })
     const hasTests = TEST_CASE_RE.test(codeOnlyText) || /\bdef\s+test_/.test(codeOnlyText) || /@(?:Test|ParameterizedTest)\b/.test(codeOnlyText)
     for (const cls of classInfo.definedClasses) {
       if (!testClassIndex.has(cls.name)) testClassIndex.set(cls.name, [])
@@ -264,7 +264,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
     const isGoBenchOrExampleOnly = isGoTest && !hasGoUnitTestFunc && (
       /_(?:bench|example)_test\.go$/i.test(f.name) || hasGoBenchOrExampleFunc
     )
-    if (isExplicitTestFile && !isGoBenchOrExampleOnly && !ASSERTION_RE.test(codeOnlyText) && !inherited.hasAssertions) {
+    if (isExplicitTestFile && !isGoBenchOrExampleOnly && !hasBehavioralAssertion(codeOnlyText, { ext }) && !inherited.hasAssertions) {
       addFinding(findings, {
         id: `tests.zero-assertion.${f.rel}`,
         category: 'tests',
@@ -332,7 +332,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
       const mockCount = (codeOnlyText.match(MOCK_SETUP_RE) ?? []).length
       const hasSpyAssert = MOCK_SPY_ASSERT_RE.test(codeOnlyText)
       const nonSpyCode = codeOnlyText.replace(new RegExp(MOCK_SPY_ASSERT_RE.source, 'g'), '')
-      const hasRealAssertion = ASSERTION_RE.test(nonSpyCode)
+      const hasRealAssertion = hasBehavioralAssertion(nonSpyCode, { ext })
       if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion) {
         addFinding(findings, {
           id: `tests.mock-tautology.${f.rel}`,

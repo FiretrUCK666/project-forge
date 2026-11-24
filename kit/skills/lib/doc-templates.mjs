@@ -442,8 +442,9 @@ export function buildStandardDocContent({
     return applyCustomTemplate(injectShapeNote([fm.trimEnd(), '', body.trimEnd(), ''].join('\n')))
   }
 
+  const todoStatus = (Number(caseType) === 4 || Boolean(relatedSpecRel)) ? 'draft' : 'active'
   const fm = serializeFm({
-    kind: 'todo', title, status: 'active', created: today, updated: today,
+    kind: 'todo', title, status: todoStatus, created: today, updated: today,
     issue: issueNum, pr: null, branch: headBranch, owner: owner ?? null,
     plan_mode: resolveDocPlanMode({ kind: 'todo', explicit: planMode }),
     approved: false, done_at: null, task_id: taskId ?? safeSlug ?? 'task',
@@ -457,6 +458,7 @@ export function buildStandardDocContent({
     pruneUnfilled: effectivePrune,
     vars: {
       TITLE: title,
+      STATUS: todoStatus,
       TODAY: today,
       ISSUE: issueNum ?? 'null',
       ISSUE_LABEL: issueNum ? `#${issueNum}` : '未关联',

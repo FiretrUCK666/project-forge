@@ -9,6 +9,12 @@ import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 
 import {
+  applyFindingClosures, assignStructuredFindings, buildCritiqueTextSnapshot,
+  classifyCritiqueFindings, evaluateRound2CritiqueScope, normCritItemText,
+  parseCritiqueOverride, parseCritiqueStamp, parseFindings, serializeFindings,
+  validateRoundContinuity,
+} from './critique-diff.mjs'
+import {
   persistPlanCritiqueEntry, persistPlanCritiqueEntrySync,
   readPlanCritiqueEntry, readPlanCritiqueEntrySync,
 } from './critique-store.mjs'
@@ -18,6 +24,7 @@ import { extractDocSnapshot } from './doc-substantive.mjs'
 import { posixPath, readTextSafe, sha256Text, writeAtomic } from './git.mjs'
 import { appendGovernSignal } from './signals.mjs'
 
+export { parseCritiqueOverride, parseCritiqueStamp, parseFindings, serializeFindings }
 export { persistPlanCritiqueEntrySync, readPlanCritiqueEntry, readPlanCritiqueEntrySync }
 
 export const CRITIQUE_FINDINGS_KEY = 'critique_findings'
@@ -87,11 +94,6 @@ export function checkDistinctRoundReviewer(rounds = [], currentReviewerId, {
   return { blocked: false, excludedReviewers }
 }
 
-function normCritItemText(item) {
-  return String(typeof item === 'string' ? item : (item?.text ?? item?.summary ?? item?.id ?? ''))
-    .replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
 /**
  * C13/C14/C22⑥ 规划与代码审查共享单一三轮停损规则判定源。
  */
@@ -124,24 +126,6 @@ export function evaluateThreeRoundStopLoss({
   if (maxRoundsExceeded) reasons.push(`round ${rNum} >= ${maxRounds} with unresolved verdict/blockers`)
   if (repeatedTrigger) reasons.push(`repeated blocker across consecutive rounds (${repeatedItems.length} item(s))`)
   return { stopLoss, maxRoundsExceeded, repeatedTrigger, repeatedItems, reasons, exitCode: stopLoss ? EXIT.HUMAN : EXIT.OK }
-}
-
-/** 解析 `plan_critique` 单行印记（兼容旧格式）。 */
-export function parseCritiqueStamp(stamp) {
-  const raw = String(stamp ?? '').trim()
-  if (!raw) return null
-  const statusMatch = /^([a-z]+)/i.exec(raw)
-  const reviewer = /reviewer=([^,)]+)/i.exec(raw)?.[1]?.trim() ?? null
-  const roundRaw = /round=(\d+)/i.exec(raw)?.[1]
-  const sha = /\bsha=([a-f0-9]{8,64})\b/i.exec(raw)?.[1]?.toLowerCase() ?? null
-  const summary = /summary=([^)]*)/i.exec(raw)?.[1]?.trim() ?? null
-  return {
-    status: statusMatch ? statusMatch[1].toLowerCase() : null,
-    reviewer,
-    round: roundRaw ? Number(roundRaw) : null,
-    sha,
-    summary,
-  }
 }
 
 /** 安全反序列化 Frontmatter 中的 `critique_rounds` 历史数组（兼容旧单行 `plan_critique` 回退）。 */
@@ -179,23 +163,6 @@ export function parseCritiqueRounds(fmData, rawText = '', ledgerEntry = null) {
     }]
   }
   return []
-}
-
-/** 安全解析账本或 Frontmatter 中的 `critique_override` 人类解锁记录。 */
-export function parseCritiqueOverride(fmData, ledgerEntry = null) {
-  if (ledgerEntry?.override && typeof ledgerEntry.override === 'object' && !Array.isArray(ledgerEntry.override)) {
-    return ledgerEntry.override
-  }
-  const raw = fmData?.[CRITIQUE_OVERRIDE_KEY]
-  if (!raw) return null
-  if (typeof raw === 'object' && !Array.isArray(raw)) return raw
-  if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw.trim())
-      return parsed && typeof parsed === 'object' ? parsed : null
-    } catch { return null }
-  }
-  return null
 }
 
 /**
@@ -243,56 +210,6 @@ export function evaluateCritiqueOverride(rawText, fmData, ledgerEntry = null) {
     currentSha,
     override,
   }
-}
-
-/** 把一轮的意见存成一行（`;;` 分隔）。 */
-export function serializeFindings(round, findings = []) {
-  const parts = []
-  for (const f of findings) {
-    const text = String(typeof f === 'string' ? f : f?.text ?? '').replace(/[\r\n]+/g, ' ').replace(/;;/g, '；').trim()
-    if (!text) continue
-    const severity = String(typeof f === 'string' ? 'must' : (f?.severity ?? 'must')).trim() || 'must'
-    parts.push(`${round}|${severity}|${text}`)
-  }
-  return parts.join(' ;; ')
-}
-
-/** 把存下来的历史解析回结构化记录（同时兼容管道串、`Round N:` 串及 `ledgerEntry.findings` 数组）。 */
-export function parseFindings(raw) {
-  if (Array.isArray(raw)) {
-    const out = []
-    for (const entry of raw) {
-      if (!entry || typeof entry !== 'object') continue
-      const r = Number(entry.round) || 1
-      if (Array.isArray(entry.items)) {
-        const sev = String(entry.verdict ?? '').toLowerCase() === 'passed' ? 'should' : 'must'
-        for (const item of entry.items) {
-          const text = String(item ?? '').trim()
-          if (text) out.push({ round: r, severity: sev, text })
-        }
-      } else if (entry.text) {
-        out.push({ round: r, severity: String(entry.severity ?? 'must').toLowerCase(), text: String(entry.text).trim() })
-      }
-    }
-    return out
-  }
-  const out = []
-  for (const part of String(raw ?? '').split(';;')) {
-    const seg = part.trim()
-    if (!seg) continue
-    const pipeMatch = /^(\d+)\|([a-z]+)\|(.+)$/i.exec(seg)
-    if (pipeMatch) {
-      out.push({ round: Number(pipeMatch[1]), severity: pipeMatch[2].toLowerCase(), text: pipeMatch[3].trim() })
-      continue
-    }
-    const roundMatch = /^Round\s+(\d+)\s*:\s*(.+)$/i.exec(seg)
-    if (roundMatch) {
-      for (const item of roundMatch[2].split(/;\s*/).map((s) => s.trim()).filter(Boolean)) {
-        out.push({ round: Number(roundMatch[1]), severity: 'must', text: item })
-      }
-    }
-  }
-  return out
 }
 
 /** 生成「这一轮要复核什么」的清单（原生消费 `ledgerEntry.findings`、`priorRounds`、`override`、`continued`）。 */
@@ -430,6 +347,12 @@ function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round,
   const effectiveRound = round !== null && round !== undefined
     ? Number(round)
     : (priorRounds.reduce((m, r) => Math.max(m, Number(r?.round) || 0), 0) + 1)
+  const continuity = validateRoundContinuity(priorRounds, round)
+  if (continuity.blocked) {
+    throw makePlanError('BLOCKED_CRITIQUE_ROUND_GAP', EXIT.FACT, continuity.message, {
+      file, round, maxRound: continuity.maxRound,
+    })
+  }
   const reviewerLock = checkDistinctRoundReviewer(priorRounds, reviewer, {
     minRound: 2,
     currentRound: effectiveRound,
@@ -456,7 +379,8 @@ function validateCritiqueActorAndHistory({ fmPre, rawPre, file, reviewer, round,
 /** 记录规划 Critique 通过（含自审拦截、全历史换人锁、A4 正文变动锁与历史停损校验）。 */
 export async function critiquePassDoc({
   repoRoot, mainRoot = repoRoot, gitDir = null, isGit = false,
-  file, reviewer, round = null, summary = '', findings = [], auditDoc = null, docType = null, taskId = null,
+  file, reviewer, round = null, summary = '', findings = [], shouldFix = [],
+  resolved = [], rebutAccepted = [], auditDoc = null, docType = null, taskId = null,
 }) {
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', EXIT.ACTION, `找不到文档：${file}`)
@@ -495,7 +419,11 @@ export async function critiquePassDoc({
   const cleanSummary = String(summary ?? '').replace(/[\r\n]+/g, ' ').trim()
   const stampValue = `passed (reviewer=${String(reviewer).trim()}, round=${effectiveRound}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
 
-  const findingList = (Array.isArray(findings) ? findings : [findings]).map((f) => String(f ?? '').trim()).filter(Boolean)
+  const rawShould = [...(Array.isArray(findings) ? findings : [findings]), ...(Array.isArray(shouldFix) ? shouldFix : [shouldFix])]
+  const findingList = rawShould.map((f) => String(f ?? '').trim()).filter(Boolean)
+  const classifiedPass = classifyCritiqueFindings(findingList, { defaultSeverity: 'minor' })
+  const closedPrev = applyFindingClosures(priorEntry?.structuredFindings ?? [], { resolved, rebutAccepted, round: effectiveRound })
+  const assignedPass = assignStructuredFindings(closedPrev.list, classifiedPass.parsed, effectiveRound, { defaultStatus: 'should-fix' })
   const priorFindings = Array.isArray(priorEntry?.findings) ? priorEntry.findings : []
   const nextFindings = findingList.length > 0
     ? [...priorFindings, { round: effectiveRound, verdict: 'passed', items: findingList }]
@@ -506,6 +434,7 @@ export async function critiquePassDoc({
     sha: digest, artifact_baseline: baseline, summary: cleanSummary || null,
     findings: findingList, stopLossTriggered: false, recordedAt: new Date().toISOString(),
   }].sort((a, b) => Number(a.round) - Number(b.round))
+  const nextSnapshots = { ...(priorEntry?.roundSnapshots ?? {}), [String(effectiveRound)]: buildCritiqueTextSnapshot(text) }
 
   persistCritiqueFrontmatter(abs, text, fm, effType, {
     plan_critique: stampValue,
@@ -519,6 +448,8 @@ export async function critiquePassDoc({
       rounds: nextRounds,
       anchors: snap,
       findings: nextFindings,
+      structuredFindings: assignedPass.list,
+      roundSnapshots: nextSnapshots,
       override: priorEntry?.override ?? parseCritiqueOverride(fm.data),
       updatedAt: new Date().toISOString(),
     },
@@ -545,7 +476,8 @@ export async function critiquePassDoc({
  */
 export async function critiqueRejectDoc({
   repoRoot, mainRoot = repoRoot, gitDir = null, isGit = false,
-  file, reviewer, round = null, summary = '', findings = [], docType = null, taskId = null,
+  file, reviewer, round = null, summary = '', findings = [],
+  resolved = [], rebutAccepted = [], auditDoc = null, docType = null, taskId = null,
 }) {
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw makePlanError('FILE_NOT_FOUND', EXIT.ACTION, `找不到文档：${file}`)
@@ -570,13 +502,41 @@ export async function critiqueRejectDoc({
 
   const findingList = (Array.isArray(findings) ? findings : [findings]).map((f) => String(f ?? '').trim()).filter(Boolean)
   const cleanSummary = String(summary ?? '').replace(/[\r\n]+/g, ' ').trim()
+  const usedSummaryFallback = findingList.length === 0 && Boolean(cleanSummary)
   const evalItems = findingList.length > 0 ? findingList : (cleanSummary ? [cleanSummary] : [])
-  const prevItems = Array.isArray(prevRound?.findings) && prevRound.findings.length > 0
-    ? prevRound.findings
-    : (prevRound?.summary ? [prevRound.summary] : [])
+  const classified = classifyCritiqueFindings(evalItems, { defaultSeverity: 'major' })
+  if (classified.onlyMinor) {
+    throw makePlanError(
+      'BLOCKED_NON_BLOCKING_REJECT', EXIT.FACT,
+      `BLOCKED_NON_BLOCKING_REJECT: critique-reject 仅收到非阻断 minor 建议（${classified.minor.map((m) => m.text).join('；')}），禁止阻断规划；请改用：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${relDoc}" --reviewer "${String(reviewer).trim()}" --round ${effectiveRound} --should-fix "${classified.minor[0].text}"`,
+      { file: relDoc, round: effectiveRound, minorFindings: classified.minor.map((m) => m.text) },
+    )
+  }
+
+  const closedPrev = applyFindingClosures(priorEntry?.structuredFindings ?? [], { resolved, rebutAccepted, round: effectiveRound })
+  const openPriorBlockers = closedPrev.list.filter((it) => it.status === 'open' && (it.severity === 'blocker' || it.severity === 'major'))
+  const currLines = buildCritiqueTextSnapshot(text)
+  const prevSnapKey = String(prevRound?.round ?? (effectiveRound - 1))
+  const prevLines = priorEntry?.roundSnapshots?.[prevSnapKey] ?? null
+  const auditFailure = typeof auditDoc === 'function' ? !auditDoc({ repoRoot, file }).ok : false
+  const scopeCheck = evaluateRound2CritiqueScope({
+    effectiveRound, prevLines, currLines, blockingItems: classified.blocking,
+    openPriorBlockers, usedSummaryFallback, auditFailure, file: relDoc, reviewer: String(reviewer).trim(),
+  })
+  if (scopeCheck.blocked) {
+    throw makePlanError('BLOCKED_OUT_OF_SCOPE_CRITIQUE', EXIT.FACT, scopeCheck.message, {
+      file: relDoc, round: effectiveRound, outOfScope: scopeCheck.outOfScope,
+    })
+  }
+
+  const blockingTexts = classified.blocking.map((b) => b.text)
+  const assigned = assignStructuredFindings(closedPrev.list, classified.parsed, effectiveRound)
+  const prevItems = openPriorBlockers.length > 0
+    ? openPriorBlockers.map((b) => b.text)
+    : (closedPrev.closedIds.length > 0 ? [] : (Array.isArray(prevRound?.findings) && prevRound.findings.length > 0 ? prevRound.findings : (prevRound?.summary ? [prevRound.summary] : [])))
 
   const sl = evaluateThreeRoundStopLoss({
-    round: effectiveRound, verdict: 'reject', items: evalItems, prevItems, humanApproved: Boolean(override?.approved),
+    round: effectiveRound, verdict: 'reject', items: blockingTexts, prevItems, humanApproved: Boolean(override?.approved),
   })
 
   const stampValue = `rejected (reviewer=${String(reviewer).trim()}, round=${effectiveRound}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
@@ -591,6 +551,7 @@ export async function critiqueRejectDoc({
     findings: evalItems, stopLossTriggered: sl.stopLoss, stopLossReasons: sl.reasons,
     recordedAt: new Date().toISOString(),
   }].sort((a, b) => Number(a.round) - Number(b.round))
+  const nextSnapshots = { ...(priorEntry?.roundSnapshots ?? {}), [String(effectiveRound)]: currLines }
 
   persistCritiqueFrontmatter(abs, text, fm, effType, {
     plan_critique: stampValue,
@@ -604,6 +565,8 @@ export async function critiqueRejectDoc({
       rounds: nextRounds,
       anchors: snap,
       findings: nextFindings,
+      structuredFindings: assigned.list,
+      roundSnapshots: nextSnapshots,
       override: priorEntry?.override ?? override,
       updatedAt: new Date().toISOString(),
     },

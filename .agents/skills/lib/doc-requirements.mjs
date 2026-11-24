@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { CUSTOM_DECL_REL, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { collectOwnerHistory, normOwnerId } from './doc-approval.mjs'
 import { isStubValue } from './doc-substantive.mjs'
+import { RISK_NON_DECISION_HEADING_RE } from './pending-decisions.mjs'
 import { readTextSafe } from './git.mjs'
 
 export { CUSTOM_DECL_REL }
@@ -211,7 +212,7 @@ export const SECTION_DEFS = Object.freeze({
     id: 'risks',
     label: '风险与开放问题',
     keywords: ['风险', '开放问题', 'Risks'],
-    evidence: [/(?:风险|可能出问题|兜底)/],
+    evidence: [/(?:风险|可能出问题|兜底)/, RISK_NON_DECISION_HEADING_RE],
     core: false,
     fixHint: '与「待拍板」不同：这里要人知道可能会出什么事，不是要人做决定。',
   },

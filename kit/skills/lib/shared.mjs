@@ -111,6 +111,7 @@ export {
   GATE_SHELL_OR_SCRIPT_RE,
   GATE_SKIP_RE,
   GATE_WORKFLOW_FILE_RE,
+  hasBehavioralAssertion,
   isRustLifetimeAt,
   isTestOrFixtureFile,
   LOCKFILE_NAMES,

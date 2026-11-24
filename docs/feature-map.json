@@ -319,6 +319,7 @@
         "kit/skills/lib/pending-decisions.mjs",
         "kit/skills/lib/criteria-lock.mjs",
         "kit/skills/lib/critique-rounds.mjs",
+        "kit/skills/lib/critique-diff.mjs",
         "kit/skills/lib/critique-store.mjs",
         "kit/skills/lib/doc-facts.mjs",
         "kit/skills/lib/doc-frontmatter.mjs",
@@ -400,6 +401,7 @@
       "modules": [
         "kit/skills/dev-edit/scripts/edit-gate.mjs",
         "kit/skills/lib/static-gates.mjs",
+        "kit/skills/lib/static-gates-assertions.mjs",
         "kit/skills/lib/static-gates-comment-hygiene.mjs",
         "kit/skills/lib/static-gates-lexer.mjs",
         "kit/skills/lib/git-core.mjs",
@@ -531,7 +533,9 @@
         "scripts/dev/fixtures-r6a-state.mjs",
         "scripts/dev/injections-data-r6a.mjs",
         "scripts/dev/fixtures-r6d-contracts.mjs",
-        "scripts/dev/injections-data-r6d.mjs"
+        "scripts/dev/injections-data-r6d.mjs",
+        "scripts/dev/fixtures-r7-rootfix.mjs",
+        "scripts/dev/injections-data-r7.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -798,7 +802,9 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-r6d-contracts.mjs",
-        "scripts/dev/injections-data-r6d.mjs"
+        "scripts/dev/injections-data-r6d.mjs",
+        "scripts/dev/fixtures-r7-rootfix.mjs",
+        "scripts/dev/injections-data-r7.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -942,7 +948,9 @@
       "testRefs": [
         "scripts/dev/fixtures-flow-truth.mjs",
         "scripts/dev/fixtures-r6d-contracts.mjs",
-        "scripts/dev/injections-data-r6d.mjs"
+        "scripts/dev/injections-data-r6d.mjs",
+        "scripts/dev/fixtures-r7-rootfix.mjs",
+        "scripts/dev/injections-data-r7.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"

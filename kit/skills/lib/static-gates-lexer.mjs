@@ -376,10 +376,13 @@ export const MOCK_SPY_ASSERT_RE = /\bexpect\s*\((?:[^()\n]|\([^()\n]*\))+\)\s*(?
  * 词法去噪后的单测反作弊检查（零断言、纯 Mock 自证、单测 >=1s 硬编码 sleep、非无头 UI 测试）。
  */
 export function scanTestAntiCheat({
-  fileRel, text, ext = '', assertionRe, testCaseRe, isNonUnit = false,
+  fileRel, text, ext = '', assertionRe, hasAssertion = null, testCaseRe, isNonUnit = false,
 } = {}) {
   const findings = []
   const extNorm = ext || String(fileRel ?? '').split('.').pop()?.toLowerCase() || ''
+  const checkAssert = typeof hasAssertion === 'function'
+    ? (code) => hasAssertion(code, { ext: extNorm })
+    : (code) => Boolean(assertionRe?.test(code))
   const views = buildLexedViews(text, extNorm)
   const codeOnlyText = views.codeOnlyText
   const codeNoLiterals = views.codeNoLiteralsText
@@ -388,7 +391,7 @@ export function scanTestAntiCheat({
   const isExplicitTest = /\.(?:test|spec)\.[^/]+$|_test\.[^/]+$|^test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$/i.test(baseName)
     || testDeclCount > 0
 
-  if (isExplicitTest && !assertionRe.test(codeOnlyText)) {
+  if (isExplicitTest && !checkAssert(codeOnlyText)) {
     findings.push({
       ruleId: 'edit.test-zero-assertion',
       defectClass: 'mock-only-test',
@@ -404,7 +407,7 @@ export function scanTestAntiCheat({
     const mockCount = (codeNoLiterals.match(MOCK_SETUP_RE) ?? []).length
     const hasSpyAssert = MOCK_SPY_ASSERT_RE.test(codeOnlyText)
     const nonSpyCode = codeOnlyText.replace(new RegExp(MOCK_SPY_ASSERT_RE.source, 'g'), '')
-    const hasRealAssertion = assertionRe.test(nonSpyCode)
+    const hasRealAssertion = checkAssert(nonSpyCode)
     if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion) {
       findings.push({
         ruleId: 'edit.test-mock-tautology',

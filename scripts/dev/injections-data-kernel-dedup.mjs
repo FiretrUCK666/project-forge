@@ -140,8 +140,8 @@ export const INJECTIONS_KERNEL_DEDUP = [
     id: 'I385',
     what: 'bench.mjs: 恢复 CI 2.5x 环境变量放宽分支',
     file: 'scripts/dev/bench.mjs',
-    from: 'export function computeCheckBudget(check, { unitMs, strictBudget = false }) {\n  if (strictBudget) return check.strictBudget\n  return Math.min(check.hardCapMs, Math.max(1, Math.round(unitMs * check.unitMult)))\n}',
-    to: 'export function computeCheckBudget(check, { unitMs, strictBudget = false }) {\n  if (strictBudget) return check.strictBudget\n  return Math.round(Math.min(check.hardCapMs, Math.max(1, Math.round(unitMs * check.unitMult))) * (process.env.CI ? 2.5 : 1))\n}',
+    from: 'export function computeCheckBudget(check, { unitMs, strictBudget = false }) {\n  if (strictBudget) return check.strictBudget\n  const clampedUnitMs = Math.min(MAX_CALIBRATION_UNIT_MS, Math.max(1, Number(unitMs) || 1))\n  return Math.max(check.strictBudget, Math.min(check.runawayCapMs, Math.round(clampedUnitMs * check.unitMult)))\n}',
+    to: 'export function computeCheckBudget(check, { unitMs, strictBudget = false }) {\n  if (strictBudget) return check.strictBudget\n  const clampedUnitMs = Math.min(MAX_CALIBRATION_UNIT_MS, Math.max(1, Number(unitMs) || 1))\n  return Math.round(Math.max(check.strictBudget, Math.min(check.runawayCapMs, Math.round(clampedUnitMs * check.unitMult))) * (process.env.CI ? 2.5 : 1))\n}',
     expect: 'C6：bench.mjs 零 CI 分支同轮校准预算与 --strict-budget 1x 严格上限正反双向',
   },
 ]

@@ -12,7 +12,8 @@ import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import {
   applyLocalAutoClaim, calibrateLedgerBaseBranch, checkStartAuthorSeparation, checkStartMainCleanAndSlot,
-  checkStartTriageDowngrade, emitBlockedStart, inheritExploredCredentials, markStartTriageConsumed, promotePlanningToStarted,
+  checkStartTriageDowngrade, emitBlockedStart, inheritExploredCredentials, markStartTriageConsumed,
+  promotePlanningToStarted, resolveStartIdentity,
 } from './flow-start-helpers.mjs'
 import { fetchGitClaimRefs } from './flow-merge-claim.mjs'
 import { workTypePrefix } from '../../lib/escalation.mjs'
@@ -36,7 +37,7 @@ import { evaluatePlanExitGate, formatPlanExitGate, PLAN_BOOTSTRAP_FLAG } from '.
 import {
   cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parseMilestoneNumber, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveIdentityLayers, resolveWorkspaceIdentity,
+  parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -570,13 +571,7 @@ export async function handleStart(opts, roots) {
   }
   const filesList = opts.files ? String(opts.files).split(/[\s,]+/).map((s) => posixPath(s).replace(/^\.\//, '').trim()).filter(Boolean) : []
   const depMeta = state.inputs?.graph?.externalDependencies?.length ? { dependsOn: state.inputs.graph.externalDependencies } : {}
-  const startIdentity = resolveIdentityLayers({
-    ghLogin: state.github?.trackB?.login,
-    ghTier: state.github?.trackB?.tier,
-    gitName: state.gitIdentity?.name,
-    explicitAgent: opts.agent ?? opts.implementer,
-  })
-  const implementerId = startIdentity.agent || startIdentity.account || 'local-agent'
+  const { startIdentity, implementerId } = resolveStartIdentity({ isPlanning, state, opts })
 
   const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
   const activePrForStart = effectiveExternalPr ?? prNumber ?? null

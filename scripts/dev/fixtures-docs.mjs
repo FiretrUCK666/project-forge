@@ -179,6 +179,8 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
       writeFileSync(p, txt)
     }
 
+    const cpPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', prdRel, '--reviewer', 'critic-1'], { cwd: dir })
+    if (cpPrd.status !== 0) return `PRD critique-pass 失败：${cpPrd.stderr}`
     const cp = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', specRel, '--reviewer', 'critic-1'], { cwd: dir })
     if (cp.status !== 0) return `critique-pass 失败：${cp.stderr}`
 
@@ -190,6 +192,9 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
     if (!renamedSpec || /-26\d{4}-/.test(renamedSpec)) {
       return `中文 slug 重命名重复损坏：${renamedSpec}`
     }
+    const renamedPrd = lkJson.byKind?.prd
+    const apPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', renamedPrd], { cwd: dir })
+    if (apPrd.status !== 0) return `PRD approve 失败：${apPrd.stderr}`
     const renamedTodo = lkJson.byKind?.todo
     const apTodo = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', renamedTodo], { cwd: dir })
     if (apTodo.status !== 0) return `Todo approve 失败：${apTodo.stderr}`

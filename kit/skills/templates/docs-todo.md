@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: "{{TITLE}}"
-status: active
+status: {{STATUS}}
 created: {{TODAY}}
 updated: {{TODAY}}
 issue: {{ISSUE}}
@@ -23,7 +23,7 @@ related_spec: null
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `{{STATUS}}`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `{{TODAY}}` / `{{TODAY}}` |
 | 分支 / 基线 | `{{BRANCH}}` @ `{{HEAD_SHA_SHORT}}` |
 | 任务编号 | `{{TASK_ID}}` |

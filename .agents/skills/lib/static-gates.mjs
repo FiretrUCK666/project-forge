@@ -14,6 +14,7 @@ import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
 import {
   classifyDeclarativeDataFile, classifyOversizedFile, isGeneratedSourceHeader, isGitAttributesGenerated,
 } from './static-gates-comment-hygiene.mjs'
+import { hasBehavioralAssertion as _hasBehavioralAssertion } from './static-gates-assertions.mjs'
 
 export { CODE_EXT_RE, matchGlob }
 import {
@@ -103,6 +104,9 @@ export const TAUTOLOGY_ASSERT_RE = new RegExp([
   `\\bassert_eq!\\s*\\(\\s*(${TAUT_ATOM})\\s*,\\s*\\5\\s*(?:,|\\))`,
 ].join('|'))
 export const GATE_ASSERTION_RE = ASSERTION_RE
+export function hasBehavioralAssertion(codeOnlyText, opts = {}) {
+  return _hasBehavioralAssertion(codeOnlyText, { assertionRe: ASSERTION_RE, ...opts })
+}
 export const TEST_CASE_RE = /(?<![.\w$])(?:it|test|describe|context|suite)(?:\.(?:skip|only|todo))?\s*\(|(?<![.\w$])(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]|@(?:Test|ParameterizedTest)\b|\[(?:Fact|Theory)\b/
 export const TEST_SKIP_RE = GATE_SKIP_RE
 export const GATE_CI_PERM_WRITE_RE = /\b(?:contents|id-token|packages|security-events|actions|pull-requests|checks|deployments|issues)\s*:\s*write\b/i
@@ -601,13 +605,13 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
     const hunkList = Array.isArray(hunks) && hunks.length > 0 ? hunks : [{ added, removed }]
     const hasAssertOrTest = (l) => {
       const info = extractLineCommentInfo(l, false, ext)
-      return info.codeText.trim() && (ASSERTION_RE.test(info.codeText) || TEST_CASE_RE.test(info.codeText))
+      return info.codeText.trim() && (hasBehavioralAssertion(info.codeText, { ext }) || TEST_CASE_RE.test(info.codeText))
     }
     const isEffectiveAddedAssert = (l) => {
       const info = extractLineCommentInfo(l, false, ext)
       const code = info.codeText.trim()
       if (!code || TAUTOLOGY_ASSERT_RE.test(code)) return false
-      return ASSERTION_RE.test(code) || TEST_CASE_RE.test(code)
+      return hasBehavioralAssertion(code, { ext }) || TEST_CASE_RE.test(code)
     }
     for (const hk of hunkList) {
       const remAsserts = hk.removed.filter(hasAssertOrTest)

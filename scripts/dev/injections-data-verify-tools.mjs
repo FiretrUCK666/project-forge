@@ -68,8 +68,8 @@ export const INJECTIONS_VERIFY_TOOLS = [
     what: 'C10 verify-tools run 放松高风险过期工具硬阻断',
     file: 'kit/skills/dev-verify-tools/scripts/verify-tools.mjs',
     alsoDropIn: ['.agents/skills/dev-verify-tools/scripts/verify-tools.mjs'],
-    from: "    if (staleness.status === 'stale' && tool.riskLevel === 'high' && !refreshBaseline && !liveE2eCmd) {",
-    to: "    if (false && staleness.status === 'stale' && tool.riskLevel === 'high' && !refreshBaseline && !liveE2eCmd) {",
+    from: "    if (staleness.status === 'stale' && tool.riskLevel === 'high' && !refreshBaseline && !liveE2eCmd && !staleOnly) {",
+    to: "    if (false && staleness.status === 'stale' && tool.riskLevel === 'high' && !refreshBaseline && !liveE2eCmd && !staleOnly) {",
     expect: 'StageC C10',
   },
   {

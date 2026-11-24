@@ -7,8 +7,10 @@
 import { existsSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
+import { parseDocFrontmatter } from '../../lib/doc-frontmatter.mjs'
 import { PLACEHOLDER_TEXT_RE } from '../../lib/doc-substantive.mjs'
-import { isInsideDir, posixPath } from '../../lib/git.mjs'
+import { isInsideDir, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { stripMarkdownCodeSpans } from '../../lib/markdown-scan.mjs'
 
 const ANGLE_PLACEHOLDER_RE = /<([^>\n]{1,60})>/g
 export const PATH_PREFIX_RE = /^(?:src|lib|kit|scripts|tests?|spec|app|apps|packages|pkg|cmd|internal|docs|templates|references|\.github)\//
@@ -50,7 +52,7 @@ const FILL_COMMENT_RE = /<!--\s*(?:project-forge:\s*)?fill/i
 
 /** 收集单行文本或 Frontmatter 字符串字段中的未清理占位符错误。 */
 export function collectPlaceholderErrors(rawText, strippedText, lineNo, errors) {
-  const nonCodeText = String(strippedText ?? '').replace(/`[^`\n]+`/g, '')
+  const nonCodeText = stripMarkdownCodeSpans(strippedText, { preserveBareAngle: true })
   if (PLACEHOLDER_TEXT_RE.test(nonCodeText) || FILL_COMMENT_RE.test(rawText)) {
     errors.push({
       code: 'UNRESOLVED_PLACEHOLDER',
@@ -59,11 +61,11 @@ export function collectPlaceholderErrors(rawText, strippedText, lineNo, errors) 
       fixHint: '请将「待补充/TBD/FIXME/fill」替换为真实结论、路径或可运行验证命令。',
     })
   }
-  for (const am of strippedText.matchAll(ANGLE_PLACEHOLDER_RE)) {
+  for (const am of nonCodeText.matchAll(ANGLE_PLACEHOLDER_RE)) {
     const inner = am[1].trim()
-    if (isGenericOrJsxAngle(strippedText, am.index ?? 0, am[0], inner)) continue
+    if (isGenericOrJsxAngle(nonCodeText, am.index ?? 0, am[0], inner)) continue
     const looksPlaceholder = /[\u4e00-\u9fa5]|\||^(?:todo|tbd|path|file|cmd|slug|title|id|N|target|module|name|reason|owner|status|branch|spec|prd|placeholder|example|two-way\s*\|\s*one-way)$/i.test(inner)
-      || /(?:^|[:：]\s*|-+\s+)<[^>]+>/.test(strippedText)
+      || /(?:^|[:：]\s*|-+\s+)<[^>]+>/.test(nonCodeText)
     if (looksPlaceholder) {
       errors.push({
         code: 'UNRESOLVED_ANGLE_PLACEHOLDER',
@@ -103,16 +105,33 @@ export function candHasNewAnnotation(strippedLine, rawCand) {
   return nearNewRe.test(strippedLine)
 }
 
-/** 解析正文相对路径候选：对 `./` 与 `../` 先按文档目录解析并校验不出 `repoRoot`（`./` 兼容回退仓根）。 */
+const TERMINAL_ARCHIVED_STATUSES = new Set(['implemented', 'done', 'archived'])
+
+function probeArchivedPlanDoc(repoRoot, cleanRel) {
+  const m = /^docs\/(prd|specs|todo)\/([^/]+\.md)$/.exec(String(cleanRel ?? ''))
+  if (!m) return null
+  const archRel = `docs/archive/${m[1]}/${m[2]}`
+  const archAbs = join(repoRoot, archRel)
+  if (!existsSync(archAbs)) return null
+  const txt = readTextSafe(archAbs)
+  if (txt === undefined) return null
+  const st = String(parseDocFrontmatter(txt)?.data?.status ?? 'archived').trim().toLowerCase()
+  return TERMINAL_ARCHIVED_STATUSES.has(st) ? archRel : null
+}
+
+/** 解析正文相对路径候选：对 `./` 与 `../` 先按文档目录解析并校验不出 `repoRoot`（支持活跃/归档双态）。 */
 export function resolveDocBodyPathCandidate({ repoRoot, absDoc, rawCand, declaredNewFiles = new Set(), declaredNewDirs = new Set() }) {
   const cleanNoSlash = String(rawCand ?? '').replace(/\/+$/, '')
   const isDotRel = rawCand.startsWith('./') || rawCand.startsWith('../')
   if (!isDotRel) {
+    const directExists = existsSync(join(repoRoot, cleanNoSlash)) || declaredNewFiles.has(cleanNoSlash) || declaredNewDirs.has(cleanNoSlash)
+    const archivedAt = !directExists ? probeArchivedPlanDoc(repoRoot, cleanNoSlash) : null
     return {
       insideRepo: true,
       cleanRel: cleanNoSlash,
       parentRel: posixPath(dirname(cleanNoSlash)),
-      exists: existsSync(join(repoRoot, cleanNoSlash)) || declaredNewFiles.has(cleanNoSlash) || declaredNewDirs.has(cleanNoSlash),
+      exists: directExists || Boolean(archivedAt),
+      ...(archivedAt ? { archivedAt } : {}),
     }
   }
   const docResolved = resolve(dirname(absDoc), cleanNoSlash)
@@ -127,10 +146,12 @@ export function resolveDocBodyPathCandidate({ repoRoot, absDoc, rawCand, declare
       return { insideRepo: true, cleanRel: rootCand, parentRel: posixPath(dirname(rootCand)), exists: true }
     }
   }
+  const archivedAt = !existsAtDoc ? probeArchivedPlanDoc(repoRoot, relFromRoot) : null
   return {
     insideRepo: true,
     cleanRel: relFromRoot,
     parentRel: posixPath(dirname(relFromRoot)),
-    exists: existsAtDoc,
+    exists: existsAtDoc || Boolean(archivedAt),
+    ...(archivedAt ? { archivedAt } : {}),
   }
 }

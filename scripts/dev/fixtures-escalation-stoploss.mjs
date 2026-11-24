@@ -381,12 +381,12 @@ export function registerStageBLoopB4bCases(cases) {
       }
 
       // R2 critic-2 与 R1 不同意见正常放行 (0)
-      const r2Diff = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-2', '--round', '2', '--findings', 'C2: 补充回滚点', '--dir', dir]))
+      const r2Diff = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-2', '--round', '2', '--findings', 'C1: 补充异常处理边界', '--dir', dir]))
       if (r2Diff.res !== EXIT.FACT) return `R2 critic-2 不同意见不应停损：exit=${r2Diff.res}, err=${r2Diff.err}`
 
       // R3 再改稿后即使换 critic-3 仍 reject -> 第 3 轮硬停损 (4) + 信号写入
       writeFileSync(join(dir, specFile), readFileSync(join(dir, specFile), 'utf8').replace('第二版补异常', '第三版补回滚'))
-      const r3Stop = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-3', '--round', '3', '--findings', 'C3: 仍未收敛', '--dir', dir, '--json']))
+      const r3Stop = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-3', '--round', '3', '--findings', 'C1: 仍未收敛', '--dir', dir, '--json']))
       if (r3Stop.res !== 4 || !r3Stop.out.includes('STOP_LOSS_ESCALATE')) {
         return `R3 规划审稿未触发硬停损：exit=${r3Stop.res}, out=${r3Stop.out}, err=${r3Stop.err}`
       }

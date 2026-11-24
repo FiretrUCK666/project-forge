@@ -3,15 +3,16 @@
  * doc-plan.mjs —— 五档需求分流、四层工程文档生成、规划自审净化、Critique、批准与归档取代。
  *
  * 子命令：
+ *   next           [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]
+ *   note           [--topic <text>] [--decision <text>] [--exclude <t>...] [--anchor <p>...] [--open <q>...] [--json]
  *   triage         --summary <text> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
  *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
  *   clarify        --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]
  *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name> --owner-reason "<原因>"] [--status <s>] [--json]
  *   audit          [--file <docPath> | .] [--json]
- *   next           [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]
  *   critique-scope    --file <docPath> [--reviewer <id>] [--round <n>] [--json]
- *   critique-pass     --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--json]
- *   critique-reject   --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--findings <t>...] [--json]
+ *   critique-pass     --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--should-fix <t>...] [--resolved <id>...] [--rebut-accepted <id>...] [--json]
+ *   critique-reject   --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--findings <t>...] [--resolved <id>...] [--rebut-accepted <id>...] [--json]
  *   critique-continue --file <docPath> --reason <改进方向> [--by <actor>] [--task <id>] [--json]
  *   critique-override --file <docPath> --human-approved --reason <text> [--by <actor>] [--json]
  *   approve           --file <specPath> [--skip-critique-reason <text>] [--json]
@@ -132,14 +133,15 @@ function printHelp() {
     '',
     '子命令：',
     '  next               [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]',
+    '  note               [--topic <主题>] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
     '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--owner <name>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--single-session] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
     '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O> --owner-reason "<变更原因>"] [--status <S>] [--milestone <m>] [--json]',
     '  audit              [--file <docPath> | .] [--json]',
     '  critique-scope     --file <docPath> [--reviewer <id>] [--round <n>] [--run-commands] [--json]',
-    '  critique-pass      --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
-    '  critique-reject    --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
+    '  critique-pass      --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--should-fix <t>...] [--resolved <id>...] [--rebut-accepted <id>...] [--json]',
+    '  critique-reject    --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--resolved <id>...] [--rebut-accepted <id>...] [--json]',
     '  critique-continue  --file <docPath> --reason <改进方向> [--by <actor>] [--task <id>] [--json]',
     '  critique-override  --file <docPath> --human-approved --reason <原因> [--by <actor>] [--json]',
     '  approve            --file <specPath> [--skip-critique-reason <文本>] [--host-mode <m>] [--single-session] [--human-approved] [--json]',
@@ -160,7 +162,7 @@ async function main(argv) {
       subcommands: SUBCOMMANDS,
       booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'single-session', 'handoff', 'plan-only', 'run-commands'],
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic'],
-      multiFlags: ['findings', 'finding', 'exclude', 'anchor', 'open'],
+      multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open'],
       aliases: { type: 'kind' },
       usageHint: `doc-plan.mjs <${SUBCOMMANDS.join('|')}>`,
     })
@@ -568,6 +570,7 @@ async function main(argv) {
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         file: opts.file, reviewer: opts.reviewer, round: opts.round ?? null,
         summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
+        shouldFix: opts['should-fix'] ?? [], resolved: opts.resolved ?? [], rebutAccepted: opts['rebut-accepted'] ?? [],
         auditDoc, docType: null, taskId: opts.task ?? null,
       })
       res.planSync = await syncPlanPhaseToBackend({
@@ -579,9 +582,7 @@ async function main(argv) {
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`Critique 通过记录已写入 ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
-        const passNext = res.docType === 'prd'
-          ? `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "${res.file}" --status active`
-          : `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${res.file}"`
+        const passNext = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${res.file}"`
         printNextStep([{ skill: 'dev-plan', text: passNext }], { repoRoot: mainRoot })
       }
       return 0
@@ -594,6 +595,7 @@ async function main(argv) {
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         file: opts.file, reviewer: opts.reviewer, round: opts.round ?? null,
         summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
+        resolved: opts.resolved ?? [], rebutAccepted: opts['rebut-accepted'] ?? [], auditDoc,
         taskId: opts.task ?? null,
       })
       res.planSync = await syncPlanPhaseToBackend({

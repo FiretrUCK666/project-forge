@@ -27,7 +27,7 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  checkProcessArtifactFilename, countTextLines, evaluateArchRules, isLegalArchiveMove, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
+  checkProcessArtifactFilename, countTextLines, evaluateArchRules, hasBehavioralAssertion, isLegalArchiveMove, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 import {
   buildSplitReuseGuidance, checkMechanicalSplitName, classifyOversizedFile, detectLineSquashCheat,
@@ -565,7 +565,9 @@ export async function runEditGate(opts = {}) {
     const exemptZeroProbe = Boolean(opts.exemptZeroAssertion) || /(?:^|\/)scratch\//i.test(rel)
     if (TEST_FILE_RE.test(rel) && !FIXTURE_FILE_RE.test(rel) && !isMetaHarness) {
       const { tier } = classifyTestFileTier(rel, txt, tierMeta)
-      for (const hit of scanTestAntiCheat({ fileRel: rel, text: txt, assertionRe: ASSERTION_RE, testCaseRe: TEST_CASE_RE, isNonUnit: tier !== 'unit' })) {
+      for (const hit of scanTestAntiCheat({
+        fileRel: rel, text: txt, assertionRe: ASSERTION_RE, hasAssertion: hasBehavioralAssertion, testCaseRe: TEST_CASE_RE, isNonUnit: tier !== 'unit',
+      })) {
         if (exemptZeroProbe && hit.ruleId === 'edit.test-zero-assertion') continue
         blockers.push(hit)
       }

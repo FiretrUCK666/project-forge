@@ -28,8 +28,8 @@ export const INJECTIONS_W6C = [
     what: 'C14 issue-template-hydrate: 0 匹配模板时不再追加保留用户 rawBody',
     file: 'kit/skills/lib/issue-template-hydrate.mjs',
     alsoDropIn: ['.agents/skills/lib/issue-template-hydrate.mjs'],
-    from: '  if (rawExplicit && (matchedCount === 0 || !md.includes(rawExplicit))) {',
-    to: '  if (false && rawExplicit && (matchedCount === 0 || !md.includes(rawExplicit))) {',
+    from: "  if (matchedCount === 0) {\n    const fallback = buildFallbackIssueBody(effectiveFields, sec).trimEnd()\n    const customTrimmed = md.trim()\n    const parts = [fallback]\n    if (customTrimmed && !fallback.includes(customTrimmed)) {\n      parts.push(customTrimmed)\n    }\n    if (rawExplicit && !parts.some((p) => p.includes(rawExplicit))) {\n      parts.push(rawExplicit)\n    }\n    md = parts.join('\\n\\n')\n  } else if (rawExplicit && !md.includes(rawExplicit)) {\n    const stripped = md.trimEnd()\n    md = stripped ? `${stripped}\\n\\n${rawExplicit}` : rawExplicit\n  }",
+    to: '  if (false && matchedCount === 0) {\n    md = md\n  }',
     expect: 'W6C C14：**Bold** 模板水合保留 --body 与 finalize 同步 SPEC 正文状态表',
   },
   {

@@ -331,6 +331,35 @@ function resolveLocalBareRemotePath(mainRoot, rawUrl) {
   return localPath
 }
 
+/** 合后以快进（ff-only）方式安全同步主工作区与本地默认分支引用，避免清理清单误报 (unmerged)。 */
+export async function syncLocalDefaultBranchAfterMerge({
+  mainRoot,
+  gitDir = null,
+  remote = 'origin',
+  baseBranch = null,
+  fetch = true,
+} = {}) {
+  const base = baseBranch || await resolveDefaultBranch(mainRoot, { strict: true })
+  if (!base) return { synced: false, reason: 'missing-default-branch' }
+  const remoteName = remote || 'origin'
+  if (fetch) {
+    await gitRun(mainRoot, ['fetch', '--prune', '--quiet', remoteName, base])
+  }
+  const fastMainBr = readHeadFast(resolveGitDirFast(mainRoot), gitDir)?.branch ?? null
+  const curMainBr = fastMainBr ? { ok: true, stdout: fastMainBr } : await gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+  const curBranch = curMainBr.ok ? curMainBr.stdout.trim() : ''
+  if (curBranch === base) {
+    const st = await gitStatusPorcelainZ(mainRoot)
+    if (st.ok && st.entries.length === 0) {
+      const m = await gitRun(mainRoot, ['merge', '--ff-only', '--no-edit', `${remoteName}/${base}`])
+      return { synced: m.ok, baseBranch: base, via: 'merge-ff-only', error: m.ok ? null : (m.stderr || m.stdout || '').trim() }
+    }
+    return { synced: false, baseBranch: base, reason: 'dirty-main' }
+  }
+  const f = await gitRun(mainRoot, ['fetch', remoteName, `${base}:${base}`])
+  return { synced: f.ok, baseBranch: base, via: 'fetch-refspec', error: f.ok ? null : (f.stderr || f.stdout || '').trim() }
+}
+
 async function tryLocalBareFastForwardMerge({ mainRoot, remote, targetBranch, base, ledger, humanApproved }) {
   if (!targetBranch || !ledger?.reviewPassed) return null
   const decisions = readDecisions(readTextSafe(join(mainRoot, 'AGENTS.md')) ?? '')
@@ -359,16 +388,7 @@ async function tryLocalBareFastForwardMerge({ mainRoot, remote, targetBranch, ba
   if (!pushRes.ok) return null
   await gitRun(mainRoot, ['fetch', '--prune', '--quiet', remote])
 
-  const curHeadRes = await gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-  const curBranch = curHeadRes.ok ? curHeadRes.stdout.trim() : ''
-  if (curBranch === base) {
-    const st = await gitStatusPorcelainZ(mainRoot)
-    if (st.ok && st.entries.length === 0) {
-      await gitRun(mainRoot, ['merge', '--ff-only', `${remote}/${base}`])
-    }
-  } else {
-    await gitRun(mainRoot, ['fetch', remote, `${base}:${base}`])
-  }
+  await syncLocalDefaultBranchAfterMerge({ mainRoot, remote, baseBranch: base, fetch: false })
 
   return {
     ok: true, merged: true, fetched: true, localBareFastForward: true,

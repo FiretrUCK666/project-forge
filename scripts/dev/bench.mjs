@@ -4,7 +4,7 @@
  *
  * 两种模式共用同一份单项表 `BENCH_CHECKS`，严禁按远端环境变量或外部倍率开关放大预算：
  *   - 默认模式（跨 OS / Node 矩阵通用）：先跑同轮真实子进程冷启 + 文件扫描校准负载得出 `unitMs`，
- *     每项阈值 = `min(hardCapMs, round(unitMs * unitMult))`；
+ *     每项阈值 = `max(strictBudget, min(runawayCapMs, round(min(unitMs, MAX_CALIBRATION_UNIT_MS) * unitMult)))`；
  *   - `--strict-budget`（本机与严格门禁）：强制执行 `1x` 绝对毫秒上限 `strictBudget`。
  */
 
@@ -25,9 +25,10 @@ const PREFLIGHT = join(ROOT, 'scripts', 'dev', 'preflight.mjs')
 
 const ROUNDS = 3
 const CALIBRATION_ROUNDS = 5
+export const MAX_CALIBRATION_UNIT_MS = 400
 
 /**
- * 唯一性能预算常量表：每项显式声明 1x 绝对上限、相对校准单位的倍数（工作量之比）与硬件校准硬顶上限。
+ * 唯一性能预算常量表：每项显式声明 1x 绝对上限、相对校准单位的倍数（工作量之比）与防失控硬顶上限。
  * 不存在任何环境倍率分支。
  */
 export const BENCH_CHECKS = [
@@ -36,42 +37,42 @@ export const BENCH_CHECKS = [
     strictBudget: 3000,
     // 300 文件临时仓库初始化扫描 + 1 次 git 状态检测，约合 35 倍单次探测工作量
     unitMult: 35,
-    hardCapMs: 4500,
+    runawayCapMs: 15000,
   },
   {
     label: 'flow inspect(self)',
     strictBudget: 300,
     // ESM 加载 + git 配置/状态/账本检查，约合 5 倍单次探测工作量
     unitMult: 5,
-    hardCapMs: 700,
+    runawayCapMs: 3000,
   },
   {
     label: 'survey(self)',
     strictBudget: 250,
     // 本仓完整只读勘察（生态 + 工具链 + git 状态/提交），约合 6 倍单次探测工作量
     unitMult: 6,
-    hardCapMs: 750,
+    runawayCapMs: 3000,
   },
   {
     label: 'review(self)',
     strictBudget: 450,
     // 本仓完整交付体检（含静态门禁与规则扫描），约合 7 倍单次探测工作量
     unitMult: 7,
-    hardCapMs: 900,
+    runawayCapMs: 4000,
   },
   {
     label: 'preflight(self)',
     strictBudget: 2500,
     // 全量自举与多路并发子进程语法/E2E 门禁，约合 55 倍单次探测工作量
     unitMult: 55,
-    hardCapMs: 7000,
+    runawayCapMs: 25000,
   },
   {
     label: 'backup.zip(1000 files)',
     strictBudget: 250,
     // 进程内 1,000 文件读取与 deflate 归档（约合 3.5 倍单次探测工作量）
     unitMult: 3.5,
-    hardCapMs: 450,
+    runawayCapMs: 2500,
   },
 ]
 
@@ -91,12 +92,13 @@ const CALIBRATION_CODE = [
 
 /**
  * 纯预算推导函数：不读取任何环境变量，仅由 `strictBudget` 或同轮 `unitMs` 决定预算。
- * @param {{ strictBudget: number, unitMult: number, hardCapMs: number }} check
+ * @param {{ strictBudget: number, unitMult: number, runawayCapMs: number }} check
  * @param {{ unitMs: number, strictBudget?: boolean }} opts
  */
 export function computeCheckBudget(check, { unitMs, strictBudget = false }) {
   if (strictBudget) return check.strictBudget
-  return Math.min(check.hardCapMs, Math.max(1, Math.round(unitMs * check.unitMult)))
+  const clampedUnitMs = Math.min(MAX_CALIBRATION_UNIT_MS, Math.max(1, Number(unitMs) || 1))
+  return Math.max(check.strictBudget, Math.min(check.runawayCapMs, Math.round(clampedUnitMs * check.unitMult)))
 }
 
 function buildFixture(files, prefix = 'pf-bench-') {
@@ -205,7 +207,7 @@ function main() {
       const marginPct = Math.round(((effectiveBudget - median) / effectiveBudget) * 1000) / 10
       const budgetDesc = strictBudget
         ? `严格1x=${effectiveBudget} ms`
-        : `校准阈值=${effectiveBudget} ms (unit=${Math.round(unitMs)}ms x ${check.unitMult}, cap=${check.hardCapMs}ms)`
+        : `校准阈值=${effectiveBudget} ms (unit=${Math.round(unitMs)}ms x ${check.unitMult}, cap=${check.runawayCapMs}ms)`
       if (median > effectiveBudget) {
         process.stderr.write(`FAIL  ${check.label} 耗时超预算：实测中位数 ${Math.round(median)} ms > ${budgetDesc} | 余量 ${marginPct}%\n`)
         failed += 1

@@ -454,10 +454,33 @@ export function detectOptionalNativeCheckers(repoRoot) {
   }
 
   const pyProj = readTextSafe(join(repoRoot, 'pyproject.toml')) ?? ''
+  const setupCfg = readTextSafe(join(repoRoot, 'setup.cfg')) ?? ''
   const ruffCfg = hasFile('ruff.toml', '.ruff.toml') || (/\[tool\.ruff\b/.test(pyProj) ? 'pyproject.toml' : null)
   if (ruffCfg) {
     configured.push({ id: 'ruff', tool: 'ruff', configFile: ruffCfg, command: 'ruff check .', declared: true })
     addAdvice('ruff', 'ruff', ruffCfg, mentionsAgents(ruffCfg), `在 \`${ruffCfg}\` 的 \`extend-exclude\` 中添加 \`".agents"\``)
+  }
+  const mypyCfg = hasFile('mypy.ini', '.mypy.ini') || (/\[tool\.mypy\b/.test(pyProj) ? 'pyproject.toml' : (/\[mypy\b/.test(setupCfg) ? 'setup.cfg' : null))
+  if (mypyCfg) {
+    configured.push({ id: 'mypy', tool: 'mypy', configFile: mypyCfg, command: 'mypy .', declared: true })
+    addAdvice('mypy', 'mypy', mypyCfg, mentionsAgents(mypyCfg), `在 \`${mypyCfg}\` 的 \`exclude\` 中添加 \`".agents"\``)
+  }
+  const pyrightCfg = hasFile('pyrightconfig.json') || (/\[tool\.pyright\b/.test(pyProj) ? 'pyproject.toml' : null)
+  if (pyrightCfg) {
+    configured.push({ id: 'pyright', tool: 'pyright', configFile: pyrightCfg, command: 'pyright', declared: true })
+    addAdvice('pyright', 'pyright', pyrightCfg, mentionsAgents(pyrightCfg), `在 \`${pyrightCfg}\` 的 \`exclude\` 中添加 \`".agents"\``)
+  }
+  const preCommitCfg = hasFile('.pre-commit-config.yaml', '.pre-commit-config.yml')
+  if (preCommitCfg) {
+    configured.push({ id: 'pre-commit', tool: 'pre-commit', configFile: preCommitCfg, command: 'pre-commit run --all-files', declared: true })
+    addAdvice('pre-commit', 'pre-commit', preCommitCfg, mentionsAgents(preCommitCfg), `在 \`${preCommitCfg}\` 的 \`exclude\` 中添加 \`^\\.agents/\``)
+  }
+  const mdLintCfg = hasFile('.markdownlint.json', '.markdownlint.jsonc', '.markdownlint.yaml', '.markdownlint.yml', '.markdownlintrc')
+  const mdLintIgnore = hasFile('.markdownlintignore')
+  if (mdLintCfg || mdLintIgnore) {
+    const targetMdCfg = mdLintCfg ?? mdLintIgnore
+    configured.push({ id: 'markdownlint', tool: 'markdownlint', configFile: targetMdCfg, command: null, declared: true })
+    addAdvice('markdownlint', 'markdownlint', targetMdCfg, mentionsAgents(mdLintCfg) || mentionsAgents(mdLintIgnore), '在 `.markdownlintignore` 中添加 `.agents/`')
   }
   if (existsSync(join(repoRoot, 'Cargo.toml'))) configured.push({ id: 'clippy', tool: 'cargo-clippy', configFile: 'Cargo.toml', command: 'cargo clippy --all-targets', declared: true })
   if (existsSync(join(repoRoot, 'go.mod'))) configured.push({ id: 'go-vet', tool: 'go-vet', configFile: 'go.mod', command: 'go vet ./...', declared: true })

@@ -79,6 +79,7 @@ function printHelp() {
     '  --apply                      Write sync updates to docs/feature-map.json',
     '  --skip-run                   Skip execution during create --promote',
     '  --changed                    Detect changed files automatically on run',
+    '  --stale                      Filter and rerun stale/unbaselined tools, refreshing baselines',
     '  --refresh-baseline           Force refresh verification cache baseline',
     '  --allow-medium-fallback      Allow stale medium-risk fallback (requires --live-e2e-cmd)',
     '  --confirm                    Confirm destructive cleanup',
@@ -402,6 +403,7 @@ export async function handleRun(opts, roots) {
   const taskId = opts.task ? sanitizeTaskId(opts.task) : 'adhoc'
   const baseRef = opts.base ? String(opts.base).trim() : null
   const refreshBaseline = Boolean(opts['refresh-baseline'])
+  const staleOnly = Boolean(opts.stale)
   const allowMediumFallback = Boolean(opts['allow-medium-fallback'])
   const liveE2eCmd = opts['live-e2e-cmd'] ? String(opts['live-e2e-cmd']).trim() : ''
 
@@ -439,6 +441,10 @@ export async function handleRun(opts, roots) {
   } else if (targetFiles.length > 0) {
     const aff = findAffectedFeatures(map, targetFiles)
     for (const f of aff.matchedFeatures) {
+      for (const t of f.verificationTools ?? []) addPair(f, t)
+    }
+  } else if (staleOnly) {
+    for (const f of map.features) {
       for (const t of f.verificationTools ?? []) addPair(f, t)
     }
   }
@@ -489,12 +495,9 @@ export async function handleRun(opts, roots) {
 
   const headSha = await resolveCurrentHead(workRoot)
   const wtEnv = computeWorktreeEnv({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId })
-  const results = []
-  let blockedCode = null
-  let anyFailed = false
-
+  const slotKey = posixPath(relative(roots.mainRoot, workRoot)) || 'main'
+  const candidateEntries = []
   for (const { feature, tool } of matched) {
-    const slotKey = posixPath(relative(roots.mainRoot, workRoot)) || 'main'
     const staleness = await evaluateToolStaleness({
       repoRoot: workRoot,
       gitCommonDir: roots.gitDir,
@@ -504,14 +507,31 @@ export async function handleRun(opts, roots) {
       baseRef,
       slotKey,
     })
+    if (staleOnly && staleness.status !== 'stale' && staleness.status !== 'unbaselined') continue
+    candidateEntries.push({ feature, tool, staleness })
+  }
 
+  if (staleOnly && candidateEntries.length === 0) {
+    const payload = {
+      ok: true, status: 'ALL_FRESH', mapSource, taskId, baseRef, matched: false, executedCount: 0, results: [],
+    }
+    emitOut(opts, payload, [`[verify-tools run --stale] ALL_FRESH（无过期或无基线验证工具，source=${mapSource}）`])
+    return { exitCode: EXIT.OK, ...payload }
+  }
+
+  const results = []
+  let blockedCode = null
+  let anyFailed = false
+  const cmdExecCache = new Map()
+
+  for (const { feature, tool, staleness } of candidateEntries) {
     if (staleness.status === 'missing-script') {
       blockedCode = staleness.code
       results.push({ toolId: tool.id, featureId: feature.id, staleness, executed: false, ok: false, blocked: true })
       continue
     }
 
-    if (staleness.status === 'stale' && tool.riskLevel === 'high' && !refreshBaseline && !liveE2eCmd) {
+    if (staleness.status === 'stale' && tool.riskLevel === 'high' && !refreshBaseline && !liveE2eCmd && !staleOnly) {
       blockedCode = 'BLOCKED_STALE_HIGH_RISK_TOOL'
       results.push({
         toolId: tool.id,
@@ -528,7 +548,7 @@ export async function handleRun(opts, roots) {
       continue
     }
 
-    if (staleness.status === 'stale' && tool.riskLevel === 'medium' && !refreshBaseline && !liveE2eCmd && !allowMediumFallback) {
+    if (staleness.status === 'stale' && tool.riskLevel === 'medium' && !refreshBaseline && !liveE2eCmd && !allowMediumFallback && !staleOnly) {
       await appendGovernSignal({
         mainRoot: roots.mainRoot,
         gitDir: roots.gitDir,
@@ -565,18 +585,26 @@ export async function handleRun(opts, roots) {
 
     const cmdToRun = (staleness.status === 'stale' && liveE2eCmd) ? liveE2eCmd : buildToolCommand(tool, taskId)
     const usedLiveOverride = Boolean(staleness.status === 'stale' && liveE2eCmd)
-    const t0 = performance.now()
-    const execRes = await execShellCommand(cmdToRun, workRoot, {
-      timeout: 300000,
-      env: { ...wtEnv, PF_VERIFY_TASK_ID: taskId, PF_VERIFY_SCRATCH_DIR: resolveTaskScratchDir(roots.gitDir, taskId, roots.mainRoot) },
-    })
-    const durationMs = Math.round(performance.now() - t0)
+    let execRes
+    let durationMs = 0
+    if (staleOnly && cmdExecCache.has(cmdToRun)) {
+      execRes = cmdExecCache.get(cmdToRun)
+    } else {
+      const t0 = performance.now()
+      execRes = await execShellCommand(cmdToRun, workRoot, {
+        timeout: 300000,
+        env: { ...wtEnv, PF_VERIFY_TASK_ID: taskId, PF_VERIFY_SCRATCH_DIR: resolveTaskScratchDir(roots.gitDir, taskId, roots.mainRoot) },
+      })
+      durationMs = Math.round(performance.now() - t0)
+      if (staleOnly) cmdExecCache.set(cmdToRun, execRes)
+    }
     const passed = Boolean(execRes.ok)
     if (!passed) anyFailed = true
 
     let baselineUpdated = false
     const shouldPersistBaseline = passed && (
       refreshBaseline
+      || staleOnly
       || (!usedLiveOverride && staleness.status === 'unbaselined')
     )
     if (shouldPersistBaseline) {
@@ -638,7 +666,7 @@ async function main(argv = process.argv.slice(2)) {
       positionalDir: 'auto',
       booleanFlags: [
         'dry-run', 'draft-only', 'promote', 'apply', 'skip-run',
-        'changed', 'refresh-baseline', 'allow-medium-fallback', 'confirm', 'prune-zombies', 'prune-scratch',
+        'changed', 'stale', 'refresh-baseline', 'allow-medium-fallback', 'confirm', 'prune-zombies', 'prune-scratch',
       ],
       valueFlags: [
         'feature', 'name', 'tool', 'tool-id', 'kind', 'command', 'script',

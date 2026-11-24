@@ -100,6 +100,7 @@ export function analyzeWorkflowSecurity(workflowsDir, files = null) {
     : (existsSync(workflowsDir) ? readdirSync(workflowsDir).filter((n) => !isMacMetadataName(n) && /\.ya?ml$/i.test(n)) : [])
   let usesPullRequestTarget = false
   const unsafePullRequestTargetWorkflows = []
+  const advisoryWorkflows = []
 
   for (const item of entries) {
     const name = typeof item === 'string' ? item : item?.name
@@ -109,6 +110,12 @@ export function analyzeWorkflowSecurity(workflowsDir, files = null) {
       : (readTextSafe(join(workflowsDir, name)) ?? '')
     const lines = text.replace(/\r\n/g, '\n').split('\n')
     const activeText = lines.map(stripYamlComment).join('\n')
+    if (/\bpull_request(?:_target)?\b/.test(activeText)) {
+      const advReasons = []
+      if (/\bnpm\s+install\b(?![^\n]*--ignore-scripts)/.test(activeText)) advReasons.push('uses bare "npm install" without "npm ci" or --ignore-scripts on PR trigger')
+      if (!/^\s*permissions\s*:/m.test(activeText)) advReasons.push('missing explicit least-privilege "permissions:" block')
+      if (advReasons.length > 0) advisoryWorkflows.push({ file: name, reasons: advReasons })
+    }
     if (!/\bpull_request_target\b/.test(activeText)) continue
     usesPullRequestTarget = true
 
@@ -134,6 +141,7 @@ export function analyzeWorkflowSecurity(workflowsDir, files = null) {
     usesPullRequestTarget,
     unsafePullRequestTargetWorkflows,
     checkoutsPrHead: unsafePullRequestTargetWorkflows.length > 0,
+    advisoryWorkflows,
   }
 }
 
@@ -400,6 +408,7 @@ export function detectDocs(root, opts = {}) {
     neutralCiConfigs: [],
     usesPullRequestTarget: false,
     unsafePullRequestTargetWorkflows: [],
+    advisoryWorkflows: [],
     checkoutsPrHead: false,
     hasContentsWrite: false,
   }
@@ -434,6 +443,7 @@ export function detectDocs(root, opts = {}) {
     const sec = analyzeWorkflowSecurity(wfDir, wfEntries)
     workflowFacts.usesPullRequestTarget = sec.usesPullRequestTarget
     workflowFacts.unsafePullRequestTargetWorkflows = sec.unsafePullRequestTargetWorkflows
+    workflowFacts.advisoryWorkflows = sec.advisoryWorkflows
     workflowFacts.checkoutsPrHead = sec.checkoutsPrHead
   }
 

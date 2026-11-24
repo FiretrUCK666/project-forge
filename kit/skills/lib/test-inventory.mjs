@@ -12,7 +12,7 @@ import { FEATURE_MAP_REL } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
-  checkProcessArtifactFilename, scanStructuralHygiene, stripCodeCommentsLines,
+  checkProcessArtifactFilename, hasBehavioralAssertion, scanStructuralHygiene, stripCodeCommentsLines,
 } from './static-gates.mjs'
 
 export { FEATURE_MAP_REL }
@@ -555,13 +555,13 @@ export function validateGeneratedTestQuality(relPath, content) {
   const codeLines = stripCodeCommentsLines(text, ext)
   const codeOnly = codeLines.join('\n')
 
-  if (!ASSERTION_RE.test(codeOnly)) {
+  if (!hasBehavioralAssertion(codeOnly, { ext })) {
     violations.push({ code: 'ZERO_ASSERTION_TEST', message: `生成的测试缺少真实行为断言（assert/expect）：${rel}` })
   }
   const mockCount = (codeOnly.match(MOCK_SETUP_RE) ?? []).length
   const hasSpyAssert = MOCK_SPY_ASSERT_RE.test(codeOnly)
   const nonSpyCode = codeOnly.replace(new RegExp(MOCK_SPY_ASSERT_RE.source, 'g'), '')
-  if (mockCount >= 5 && hasSpyAssert && !ASSERTION_RE.test(nonSpyCode)) {
+  if (mockCount >= 5 && hasSpyAssert && !hasBehavioralAssertion(nonSpyCode, { ext })) {
     violations.push({ code: 'MOCK_TAUTOLOGY_TEST', message: `生成的测试属于纯 Mock 自证（mock=${mockCount}）：${rel}` })
   }
   for (let i = 0; i < codeLines.length; i += 1) {

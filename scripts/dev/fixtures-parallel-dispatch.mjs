@@ -323,7 +323,7 @@ export function registerParallelDispatchCases(cases) {
       const longPrdRel = 'docs/prd/261120-long-prd.md'
       mkdirSync(dirname(join(dir, longPrdRel)), { recursive: true })
       writeFileSync(join(dir, longPrdRel), [
-        '---', 'kind: prd', 'title: Long PRD', 'status: active', 'created: 2026-11-20', 'updated: 2026-11-20', 'owner: p', '---',
+        '---', 'kind: prd', 'title: Long PRD', 'status: active', 'plan_critique: passed', 'created: 2026-11-20', 'updated: 2026-11-20', 'owner: p', '---',
         '# PRD: Long', '', '## 要解决的问题', '- 统一主干能力 `src/app.mjs`。', '',
         '## 本期不做', '- 不改外部接口。', '', '## 验收标准', '- [ ] C1: `node src/app.mjs` 退出 0', '',
         ...longBody,

@@ -53,15 +53,16 @@ metadata:
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 
-- **不可自审、全历史换人与 3 轮停损锁**：禁用 `owner: null`（`INVALID_OWNER`），禁跨轮把 `triage` 高档降回低档（`BLOCKED_TRIAGE_DOWNGRADE`）；`interactive` 模式 `clarify` 须带 `--by user` 消解全部待决小节。`critique-pass` / `critique-reject` 写入 `ledger.planCritique`，硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用历史审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`）；连轮同阻或第 3 轮退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），仅人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后由维护者 `approve`（**`--host-mode single-session --human-approved` 配 `--skip-critique-reason` 仅限无子代理能力单会话宿主且经人授权时使用，多代理宿主严禁借此绕过**）。**批准只由 `approve` 写入**（`link --approve` 报 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY`），并支持 `--multi-spec` 与活跃 SPEC 反查总控 PRD。
+- **不可自审、全历史换人、严重度分层与 R2+ 收敛锁**：禁用 `owner: null`（`INVALID_OWNER`），禁跨轮把 `triage` 高档降回低档（`BLOCKED_TRIAGE_DOWNGRADE`）；`interactive` 模式 `clarify` 须带 `--by user` 消解全部待决小节。`critique-pass` / `critique-reject` 写入 `ledger.planCritique`，硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用历史审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`）、跳轮（`BLOCKED_CRITIQUE_ROUND_GAP`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`）；**严重度分层**：仅 `[minor]` 建议禁 `critique-reject`（`BLOCKED_NON_BLOCKING_REJECT`），改走 `critique-pass --should-fix`；Round 2+ 新增阻塞须命中未闭环项（可配 `--resolved` / `--rebut-accepted` 关闭）或落入改动行/改动章节内，越界挑刺报 `BLOCKED_OUT_OF_SCOPE_CRITIQUE`；连轮同阻或第 3 轮退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），仅人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后由维护者 `approve`（**`--host-mode single-session --human-approved` 配 `--skip-critique-reason` 仅限无子代理能力单会话宿主且经人授权时使用，多代理宿主严禁借此绕过**）。**批准只由 `approve` 写入**（`link --approve` 报 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY`），并支持 `--multi-spec` 与活跃 SPEC 反查总控 PRD。
 - **抗压缩单源恢复、默认隔离与外部调研边界（Repo-Path Grounding）**：随时可跑 `doc-plan.mjs next --handoff`（与 `flow.mjs next` 共享状态机）从磁盘无损恢复 `1:N` 总控 PRD/切片、`findings`、中断半成品工作树归属与人类三态拍板出口（含 `--plan-only`）。在已有提交的 Git 默认分支上，`doc-plan.mjs init` 默认自动建 `.worktrees/impl-<taskId>/` 隔离规划（除非显式 `--in-place`；若先跑 `flow.mjs start --planning --task <id>`，则 `init --task <id>` 自动复用该工作树不重开）；`planner` 返工优先向既有原写手子代理发送续聊指令，仅只读探索不建工作树；**允许在需求澄清、技术选型或用户明确要求时调用 `webfetch`/`websearch` 做外部调研（须注明外部来源），但任何写入规划文档的仓内文件路径、符号与命令必须经 `doc-locate`/`repo-map`/`verifyDocClaims` 在本仓验真（Repo-Path Grounding）**。
 - **波次移交 `dev-flow`**：单任务 `audit`/`approve` 通过后按 `[NEXT STEP]` 移交 `dev-flow`（`flow.mjs start`）；多切片协同可配合 `flow.mjs start --after <parent>` 起堆叠子分支或 `flow.mjs batch plan` 按文件互斥划分波次。未装配兄弟技能时退化为原生 Git 指引。
 
 ## 标准命令流
 
 ```sh
-# 0. 单源抗压缩恢复与规划下一步指引（1:N 切片与 Plan-Only 团队交付路由）
+# 0. 单源抗压缩恢复、init 前讨论缓冲（note）与规划下一步指引（1:N 切片与 Plan-Only 团队交付路由）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" next [--file "<docPath>"] [--task "<taskId>"] [--plan-only] [--handoff] [--json]
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" note [--topic "<主题>"] [--decision "<结论>"] [--exclude "<不做项>..."] [--anchor "<锚点>..."] [--open "<问题>..."] [--json]
 
 # 1. 五档分流 + 门型判断 + 改哪看哪联动预警（结论含建议规划态 planMode）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--plan-mode interactive | autonomous]
@@ -77,8 +78,8 @@ node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit .
 # 4. 关联、生成只读评审边界（critique-scope）、独立 Critique、批准、成对归档（--include-master-prd）与取代
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "<slug-or-path>" [--issue <N>] [--pr <M>] [--milestone <N|标题>] [--branch <B>] [--status <S>]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "docs/specs/<file>" [--reviewer "<criticId>"] [--round <N>] [--json]
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --summary "<结论>"
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-reject --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --findings "<意见>" --summary "<退回原因>"
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 [--should-fix "<建议>..."] [--resolved "<F1>..."] [--rebut-accepted "<F2>..."] --summary "<结论>"
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-reject --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --findings "<[major] 意见>" [--resolved "<F1>..."] [--rebut-accepted "<F2>..."] --summary "<退回原因>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-continue --file "docs/specs/<file>" --reason "<改进方向>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-override --file "docs/specs/<file>" --human-approved --reason "<裁决理由>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "docs/specs/<file>"

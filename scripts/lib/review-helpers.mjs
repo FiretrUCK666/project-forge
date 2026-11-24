@@ -324,6 +324,92 @@ export function findTradeoffContradictions(root, facts, decisionMap) {
   return issues
 }
 
+/** 跨生态 Linter / Formatter / Typechecker `.agents/` 忽略探测规则表（只读探测，绝不静默改写宿主配置）。 */
+export const TOOLING_AGENTS_IGNORE_RULES = Object.freeze([
+  {
+    tool: 'ruff',
+    configFiles: ['ruff.toml', '.ruff.toml'],
+    pyprojectSectionRe: /\[tool\.ruff\b/,
+    advice: (cfg) => `在 \`${cfg}\` 的 \`extend-exclude\` 中添加 \`".agents"\``,
+  },
+  {
+    tool: 'mypy',
+    configFiles: ['mypy.ini', '.mypy.ini'],
+    setupCfgSectionRe: /\[mypy\b/,
+    pyprojectSectionRe: /\[tool\.mypy\b/,
+    advice: (cfg) => `在 \`${cfg}\` 的 \`exclude\` 中添加 \`".agents"\``,
+  },
+  {
+    tool: 'pyright',
+    configFiles: ['pyrightconfig.json'],
+    pyprojectSectionRe: /\[tool\.pyright\b/,
+    advice: (cfg) => `在 \`${cfg}\` 的 \`exclude\` 中添加 \`".agents"\``,
+  },
+  {
+    tool: 'pre-commit',
+    configFiles: ['.pre-commit-config.yaml', '.pre-commit-config.yml'],
+    advice: (cfg) => `在 \`${cfg}\` 的 \`exclude\` 中添加 \`^\\.agents/\``,
+  },
+  {
+    tool: 'markdownlint',
+    configFiles: ['.markdownlint.json', '.markdownlint.jsonc', '.markdownlint.yaml', '.markdownlint.yml', '.markdownlintrc'],
+    ignoreFiles: ['.markdownlintignore'],
+    advice: () => '在 `.markdownlintignore` 中添加 `.agents/`',
+  },
+  {
+    tool: 'oxlint',
+    configFiles: ['.oxlintrc.json', '.oxlintrc.jsonc', 'oxlint.config.ts', 'oxlint.config.mts', 'oxlint.config.js', 'oxlint.config.mjs'],
+    pkgKey: 'oxlint',
+    advice: (cfg) => `在 \`${cfg}\` 的 \`ignorePatterns\` 中添加 \`".agents/**"\``,
+  },
+  {
+    tool: 'oxfmt',
+    configFiles: ['.oxfmtrc.json', '.oxfmtrc.jsonc', '.oxfmtrc', 'oxfmt.config.ts', 'oxfmt.config.js', 'oxfmt.config.mjs'],
+    advice: (cfg) => `在 \`${cfg}\` 的 \`ignorePatterns\` 中添加 \`".agents/**"\``,
+  },
+  {
+    tool: 'biome',
+    configFiles: ['biome.json', 'biome.jsonc'],
+    advice: (cfg) => `在 \`${cfg}\` 的 \`files.ignore\`（或 \`!/.agents\`）中添加 \`".agents/**"\``,
+  },
+  {
+    tool: 'dprint',
+    configFiles: ['dprint.json', 'dprint.jsonc'],
+    advice: (cfg) => `在 \`${cfg}\` 的 \`excludes\` 中添加 \`"**/.agents/**"\``,
+  },
+])
+
+/** 跨生态探测已配置检查/格式化工具中尚未忽略 `.agents/**` 的配置清单（纯只读）。 */
+export function detectToolingAgentsIgnoreGaps(root) {
+  const gaps = []
+  const eslintGap = checkEslintAgentsIgnore(root)
+  if (eslintGap) {
+    gaps.push({ tool: 'eslint', configFile: eslintGap.configFile, advice: eslintGap.advice })
+  }
+  const pkg = readJsonSafe(join(root, 'package.json'))
+  const pyProjText = readTextSafe(join(root, 'pyproject.toml')) ?? ''
+  const setupCfgText = readTextSafe(join(root, 'setup.cfg')) ?? ''
+  const mentionsAgents = (rel) => Boolean(rel && /\.agents\b/.test(readTextSafe(join(root, rel)) ?? ''))
+
+  for (const rule of TOOLING_AGENTS_IGNORE_RULES) {
+    const directCfg = (rule.configFiles ?? []).find((f) => existsSync(join(root, f))) ?? null
+    const pyProjHit = !directCfg && rule.pyprojectSectionRe && rule.pyprojectSectionRe.test(pyProjText) ? 'pyproject.toml' : null
+    const setupHit = !directCfg && !pyProjHit && rule.setupCfgSectionRe && rule.setupCfgSectionRe.test(setupCfgText) ? 'setup.cfg' : null
+    const pkgHit = !directCfg && !pyProjHit && !setupHit && rule.pkgKey && pkg?.[rule.pkgKey] ? 'package.json' : null
+    const cfg = directCfg ?? pyProjHit ?? setupHit ?? pkgHit
+    const ignoreFile = (rule.ignoreFiles ?? []).find((f) => existsSync(join(root, f))) ?? null
+    if (!cfg && !ignoreFile) continue
+    if (mentionsAgents(cfg) || mentionsAgents(ignoreFile)) continue
+    const targetCfg = cfg ?? ignoreFile
+    gaps.push({
+      tool: rule.tool,
+      configFile: targetCfg,
+      advice: rule.advice(targetCfg),
+    })
+  }
+  return gaps
+}
+
 /** 检测仓库是否存在 ESLint 配置却未忽略 `.agents/**`。 */
 export function checkEslintAgentsIgnore(root) {
   const pkg = readJsonSafe(join(root, 'package.json'))

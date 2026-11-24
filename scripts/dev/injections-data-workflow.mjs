@@ -368,8 +368,8 @@ export const INJECTIONS_WORKFLOW = [
     id: 'I96',
     what: '第二遍路径校验不再看 skipPathCheck（讲不做的地方开始误报）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',
-    from: '  // Pass 2: 校验全部引用路径（已存在或已在本篇标为 (new)）\n  for (const item of bodyLines) {\n    if (item.skipPathCheck) continue',
-    to: '  // Pass 2: 校验全部引用路径（已存在或已在本篇标为 (new)）\n  for (const item of bodyLines) {',
+    from: '  // Pass 2: 校验全部引用路径（已存在、已迁入归档终态或已在本篇标为 (new)）\n  for (const item of bodyLines) {\n    if (item.skipPathCheck) continue',
+    to: '  // Pass 2: 校验全部引用路径（已存在、已迁入归档终态或已在本篇标为 (new)）\n  for (const item of bodyLines) {',
     expect: '讲不做与讲删除',
   },
   {

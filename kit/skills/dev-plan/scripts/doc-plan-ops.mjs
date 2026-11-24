@@ -11,10 +11,11 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { evaluateCritiqueOverride, parseCritiqueRounds, persistPlanCritiqueEntrySync, readPlanCritiqueEntrySync } from '../../lib/critique-rounds.mjs'
 import {
-  DOC_FRONTMATTER_KEY_ORDER, docDateTag, docIsoDate, parseDocFrontmatter,
+  DOC_FRONTMATTER_KEY_ORDER, docDateTag, docIsoDate, isApprovingStatus, parseDocFrontmatter,
   renderStandardDocTemplate, resolveRepoCustomDocTemplate, serializeDocFrontmatter,
   slugify, syncDocsLifecycle, syncPlanDocBodyMeta, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
+import { resolveApprovalBasis } from '../../lib/plan-exit-gate.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { canonicalPath, ensureWorktreesIgnored, gitRun, isDefaultBranch, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
@@ -56,6 +57,30 @@ export function approveSpec({
   if (!/^- \[[ xX]\]\s+C\d+\b/m.test(text)) throw new Error(`${file} 至少需要包含一条「- [ ] C<N>: ...」可判定验收标准才可批准`)
 
   const docType = detectDocType(audit.file, text)
+  if (docType === 'spec' && typeof fm.data?.related_prd === 'string' && fm.data.related_prd.trim() && !/^(?:null|none|无)$/i.test(fm.data.related_prd.trim())) {
+    const prdCandAbs = resolve(dirname(abs), fm.data.related_prd.trim())
+    const prdFallbackAbs = resolve(repoRoot, fm.data.related_prd.trim())
+    const prdAbs = existsSync(prdCandAbs) ? prdCandAbs : (existsSync(prdFallbackAbs) ? prdFallbackAbs : null)
+    if (prdAbs) {
+      const prdText = readTextSafe(prdAbs) ?? ''
+      const prdFm = parseDocFrontmatter(prdText)
+      const prdStatus = String(prdFm.data?.status ?? 'draft').trim().toLowerCase()
+      if (!['superseded', 'dropped'].includes(prdStatus)) {
+        const prdRel = posixPath(relative(repoRoot, prdAbs))
+        const { entry: prdEntry } = readPlanCritiqueEntrySync({
+          repoRoot, mainRoot, gitDir, taskId: prdFm.data?.task_id ?? taskId, fmData: prdFm.data, relDoc: prdRel,
+        })
+        const prdBasis = resolveApprovalBasis({ rel: prdRel, kind: 'prd', docType: 'prd', text: prdText, data: prdFm.data, ledgerEntry: prdEntry })
+        const prdApproved = isApprovingStatus('prd', prdStatus) || prdStatus === 'done'
+        if (!prdApproved || !prdBasis.hasBasis) {
+          throw Object.assign(
+            new Error(`BLOCKED_MASTER_PRD_CRITIQUE_UNREADY: ${audit.file} 关联的总控 PRD (${prdRel}) 尚未完成 Critique 并批准（status=${prdStatus}, basis=${prdBasis.basis}），请先完成总控 PRD 审批后再 approve 子 SPEC。`),
+            { code: 'BLOCKED_MASTER_PRD_CRITIQUE_UNREADY', exitCode: EXIT.FACT },
+          )
+        }
+      }
+    }
+  }
   let workingText = text
   let critiqueSkipped = false
   let skippedCritiqueValue = null
@@ -527,7 +552,9 @@ export async function initDoc({
         taskId, issueNum, owner, quickCmd, relatedPrdRel, relatedSpecRel,
         pruneUnfilled: false, noPrune: Boolean(noPrune), docShape, planMode,
         multiSpec: Boolean(multiSpec && item.kind === 'prd'),
-        caseType: Number.isInteger(caseType) ? caseType : null,
+        caseType: Number.isInteger(caseType)
+          ? caseType
+          : (item.kind === 'todo' && (effectiveKind === 'pair' || effectiveKind === 'all' || Boolean(relatedSpec)) ? 4 : null),
       })
       if (pendingPreInit) {
         content = applyPreInitToDocContent(content, pendingPreInit, item.kind, today)

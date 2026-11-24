@@ -633,7 +633,7 @@ cases.push(['1:N 切片 SPEC 从 C4+ 起始允许 audit 与 approve，缺少 C<N
     'src/app.mjs': 'export const ok = 1\n',
     'docs/prd/261118-issue10-master-prd.md': [
       '---', 'kind: prd', 'title: Master', 'status: active', 'created: 2026-11-18',
-      'updated: 2026-11-18', 'issue: 10', 'owner: planner', 'multi_spec: true', '---', '',
+      'updated: 2026-11-18', 'issue: 10', 'owner: planner', 'multi_spec: true', 'plan_critique: passed', '---', '',
       '# PRD: Master', '', '## 要解决的问题', '- 拆成多个独立切片交付，统一更新 `src/app.mjs`。', '',
       '## 本期不做', '- 不改外部公共接口或 `node src/app.mjs` 入口参数。', '', '## 验收标准', '',
       '- [ ] C1: `node src/app.mjs` slice 1a',

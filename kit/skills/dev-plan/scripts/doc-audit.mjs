@@ -8,7 +8,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
-import { checkMermaidLabelWidth, evaluateCoupledSync, isManagedPlanDoc, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
+import { checkMermaidLabelWidth, evaluateCoupledSync, isApprovingStatus, isManagedPlanDoc, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { stripCritiqueMeta } from '../../lib/doc-frontmatter.mjs'
 import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, resolveSectionPresence } from '../../lib/doc-requirements.mjs'
 import { validateSkippedSections } from '../../lib/doc-shape.mjs'
@@ -353,14 +353,16 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
       // 判法不在这里。`resolveApprovalBasis` 是「这条批准有没有依据」的唯一实现，
       // 退场门禁调的是同一个函数——两处各判一遍，迟早对同一份文档给出相反结论。
       // 本文件只负责把它的结论翻译成一条审计错误。
-      if (fm.data.approved === true) {
+      if (fm.data.approved === true || (docType !== 'todo' && isApprovingStatus(docType, st))) {
         const { entry: ledgerEntry } = readPlanCritiqueEntrySync({ repoRoot, fmData: fm.data, relDoc })
         const basis = resolveApprovalBasis({ rel: relDoc, docType, text: normRaw, data: fm.data, ledgerEntry })
         if (basis.applicable && !basis.hasBasis) {
+          const lineField = fm.data.approved === true ? 'approved' : 'status'
+          const stateDesc = fm.data.approved === true ? '`approved: true`' : `\`status: ${st}\``
           errors.push({
             code: 'APPROVAL_WITHOUT_BASIS',
-            line: findFmKeyLine(lines, fmEndIdx, 'approved'),
-            message: `Frontmatter 写着 \`approved: true\`，但找不到任何批准依据（plan_critique=${fm.data.plan_critique ?? '未声明'}，critique_override=${fm.data.critique_override ? '有' : '无'}）`,
+            line: findFmKeyLine(lines, fmEndIdx, lineField),
+            message: `Frontmatter 写着 ${stateDesc}，但找不到任何批准依据（plan_critique=${fm.data.plan_critique ?? '未声明'}，critique_override=${fm.data.critique_override ? '有' : '无'}）`,
             fixHint: basis.basis === 'override-stale'
               ? '人类 critique-override 之后正文又改过，签字只对当时那一版有效；重跑 critique-override 再 approve。'
               : '批准只能由 `doc-plan.mjs approve` 写入：先经独立 Critique 跑 critique-pass（或 critique-override），再 approve。',
@@ -403,10 +405,17 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
     // 认位置不能只看中文标题：真实文档写 `## Out of scope`、`## 实现说明`、
     // `## What we removed` 的都有。所以标题启发 + 行内语义两条一起用。
     const removedPathCue = /(?:已删除|删掉|删除|移除|不再使用|旧路径|废弃|不存在|\b(?:deleted|removed|dropped|no longer)\b)/i
+    const strippedLine = rawLine.replace(/<!--[\s\S]*?-->/g, '')
+    const isMetaBranchRow = /^\|\s*(?:分支(?:\s*\/\s*(?:基线|Issue\s*\/\s*PR))?|Branch(?:\s*\/\s*(?:Baseline|Issue|PR))?)\s*\|/i.test(strippedLine.trim())
+      || /^(?:-\s+)?(?:\*\*)?(?:分支|Branch)(?:\*\*)?\s*[:：]/i.test(strippedLine.trim())
+    const pathScanLine = isMetaBranchRow
+      ? strippedLine.replace(/^(\|\s*[^|]+\|\s*)[^|@]+/, '$1 ').replace(/^((?:-\s+)?(?:\*\*)?(?:分支|Branch)(?:\*\*)?\s*[:：]\s*)\S+/, '$1 ')
+      : strippedLine
     bodyLines.push({
       lineNo: i + 1,
       rawLine,
-      strippedLine: rawLine.replace(/<!--[\s\S]*?-->/g, ''),
+      strippedLine,
+      pathScanLine,
       skipPathCheck: /(?:完成后的记录|实现说明|本期不做|明确不做|非目标|Non-Goals|范围外|不在本次|Out of scope|removed|cleanup)/i.test(curSection)
         || rawLine.includes('...')
         || removedPathCue.test(rawLine),
@@ -430,9 +439,9 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
       })
     }
     if (item.skipPathCheck) continue
-    for (const rawCand of extractLinePathCandidates(item.strippedLine)) {
+    for (const rawCand of extractLinePathCandidates(item.pathScanLine)) {
       if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue
-      if (!candHasNewAnnotation(item.strippedLine, rawCand)) continue
+      if (!candHasNewAnnotation(item.pathScanLine, rawCand)) continue
       const resolved = resolveDocBodyPathCandidate({ repoRoot, absDoc: abs, rawCand, declaredNewFiles, declaredNewDirs })
       if (!resolved.cleanRel || resolved.cleanRel === relDoc) continue
       if (!resolved.insideRepo) {
@@ -472,16 +481,26 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
     }
   }
 
-  // Pass 2: 校验全部引用路径（已存在或已在本篇标为 (new)）
+  // Pass 2: 校验全部引用路径（已存在、已迁入归档终态或已在本篇标为 (new)）
   for (const item of bodyLines) {
     if (item.skipPathCheck) continue
-    for (const rawCand of extractLinePathCandidates(item.strippedLine)) {
+    for (const rawCand of extractLinePathCandidates(item.pathScanLine)) {
       if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue
       if (rawCand.startsWith('docs/archive/') && /归档|archive/i.test(item.rawLine)) continue
-      if (candHasNewAnnotation(item.strippedLine, rawCand)) continue
+      if (candHasNewAnnotation(item.pathScanLine, rawCand)) continue
       const resolved = resolveDocBodyPathCandidate({ repoRoot, absDoc: abs, rawCand, declaredNewFiles, declaredNewDirs })
       if (!resolved.cleanRel || resolved.cleanRel === relDoc) continue
       if (resolved.insideRepo && docsFolderExists && CONVENTION_DOC_DIRS.has(resolved.cleanRel)) continue
+      if (resolved.archivedAt) {
+        warnings.push({
+          code: 'WARN_ARCHIVED_LIFECYCLE_PATH',
+          line: item.lineNo,
+          path: resolved.cleanRel,
+          archivedAt: resolved.archivedAt,
+          message: `第 ${item.lineNo} 行引用的 "${resolved.cleanRel}" 已随生命周期归档至 "${resolved.archivedAt}"`,
+        })
+        continue
+      }
       if (!resolved.insideRepo || !resolved.exists) {
         errors.push({
           code: 'HALLUCINATED_PATH',

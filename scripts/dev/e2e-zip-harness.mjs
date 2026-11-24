@@ -319,7 +319,7 @@ async function runScenarioE(pkgRoot, sandbox, env) {
     'AGENTS.md': '# e\n\n```yaml\nquick-test: node -e "process.exit(0)" -- {target}\nfull-test: node -e "process.exit(0)"\nsmoke-verify: none\nmerge-gate: node -e "process.exit(0)"\nhigh-risk: none\n```\n',
     'src/app.mjs': 'export const app = 1\n',
     'src/untouched.mjs': 'export const untouched = 1\n',
-    'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "alice"\nrelated_spec: null\nrelated_todo: null\n---\n# Master\n- [ ] C1: child1\n- [ ] C2: child2\n',
+    'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "alice"\nplan_critique: passed\nrelated_spec: null\nrelated_todo: null\n---\n# Master\n- [ ] C1: child1\n- [ ] C2: child2\n',
     'docs/specs/261116-issue12-child2-spec.md': '---\nkind: spec\ntitle: "Child2"\nstatus: draft\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 12\npr: null\nbranch: null\nowner: "alice"\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: null\nscope_files: [src/untouched.mjs]\ndepends_on: []\nhigh_risk_paths: []\n---\n# Child2\n\n## 要解决的问题\n- 调整 `src/untouched.mjs` 出口。\n\n## 本期不做\n- 不修改 `src/app.mjs`。\n\n## 门型与回滚路径\n- two-way，回滚 `src/untouched.mjs`。\n\n## 验收标准\n- [ ] C1: `src/untouched.mjs` future\n',
   })
 

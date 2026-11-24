@@ -204,7 +204,18 @@ export function hydrateIssueBody(repoRoot, kind = 'feature', fields = {}, opts =
   applyReplace(['不在本次范围', 'Out of Scope'], sec.outOfScope)
   applyReplace(['关联的设计产物', 'Related Docs', 'Related Issues'], sec.docRefs)
 
-  if (rawExplicit && (matchedCount === 0 || !md.includes(rawExplicit))) {
+  if (matchedCount === 0) {
+    const fallback = buildFallbackIssueBody(effectiveFields, sec).trimEnd()
+    const customTrimmed = md.trim()
+    const parts = [fallback]
+    if (customTrimmed && !fallback.includes(customTrimmed)) {
+      parts.push(customTrimmed)
+    }
+    if (rawExplicit && !parts.some((p) => p.includes(rawExplicit))) {
+      parts.push(rawExplicit)
+    }
+    md = parts.join('\n\n')
+  } else if (rawExplicit && !md.includes(rawExplicit)) {
     const stripped = md.trimEnd()
     md = stripped ? `${stripped}\n\n${rawExplicit}` : rawExplicit
   }

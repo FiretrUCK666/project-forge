@@ -128,7 +128,9 @@ export function markTriageConsumed(mainRoot, { taskId = null, slug = null, termi
       if (!rec || typeof rec !== 'object') return rec
       const rTask = rec.taskId ? String(rec.taskId).trim().toLowerCase() : ''
       const rSlug = rec.slug ? String(rec.slug).trim().toLowerCase() : ''
-      const matchesSame = (cleanTask && rTask === cleanTask.toLowerCase()) || (cleanSlug && rSlug === cleanSlug.toLowerCase())
+      const rConsumed = rec.consumedByTaskId ? String(rec.consumedByTaskId).trim().toLowerCase() : ''
+      const matchesSame = (cleanTask && (rTask === cleanTask.toLowerCase() || rConsumed === cleanTask.toLowerCase()))
+        || (cleanSlug && (rSlug === cleanSlug.toLowerCase() || rConsumed === cleanSlug.toLowerCase()))
       if (matchesSame || (!rec.consumedByTaskId && !rTask && !rSlug)) {
         return {
           ...rec,
@@ -189,7 +191,9 @@ export function findBlockingTriageDowngrade(sess, { taskId = null, slug = null, 
       || (cleanSlug && (recSlug === cleanSlug || recConsumed === cleanSlug))
       || (cleanTask && recSlug && cleanTask === recSlug)
     const fpMatched = Boolean(fp && rec.fingerprint && fp === rec.fingerprint)
-    const unconsumedFresh = !recConsumed && !recTask && !recSlug
+    const callerHasIdentity = Boolean(cleanTask || cleanSlug)
+    const fpDistinct = Boolean(fp && rec.fingerprint && fp !== rec.fingerprint)
+    const unconsumedFresh = !recConsumed && !recTask && !recSlug && !callerHasIdentity && !fpDistinct
     if (!idMatched && !fpMatched && !unconsumedFresh) continue
     const chk = checkTriageDowngrade({ previousCase: rec.caseType, nextCase, reason })
     if (!chk.ok) return chk

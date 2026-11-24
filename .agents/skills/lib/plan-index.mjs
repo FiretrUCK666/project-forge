@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readdirSync } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { exitCodeForBlocked } from './exit-codes.mjs'
@@ -272,6 +272,79 @@ export function indexPlanDocs(rootOrOpts, extraOpts = {}) {
   }
 
   return [...byRel.values()].sort((a, b) => a.rel.localeCompare(b.rel))
+}
+
+function resolveDocLinkRel(repoRoot, fromDocRel, rawTarget) {
+  if (typeof rawTarget !== 'string') return null
+  const s = rawTarget.trim()
+  if (!s || /^(?:null|none|无)$/i.test(s)) return null
+  const absTarget = resolve(repoRoot, dirname(fromDocRel), s)
+  const relFromRoot = posixPath(relative(repoRoot, absTarget)).replace(/^\.\//, '')
+  return relFromRoot || null
+}
+
+/**
+ * 解析关联规划子图（沿着 `related_prd`、`related_spec`、`related_todo` 与反向子切片边），
+ * 返回整图节点及就绪状态明细，供 `plan-next` 与 `doc-plan-ops` 原子就绪校验共用。
+ */
+export function resolveLinkedPlanGraph({
+  repoRoot = process.cwd(),
+  mainRoot = repoRoot,
+  file = null,
+  doc = null,
+  allDocs = null,
+} = {}) {
+  const docs = Array.isArray(allDocs)
+    ? allDocs
+    : indexPlanDocs({ repoRoot, mainRoot, includeArchive: false, includeWorktrees: true, managedOnly: true })
+  const byRel = new Map(docs.map((d) => [d.rel, d]))
+  const startRel = doc?.rel ?? (file ? posixPath(String(file).trim()).replace(/^\.\//, '') : null)
+  const rootDoc = (startRel && byRel.get(startRel)) ?? doc ?? null
+  if (!rootDoc) {
+    return { rootDoc: null, nodes: [], masterPrd: null, specs: [], todos: [], unreadyNodes: [], ready: true }
+  }
+  if (!byRel.has(rootDoc.rel)) byRel.set(rootDoc.rel, rootDoc)
+
+  const visited = new Map()
+  const queue = [rootDoc]
+  while (queue.length > 0) {
+    const cur = queue.shift()
+    if (!cur || visited.has(cur.rel)) continue
+    visited.set(cur.rel, cur)
+
+    for (const key of ['related_prd', 'related_spec', 'related_todo']) {
+      const targetRel = resolveDocLinkRel(cur.root || repoRoot, cur.rel, cur.data?.[key])
+      if (targetRel && byRel.has(targetRel) && !visited.has(targetRel)) {
+        queue.push(byRel.get(targetRel))
+      }
+    }
+
+    for (const cand of byRel.values()) {
+      if (cand.inert || visited.has(cand.rel)) continue
+      for (const key of ['related_prd', 'related_spec', 'related_todo']) {
+        const candTarget = resolveDocLinkRel(cand.root || repoRoot, cand.rel, cand.data?.[key])
+        if (candTarget && candTarget === cur.rel) {
+          queue.push(cand)
+          break
+        }
+      }
+    }
+  }
+
+  const nodes = [...visited.values()].sort((a, b) => a.rel.localeCompare(b.rel))
+  const masterPrd = nodes.find((n) => n.kind === 'prd' && !n.inert) ?? null
+  const specs = nodes.filter((n) => n.kind === 'spec' && !n.inert)
+  const todos = nodes.filter((n) => n.kind === 'todo' && !n.inert)
+  const unreadyNodes = nodes.filter((n) => !n.inert && !isPlanDocApproved(n))
+  return {
+    rootDoc,
+    nodes,
+    masterPrd,
+    specs,
+    todos,
+    unreadyNodes,
+    ready: unreadyNodes.length === 0,
+  }
 }
 
 function toDocSummary(doc) {

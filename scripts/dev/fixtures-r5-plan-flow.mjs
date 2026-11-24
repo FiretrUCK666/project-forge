@@ -83,7 +83,7 @@ export function registerR5PlanFlowCases(cases) {
     const dir = tmpProject({
       'AGENTS.md': '# A\n',
       'src/app.mjs': 'export const ok = 1\n',
-      'docs/prd/261123-master-prd.md': '---\nkind: prd\ntitle: Master\nstatus: active\nmulti_spec: true\nowner: planner-1\n---\n\n# Master\n- [ ] C1: done\n',
+      'docs/prd/261123-master-prd.md': '---\nkind: prd\ntitle: Master\nstatus: active\nmulti_spec: true\nowner: planner-1\nplan_critique: passed\n---\n\n# Master\n- [ ] C1: done\n',
       'docs/specs/261123-slice-a-spec.md': '---\nkind: spec\ntitle: Slice A\nstatus: draft\nowner: planner-1\napproved: false\nrelated_prd: ../prd/261123-master-prd.md\ntask_id: slice-a\n---\n\n# Slice A\n- [ ] C1: done\n',
     })
     try {

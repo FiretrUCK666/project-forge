@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Round-7 盲测 10 项跨项目架构级根因统一根治
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
 updated: 2026-11-24
@@ -11,7 +11,7 @@ branch: feat/r7-rootfix-closure
 owner: plan-r7-rootfix
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r7-rootfix, round=1, sha=90cb43582391, summary=C1..C7完整覆盖Round-7全部10项取证根因且为跨生态通用单源架构，含新退出码与note注册、800行拆分方案、equip/compose-agents/双向夹具与故障注入预演，路径核验真实无幻觉。)"
 related_prd: null
 related_todo: ../todo/261124-r7-rootfix-closure-todo.md
@@ -26,13 +26,13 @@ scope_files: [kit/skills/lib/exit-codes.mjs, kit/skills/lib/critique-rounds.mjs,
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-24` / `2026-11-24` |
 | 分支 / Issue / PR | `feat/r7-rootfix-closure` / 未关联 / 未关联 |
 | 负责人 / 内审状态 | plan-r7-rootfix / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 PRD / Todo | 无 / `../todo/261124-r7-rootfix-closure-todo.md` |
+| 关联 PRD / Todo | 无 / `docs/archive/todo/261124-r7-rootfix-closure-todo.md` |
 
 - **变更一句话**：将 Round-7 四条离线盲测通道双路取证证实的 10 项跨项目架构级根因一次性收敛为通用单源机制，消除规划停损误触、关联图审批脱节、路径/反引号误杀、流转状态串台、宿主软链误截断、多生态断言与 linter 探测盲区、供应链 diff 覆盖盲区及慢速 CI 性能预算反切。
 
@@ -183,13 +183,13 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `critiqueRejectDoc` 在仅含 `minor` findings 时以退出码 `3` 返回 `BLOCKED_NON_BLOCKING_REJECT` 并引导 `critique-pass --should-fix`；Round `>= 2` 跳轮触发 `BLOCKED_CRITIQUE_ROUND_GAP`（exit 3），指向未改旧行/旧章节的新增阻塞项触发 `BLOCKED_OUT_OF_SCOPE_CRITIQUE`（exit 3），通过 `--resolved` / `--rebut-accepted` 闭环或修改区间内正当驳回正常推进，且 `critique-rounds.mjs` 与 `critique-diff.mjs` (new) 均 `<= 800` 行。
-- [ ] C2: `doc-audit.mjs` 对 `status: active` 但无有效 Critique/override 依据的 PRD 报错 `APPROVAL_WITHOUT_BASIS`；`approveSpec` 在关联 `related_prd` 未就绪时以退出码 `3` 报 `BLOCKED_MASTER_PRD_CRITIQUE_UNREADY`；`doc-plan.mjs init --kind pair` 生成 `status: draft` 的 Case 4 Todo 并在 SPEC `approve` 时原子切为 `active`；`doc-plan.mjs note` 在 `kit/skills/lib/subcommand-meta.mjs`、`doc-plan.mjs` `printHelp()`、`kit/skills/dev-plan/SKILL.md` 同步注册且通过 `subcommand-parity.mjs` 与 `cli-parity.mjs`；`plan-next.mjs` 在 `plan-only-handoff` 前完成整图节点就绪校验。
-- [ ] C3: `doc-audit.mjs` 对已迁入归档目录的合法关联规划路径不再误报 `HALLUCINATED_PATH`；元信息表格 `分支` 行内的 `docs/` 前缀分支名不被误扫为文件路径；行内反引号与代码围栏内的尖括号占位（如参数示例）在 `doc-audit-helpers.mjs` 与 `doc-substantive.mjs` 中不触发 `UNRESOLVED_ANGLE_PLACEHOLDER` 或核心节退化；`pending-decisions.mjs` 对 `风险与开放问题` 章节及「无。+ 补充说明」不误报 `BLOCKED_PENDING_DECISIONS`。
-- [ ] C4: `session-state.mjs` 在存在未消费的前轮 `Case 4` `triage` 时，对不同任务 ID 与不同 `summary` 指纹的新 `Case 2` 任务不误报 `BLOCKED_TRIAGE_DOWNGRADE`，同任务或同指纹降档仍拦截；`issue-template-hydrate.mjs` 对剥注释后 `matchedCount === 0` 的模板必输出含真实要点的兜底正文；`flow-inspect.mjs --planning` 不再将 `git user.name` 预填为 `implementerId`，多代理晋升缺 `--agent` 报 `BLOCKED_MISSING_ACTOR`（exit 2）；`generic-git` `flow merge` 同步干净主干默认分支且清理清单不再误报 `(unmerged)`。
-- [ ] C5: `scripts/handoff.mjs --verify` 基于 `isForgeOwnedPath` 与 Git `120000` / `.gitignore` 状态对宿主已跟踪软链与已忽略软链跳过不标 `truncated`，同时保持未跟踪越界/悬空软链及 PF 所属异常软链退出码 `3` 严格拦截；`scripts/lib/review-helpers.mjs` `detectToolingAgentsIgnoreGaps` 覆盖 ESLint、Ruff、mypy、pyright、pre-commit 与 markdownlint 并在 `review.mjs` / `survey.mjs` / `equip.mjs` 非侵入提示，保留 `kit.eslint-agents-ignore` 兼容 ID 且通过 `gap-coverage.mjs`。
-- [ ] C6: `hasBehavioralAssertion`（`static-gates-assertions.mjs` (new)）准确放行 `tape`/`tap`/`ava`/`node:test`、Python `self.assert*`、Ruby `assert_*`/`refute_*`、PHP `$this->assert*`、Swift `#expect`/`#require`，并严拒仅含 `t.plan`/`t.end` 的空壳测试；`scanUntrustedDiff` 拦截普通新增 diff 行中的提示词注入与双向控制字符；`analyzeWorkflowSecurity` 对 PR 工作流裸 `npm install` 及缺最小 `permissions` 给出结构化提示；`scripts/dev/bench.mjs` 解耦 `strictBudget` 与 `runawayCapMs`（零 `process.env.CI` 分支）；`verify-tools.mjs run --stale` 真实重跑过期工具并原子更新基线，合后于主仓将 `slots.main` 16 项旧基线清零。
-- [ ] C7: 新增 `scripts/dev/fixtures-r7-rootfix.mjs` (new) 与 `scripts/dev/injections-data-r7.mjs` (new) 通过正反双向断言与故障注入复验；`docs/TDD.md`、`docs/feature-map.json`、`references/` 同步完成；`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs`、`node scripts/dev/bench.mjs`、`node scripts/dev/e2e-zip-harness.mjs`、`node scripts/dev/verify-injections.mjs --jobs 4` 及 `node scripts/dev/merge-gate.mjs` 全部退出码 `0`（全 `.mjs` 文件 `<= 800` 行，零 emoji，零 AI 宿主绑定）。
+- [x] C1: `critiqueRejectDoc` 在仅含 `minor` findings 时以退出码 `3` 返回 `BLOCKED_NON_BLOCKING_REJECT` 并引导 `critique-pass --should-fix`；Round `>= 2` 跳轮触发 `BLOCKED_CRITIQUE_ROUND_GAP`（exit 3），指向未改旧行/旧章节的新增阻塞项触发 `BLOCKED_OUT_OF_SCOPE_CRITIQUE`（exit 3），通过 `--resolved` / `--rebut-accepted` 闭环或修改区间内正当驳回正常推进，且 `critique-rounds.mjs` 与 `critique-diff.mjs` (new) 均 `<= 800` 行。
+- [x] C2: `doc-audit.mjs` 对 `status: active` 但无有效 Critique/override 依据的 PRD 报错 `APPROVAL_WITHOUT_BASIS`；`approveSpec` 在关联 `related_prd` 未就绪时以退出码 `3` 报 `BLOCKED_MASTER_PRD_CRITIQUE_UNREADY`；`doc-plan.mjs init --kind pair` 生成 `status: draft` 的 Case 4 Todo 并在 SPEC `approve` 时原子切为 `active`；`doc-plan.mjs note` 在 `kit/skills/lib/subcommand-meta.mjs`、`doc-plan.mjs` `printHelp()`、`kit/skills/dev-plan/SKILL.md` 同步注册且通过 `subcommand-parity.mjs` 与 `cli-parity.mjs`；`plan-next.mjs` 在 `plan-only-handoff` 前完成整图节点就绪校验。
+- [x] C3: `doc-audit.mjs` 对已迁入归档目录的合法关联规划路径不再误报 `HALLUCINATED_PATH`；元信息表格 `分支` 行内的 `docs/` 前缀分支名不被误扫为文件路径；行内反引号与代码围栏内的尖括号占位（如参数示例）在 `doc-audit-helpers.mjs` 与 `doc-substantive.mjs` 中不触发 `UNRESOLVED_ANGLE_PLACEHOLDER` 或核心节退化；`pending-decisions.mjs` 对 `风险与开放问题` 章节及「无。+ 补充说明」不误报 `BLOCKED_PENDING_DECISIONS`。
+- [x] C4: `session-state.mjs` 在存在未消费的前轮 `Case 4` `triage` 时，对不同任务 ID 与不同 `summary` 指纹的新 `Case 2` 任务不误报 `BLOCKED_TRIAGE_DOWNGRADE`，同任务或同指纹降档仍拦截；`issue-template-hydrate.mjs` 对剥注释后 `matchedCount === 0` 的模板必输出含真实要点的兜底正文；`flow-inspect.mjs --planning` 不再将 `git user.name` 预填为 `implementerId`，多代理晋升缺 `--agent` 报 `BLOCKED_MISSING_ACTOR`（exit 2）；`generic-git` `flow merge` 同步干净主干默认分支且清理清单不再误报 `(unmerged)`。
+- [x] C5: `scripts/handoff.mjs --verify` 基于 `isForgeOwnedPath` 与 Git `120000` / `.gitignore` 状态对宿主已跟踪软链与已忽略软链跳过不标 `truncated`，同时保持未跟踪越界/悬空软链及 PF 所属异常软链退出码 `3` 严格拦截；`scripts/lib/review-helpers.mjs` `detectToolingAgentsIgnoreGaps` 覆盖 ESLint、Ruff、mypy、pyright、pre-commit 与 markdownlint 并在 `review.mjs` / `survey.mjs` / `equip.mjs` 非侵入提示，保留 `kit.eslint-agents-ignore` 兼容 ID 且通过 `gap-coverage.mjs`。
+- [x] C6: `hasBehavioralAssertion`（`static-gates-assertions.mjs` (new)）准确放行 `tape`/`tap`/`ava`/`node:test`、Python `self.assert*`、Ruby `assert_*`/`refute_*`、PHP `$this->assert*`、Swift `#expect`/`#require`，并严拒仅含 `t.plan`/`t.end` 的空壳测试；`scanUntrustedDiff` 拦截普通新增 diff 行中的提示词注入与双向控制字符；`analyzeWorkflowSecurity` 对 PR 工作流裸 `npm install` 及缺最小 `permissions` 给出结构化提示；`scripts/dev/bench.mjs` 解耦 `strictBudget` 与 `runawayCapMs`（零 `process.env.CI` 分支）；`verify-tools.mjs run --stale` 真实重跑过期工具并原子更新基线，合后于主仓将 `slots.main` 16 项旧基线清零。
+- [x] C7: 新增 `scripts/dev/fixtures-r7-rootfix.mjs` (new) 与 `scripts/dev/injections-data-r7.mjs` (new) 通过正反双向断言与故障注入复验；`docs/TDD.md`、`docs/feature-map.json`、`references/` 同步完成；`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs`、`node scripts/dev/bench.mjs`、`node scripts/dev/e2e-zip-harness.mjs`、`node scripts/dev/verify-injections.mjs --jobs 4` 及 `node scripts/dev/merge-gate.mjs` 全部退出码 `0`（全 `.mjs` 文件 `<= 800` 行，零 emoji，零 AI 宿主绑定）。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -203,8 +203,6 @@ flowchart LR
 
 ## 实现说明
 
-> 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
-
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：按 C1–C7 落地全部架构级重构：新增 `kit/skills/lib/critique-diff.mjs`（严重度分层、`BLOCKED_NON_BLOCKING_REJECT`/`BLOCKED_OUT_OF_SCOPE_CRITIQUE`/`BLOCKED_CRITIQUE_ROUND_GAP`、R2+ 文本快照区间锁与闭环追踪）与 `kit/skills/lib/static-gates-assertions.mjs`（跨生态 `hasBehavioralAssertion` 家族）；实现 `resolveLinkedPlanGraph` 与 PRD `APPROVING_STATUS`/`approveSpec` `related_prd` 强校、Case 4 Todo `draft` 联动与 `note` 对齐；`stripMarkdownCodeSpans`（保留裸 `` `<...>` `` 占位）及活跃/归档双态路径与元信息分支隔离；`session-state` 跨任务隔离 + 模板剥注释兜底 + `--planning` 身份隔离 + `generic-git` 合后默认分支 `ff-only` 同步；`handoff.mjs` `isForgeOwnedPath` 与 Git `120000`/`.gitignore` 软链分层 + 跨生态 linter 忽略探测；`review-diff.mjs` 普通新增行提示词注入/双向字符扫描、`survey-docs.mjs` `advisoryWorkflows`、`bench.mjs` `runawayCapMs` 与 `verify-tools run --stale`。
+- **与草案的差异**：`stripMarkdownCodeSpans` 增加 `preserveBareAngle` 选项，使 `` `--top <n>` `` 等命令片段被剥离而 `` `<target>` `` / `` `<真实文件路径，新建文件标 (new)>` `` 等模板裸尖括号仍由 `UNRESOLVED_ANGLE_PLACEHOLDER` 捕获；`scripts/review.mjs` 与 `kit/skills/lib/profile-sniffer.mjs` 共补跨生态 `.agents/` 忽略探测并在 `review-helpers.mjs` 导出 `detectToolingAgentsIgnoreGaps`。
+- **关联同步文件**：已同步 `docs/TDD.md`、`docs/feature-map.json`、`references/docs-set.md`、`references/handoff.md`、`kit/skills/dev-plan/SKILL.md`、`kit/skills/dev-verify-tools/SKILL.md`，已重跑 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`。

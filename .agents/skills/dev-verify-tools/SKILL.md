@@ -52,8 +52,8 @@ node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" sync --json
 node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" create --feature <id> --task <taskId> --draft-only --json
 node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" create --feature <id> --tool-id <tid> [--from-scratch <path> | --script <relPath>] [--command "<cmd>"] --risk medium --task <taskId> --promote --json
 
-# 3. 场景 2（自动复用）：反查变更文件匹配工具、执行免日期过时分派（空 feature-map 返回 NOT_APPLICABLE 退出 0；有条目未命中返回 NO_TOOLS_MATCHED 退出 3）
-node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" run --changed [--base main] [--task <taskId>] [--refresh-baseline] [--allow-medium-fallback --live-e2e-cmd "<cmd>"] [--live-e2e-cmd "<cmd>"] --json
+# 3. 场景 2（自动复用）：反查变更文件匹配工具、执行免日期过时分派（`--stale` 去重重跑过期/无基线工具并刷新基线；空 feature-map 返回 NOT_APPLICABLE 退出 0）
+node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" run [--changed | --stale] [--base main] [--task <taskId>] [--refresh-baseline] [--allow-medium-fallback --live-e2e-cmd "<cmd>"] [--live-e2e-cmd "<cmd>"] --json
 
 # 4. 场景 3（体检清理）：检查僵尸引用/漂移/盲区/跨 PR 固化提示，确认后清理
 node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" audit [--base main] --json

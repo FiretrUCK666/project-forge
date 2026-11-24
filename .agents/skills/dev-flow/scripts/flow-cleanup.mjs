@@ -23,6 +23,7 @@ import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite,
 } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { markTriageConsumed } from '../../lib/session-state.mjs'
 import { buildTargetRepoContext } from './flow-inspect.mjs'
 import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
 import { releaseGitClaimLease } from './flow-merge-claim.mjs'
@@ -360,6 +361,7 @@ export async function handleCleanup(opts, roots) {
   ledger.cleanedAt = new Date().toISOString()
   await runLifecycleGovernHook({ stage: 'cleanup', mainRoot: roots.mainRoot, implRoot: roots.mainRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, cleanedAt: ledger.cleanedAt, ...(ledger.hooks ? { hooks: ledger.hooks } : {}) }), { createIfMissing: true })
+  markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
   const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, verifyScratchCleanup, status: ledger.status }
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
   else {
@@ -505,6 +507,7 @@ export async function handleAbort(opts, roots) {
   ledger.status = 'aborted'
   ledger.abortedAt = new Date().toISOString()
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })
+  markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
   if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees, verifyScratchCleanup }, null, 2)}\n`)
   else {
     process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)

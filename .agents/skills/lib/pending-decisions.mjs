@@ -115,8 +115,11 @@ export function planModeErrors(rawText) {
   return []
 }
 
-/** 整节为空 / 明确写「无」的几种写法。 */
-const EMPTY_SECTION_RE = /^(?:\s*(?:[-*]\s*)?(?:待确认|待拍板|未决)[:：]\s*)?(?:无|没有|none|n\/a)\s*[。.]?\s*$/i
+/** 整节为空 / 明确写「无」或「无。+ 补充说明」的否定收敛句式。 */
+const EMPTY_SECTION_RE = /^(?:\s*(?:[-*]\s*)?(?:待确认|待拍板|未决)\s*[:：]\s*)?(?:无|没有|暂无|无待拍板(?:事项|问题)?|无待定(?:事项|问题)?|无未决(?:事项|问题)?|none|n\/a)(?:$|[。.,，；;：:\s])/i
+
+/** 属于风险提示而非待拍板裁决的章节标题（与 doc-requirements.mjs SECTION_DEFS.risks 对齐）。 */
+export const RISK_NON_DECISION_HEADING_RE = /(?:风险与开放问题|风险与应对|风险评估|风险提示|\brisks?\b)/i
 
 /** 一条已被拍板的事项必须带这些标记之一。 */
 const DECIDED_RE = /(?:已定|已拍板|决定|结论|采纳建议|按建议执行|已确认)\s*[:：]/i
@@ -126,7 +129,7 @@ export { DECIDED_RE }
 const PENDING_HEADING_RE = /^#{2,4}\s*(?:[一二三四五六七八九十百]+[、.]\s*)?([^\n]*)$/
 
 const PENDING_WORDS = /(?:待拍板|未决问题|待确认|待决定|开放问题|待定事项|仍待.*?拍板|open\s+questions?|pending\s+decisions?)/i
-const INLINE_UNRESOLVED_RE = /(?:仍待定|（待拍板[^）]*）|\(待拍板[^)]*\)|（待定[^）]*）|\(待定[^)]*\)|待拍板\s*[:：]\s*(?!(?:无|没有)(?=$|[\s，,。.；;）)])|none\b)|待确认\s*[:：]\s*(?!(?:无|没有)(?=$|[\s，,。.；;）)])|none\b)|\bTBD\b)/i
+const INLINE_UNRESOLVED_RE = /(?:仍待定|（待拍板[^）]*）|\(待拍板[^)]*\)|（待定[^）]*）|\(待定[^)]*\)|待拍板\s*[:：]\s*(?!(?:无|没有|暂无)(?=$|[\s，,。.；;）)])|none\b)|待确认\s*[:：]\s*(?!(?:无|没有|暂无)(?=$|[\s，,。.；;）)])|none\b)|\bTBD\b)/i
 
 /** 遇到下一个同级或更高级标题就结束。 */
 function sectionBody(lines, startIdx) {
@@ -156,6 +159,7 @@ export function analyzePendingDecisions(text) {
     const h = PENDING_HEADING_RE.exec(lines[i])
     if (!h) continue
     if (!PENDING_WORDS.test(h[1])) continue
+    if (RISK_NON_DECISION_HEADING_RE.test(h[1]) && !/(?:待拍板|待确认|待决定|未决问题|pending\s+decisions?)/i.test(h[1])) continue
     found = true
 
     const { body, endIdx } = sectionBody(lines, i)
@@ -163,7 +167,7 @@ export function analyzePendingDecisions(text) {
     const content = body.filter((l) => l.trim() && !/^\s*<!--/.test(l))
     const meaningful = content.filter((l) => !/^\s*>/.test(l))
     if (meaningful.length === 0) continue
-    if (meaningful.length === 1 && EMPTY_SECTION_RE.test(meaningful[0].replace(/^[-*]\s*/, ''))) {
+    if (meaningful.every((l) => EMPTY_SECTION_RE.test(l.replace(/^[-*]\s*/, '')) && !INLINE_UNRESOLVED_RE.test(l))) {
       continue
     }
 
@@ -171,6 +175,8 @@ export function analyzePendingDecisions(text) {
     const items = splitItems(body, i + 1)
     total += items.length
     for (const item of items) {
+      const cleanHead = item.head.replace(/^[-*]\s*/, '')
+      if (EMPTY_SECTION_RE.test(cleanHead) && !INLINE_UNRESOLVED_RE.test(item.block)) continue
       if (DECIDED_RE.test(item.block) && !INLINE_UNRESOLVED_RE.test(item.block)) continue
       unresolved.push({ line: item.line, text: item.head })
     }

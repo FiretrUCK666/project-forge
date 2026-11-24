@@ -17,9 +17,32 @@ import {
   resolveHostMode,
 } from '../../lib/harness-context.mjs'
 import { createExploredEvidence, recordMountedDepsInLedger } from '../../lib/ledger.mjs'
+import { resolveIdentityLayers } from '../../lib/platform.mjs'
 import { findBlockingTriageDowngrade, markTriageConsumed, readSessionState } from '../../lib/session-state.mjs'
 import { validateStartProvenanceAndRole } from './flow-start-provenance.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
+
+export function resolveStartIdentity({ isPlanning = false, state = {}, opts = {} } = {}) {
+  if (isPlanning) {
+    const startIdentity = resolveIdentityLayers({
+      explicitAgent: opts.agent ?? opts.implementer,
+    })
+    return {
+      startIdentity,
+      implementerId: startIdentity.agent || null,
+    }
+  }
+  const startIdentity = resolveIdentityLayers({
+    ghLogin: state.github?.trackB?.login,
+    ghTier: state.github?.trackB?.tier,
+    gitName: state.gitIdentity?.name,
+    explicitAgent: opts.agent ?? opts.implementer,
+  })
+  return {
+    startIdentity,
+    implementerId: startIdentity.agent || startIdentity.account || 'local-agent',
+  }
+}
 
 export function checkStartTriageDowngrade(mainRoot, { taskId = null, slug = null, caseType, summary = '', reason = '' } = {}) {
   const sess = readSessionState(mainRoot)
@@ -185,10 +208,21 @@ export async function promotePlanningToStarted({
   })
   if (gateRes.blocked) return { blocked: true, exitCode: gateRes.exitCode }
 
+  const hostMode = resolveHostMode(opts)
   const candidateImpl = opts.agent ?? opts.implementer
     ?? (existing.implementerId && existing.implementerId !== 'local-agent' ? existing.implementerId : null)
     ?? existing.claimedBy
     ?? existing.agent
+  if (nextCase >= 2 && hostMode !== 'single-session' && !isValidActorName(candidateImpl)) {
+    return {
+      blocked: true,
+      ...emitBlockedStart(opts, {
+        code: 'BLOCKED_MISSING_ACTOR',
+        exitCode: EXIT.USAGE,
+        reason: `Case ${nextCase} 多代理模式下，从 planning 晋升至实施态必须显式传入 --agent/--implementer <实施代理名>（或存在已记录的独立实施者）；仅 --host-mode single-session 可豁免。`,
+      }),
+    }
+  }
   const authRes = checkStartAuthorSeparation(gateRoot, [existing.specFile, existing.todoFile, existing.prdFile], candidateImpl, {
     ...opts, mainRoot: roots.mainRoot, taskId, ledger: existing, caseType: nextCase,
   })

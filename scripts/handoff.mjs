@@ -12,7 +12,7 @@ import { STALE_TEMP_RE, processAlive } from './lib/fs-atomic.mjs'
 import { VERIFY_EXIT } from '../kit/skills/lib/exit-codes.mjs'
 import {
   COMMON_SKIP_DIRS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
-  getKitSkills, isMacOsMetadata, markerSyntaxFor, parseMarkers,
+  getKitSkills, isMacOsMetadata, isToolOwnedPath, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
 
 export { VERIFY_EXIT }
@@ -112,6 +112,34 @@ function isNonEngineeringLargeAsset(rel) {
   return /\.json$/i.test(norm) && !/(?:^|\/)\.pf-manifest\.json$/i.test(norm)
 }
 
+const FORGE_OWNED_SYMLINK_EXACT = new Set([
+  'AGENTS.md', 'CONTRIBUTING.md', 'RELEASING.md', 'docs/TDD.md', 'docs/feature-map.json',
+])
+const FORGE_OWNED_SYMLINK_PREFIXES = ['.agents/', '.pf-', '.githooks/', 'docs/prd/', 'docs/specs/', 'docs/todo/', 'docs/archive/']
+
+/** 判定相对路径是否归属 project-forge 托管资产（托管软链须继续按严苛意图校验，非 PF 仓内软链交由 Git 跟踪/忽略语义判定）。 */
+export function isForgeOwnedPath(rel) {
+  const norm = String(rel ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+  if (!norm) return false
+  if (isToolOwnedPath(norm)) return true
+  if (FORGE_OWNED_SYMLINK_EXACT.has(norm) || /(?:^|\/)AGENTS\.md$/i.test(norm)) return true
+  return FORGE_OWNED_SYMLINK_PREFIXES.some((p) => norm.startsWith(p))
+}
+
+function collectGitIgnoredPaths(root, rels) {
+  if (!Array.isArray(rels) || rels.length === 0) return new Set()
+  const res = spawnSync('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'check-ignore', '-z', '--stdin'], {
+    cwd: root,
+    input: `${rels.join('\0')}\0`,
+    encoding: 'utf8',
+    timeout: 5000,
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true,
+  })
+  if (typeof res.stdout !== 'string' || !res.stdout) return new Set()
+  return new Set(res.stdout.split('\0').map((p) => p.replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean))
+}
+
 function isIntentionalSymlink(fullPath, canonRoot) {
   try {
     const rawTarget = readlinkSync(fullPath).replace(/\\/g, '/')
@@ -145,7 +173,7 @@ function collectGitTrackedFiles(root) {
   return res.stdout.split('\0').map((p) => p.replace(/\\/g, '/')).filter(Boolean)
 }
 
-function subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state) {
+function subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state, pendingSymlinks = null) {
   const stack = [dir]
   let visited = 0
   while (stack.length > 0) {
@@ -157,9 +185,12 @@ function subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state) {
       if (isMacOsMetadata(entry.name) || SKIP_DIRS.has(entry.name)) continue
       visited += 1
       const full = join(cur, entry.name)
+      const rel = relative(root, full).split(sep).join('/')
       if (entry.isSymbolicLink()) {
+        if (seenTracked.has(rel)) continue
         state.symlinks += 1
         if (isIntentionalSymlink(full, canonRoot)) { state.skippedSymlinks += 1; continue }
+        if (pendingSymlinks && !isForgeOwnedPath(rel)) { pendingSymlinks.push(rel); continue }
         return true
       }
       if (entry.isDirectory()) {
@@ -167,7 +198,6 @@ function subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state) {
       } else if (entry.isFile()) {
         if (isLockfileName(entry.name)) continue
         if (!(SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) continue
-        const rel = relative(root, full).split(sep).join('/')
         if (!seenTracked.has(rel)) return true
       }
     }
@@ -206,6 +236,7 @@ function walk(root) {
   }
 
   const trackedList = collectGitTrackedFiles(root)
+  const pendingUntrackedSymlinks = []
   if (trackedList) {
     for (const rel of trackedList) {
       const segs = rel.split('/')
@@ -216,7 +247,8 @@ function walk(root) {
       if (lst.isSymbolicLink()) {
         seenTracked.add(rel)
         state.symlinks += 1
-        if (isIntentionalSymlink(full, canonRoot)) state.skippedSymlinks += 1
+        // 非 project-forge 所属且已被 Git 跟踪的合法仓内软链（如测试 fixture 软链）视作项目自有受控资产，不判扫不全
+        if (!isForgeOwnedPath(rel) || isIntentionalSymlink(full, canonRoot)) state.skippedSymlinks += 1
         else state.truncated = true
         continue
       }
@@ -229,7 +261,7 @@ function walk(root) {
   const go = (dir, depth) => {
     if (depth > MAX_DEPTH) {
       state.depthLimited += 1
-      if (subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state)) state.truncated = true
+      if (subtreeHasUnscannedMarkers(dir, root, canonRoot, seenTracked, state, pendingUntrackedSymlinks)) state.truncated = true
       return
     }
     if (out.length > MAX_FILES) { state.truncated = true; return }
@@ -245,8 +277,12 @@ function walk(root) {
         const rel = relative(root, full).split(sep).join('/')
         if (seenTracked.has(rel)) continue
         state.symlinks += 1
-        if (isIntentionalSymlink(full, canonRoot)) state.skippedSymlinks += 1
-        else state.truncated = true
+        if (isIntentionalSymlink(full, canonRoot)) { state.skippedSymlinks += 1; continue }
+        if (!isForgeOwnedPath(rel) && trackedList !== null) {
+          pendingUntrackedSymlinks.push(rel)
+        } else {
+          state.truncated = true
+        }
         continue
       }
       if (entry.isDirectory()) {
@@ -259,6 +295,13 @@ function walk(root) {
     }
   }
   go(root, 0)
+  if (pendingUntrackedSymlinks.length > 0) {
+    const ignoredSet = trackedList !== null ? collectGitIgnoredPaths(root, pendingUntrackedSymlinks) : new Set()
+    for (const rel of pendingUntrackedSymlinks) {
+      if (ignoredSet.has(rel)) state.skippedSymlinks += 1
+      else state.truncated = true
+    }
+  }
   return { files: out, scan: state }
 }
 

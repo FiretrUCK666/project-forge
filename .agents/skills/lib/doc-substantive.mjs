@@ -13,6 +13,7 @@ import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { prepareExecInvocation } from './exec.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { hasDotGitInAncestors, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
+import { stripMarkdownCodeSpans } from './markdown-scan.mjs'
 import { DECIDED_RE, analyzePendingDecisions } from './pending-decisions.mjs'
 
 export const VAGUE_FLUFF_RE = /(?:提高质量|提升质量|保证稳定|确保稳定|保持稳定|确保安全|优化体验|提升体验|增强体验|改善体验|完善功能|优化功能|增强功能|做好测试|提升性能|改善性能|优化性能|增强健壮性|提升健壮性|代码整洁|按需处理|合理设计|合理规划|全面优化|整体提升|正常工作|正常运行|improve\s+(?:experience|quality|performance)|enhance\s+(?:experience|stability|quality)|ensure\s+stability|optimize\s+feature)/i
@@ -81,7 +82,7 @@ function hasExplicitStubOnlyContent(sectionText) {
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('>') && !/^\|(?:\s*:?-+:?\s*\|)+$/.test(l) && !/^#{3,6}\s+/.test(l))
   if (lines.length === 0) return true
-  const withoutAngles = lines.filter((l) => !ANGLE_PLACEHOLDER_SINGLE_RE.test(l) || PLACEHOLDER_TEXT_RE.test(l))
+  const withoutAngles = lines.filter((l) => !ANGLE_PLACEHOLDER_SINGLE_RE.test(stripMarkdownCodeSpans(l)) || PLACEHOLDER_TEXT_RE.test(stripMarkdownCodeSpans(l)))
   if (withoutAngles.length === 0) return false
   return withoutAngles.every((l) => isStubValue(l))
 }
@@ -224,7 +225,7 @@ export function checkCoreSubstantiveness(bodyText, docType) {
       return
     }
     const rawNoHtml = cleaned.replace(/<!--[\s\S]*?-->/g, '')
-    const hasAngles = ANGLE_PLACEHOLDER_SINGLE_RE.test(rawNoHtml)
+    const hasAngles = ANGLE_PLACEHOLDER_SINGLE_RE.test(stripMarkdownCodeSpans(rawNoHtml))
     if (hasExplicitStubOnlyContent(cleaned)) {
       errors.push({
         code: 'DOC_STUB_PLACEHOLDER',
@@ -263,7 +264,8 @@ export function checkCoreSubstantiveness(bodyText, docType) {
         if (!m) continue
         const tail = m[1].trim()
         const tailClean = tail.replace(/<!--[\s\S]*?-->/g, '').trim()
-        if (ANGLE_PLACEHOLDER_SINGLE_RE.test(tailClean) && !PLACEHOLDER_TEXT_RE.test(tailClean)) continue
+        const tailNoCode = stripMarkdownCodeSpans(tailClean)
+        if (ANGLE_PLACEHOLDER_SINGLE_RE.test(tailNoCode) && !PLACEHOLDER_TEXT_RE.test(tailNoCode)) continue
         if (isStubValue(tailClean)) {
           errors.push({
             code: 'DOC_STUB_PLACEHOLDER',
@@ -295,11 +297,12 @@ export function checkCoreSubstantiveness(bodyText, docType) {
 function isSubstantiveText(rawText) {
   const cleaned = normalizeSectionText(rawText)
   if (!cleaned || isEmptyTableShell(cleaned) || hasExplicitStubOnlyContent(cleaned)) return false
-  const hasAngles = ANGLE_PLACEHOLDER_SINGLE_RE.test(cleaned)
+  const hasAngles = ANGLE_PLACEHOLDER_SINGLE_RE.test(stripMarkdownCodeSpans(cleaned))
   if (hasAngles) return false
   if (VAGUE_FLUFF_RE.test(cleaned) && extractTechAnchors(cleaned).count === 0) return false
   return true
 }
+export { isSubstantiveText }
 
 /** 抽取规划文档的结构化实质性与锚点快照，供跨轮防退化对比与 critique_anchors 落盘。 */
 export function extractDocSnapshot(rawText) {

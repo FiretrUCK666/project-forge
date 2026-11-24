@@ -31,6 +31,8 @@ export { EXIT } from '../../lib/exit-codes.mjs'
 
 const LIFECYCLE_HOOK_RE = /"(?:preinstall|install|postinstall|preuninstall|uninstall|postuninstall|prepublish|prepublishOnly|preprepare|prepare|postprepare|prepack|postpack)"\s*:/
 const BUILD_SCRIPT_RE = /(?:^|\/)(?:Makefile|GNUmakefile|makefile|justfile|Taskfile\.ya?ml|build\.rs|setup\.py)$|\.(?:mk)$|(?:^|\/)(?:preinstall|install|postinstall|bootstrap)\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$|(?:^|\/)(?:scripts?|tools?|build)\/[^/]*(?:build|install|setup|bootstrap|hook)[^/]*\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$/i
+const BIDI_CONTROL_RE = /[\u202A-\u202E\u2066-\u2069\u200E\u200F]/
+const PROMPT_INJECTION_RE = /(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions|disregard\s+(?:all\s+)?(?:previous|prior)\s+instructions|you\s+are\s+now\s+(?:in\s+)?(?:developer|admin|unrestricted|jailbreak)\s+mode|override\s+(?:system|safety)\s+(?:prompt|rules)|<\s*system[-_]?prompt\b)/i
 
 export async function hasCommits(repoRoot) {
   const fastHead = readHeadFast(resolveGitDirFast(repoRoot))
@@ -482,6 +484,19 @@ export function scanUntrustedDiff(diff, repoRoot) {
         file: f,
         reason: 'Modifies Makefile or build/install script',
         excerpt,
+      })
+    }
+
+    const promptOrBidiHits = added.filter((l) => {
+      if (/^\s*(?:const|let|var)\s+[A-Z0-9_]+RE\s*=/.test(l)) return false
+      return BIDI_CONTROL_RE.test(l) || PROMPT_INJECTION_RE.test(l)
+    })
+    if (promptOrBidiHits.length > 0) {
+      hazards.push({
+        category: 'prompt-injection-or-bidi',
+        file: f,
+        reason: 'Added diff lines contain prompt-injection directives or Unicode bidirectional control characters',
+        excerpt: promptOrBidiHits.slice(0, 4).map((l) => `+ ${l}`),
       })
     }
 

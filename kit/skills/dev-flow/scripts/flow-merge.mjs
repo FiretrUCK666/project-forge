@@ -22,6 +22,8 @@ import {
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { classifyDoorType, detectGateWeakening, gitDiffRawEntriesAndText, matchGlob } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { syncLocalDefaultBranchAfterMerge } from '../../lib/task-backend-local.mjs'
+import { markTriageConsumed } from '../../lib/session-state.mjs'
 import { checkStackedParentMerged, checkUnresolvedDependencies } from '../../lib/task-graph.mjs'
 import {
   hasRepoCiWorkflow,
@@ -309,6 +311,7 @@ export async function handleMerge(opts, roots) {
     return { exitCode: EXIT.FACT, code: 'BLOCKED_MISSING_DEFAULT_BRANCH' }
   }
   let mergeRes = null
+  let genericSyncRes = null
   // 本次合并发出的回告逐条记成败：两条合并路径共用一份，报告里统一列出未发出的那些。
   const mergeComments = []
   const syncFailures = []
@@ -357,14 +360,14 @@ export async function handleMerge(opts, roots) {
       throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
     }
     // 先同步 mainRoot，确保 1:N 总控 Issue 关单保护读取到最新主线切片终态。
-    const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
-    if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
-      await gitRun(roots.mainRoot, ['fetch', pushRemote, baseBranch])
-      const fastMainBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
-      const curMainBr = fastMainBr ? { ok: true, stdout: fastMainBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-      if (curMainBr.ok && curMainBr.stdout.trim() === baseBranch) {
-        await gitRun(roots.mainRoot, ['merge', '--ff-only', '--no-edit', `${pushRemote}/${baseBranch}`])
-      }
+    if (!opts._ghProbe) {
+      await syncLocalDefaultBranchAfterMerge({
+        mainRoot: roots.mainRoot,
+        gitDir: roots.gitDir,
+        remote: pushRemote,
+        baseBranch,
+        fetch: true,
+      })
     }
     const mergeImplLayers = resolveIdentityLayers({
       ghLogin: ghProbe?.env?.trackB?.login,
@@ -436,7 +439,8 @@ export async function handleMerge(opts, roots) {
       }
     }
   } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
-    if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
+    const isGenericRemote = ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git'
+    if (isGenericRemote) {
       mergeRes = await backend.mergePr({
         humanApproved: Boolean(opts['human-approved']),
         ledger,
@@ -460,6 +464,15 @@ export async function handleMerge(opts, roots) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
       process.stderr.write(`${mergeRes.message}\n`)
       return { exitCode: mergeRes.exitCode ?? EXIT.FACT, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
+    }
+    if (isGenericRemote && mergeRes?.merged && !opts._ghProbe) {
+      genericSyncRes = await syncLocalDefaultBranchAfterMerge({
+        mainRoot: roots.mainRoot,
+        gitDir: roots.gitDir,
+        remote: pushRemote,
+        baseBranch,
+        fetch: Boolean(mergeRes?.fetched),
+      })
     }
     if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
       const mergeImplLayers = resolveIdentityLayers({
@@ -522,12 +535,19 @@ export async function handleMerge(opts, roots) {
   }
   await runLifecycleGovernHook({ stage: 'merge', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+  markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
+  const verifiedRemoteMerged = Boolean(
+    mergeRes?.trialMerged
+    || (mergeRes?.merged && mergeRes?.verified !== false && ['merged', 'squash_or_rebase_merged', 'no_own_commits', 'fast-forward'].includes(mergeRes?.mergeState)),
+  )
   const checklist = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, originFull, pushRemote, {
     skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
     _ghProbe: opts._ghProbe,
     _ghClient: opts._ghClient,
     gitDir: roots.gitDir,
-    mergeStateOverride: mergeRes?.trialMerged ? { state: 'merged', ownCommits: 0, isShallow: false, reason: `已合入 ${baseBranch}` } : null,
+    mergeStateOverride: (mergeRes?.trialMerged || (verifiedRemoteMerged && genericSyncRes?.synced === false))
+      ? { state: 'merged', ownCommits: 0, isShallow: false, reason: `已合入 ${baseBranch}` }
+      : null,
     knownCleanWorktrees: ledger.worktreePath ? [ledger.worktreePath] : [],
   })
   const unreported = mergeComments.filter((c) => !c.ok)

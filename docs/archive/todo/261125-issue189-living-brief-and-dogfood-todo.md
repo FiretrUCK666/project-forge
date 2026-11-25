@@ -5,7 +5,7 @@ status: done
 created: 2026-11-25
 updated: 2026-11-25
 issue: 189
-pr: null
+pr: 190
 branch: feat/living-brief-and-dogfood
 owner: planner-arch
 plan_mode: interactive
@@ -31,7 +31,7 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 | 任务编号 | `living-brief-and-dogfood` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与预算已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #189 / 未关联 / `docs/archive/specs/261125-issue189-living-brief-and-dogfood-spec.md` |
+| 关联 Issue / PR / SPEC | #189 / #190 / `docs/archive/specs/261125-issue189-living-brief-and-dogfood-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261125-issue189-living-brief-and-dogfood-spec.md`。
 

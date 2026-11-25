@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-25
 updated: 2026-11-25
 issue: 189
-pr: null
+pr: 190
 branch: feat/living-brief-and-dogfood
 owner: planner-arch
 plan_mode: interactive
@@ -30,7 +30,7 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 | 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（仓外活需求简报状态机、宿主中立原型挂载、预算内文档同步与本仓自举；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-25` / `2026-11-25` |
-| 分支 / Issue / PR | `feat/living-brief-and-dogfood` / #189 / 未关联 |
+| 分支 / Issue / PR | `feat/living-brief-and-dogfood` / #189 / #190 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界、预算与自举标准已由总控 PRD 冻结，待拍板为零） |
 | 关联 PRD / Todo | `docs/archive/prd/261125-visual-arch-brief-prd-prd.md` / `docs/archive/todo/261125-issue189-living-brief-and-dogfood-todo.md` |

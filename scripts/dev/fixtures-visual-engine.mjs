@@ -402,7 +402,28 @@ export function registerVisualEngineCases(cases) {
 
     const followupCount = (briefHtml.match(/data-followup-panel=/g) || []).length
     if (followupCount !== 1) return `顶栏追问按钮应去重为恰好 1 个，实得 ${followupCount}`
-    if (briefHtml.includes('pf-left-stripe')) return '严禁渲染左边框竖条样式'
+    if (briefHtml.includes('pf-sidebar') || archHtml.includes('pf-sidebar')) return '严禁渲染右侧抽屉 pf-sidebar'
+    if (briefHtml.includes('pf-left-stripe') || briefHtml.includes('border-top:2px solid') || briefHtml.includes('border-left:3px solid')) {
+      return '严禁渲染彩色边框竖条/顶条样式'
+    }
+    if (!/\.pf-node\{[^}]*text-align:\s*center/i.test(archHtml)) {
+      return '缺少居中单色卡片样式（text-align:center in .pf-node）'
+    }
+    if (!archHtml.includes('pf-quicklook') || !briefHtml.includes('pf-quicklook')) {
+      return '缺少居中 Quick-Look 详情窗（pf-quicklook）'
+    }
+    if (!archHtml.includes('pf-focus-card') || !briefHtml.includes('pf-focus-card')) {
+      return '缺少底部焦点聚光条（pf-focus-card）'
+    }
+    if (!archHtml.includes('pf-cmdk') || !briefHtml.includes('pf-cmdk')) {
+      return '缺少 Cmd/Ctrl+K 命令与目录面板（pf-cmdk）'
+    }
+    if (!/d="M [^"]* Q [^"]*"/.test(archHtml)) {
+      return '全景架构缺少带圆角 Q 的正交侧道 SVG 连线'
+    }
+    if (!archHtml.includes('id="vp-tree"') || !archHtml.includes('id="vp-flow"') || !archHtml.includes('pf-stage')) {
+      return '缺少 vp-tree 与 vp-flow 双交互画布（pf-stage）'
+    }
     if (!briefHtml.includes('pf-edge-added') || !briefHtml.includes('pf-diff-removed')) return 'SVG 缺少新增虚线边或拟移除节点样式'
     if (!briefHtml.includes('pf-zoom-float') || !briefHtml.includes('pf-focus-bar') || !briefHtml.includes('btn-only-diff')) {
       return '缺少左下角浮动缩放胶囊或域聚焦/仅看变更条'

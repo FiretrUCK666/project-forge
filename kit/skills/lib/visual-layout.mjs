@@ -418,6 +418,76 @@ export function computeDiffOverlay(featureMap, diffOverlay = {}) {
   }
 }
 
+const ACTOR_TITLES = Object.freeze({ maintainer: '维护与治理', planner: '规划与设计', coordinator: '主调度协调', implementer: '实施与验证', reviewer: '独立审查', explore: '只读探索', critic: '内审批评', human: '人工拍板', user: '终端用户', system: '系统引擎' })
+const formatActorTitle = (actor) => ACTOR_TITLES[String(actor || '').trim().toLowerCase()] || String(actor || '').trim() || '系统引擎'
+const resolveEdgeState = (src, dst) => (src.diffState === 'added' || dst.diffState === 'added') ? 'added' : ((src.diffState === 'removed' || dst.diffState === 'removed') ? 'removed' : ((src.diffState !== 'context' || dst.diffState !== 'context') ? 'impacted' : 'context'))
+
+function roundedOrthogonalPath(rawPts, radius = 10) {
+  const pts = []
+  for (const p of rawPts) {
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue
+    const x = Math.round(p.x * 10) / 10, y = Math.round(p.y * 10) / 10, prev = pts[pts.length - 1]
+    if (prev && Math.abs(prev.x - x) < 0.5 && Math.abs(prev.y - y) < 0.5) continue
+    if (pts.length >= 2) {
+      const a = pts[pts.length - 2], b = pts[pts.length - 1]
+      if ((Math.abs(a.x - b.x) < 0.5 && Math.abs(b.x - x) < 0.5) || (Math.abs(a.y - b.y) < 0.5 && Math.abs(b.y - y) < 0.5)) { pts[pts.length - 1] = { x, y }; continue }
+    }
+    pts.push({ x, y })
+  }
+  if (pts.length < 2) return pts.length === 1 ? `M ${pts[0].x} ${pts[0].y}` : ''
+  const parts = [`M ${pts[0].x} ${pts[0].y}`]
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1]
+    const dx1 = p1.x - p0.x, dy1 = p1.y - p0.y, dx2 = p2.x - p1.x, dy2 = p2.y - p1.y
+    const len1 = Math.hypot(dx1, dy1), len2 = Math.hypot(dx2, dy2), cr = Math.min(radius, len1 / 2, len2 / 2)
+    if (cr < 1 || len1 < 1 || len2 < 1) { parts.push(`L ${p1.x} ${p1.y}`); continue }
+    const q1x = Math.round((p1.x - (dx1 / len1) * cr) * 10) / 10, q1y = Math.round((p1.y - (dy1 / len1) * cr) * 10) / 10
+    const q2x = Math.round((p1.x + (dx2 / len2) * cr) * 10) / 10, q2y = Math.round((p1.y + (dy2 / len2) * cr) * 10) / 10
+    parts.push(`L ${q1x} ${q1y} Q ${p1.x} ${p1.y} ${q2x} ${q2y}`)
+  }
+  return `${parts.join(' ')} L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`
+}
+
+function routeOrthogonalTreeEdge(src, dst, domById, idxOffset = 0) {
+  const srcDom = domById.get(src.domain), dstDom = domById.get(dst.domain), lane = ((idxOffset % 5) - 2) * 5, pts = []
+  if (srcDom && dstDom && srcDom.id === dstDom.id) {
+    if (Math.abs(src.cy - dst.cy) < 12) {
+      if (dst.x >= src.x + src.w - 4 && dst.x - (src.x + src.w) <= 64) pts.push({ x: src.x + src.w, y: src.cy }, { x: dst.x, y: dst.cy })
+      else if (src.x >= dst.x + dst.w - 4 && src.x - (dst.x + dst.w) <= 64) pts.push({ x: src.x, y: src.cy }, { x: dst.x + dst.w, y: dst.cy })
+      else { const dy = src.y + src.h + 10 + Math.abs(lane); pts.push({ x: src.cx, y: src.y + src.h }, { x: src.cx, y: dy }, { x: dst.cx, y: dy }, { x: dst.cx, y: dst.y + dst.h }) }
+    } else if (Math.abs(src.cx - dst.cx) < 12) {
+      if (dst.y >= src.y + src.h - 4 && dst.y - (src.y + src.h) <= 44) pts.push({ x: src.cx, y: src.y + src.h }, { x: dst.cx, y: dst.y })
+      else { const sx = srcDom.rightAisleX - 12 + Math.abs(lane); pts.push({ x: src.x + src.w, y: src.cy }, { x: sx, y: src.cy }, { x: sx, y: dst.cy }, { x: dst.x + dst.w, y: dst.cy }) }
+    } else {
+      const dn = src.y < dst.y, gy = (dn ? src.y + src.h : dst.y + dst.h) + 10 + lane * 0.4
+      pts.push({ x: src.cx, y: dn ? src.y + src.h : src.y }, { x: src.cx, y: gy }, { x: dst.cx, y: gy }, { x: dst.cx, y: dn ? dst.y : dst.y + dst.h })
+    }
+    return roundedOrthogonalPath(pts)
+  }
+  if (srcDom && dstDom && srcDom.row === dstDom.row && Math.abs(srcDom.col - dstDom.col) === 1) {
+    const dir = dstDom.col > srcDom.col ? 1 : -1, ax = (dir > 0 ? srcDom.rightAisleX : srcDom.leftAisleX) + lane
+    const sFace = dir > 0 ? src.gridCol === srcDom.innerCols - 1 : src.gridCol === 0, dFace = dir > 0 ? dst.gridCol === 0 : dst.gridCol === dstDom.innerCols - 1
+    if (sFace || srcDom.innerCols === 1) pts.push({ x: dir > 0 ? src.x + src.w : src.x, y: src.cy }, { x: ax, y: src.cy })
+    else pts.push({ x: src.cx, y: src.y + src.h }, { x: src.cx, y: src.y + src.h + 10 }, { x: ax, y: src.y + src.h + 10 })
+    if (dFace || dstDom.innerCols === 1) pts.push({ x: ax, y: dst.cy }, { x: dir > 0 ? dst.x : dst.x + dst.w, y: dst.cy })
+    else pts.push({ x: ax, y: dst.y + dst.h + 10 }, { x: dst.cx, y: dst.y + dst.h + 10 }, { x: dst.cx, y: dst.y + dst.h })
+    return roundedOrthogonalPath(pts)
+  }
+  const busY = (srcDom && dstDom ? (dstDom.row > srcDom.row ? srcDom.corridorMidY : (dstDom.row < srcDom.row ? srcDom.topCorridorY : srcDom.corridorMidY)) : (src.y + src.h + 32)) + lane
+  if (srcDom && src.gridRow === srcDom.innerRows - 1 && busY >= srcDom.y + srcDom.h) pts.push({ x: src.cx, y: src.y + src.h }, { x: src.cx, y: busY })
+  else if (srcDom) {
+    const ur = dst.cx >= src.cx, ea = (ur ? srcDom.rightAisleX : srcDom.leftAisleX) + lane * 0.5
+    if (srcDom.innerCols === 1 || (ur && src.gridCol === srcDom.innerCols - 1) || (!ur && src.gridCol === 0)) pts.push({ x: ur ? src.x + src.w : src.x, y: src.cy }, { x: ea, y: src.cy }, { x: ea, y: busY })
+    else pts.push({ x: src.cx, y: src.y + src.h }, { x: src.cx, y: src.y + src.h + 10 }, { x: ea, y: src.y + src.h + 10 }, { x: ea, y: busY })
+  } else pts.push({ x: src.cx, y: src.y + src.h }, { x: src.cx, y: busY })
+  if (dstDom) {
+    const er = src.cx > dst.cx, da = (er ? dstDom.rightAisleX : dstDom.leftAisleX) + lane * 0.5
+    if (dstDom.innerCols === 1 || (er && dst.gridCol === dstDom.innerCols - 1) || (!er && dst.gridCol === 0)) pts.push({ x: da, y: busY }, { x: da, y: dst.cy }, { x: er ? dst.x + dst.w : dst.x, y: dst.cy })
+    else pts.push({ x: da, y: busY }, { x: da, y: dst.y + dst.h + 10 }, { x: dst.cx, y: dst.y + dst.h + 10 }, { x: dst.cx, y: dst.y + dst.h })
+  } else pts.push({ x: dst.cx, y: busY }, { x: dst.cx, y: dst.y })
+  return roundedOrthogonalPath(pts)
+}
+
 export function layoutDomainTree(featureMap, overlay, _opts = {}) {
   const features = Array.isArray(overlay?.features) ? overlay.features : normalizeFeatures(featureMap)
   const domains = resolveDomains(featureMap, features)
@@ -426,19 +496,19 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
   const detailMap = overlay?.changeDetails instanceof Map ? overlay.changeDetails : new Map()
   const reasonMap = overlay?.impactReasons instanceof Map ? overlay.impactReasons : new Map()
 
-  const cardW = 284, cardH = 114, cardGapX = 24, cardGapY = 22
-  const domPadX = 24, domPadBottom = 24, domGapX = 34, domGapY = 34, canvasPad = 32
+  const cardW = 284, cardH = 114, cardGapX = 32, cardGapY = 20
+  const domPadX = 28, domPadBottom = 26, domGapX = 64, domGapY = 82, canvasPad = 40
   const domCols = domains.length <= 1 ? 1 : domains.length <= 4 ? 2 : 3
   const domainBoxes = [], featureBoxes = [], featureBoxMap = new Map()
 
   const preppedDomains = domains.map((dom) => {
     const items = dom.featureIds.map((fid) => featureById.get(fid)).filter(Boolean)
-    const innerCols = items.length <= 1 ? 1 : Math.min(2, items.length)
-    const rows = Math.max(1, Math.ceil(items.length / innerCols))
-    const domHeaderH = (dom.description || displayWidth(dom.title) > 24) ? 66 : 54
+    const innerCols = items.length <= 3 ? 1 : (items.length >= 6 ? 3 : 2)
+    const innerRows = Math.max(1, Math.ceil(items.length / innerCols))
+    const domHeaderH = dom.description ? 66 : 52
     const w = domPadX * 2 + innerCols * cardW + Math.max(0, innerCols - 1) * cardGapX
-    const h = domHeaderH + rows * cardH + Math.max(0, rows - 1) * cardGapY + domPadBottom
-    return { dom, items, innerCols, domHeaderH, w, h }
+    const h = domHeaderH + innerRows * cardH + Math.max(0, innerRows - 1) * cardGapY + domPadBottom
+    return { dom, items, innerCols, innerRows, domHeaderH, w, h }
   })
 
   const colWidths = Array.from({ length: domCols }, () => 0)
@@ -453,23 +523,38 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
   let accY = canvasPad
   for (let r = 0; r < rowHeights.length; r++) { rowOffsets[r] = accY; accY += rowHeights[r] + domGapY }
 
+  const totalW = Math.max(680, accX - domGapX + canvasPad)
+  const bottomGutterY = (rowOffsets[rowHeights.length - 1] || canvasPad) + (rowHeights[rowHeights.length - 1] || 200) + domGapY / 2
+  const totalH = Math.max(400, accY - domGapY + canvasPad + 16)
+  const domBoxById = new Map()
+
   preppedDomains.forEach((pd, idx) => {
     const col = idx % domCols
     const row = Math.floor(idx / domCols)
     const x = colOffsets[col]
     const y = rowOffsets[row]
     const w = colWidths[col]
-    const h = pd.h
-    domainBoxes.push({
+    const h = rowHeights[row] || pd.h
+    const corridorMidY = y + h + domGapY / 2
+    const topCorridorY = row === 0 ? Math.max(14, canvasPad / 2) : (rowOffsets[row - 1] + rowHeights[row - 1] + domGapY / 2)
+    const leftAisleX = col === 0 ? Math.max(16, canvasPad / 2) : (x - domGapX / 2)
+    const rightAisleX = col === domCols - 1 ? (x + w + Math.min(28, domGapX / 2)) : (x + w + domGapX / 2)
+    const domBox = {
       id: pd.dom.id, title: pd.dom.title, shortTitle: truncateLabel(pd.dom.title, 34),
       description: pd.dom.description, shortDescription: pd.dom.description ? truncateLabel(pd.dom.description, 44) : '',
       domHeaderH: pd.domHeaderH, risk: pd.dom.risk, layer: pd.dom.effectiveLayer, palette: pd.dom.palette,
-      x, y, w, h, featureCount: pd.items.length,
-    })
+      x, y, w, h, row, col, innerCols: pd.innerCols, innerRows: pd.innerRows,
+      corridorMidY, topCorridorY, leftAisleX, rightAisleX,
+      featureCount: pd.items.length,
+    }
+    domainBoxes.push(domBox)
+    domBoxById.set(domBox.id, domBox)
 
+    const innerContentW = pd.innerCols * cardW + Math.max(0, pd.innerCols - 1) * cardGapX
+    const startX = x + Math.round((w - innerContentW) / 2)
     pd.items.forEach((feat, fIdx) => {
       const fCol = fIdx % pd.innerCols, fRow = Math.floor(fIdx / pd.innerCols)
-      const fx = x + domPadX + fCol * (cardW + cardGapX), fy = y + pd.domHeaderH + fRow * (cardH + cardGapY)
+      const fx = startX + fCol * (cardW + cardGapX), fy = y + pd.domHeaderH + fRow * (cardH + cardGapY)
       const diffState = stateMap.get(feat.id) || 'context'
       const primaryAnchor = feat.entrypoints[0] || feat.modules[0] || feat.tests[0] || ''
       const summarySrc = feat.description || feat.businessFlows[0] || toRelPath(primaryAnchor) || feat.id
@@ -477,6 +562,7 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
         ...feat, shortTitle: truncateLabel(feat.title, 34), shortSummary: truncateLabel(summarySrc, 38),
         shortAnchor: truncateLabel(toRelPath(primaryAnchor) || feat.id, 36), domainTitle: pd.dom.title,
         x: fx, y: fy, w: cardW, h: cardH, cx: fx + cardW / 2, cy: fy + cardH / 2,
+        gridRow: fRow, gridCol: fCol,
         diffState, isVirtual: Boolean(feat.isVirtual), changeDetail: detailMap.get(feat.id) || null,
         impactReasons: reasonMap.get(feat.id) || [], primaryAnchor, palette: pd.dom.palette,
       }
@@ -489,244 +575,108 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
     for (const depId of feat.dependsOn) {
       const src = featureBoxMap.get(depId)
       if (!src || src.id === feat.id) continue
-      const x1 = src.x + src.w
-      const y1 = src.cy
-      const x2 = feat.x
-      const y2 = feat.cy
-      const sameColRightToLeft = Math.abs(src.x - feat.x) < 10
-      let pathD
-      if (sameColRightToLeft) {
-        const sy1 = src.y + src.h
-        const sy2 = feat.y
-        const midY = (sy1 + sy2) / 2
-        pathD = `M ${src.cx} ${sy1} C ${src.cx} ${midY}, ${feat.cx} ${midY}, ${feat.cx} ${sy2}`
-      } else if (src.x <= feat.x) {
-        const dx = Math.max(40, Math.abs(x2 - x1) * 0.45)
-        pathD = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
-      } else {
-        const sx1 = src.x
-        const sx2 = feat.x + feat.w
-        const dx = Math.max(40, Math.abs(sx2 - sx1) * 0.45)
-        pathD = `M ${sx1} ${y1} C ${sx1 - dx} ${y1}, ${sx2 + dx} ${y2}, ${sx2} ${y2}`
-      }
-      const isVirtual = Boolean(src.isVirtual || feat.isVirtual)
-      const edgeState = (src.diffState === 'added' || feat.diffState === 'added')
-        ? 'added'
-        : ((src.diffState === 'removed' || feat.diffState === 'removed')
-            ? 'removed'
-            : ((src.diffState !== 'context' || feat.diffState !== 'context') ? 'impacted' : 'context'))
-      edges.push({
-        id: `${src.id}->${feat.id}`,
-        fromId: src.id,
-        toId: feat.id,
-        pathD,
-        edgeState,
-        isVirtual,
-        impacted: edgeState !== 'context',
-      })
+      const edgeState = resolveEdgeState(src, feat)
+      edges.push({ id: `${src.id}->${feat.id}`, fromId: src.id, toId: feat.id, pathD: routeOrthogonalTreeEdge(src, feat, domBoxById, edges.length), edgeState, isVirtual: Boolean(src.isVirtual || feat.isVirtual), impacted: edgeState !== 'context' })
     }
   }
-
-  return {
-    width: Math.max(640, accX - domGapX + canvasPad),
-    height: Math.max(360, accY - domGapY + canvasPad),
-    domains: domainBoxes,
-    nodes: featureBoxes,
-    edges,
-  }
+  return { width: totalW, height: totalH, bottomGutterY, domains: domainBoxes, nodes: featureBoxes, edges }
 }
 
 export function layoutFlowDag(featureMap, overlay, _opts = {}) {
   const features = Array.isArray(overlay?.features) ? overlay.features : normalizeFeatures(featureMap)
   const domains = resolveDomains(featureMap, features)
   const stateMap = overlay?.states instanceof Map ? overlay.states : new Map()
+  const detailMap = overlay?.changeDetails instanceof Map ? overlay.changeDetails : new Map()
   const rawFlows = Array.isArray(featureMap?.flows) ? featureMap.flows : []
 
-  const laneSpecs = []
-  const flowSummaries = []
+  const laneSpecs = [], flowSummaries = []
   if (rawFlows.length > 0) {
     const laneNames = new Map()
     for (const fl of rawFlows) {
       if (!fl || typeof fl !== 'object') continue
       const flowId = String(fl.id || `flow-${flowSummaries.length + 1}`).trim()
-      const flowTitle = String(fl.title || fl.name || flowId).trim()
       const steps = Array.isArray(fl.steps) ? fl.steps : []
-      const cleanSteps = steps.map((step, sIdx) => ({
-        stepIndex: sIdx + 1,
-        feature: String(step?.feature || '').trim(),
-        actor: String(step?.actor || step?.lane || 'system').trim(),
-        action: String(step?.action || '').trim(),
-      })).filter((s) => s.feature)
-      flowSummaries.push({
-        id: flowId,
-        title: flowTitle,
-        description: String(fl.description || '').trim(),
-        stepCount: cleanSteps.length,
-        actors: normArray(fl.actors),
-        featureIds: normArray(fl.features),
-        steps: cleanSteps,
-      })
+      const cleanSteps = steps.map((step, sIdx) => ({ stepIndex: sIdx + 1, feature: String(step?.feature || '').trim(), actor: String(step?.actor || step?.lane || 'system').trim(), action: String(step?.action || '').trim() })).filter((s) => s.feature)
+      flowSummaries.push({ id: flowId, title: String(fl.title || fl.name || flowId).trim(), description: String(fl.description || '').trim(), stepCount: cleanSteps.length, actors: normArray(fl.actors), featureIds: normArray(fl.features), steps: cleanSteps })
       for (const step of steps) {
         const actor = String(step?.actor || step?.lane || 'system').trim()
-        if (!laneNames.has(actor)) laneNames.set(actor, { id: actor, title: actor, palette: pickDomainPalette(actor) })
+        if (!laneNames.has(actor)) laneNames.set(actor, { id: actor, title: formatActorTitle(actor), palette: pickDomainPalette(actor) })
       }
     }
     for (const l of laneNames.values()) laneSpecs.push(l)
   }
 
-  if (laneSpecs.length === 0) {
-    for (const d of domains) laneSpecs.push({ id: d.id, title: d.title, palette: d.palette })
-  }
-  if (laneSpecs.length === 0) laneSpecs.push({ id: 'core', title: 'Core Pipeline', palette: DOMAIN_PALETTES[0] })
+  if (laneSpecs.length === 0) for (const d of domains) laneSpecs.push({ id: d.id, title: d.title, palette: d.palette })
+  if (laneSpecs.length === 0) laneSpecs.push({ id: 'core', title: '核心管线', palette: DOMAIN_PALETTES[0] })
 
-  const featureIds = new Set(features.map((f) => f.id))
-  const edgePairs = []
-  for (const f of features) {
-    for (const dep of f.dependsOn) {
-      if (featureIds.has(dep) && dep !== f.id) edgePairs.push([dep, f.id])
-    }
-  }
+  const featureIds = new Set(features.map((f) => f.id)), edgePairs = []
+  for (const f of features) for (const dep of f.dependsOn) if (featureIds.has(dep) && dep !== f.id) edgePairs.push([dep, f.id])
   const { rank: ranks } = kahnTopoSort(features.map((f) => f.id), edgePairs, (a, b) => a.localeCompare(b))
   const maxRank = Math.max(0, ...Array.from(ranks.values()))
 
-  const labelColW = 172, nodeW = 200, nodeH = 74, colGap = 54, nodeGapY = 16, lanePadY = 18, pad = 24
-  const laneBuckets = new Map(laneSpecs.map((l) => [l.id, []]))
-  const fallbackLaneId = laneSpecs[0].id
+  const labelColW = 168, nodeW = 228, nodeH = 82, colGap = 64, nodeGapY = 20, lanePadY = 22, pad = 28, stageHeadH = 38
+  const laneBuckets = new Map(laneSpecs.map((l) => [l.id, []])), fallbackLaneId = laneSpecs[0].id
   for (const f of features) {
     const preferredActor = f.actors[0]
-    const targetLane = (preferredActor && laneBuckets.has(preferredActor))
-      ? preferredActor
-      : (laneBuckets.has(f.domain) ? f.domain : fallbackLaneId)
-    laneBuckets.get(targetLane).push(f)
+    laneBuckets.get((preferredActor && laneBuckets.has(preferredActor)) ? preferredActor : (laneBuckets.has(f.domain) ? f.domain : fallbackLaneId)).push(f)
   }
-
-  const lanes = []
-  const flowNodes = []
-  const flowNodeMap = new Map()
-  let curY = pad
+  const stages = Array.from({ length: maxRank + 1 }, (_, r) => ({ index: r, title: `阶段 ${r + 1}`, x: pad + labelColW + 24 + r * (nodeW + colGap), y: pad, w: nodeW }))
+  const lanes = [], flowNodes = [], flowNodeMap = new Map()
+  let curY = pad + stageHeadH
+  const totalW = labelColW + 24 + (maxRank + 1) * nodeW + maxRank * colGap + pad * 2
 
   laneSpecs.forEach((lane) => {
-    const items = laneBuckets.get(lane.id) || []
-    const byRank = new Map()
+    const items = laneBuckets.get(lane.id) || [], byRank = new Map()
     for (const item of items) {
       const r = ranks.get(item.id) || 0
       if (!byRank.has(r)) byRank.set(r, [])
       byRank.get(r).push(item)
     }
     const maxStack = Math.max(1, ...Array.from(byRank.values()).map((arr) => arr.length))
-    const laneH = lanePadY * 2 + maxStack * nodeH + Math.max(0, maxStack - 1) * nodeGapY
-    const totalW = labelColW + (maxRank + 1) * nodeW + maxRank * colGap + pad * 2
-    const palette = lane.palette || pickDomainPalette(lane.id)
-    lanes.push({ id: lane.id, title: lane.title, shortTitle: truncateLabel(lane.title, 20), x: pad, y: curY, w: totalW, h: laneH, labelW: labelColW, palette })
-
+    const laneH = lanePadY * 2 + maxStack * nodeH + Math.max(0, maxStack - 1) * nodeGapY, palette = lane.palette || pickDomainPalette(lane.id)
+    lanes.push({ id: lane.id, title: lane.title, shortTitle: truncateLabel(lane.title, 18), x: pad, y: curY, w: totalW - pad * 2, h: laneH, labelW: labelColW, palette })
     for (const [r, group] of byRank.entries()) {
       group.forEach((feat, stackIdx) => {
-        const nx = pad + labelColW + 20 + r * (nodeW + colGap)
-        const ny = curY + lanePadY + stackIdx * (nodeH + nodeGapY)
-        const node = {
-          id: feat.id, title: feat.title, shortTitle: truncateLabel(feat.title, 22),
-          laneId: lane.id, rank: r, x: nx, y: ny, w: nodeW, h: nodeH,
-          cx: nx + nodeW / 2, cy: ny + nodeH / 2,
-          diffState: stateMap.get(feat.id) || 'context',
-          isVirtual: Boolean(feat.isVirtual),
-          palette,
-        }
-        flowNodes.push(node)
-        flowNodeMap.set(feat.id, node)
+        const nx = pad + labelColW + 24 + r * (nodeW + colGap), ny = curY + lanePadY + stackIdx * (nodeH + nodeGapY)
+        const node = { id: feat.id, title: feat.title, shortTitle: truncateLabel(feat.title, 24), laneId: lane.id, rank: r, x: nx, y: ny, w: nodeW, h: nodeH, cx: nx + nodeW / 2, cy: ny + nodeH / 2, diffState: stateMap.get(feat.id) || 'context', isVirtual: Boolean(feat.isVirtual), changeDetail: detailMap.get(feat.id) || null, palette }
+        flowNodes.push(node); flowNodeMap.set(feat.id, node)
       })
     }
-    curY += laneH + 14
+    curY += laneH + 16
   })
 
   const flowEdges = []
   for (const [fromId, toId] of edgePairs) {
-    const src = flowNodeMap.get(fromId)
-    const dst = flowNodeMap.get(toId)
+    const src = flowNodeMap.get(fromId), dst = flowNodeMap.get(toId)
     if (!src || !dst) continue
-    const x1 = src.x + src.w, y1 = src.cy, x2 = dst.x, y2 = dst.cy
-    const dx = Math.max(28, Math.abs(x2 - x1) * 0.45)
-    const edgeState = (src.diffState === 'added' || dst.diffState === 'added')
-      ? 'added'
-      : ((src.diffState === 'removed' || dst.diffState === 'removed')
-          ? 'removed'
-          : ((src.diffState !== 'context' || dst.diffState !== 'context') ? 'impacted' : 'context'))
-    flowEdges.push({
-      id: `flow:${fromId}->${toId}`, fromId, toId,
-      pathD: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`,
-      edgeState,
-      isVirtual: Boolean(src.isVirtual || dst.isVirtual),
-      impacted: edgeState !== 'context',
-    })
+    const lr = src.x <= dst.x, x1 = lr ? src.x + src.w : src.x, x2 = lr ? dst.x : dst.x + dst.w, dx = Math.max(36, Math.abs(x2 - x1) * 0.45)
+    const edgeState = resolveEdgeState(src, dst)
+    flowEdges.push({ id: `flow:${fromId}->${toId}`, fromId, toId, pathD: `M ${x1} ${src.cy} C ${lr ? x1 + dx : x1 - dx} ${src.cy}, ${lr ? x2 - dx : x2 + dx} ${dst.cy}, ${x2} ${dst.cy}`, edgeState, isVirtual: Boolean(src.isVirtual || dst.isVirtual), impacted: edgeState !== 'context' })
   }
-
-  return { width: Math.max(640, ...lanes.map((l) => l.w + pad)), height: Math.max(280, curY + pad), lanes, nodes: flowNodes, edges: flowEdges, flows: flowSummaries }
+  return { width: Math.max(680, totalW), height: Math.max(320, curY + pad), lanes, stages, nodes: flowNodes, edges: flowEdges, flows: flowSummaries }
 }
 
-export function buildVisualModel({
-  featureMap = {},
-  diffOverlay = {},
-  mode = 'architecture-map',
-  title = '',
-  briefSpec = null,
-} = {}) {
-  const overlay = computeDiffOverlay(featureMap, diffOverlay)
-  const tree = layoutDomainTree(featureMap, overlay)
-  const flow = layoutFlowDag(featureMap, overlay)
+export function buildVisualModel({ featureMap = {}, diffOverlay = {}, mode = 'architecture-map', title = '', briefSpec = null } = {}) {
+  const overlay = computeDiffOverlay(featureMap, diffOverlay), tree = layoutDomainTree(featureMap, overlay), flow = layoutFlowDag(featureMap, overlay)
   const repoName = String(featureMap?.repoName || featureMap?.project || briefSpec?.repoName || '项目仓库').trim()
   const resolvedMode = mode === 'visual-brief' ? 'visual-brief' : 'architecture-map'
-  const resolvedTitle = String(
-    title || briefSpec?.title || (resolvedMode === 'visual-brief' ? `${repoName} — 实时规划简报` : `${repoName} — 架构全景图`)
-  ).trim()
-
-  const verdict = briefSpec?.verdict || {
-    status: overlay.hasActiveDiff ? '有变更' : '已同步',
-    tone: overlay.hasActiveDiff ? 'warn' : 'pass',
-    summary: overlay.hasActiveDiff
-      ? `新增 ${overlay.counts.added}、修改 ${overlay.counts.modified}、拟移除 ${overlay.counts.removed}、受波及 ${overlay.counts.impacted} 个模块。`
-      : `共 ${tree.domains.length} 个域、${tree.nodes.length} 个模块，全部已同步。`,
-  }
-
-  const scopeChips = normArray(briefSpec?.scopeChips).length > 0
-    ? normArray(briefSpec.scopeChips)
-    : [`schema:${featureMap?.version >= 2 ? 'v2' : 'v1-compat'}`, `域:${tree.domains.length}`, `模块:${tree.nodes.length}`, `依赖:${tree.edges.length}`]
-
-  const metrics = Array.isArray(briefSpec?.metrics) && briefSpec.metrics.length > 0
-    ? briefSpec.metrics
-    : [
-        { label: '域', value: String(tree.domains.length) },
-        { label: '模块', value: String(tree.nodes.length) },
-        { label: '依赖', value: String(tree.edges.length) },
-        { label: '新增', value: String(overlay.counts.added) },
-        { label: '修改', value: String(overlay.counts.modified) },
-        { label: '拟移除', value: String(overlay.counts.removed) },
-        { label: '受波及', value: String(overlay.counts.impacted) },
-      ]
-
+  const resolvedTitle = String(title || briefSpec?.title || (resolvedMode === 'visual-brief' ? `${repoName} — 实时规划简报` : `${repoName} — 架构全景图`)).trim()
+  const verdict = briefSpec?.verdict || { status: overlay.hasActiveDiff ? '有变更' : '已同步', tone: overlay.hasActiveDiff ? 'warn' : 'pass', summary: overlay.hasActiveDiff ? `新增 ${overlay.counts.added}、修改 ${overlay.counts.modified}、拟移除 ${overlay.counts.removed}、受波及 ${overlay.counts.impacted} 个模块。` : `共 ${tree.domains.length} 个域、${tree.nodes.length} 个模块，全部已同步。` }
+  const scopeChips = normArray(briefSpec?.scopeChips).length > 0 ? normArray(briefSpec.scopeChips) : [`schema:${featureMap?.version >= 2 ? 'v2' : 'v1-compat'}`, `域:${tree.domains.length}`, `模块:${tree.nodes.length}`, `依赖:${tree.edges.length}`]
+  const metrics = Array.isArray(briefSpec?.metrics) && briefSpec.metrics.length > 0 ? briefSpec.metrics : [{ label: '域', value: String(tree.domains.length) }, { label: '模块', value: String(tree.nodes.length) }, { label: '依赖', value: String(tree.edges.length) }, { label: '新增', value: String(overlay.counts.added) }, { label: '修改', value: String(overlay.counts.modified) }, { label: '拟移除', value: String(overlay.counts.removed) }, { label: '受波及', value: String(overlay.counts.impacted) }]
   const walkthrough = Array.isArray(briefSpec?.walkthrough) && briefSpec.walkthrough.length > 0
-    ? briefSpec.walkthrough.map((step, idx) => ({
-        index: idx,
-        targetId: String(step.targetId || tree.nodes[idx]?.id || '').trim(),
-        title: String(step.title || `步骤 ${idx + 1}`).trim(),
-        detail: String(step.detail || '').trim(),
-      }))
-    : tree.nodes.map((n, idx) => ({
-        index: idx,
-        targetId: n.id,
-        title: n.title,
-        detail: n.description || `${n.domainTitle || n.domain}（${n.modules.length} 个模块，${n.tests.length} 个测试）`,
-      }))
-
-  const prototypes = Array.isArray(briefSpec?.prototypes) ? briefSpec.prototypes : []
-  const panels = [
-    { id: 'panel-tree', title: '全景架构', promptHint: '核查领域边界与模块归属。' },
-    { id: 'panel-flow', title: '业务流转', promptHint: '核查跨模块依赖关系与角色泳道。' },
-    { id: 'panel-diff', title: '变更蓝图', promptHint: '核查新增、修改、拟移除及下游受波及模块。' },
-    { id: 'panel-prototypes', title: '方案原型', promptHint: '核查沙盒原型预览与外部设计参考链接。' },
-  ]
-
+    ? briefSpec.walkthrough.map((step, idx) => ({ index: idx, targetId: String(step.targetId || tree.nodes[idx]?.id || '').trim(), title: String(step.title || `步骤 ${idx + 1}`).trim(), detail: String(step.detail || '').trim() }))
+    : tree.nodes.map((n, idx) => ({ index: idx, targetId: n.id, title: n.title, detail: n.description || `${n.domainTitle || n.domain}（${n.modules.length} 个模块，${n.tests.length} 个测试）` }))
   return {
     schemaVersion: 2, mode: resolvedMode, repoName, title: resolvedTitle, verdict, scopeChips, metrics,
-    overlayCounts: overlay.counts, hasActiveDiff: overlay.hasActiveDiff, tree, flow, walkthrough, prototypes,
-    briefData: briefSpec?.briefData || null, panels,
+    overlayCounts: overlay.counts, hasActiveDiff: overlay.hasActiveDiff, tree, flow, walkthrough,
+    prototypes: Array.isArray(briefSpec?.prototypes) ? briefSpec.prototypes : [],
+    briefData: briefSpec?.briefData || null,
+    panels: [
+      { id: 'panel-tree', title: '全景架构', promptHint: '核查领域边界与模块归属。' },
+      { id: 'panel-flow', title: '业务流转', promptHint: '核查跨模块依赖关系与角色泳道。' },
+      { id: 'panel-diff', title: '变更蓝图', promptHint: '核查新增、修改、拟移除及下游受波及模块。' },
+      { id: 'panel-prototypes', title: '方案原型', promptHint: '核查沙盒原型预览与外部设计参考链接。' },
+    ],
   }
 }

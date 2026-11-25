@@ -6,9 +6,11 @@
  *   - C4: pr-template-hydrate.mjs 与 review-comment-render.mjs 拆分及全仓库 .mjs <= 800 行
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { runEditGate } from '../../kit/skills/dev-edit/scripts/edit-gate.mjs'
+import { isLegalArchiveMove } from '../../kit/skills/lib/static-gates.mjs'
 import { renderAgentsTemplate } from '../compose-agents.mjs'
 import { discoverKitSkillsDetailed } from '../lib/protocol.mjs'
 import { survey } from '../survey.mjs'
@@ -332,12 +334,12 @@ export function registerAttributionRoutingCases(cases) {
       }
     } finally { rmTree(dir) }
 
-    // 根 SKILL.md <= 200L / 16384B、version 6.0.0、v3、8 技能与真融合/纯调度
+    // 根 SKILL.md <= 200L / 16384B、有效 semver、v3、8 技能与真融合/纯调度
     const rootSkill = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8')
     const rootLines = countLines(rootSkill)
     const rootBytes = Buffer.byteLength(rootSkill, 'utf8')
     if (rootLines > 200 || rootBytes > 16384) return `SKILL.md 超限: ${rootLines}L / ${rootBytes}B`
-    if (/v2\s*(?:账本|墓碑)/.test(rootSkill) || !rootSkill.includes('v3') || !rootSkill.includes('version: "6.0.0"')) {
+    if (/v2\s*(?:账本|墓碑)/.test(rootSkill) || !rootSkill.includes('v3') || !/version:\s*"\d+\.\d+\.\d+"/.test(rootSkill)) {
       return 'SKILL.md 未同步升级为 v3 或版本标识异常'
     }
     for (const sk of ['dev-edit', 'dev-verify-tools', 'dev-iterate']) {
@@ -548,6 +550,53 @@ export function registerAttributionRoutingCases(cases) {
           return `intake 离线后端(${decision}) 违规输出 @mention:\n${offRes.commentBody}`
         }
       }
+      return true
+    } finally { rmTree(dir) }
+  }])
+
+  cases.push(['[C5] release-notes 仅放行全新新增且阻断修改或删除历史说明（正反双向）', async () => {
+    const okAdd = isLegalArchiveMove({ file: 'docs/release-notes/v7.0.0.md', status: 'A' })
+    const okUntracked = isLegalArchiveMove({ file: 'docs/release-notes/v7.0.0.md', status: '??' })
+    const badMod = isLegalArchiveMove({ file: 'docs/release-notes/v6.0.0.md', status: 'M' })
+    const badDel = isLegalArchiveMove({ file: 'docs/release-notes/v6.0.0.md', status: 'D' })
+    const badRen = isLegalArchiveMove({ file: 'docs/release-notes/v6.0.0.md', status: 'R' })
+    if (!okAdd || !okUntracked || badMod || badDel || badRen) {
+      return `isLegalArchiveMove release-notes 判定异常：A=${okAdd}, ??=${okUntracked}, M=${badMod}, D=${badDel}, R=${badRen}`
+    }
+
+    const dir = tmpProject({
+      'AGENTS.md': '# Demo\n```yaml\nquick-test: exit 0\ndo-not-edit: docs/archive/, docs/release-notes/\n```\n',
+      'docs/release-notes/v6.0.0.md': '# v6.0.0\n\nExisting note.\n',
+    })
+    try {
+      gitInit(dir)
+      gitCommitFast(dir, 'chore: seed baseline release note')
+
+      const preNewOk = await runEditGate({ mode: 'pre-edit', dir, files: ['docs/release-notes/v7.0.0.md'] })
+      if (!preNewOk.ok || preNewOk.blockers.length > 0) {
+        return `pre-edit 应放行尚不存在的 release-notes 新文件：${JSON.stringify(preNewOk)}`
+      }
+      const preExistingBlock = await runEditGate({ mode: 'pre-edit', dir, files: ['docs/release-notes/v6.0.0.md'] })
+      if (preExistingBlock.ok || !preExistingBlock.blockers.some((b) => b.ruleId === 'edit.do-not-edit')) {
+        return `pre-edit 应阻断已存在的历史 release-notes 文件：${JSON.stringify(preExistingBlock)}`
+      }
+
+      writeFileSync(join(dir, 'docs/release-notes/v7.0.0.md'), '# v7.0.0\n\nNew release.\n', 'utf8')
+      const verifyNewOk = await runEditGate({ mode: 'verify', dir, final: true })
+      if (!verifyNewOk.ok || verifyNewOk.blockers.length > 0) {
+        return `verify 应放行新增 release-notes 文件：${JSON.stringify(verifyNewOk)}`
+      }
+
+      writeFileSync(join(dir, 'docs/release-notes/v6.0.0.md'), '# v6.0.0\n\nTampered.\n', 'utf8')
+      const verifyModBlock = await runEditGate({ mode: 'verify', dir, final: true })
+      if (verifyModBlock.ok || !verifyModBlock.blockers.some((b) => b.ruleId === 'edit.do-not-edit' && b.file === 'docs/release-notes/v6.0.0.md')) {
+        return `verify 应阻断修改历史 release-notes 文件：${JSON.stringify(verifyModBlock)}`
+      }
+
+      unlinkSync(join(dir, 'docs/release-notes/v6.0.0.md'))
+      const verifyDelCheck = isLegalArchiveMove({ file: 'docs/release-notes/v6.0.0.md', status: 'D' })
+      if (verifyDelCheck) return '删除历史 release-notes 文件不应被 isLegalArchiveMove 放行'
+
       return true
     } finally { rmTree(dir) }
   }])

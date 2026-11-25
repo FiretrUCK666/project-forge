@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="RELEASING.md"><img src="https://img.shields.io/badge/version-v6.0.0-4E7496?style=flat-square" alt="版本 v6.0.0"></a>
+  <a href="RELEASING.md"><img src="https://img.shields.io/badge/version-v7.0.0-4E7496?style=flat-square" alt="版本 v7.0.0"></a>
   <a href="#安装与自动更新"><img src="https://img.shields.io/badge/node-%3E%3D18-1F6F5B?style=flat-square" alt="Node.js 18 及以上"></a>
   <a href="SKILL.md"><img src="https://img.shields.io/badge/dependencies-0-1F6F5B?style=flat-square" alt="零第三方依赖"></a>
   <a href="#支持的语言"><img src="https://img.shields.io/badge/languages-any-D96B27?style=flat-square" alt="适用于任何语言的仓库"></a>

@@ -27,7 +27,7 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  checkProcessArtifactFilename, countTextLines, evaluateArchRules, hasBehavioralAssertion, isLegalArchiveMove, isMetaTestHarness, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
+  checkProcessArtifactFilename, countTextLines, evaluateArchRules, hasBehavioralAssertion, isLegalArchiveMove, isMetaTestHarness, isReleaseNotesDocPath, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 import {
   buildSplitReuseGuidance, checkMechanicalSplitName, classifyOversizedFile, detectLineSquashCheat,
@@ -294,12 +294,22 @@ export async function runEditGate(opts = {}) {
     }
   }
 
+  const toSyntheticEntries = (rawList) => rawList
+    .map((f) => normalizeRelFile(workTreeRoot, f))
+    .filter(Boolean)
+    .map((file) => ({
+      file,
+      status: isReleaseNotesDocPath(file) && !existsSync(join(workTreeRoot, file))
+        ? 'A'
+        : 'M',
+    }))
+
   let entries = []
   let deletedFiles = new Set()
   if (Array.isArray(opts.files) && opts.files.length > 0) {
-    entries = opts.files.map((f) => normalizeRelFile(workTreeRoot, f)).filter(Boolean).map((file) => ({ file, status: 'M' }))
+    entries = toSyntheticEntries(opts.files)
   } else if (typeof opts.files === 'string' && opts.files.trim()) {
-    entries = opts.files.split(',').map((f) => normalizeRelFile(workTreeRoot, f)).filter(Boolean).map((file) => ({ file, status: 'M' }))
+    entries = toSyntheticEntries(opts.files.split(','))
   } else {
     const collected = await collectChangedEntries(workTreeRoot, isGit, defaultBranch, { taskLedger, explicitBase: opts.base })
     entries = collected.entries

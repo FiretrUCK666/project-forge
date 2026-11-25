@@ -4,7 +4,7 @@ title: Universal Layered Visual Architecture and 4-State Change Blueprint
 status: active
 created: 2026-11-26
 updated: 2026-11-26
-issue: null
+issue: 193
 pr: null
 branch: feat/visual-blueprint-v2
 owner: planner-blueprint
@@ -14,7 +14,7 @@ done_at: null
 task_id: visual-blueprint-v2
 planned_at: 09aa4a80e1c0a00d9c7f9e31c129e4efb9af33d7
 related_prd: null
-related_spec: ../specs/261126-visual-blueprint-v2-spec.md
+related_spec: ../specs/261126-issue193-visual-blueprint-v2-spec.md
 ---
 
 # Universal Layered Visual Architecture and 4-State Change Blueprint
@@ -29,9 +29,9 @@ related_spec: ../specs/261126-visual-blueprint-v2-spec.md
 | 任务编号 | `visual-blueprint-v2` |
 | 负责人 / 审批 | planner-blueprint / `false` |
 | 规划态 | `autonomous`（按仓内既有最佳模式推进，经独立 Critique 过审并批准后交实施子代理执行） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261126-visual-blueprint-v2-spec.md` |
+| 关联 Issue / PR / SPEC | #193 / 未关联 / `docs/specs/261126-issue193-visual-blueprint-v2-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261126-visual-blueprint-v2-spec.md` 最新内容。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261126-issue193-visual-blueprint-v2-spec.md` 最新内容。
 
 ## 任务范围与验证基准
 
@@ -43,11 +43,11 @@ related_spec: ../specs/261126-visual-blueprint-v2-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C1: `kit/skills/lib/visual-layout.mjs`（`<= 750` 行）实现 5 态 `DIFF_STATES = ['added', 'modified', 'removed', 'impacted', 'context']`、Kahn 拓扑分层域排序、稳定 `domain.id` 调色板锁定、`addedNodes[]` 合成独立新域与虚拟绿虚线边、`removed[]`/`featureChanges` 映射、多源聚合 BFS `impactReasons` 与 `284 x 114` 顶部 eyebrow 防截断几何；由 `node scripts/dev/fixtures.mjs --domain visual-engine` 验证通过。
-- [ ] C2: `kit/skills/lib/visual-brief.mjs`（`<= 795` 行，接近 780 行即抽离解析辅助）、`kit/skills/dev-plan/scripts/doc-plan-brief.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs` 与 `kit/skills/dev-plan/SKILL.md`（`< 14 KB`、`<= 180` 行，围栏代码块禁字面箭头规避 `cli-parity`）支持 Sidecar `featureChanges`/`addedFeatures`/`removedFeatures`、三态 `--affected-feature`（兼容 `->`/`=>`/`::`）、新 `--add-feature`/`--remove-feature`（纳入 `hasMutation`、异常格式退码 `2`），并通过 `node scripts/dev/cli-parity.mjs`、`node scripts/dev/subcommand-parity.mjs` 与 `node scripts/dev/fixtures.mjs --domain living-brief`。
-- [ ] C3: 新增 `kit/skills/lib/visual-render-panels.mjs` (new) 并更新 `kit/skills/lib/visual-render.mjs`、`kit/skills/lib/visual-render-assets.mjs`（三文件各 `<= 650` 行），实现单行顶栏（仅 1 个上下文 `复制追问` 按钮）、左下角浮动缩放胶囊、单条域聚焦/仅看变更栏、零左竖条四态样式、`compactClientModel` 透传 `impactReasons`/`changeDetail`/`isVirtual`、无嵌套灰盒可扫读详情区（`1.1rem` 标题、`0.88rem` 正文、顶部 `本次改动`、双列上下游胶囊、垂直流转时间线、折叠源码与验证）、模式感知默认页签与 `flows.length > 0` 默认选中 `flows[0]` 故事板，保留 `switchTab('tree'|'flow')`、`.walk-bar` 等既有交互锚点；由 `node scripts/dev/fixtures.mjs --domain visual-engine` 断言通过。
-- [ ] C4: 4 功能夹具 HTML 体积严格 `25–60 KB`（`25600–61440` 字节；基线已 `58,549 B`，须紧凑压缩 CSS/JS 并在 `architecture-map` 模式省略 brief 专属 DOM），零三方依赖、零 emoji、零 `homedir()` 泄漏、XSS 与危险协议阻断、`file://` 三级剪贴板降级与 `localStorage` `try/catch`；重渲 `docs/architecture-map.html`、同步 `docs/TDD.md`，且 `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check` 与 `node scripts/dev/preflight.mjs` 全绿。
-- [ ] C5: `scripts/dev/fixtures-visual-engine.mjs` 与 `scripts/dev/fixtures-living-brief.mjs` 具备正反双向用例与 `node:vm` `Script` 解析门禁，完成真实 `1440x900` 浅色/深色无头 Chrome 全 5 视图交互与零报错实证，并在 `flow.mjs verify` 附 `--artifact` 实证。
+- [x] C1: `kit/skills/lib/visual-layout.mjs`（`<= 750` 行）实现 5 态 `DIFF_STATES = ['added', 'modified', 'removed', 'impacted', 'context']`、Kahn 拓扑分层域排序、稳定 `domain.id` 调色板锁定、`addedNodes[]` 合成独立新域与虚拟绿虚线边、`removed[]`/`featureChanges` 映射、多源聚合 BFS `impactReasons` 与 `284 x 114` 顶部 eyebrow 防截断几何；由 `node scripts/dev/fixtures.mjs --domain visual-engine` 验证通过。
+- [x] C2: `kit/skills/lib/visual-brief.mjs`（`<= 795` 行，接近 780 行即抽离解析辅助）、`kit/skills/dev-plan/scripts/doc-plan-brief.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs` 与 `kit/skills/dev-plan/SKILL.md`（`< 14 KB`、`<= 180` 行，围栏代码块禁字面箭头规避 `cli-parity`）支持 Sidecar `featureChanges`/`addedFeatures`/`removedFeatures`、三态 `--affected-feature`（兼容 `->`/`=>`/`::`）、新 `--add-feature`/`--remove-feature`（纳入 `hasMutation`、异常格式退码 `2`），并通过 `node scripts/dev/cli-parity.mjs`、`node scripts/dev/subcommand-parity.mjs` 与 `node scripts/dev/fixtures.mjs --domain living-brief`。
+- [x] C3: 新增 `kit/skills/lib/visual-render-panels.mjs` (new) 并更新 `kit/skills/lib/visual-render.mjs`、`kit/skills/lib/visual-render-assets.mjs`（三文件各 `<= 650` 行），实现单行顶栏（仅 1 个上下文 `复制追问` 按钮）、左下角浮动缩放胶囊、单条域聚焦/仅看变更栏、零左竖条四态样式、`compactClientModel` 透传 `impactReasons`/`changeDetail`/`isVirtual`、无嵌套灰盒可扫读详情区（`1.1rem` 标题、`0.88rem` 正文、顶部 `本次改动`、双列上下游胶囊、垂直流转时间线、折叠源码与验证）、模式感知默认页签与 `flows.length > 0` 默认选中 `flows[0]` 故事板，保留 `switchTab('tree'|'flow')`、`.walk-bar` 等既有交互锚点；由 `node scripts/dev/fixtures.mjs --domain visual-engine` 断言通过。
+- [x] C4: 4 功能夹具 HTML 体积严格 `25–60 KB`（`25600–61440` 字节；基线已 `58,549 B`，须紧凑压缩 CSS/JS 并在 `architecture-map` 模式省略 brief 专属 DOM），零三方依赖、零 emoji、零 `homedir()` 泄漏、XSS 与危险协议阻断、`file://` 三级剪贴板降级与 `localStorage` `try/catch`；重渲 `docs/architecture-map.html`、同步 `docs/TDD.md`，且 `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check` 与 `node scripts/dev/preflight.mjs` 全绿。
+- [x] C5: `scripts/dev/fixtures-visual-engine.mjs` 与 `scripts/dev/fixtures-living-brief.mjs` 具备正反双向用例与 `node:vm` `Script` 解析门禁，完成真实 `1440x900` 浅色/深色无头 Chrome 全 5 视图交互与零报错实证，并在 `flow.mjs verify` 附 `--artifact` 实证。
 
 ## 执行步骤
 
@@ -89,5 +89,10 @@ related_spec: ../specs/261126-visual-blueprint-v2-spec.md
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/dev/preflight.mjs`：41 项全通过（0 失败）
+  - `node scripts/dev/fixtures.mjs --domain visual-engine` & `--domain living-brief`：5/5 + 5/5 通过（4 功能 HTML `54,532 B`）
+  - `node scripts/dev/verify-injections.mjs --jobs 4`：467/467 故障注入全部拦截
+  - `node scripts/dev/cli-parity.mjs`、`node scripts/dev/subcommand-parity.mjs`、`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`govern-audit.mjs audit .`：全部通过
+  - 无头 Chrome 1440×900 浅/深色全 5 视图实证：`0` consoleErrors / `0` pageErrors
+- **文档同步检查**：已同步 `docs/TDD.md`（登记 `kit/skills/lib/visual-render-panels.mjs`）、`kit/skills/dev-plan/SKILL.md`（`13,101 B`, `92 L`）、`.agents/skills/` 与 `docs/architecture-map.html`（`132,369 B`）
+- **遗留问题**：无

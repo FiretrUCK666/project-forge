@@ -5,7 +5,7 @@ status: approved
 tier: L3
 created: 2026-11-26
 updated: 2026-11-26
-issue: null
+issue: 193
 pr: null
 branch: feat/visual-blueprint-v2
 owner: planner-blueprint
@@ -14,7 +14,7 @@ approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-bp-r3, round=3, sha=b85f85744e18, summary=Round 3 独立终审通过：核实 Round 2 全量防线均已精准落盘（addedNodes 合成独立新域、domain.id 哈希固定 palette、多源 BFS impactReasons、cli-parity.mjs:554 围栏字面箭头规避、compactClientModel 透传字段与既有交互锚点、<=800L/25-60KB/<14KB 预算），doc-plan audit 与 edit-gate --changed 均 0 错误 0 警告。)"
 related_prd: null
-related_todo: ../todo/261126-visual-blueprint-v2-todo.md
+related_todo: ../todo/261126-issue193-visual-blueprint-v2-todo.md
 high_risk_paths: [kit/skills/lib/, kit/skills/dev-plan/]
 ---
 
@@ -27,10 +27,10 @@ high_risk_paths: [kit/skills/lib/, kit/skills/dev-plan/]
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
-| 分支 / Issue / PR | `feat/visual-blueprint-v2` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/visual-blueprint-v2` / #193 / 未关联 |
 | 负责人 / 内审状态 | planner-blueprint / `passed` |
 | 规划态 | `autonomous`（按仓内既有最佳模式推进，单向门与验收边界冻结后交独立 Critique 审查） |
-| 关联 PRD / Todo | 无 / `../todo/261126-visual-blueprint-v2-todo.md` |
+| 关联 PRD / Todo | 无 / `docs/todo/261126-issue193-visual-blueprint-v2-todo.md` |
 
 - **变更一句话**：升级视觉拓扑布局与单文件 HTML 渲染引擎，支持任意规模仓的拓扑分层排布、四态变更蓝图（新增/修改/拟移除/受波及含改前改后与级联原因）、单行精简顶栏与无文本墙可扫读详情面板。
 
@@ -176,6 +176,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：在 `visual-layout.mjs`（732 L）实现 5 态 `DIFF_STATES`、Kahn 拓扑域排序与 FNV-1a 固定调色板、虚拟新增/移除节点与多源 BFS `impactReasons`、及 `284 x 114` 卡片几何；在 `visual-brief.mjs`（789 L）、`doc-plan-brief.mjs`、`doc-plan.mjs` 与 `dev-plan/SKILL.md`（13,101 B / 92 L）实现四态 Sidecar 与 CLI 契约并在 `exit-codes.mjs` 登记 `INVALID_FEATURE_CHANGE`；拆出 `visual-render-panels.mjs`（188 L）并重构 `visual-render.mjs`（280 L）与 `visual-render-assets.mjs`（226 L）实现单行顶栏（仅 1 个追问按钮）、悬浮缩放胶囊、域聚焦条、零左竖条四态样式、无文本墙详情与 `flows[0]` 默认故事板（4 功能 HTML `54,532 B`）。
+- **与草案的差异**：在 `kit/skills/lib/exit-codes.mjs` 补登记 `INVALID_FEATURE_CHANGE` 到 `USAGE_CODES`（由 `preflight.mjs` 退出码档位扫描检出并要求）。
+- **关联同步文件**：`docs/TDD.md`、`docs/architecture-map.html`、`.agents/skills/`、`.agents/skills/.pf-manifest.json`、`scripts/dev/fixtures-visual-engine.mjs`、`scripts/dev/fixtures-living-brief.mjs`

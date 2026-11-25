@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { Script } from 'node:vm'
 
 import {
   ARCHITECTURE_MAP_REL,
@@ -12,7 +13,7 @@ import {
   verifyArchitectureMapSync,
 } from '../../kit/skills/lib/architecture-map.mjs'
 import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
-import { buildVisualModel } from '../../kit/skills/lib/visual-layout.mjs'
+import { buildVisualModel, DIFF_STATES } from '../../kit/skills/lib/visual-layout.mjs'
 import { renderVisualHtml } from '../../kit/skills/lib/visual-render.mjs'
 import { isUiVisualFile, UI_VISUAL_EXT_RE } from '../../kit/skills/lib/static-gates.mjs'
 import { determineWorkflowPolicy } from '../../kit/skills/lib/workflow-policy.mjs'
@@ -302,5 +303,135 @@ export function registerVisualEngineCases(cases) {
       rmTree(emptyDir)
       rmTree(codeDir)
     }
+  }])
+
+  cases.push(['Visual Blueprint v2 C1/C3/C4：5态 DIFF_STATES、拓扑域排序与固定调色板、虚拟节点与 BFS impactReasons、精简顶栏与 Script 解析（正反双向）', async () => {
+    for (const s of ['added', 'modified', 'removed', 'impacted', 'context']) {
+      if (!DIFF_STATES.includes(s)) return `DIFF_STATES 缺少状态：${s}`
+    }
+    if (DIFF_STATES.length !== 5) return `DIFF_STATES 长度应为 5，实得 ${DIFF_STATES.length}`
+
+    // 域字母序 a-ui < b-service < c-core，但依赖方向 a-ui -> b-service -> c-core，拓扑序必须为 c-core -> b-service -> a-ui
+    const layeredMap = {
+      version: 2,
+      repoName: 'Layered Demo',
+      domains: [
+        { id: 'a-ui', name: 'UI Presentation' },
+        { id: 'b-service', name: 'Domain Service' },
+        { id: 'c-core', name: 'Core Storage' },
+      ],
+      features: [
+        { id: 'ui-page', name: 'UI Page', domain: 'a-ui', dependsOn: ['svc-api'], entrypoints: ['src/ui.mjs'], modules: ['src/ui.mjs'], tests: [] },
+        { id: 'svc-api', name: 'Service API', domain: 'b-service', dependsOn: ['core-db'], entrypoints: ['src/svc.mjs'], modules: ['src/svc.mjs'], tests: [] },
+        { id: 'core-db', name: 'Core DB', domain: 'c-core', dependsOn: [], entrypoints: ['src/db.mjs'], modules: ['src/db.mjs'], tests: [] },
+        { id: 'legacy-hook', name: 'Legacy Hook', domain: 'b-service', dependsOn: ['core-db'], entrypoints: ['src/legacy.mjs'], modules: ['src/legacy.mjs'], tests: [] },
+      ],
+      flows: [
+        {
+          id: 'main-flow',
+          name: '主业务流',
+          actors: ['user', 'system'],
+          features: ['core-db', 'svc-api', 'ui-page'],
+          steps: [
+            { feature: 'core-db', actor: 'system', action: '读取存储' },
+            { feature: 'svc-api', actor: 'system', action: '聚合服务' },
+            { feature: 'ui-page', actor: 'user', action: '渲染视图' },
+          ],
+        },
+      ],
+    }
+
+    const baseModel = buildVisualModel({ featureMap: layeredMap, mode: 'architecture-map' })
+    const baseOrder = baseModel.tree.domains.map((d) => d.id)
+    if (baseOrder[0] !== 'c-core' || baseOrder[1] !== 'b-service' || baseOrder[2] !== 'a-ui') {
+      return `领域未按依赖拓扑序分层排序（反退化为字母序）：${JSON.stringify(baseOrder)}`
+    }
+    const basePalettes = Object.fromEntries(baseModel.tree.domains.map((d) => [d.id, d.palette.id]))
+
+    // 显式 layer 覆盖与新增独立规划域 z-gateway + 4 态叠加 + 多源 BFS impactReasons
+    const diffModel = buildVisualModel({
+      featureMap: layeredMap,
+      mode: 'visual-brief',
+      diffOverlay: {
+        addedNodes: [
+          { id: 'gw-edge', domain: 'z-gateway', title: 'New Gateway', summary: '统一网关路由', dependsOn: ['core-db'] },
+        ],
+        removed: [{ id: 'legacy-hook', reason: '已合并进 Service API', replacementId: 'svc-api' }],
+        featureChanges: {
+          'core-db': { state: 'modified', before: '同步单连接', after: '连接池 + 只读副本' },
+        },
+      },
+      briefSpec: {
+        briefData: {
+          goals: ['消除网格毛线团', '实现四态蓝图可读详情'],
+          nonGoals: ['不引入第三方图表库'],
+          mergedDecisions: ['单行顶栏仅保留 1 个追问按钮'],
+          mergedOpen: [],
+          pendingDecisions: [],
+          childSlices: [],
+          activeWorktrees: [],
+          flowDeltas: ['增加网关前置鉴权'],
+        },
+      },
+    })
+
+    const gwDom = diffModel.tree.domains.find((d) => d.id === 'z-gateway')
+    if (!gwDom) return 'addedNodes 声明的新域 z-gateway 未合成为独立域分组'
+    for (const [domId, palId] of Object.entries(basePalettes)) {
+      const d = diffModel.tree.domains.find((x) => x.id === domId)
+      if (!d || d.palette.id !== palId) return `域 ${domId} 调色板在叠加变更后发生漂移：${palId} -> ${d?.palette?.id}`
+    }
+    const gwNode = diffModel.tree.nodes.find((n) => n.id === 'gw-edge')
+    if (!gwNode || !gwNode.isVirtual || gwNode.diffState !== 'added') return `新增虚拟节点异常：${JSON.stringify(gwNode)}`
+    if (gwNode.w !== 284 || gwNode.h !== 114) return `卡片几何应为 284x114，实得 ${gwNode.w}x${gwNode.h}`
+    const gwEdge = diffModel.tree.edges.find((e) => e.toId === 'gw-edge')
+    if (!gwEdge || !gwEdge.isVirtual || gwEdge.edgeState !== 'added') return `虚拟新增连线异常：${JSON.stringify(gwEdge)}`
+    const svcNode = diffModel.tree.nodes.find((n) => n.id === 'svc-api')
+    if (!svcNode || svcNode.diffState !== 'impacted' || !Array.isArray(svcNode.impactReasons) || svcNode.impactReasons.length === 0) {
+      return `下游受波及节点缺少 impactReasons：${JSON.stringify(svcNode)}`
+    }
+    const remNode = diffModel.tree.nodes.find((n) => n.id === 'legacy-hook')
+    if (!remNode || remNode.diffState !== 'removed') return `拟移除节点状态异常：${JSON.stringify(remNode)}`
+    if (diffModel.overlayCounts.added !== 1 || diffModel.overlayCounts.modified !== 1 || diffModel.overlayCounts.removed !== 1 || diffModel.overlayCounts.impacted < 2) {
+      return `四态统计异常：${JSON.stringify(diffModel.overlayCounts)}`
+    }
+
+    // 渲染校验：单行顶栏仅 1 个追问按钮、无左竖条、默认页签模式感知、首流默认激活、Script 解析通过
+    const briefHtml = renderVisualHtml({ visualModel: diffModel, featureMapSha256: 'b'.repeat(64), mode: 'visual-brief' }).html
+    const archHtml = renderVisualHtml({ visualModel: baseModel, featureMapSha256: 'b'.repeat(64), mode: 'architecture-map' }).html
+
+    const followupCount = (briefHtml.match(/data-followup-panel=/g) || []).length
+    if (followupCount !== 1) return `顶栏追问按钮应去重为恰好 1 个，实得 ${followupCount}`
+    if (briefHtml.includes('pf-left-stripe')) return '严禁渲染左边框竖条样式'
+    if (!briefHtml.includes('pf-edge-added') || !briefHtml.includes('pf-diff-removed')) return 'SVG 缺少新增虚线边或拟移除节点样式'
+    if (!briefHtml.includes('pf-zoom-float') || !briefHtml.includes('pf-focus-bar') || !briefHtml.includes('btn-only-diff')) {
+      return '缺少左下角浮动缩放胶囊或域聚焦/仅看变更条'
+    }
+    if (!/<button[^>]*data-tab-target="brief"[^>]*is-active/.test(briefHtml) && !/<button[^>]*is-active[^>]*data-tab-target="brief"/.test(briefHtml)) {
+      return 'visual-brief 模式未默认激活变更蓝图页签'
+    }
+    if (!/<button[^>]*data-tab-target="tree"[^>]*is-active/.test(archHtml) && !/<button[^>]*is-active[^>]*data-tab-target="tree"/.test(archHtml)) {
+      return 'architecture-map 模式未默认激活全景架构页签'
+    }
+    if (archHtml.includes('data-tab-panel="brief"')) return 'architecture-map 模式应省略 brief 专属 DOM 以控体积'
+    const flowBtns = [...archHtml.matchAll(/data-flow-select="([^"]*)"/g)].map((m) => m[1])
+    if (flowBtns[0] !== 'main-flow' || flowBtns[flowBtns.length - 1] !== '') {
+      return `业务流转应默认主流程在前、全部泳道总图在末，实得 ${JSON.stringify(flowBtns)}`
+    }
+    const dataMatch = /<script id="pf-visual-data" type="application\/json">([\s\S]*?)<\/script>/i.exec(briefHtml)
+    const clientJson = dataMatch ? JSON.parse(dataMatch[1]) : null
+    const clientSvc = clientJson?.tree?.nodes?.find((n) => n.id === 'svc-api')
+    const clientCore = clientJson?.tree?.nodes?.find((n) => n.id === 'core-db')
+    if (!clientSvc?.impactReasons?.length || !clientCore?.changeDetail?.after) {
+      return 'compactClientModel 未透传 impactReasons 与 changeDetail'
+    }
+    for (const [label, doc] of [['brief', briefHtml], ['arch', archHtml]]) {
+      const blocks = [...doc.matchAll(/<script(?:\s+[^>]*)?>([\s\S]*?)<\/script>/gi)]
+      for (const m of blocks) {
+        if (/type=["']application\/json["']/i.test(m[0])) continue
+        try { new Script(m[1]) } catch (err) { return `${label} 内联 <script> 解析失败：${err.message}` }
+      }
+    }
+    return true
   }])
 }

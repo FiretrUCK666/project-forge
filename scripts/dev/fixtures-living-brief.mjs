@@ -312,4 +312,65 @@ export function registerLivingBriefCases(cases) {
       rmTree(dir)
     }
   }])
+
+  cases.push(['Living Brief C2：四态 --affected-feature 改前改后语法、--add-feature/--remove-feature 双向校验与指纹 stale', async () => {
+    const dir = makeRepoWithFeatureMap('lb-4state')
+    try {
+      const okRes = await runAbsAsync(DOC_PLAN, [
+        'brief', '--topic', 'bp-v2', '--title', '4-State Blueprint', '--verdict', 'Upgrade to 4-state blueprint',
+        '--affected-feature', 'auth=旧版Cookie单轨 -> Token与Cookie双轨',
+        '--affected-feature', 'export=优化流式输出',
+        '--affected-feature', 'plain-mod',
+        '--add-feature', 'cache|infra|缓存层|Redis加速鉴权|auth',
+        '--remove-feature', 'legacy-sync|由异步队列替代|cache',
+        '--confirm', '--json',
+      ], { cwd: dir })
+      if (okRes.status !== 0) return `四态 brief 执行失败：${okRes.stderr || okRes.stdout}`
+      const sc = readBriefSidecar(dir, 'bp-v2')
+      if (!sc) return '未写入 bp-v2 sidecar'
+      if (!sc.affectedFeatures.includes('auth') || !sc.affectedFeatures.includes('plain-mod') || sc.affectedFeatures.some((x) => x.includes('->'))) {
+        return `affectedFeatures 应保留纯 ID 集合：${JSON.stringify(sc.affectedFeatures)}`
+      }
+      if (sc.featureChanges?.auth?.before !== '旧版Cookie单轨' || sc.featureChanges?.auth?.after !== 'Token与Cookie双轨') {
+        return `改前改后解析异常：${JSON.stringify(sc.featureChanges)}`
+      }
+      if (sc.featureChanges?.export?.note !== '优化流式输出') {
+        return `说明形态解析异常：${JSON.stringify(sc.featureChanges?.export)}`
+      }
+      if (!sc.addedFeatures?.some((a) => a.id === 'cache' && a.domain === 'infra' && a.dependsOn?.includes('auth'))) {
+        return `addedFeatures 归一化异常：${JSON.stringify(sc.addedFeatures)}`
+      }
+      if (!sc.removedFeatures?.some((r) => r.id === 'legacy-sync' && r.replacementId === 'cache')) {
+        return `removedFeatures 归一化异常：${JSON.stringify(sc.removedFeatures)}`
+      }
+      const html = readFileSync(resolveBriefPaths(dir, 'bp-v2').htmlPath, 'utf8')
+      if (!html.includes('缓存层') || !html.includes('Token与Cookie双轨') || !html.includes('由异步队列替代')) {
+        return '生成的简报 HTML 缺少四态详情文本'
+      }
+
+      // 确认后追加 --add-feature 必须触发 stale
+      const staleRes = await runAbsAsync(DOC_PLAN, [
+        'brief', '--topic', 'bp-v2', '--add-feature', 'audit-log|infra|审计日志|记录关键操作', '--json',
+      ], { cwd: dir })
+      if (staleRes.status !== 0) return `追加新增特征失败：${staleRes.stderr || staleRes.stdout}`
+      if (JSON.parse(staleRes.stdout).visualBrief.confirmedState !== 'stale') {
+        return `确认后变更四态字段未触发 stale：${staleRes.stdout}`
+      }
+
+      // 负向：残缺格式必须返回 EXIT.USAGE (2) 且不破坏既有 sidecar
+      for (const badArgs of [
+        ['--add-feature', 'bad|only-two'],
+        ['--remove-feature', 'only-id'],
+        ['--affected-feature', '=missing-id'],
+      ]) {
+        const bad = await runAbsAsync(DOC_PLAN, ['brief', '--topic', 'bp-v2', ...badArgs, '--json'], { cwd: dir })
+        if (bad.status !== EXIT.USAGE) {
+          return `非法参数 ${badArgs.join(' ')} 应返回 EXIT.USAGE(2)，实得 ${bad.status}: ${bad.stdout}`
+        }
+      }
+      return true
+    } finally {
+      rmTree(dir)
+    }
+  }])
 }

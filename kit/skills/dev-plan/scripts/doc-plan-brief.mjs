@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 
 import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { formatContextBriefLines } from '../../lib/context-brief.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readTaskLedger, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { resolveDocPlanMode } from '../../lib/pending-decisions.mjs'
@@ -219,6 +220,53 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
   return 0
 }
 
+function parseBriefFeatureSpecs(rawAffected, rawAdded, rawRemoved) {
+  const affectedFeatures = []
+  const featureChanges = {}
+  for (const raw of rawAffected) {
+    const s = String(raw ?? '').trim()
+    if (!s) continue
+    const eqIdx = s.indexOf('=')
+    if (eqIdx === 0) {
+      throw Object.assign(new Error(`INVALID_FEATURE_CHANGE: --affected-feature 缺少模块 ID："${s}"`), { code: 'INVALID_FEATURE_CHANGE', exitCode: EXIT.USAGE })
+    }
+    if (eqIdx < 0) {
+      affectedFeatures.push(s)
+      continue
+    }
+    const id = s.slice(0, eqIdx).trim()
+    const body = s.slice(eqIdx + 1).trim()
+    if (!id) throw Object.assign(new Error(`INVALID_FEATURE_CHANGE: --affected-feature 缺少模块 ID："${s}"`), { code: 'INVALID_FEATURE_CHANGE', exitCode: EXIT.USAGE })
+    affectedFeatures.push(id)
+    const arrowMatch = /^(.*?)\s*(?:->|=>|::)\s*(.*)$/.exec(body)
+    if (arrowMatch && arrowMatch[1].trim() && arrowMatch[2].trim()) {
+      featureChanges[id] = { state: 'modified', before: arrowMatch[1].trim(), after: arrowMatch[2].trim(), note: body }
+    } else if (body) {
+      featureChanges[id] = { state: 'modified', note: body }
+    }
+  }
+  const addedFeatures = []
+  for (const raw of rawAdded) {
+    const parts = String(raw ?? '').split('|').map((x) => x.trim())
+    if (parts.length < 4 || !parts[0] || !parts[1] || !parts[2]) {
+      throw Object.assign(new Error(`INVALID_FEATURE_CHANGE: --add-feature 须为 "id|domain|title|summary[|dependsOnCsv]"，收到："${raw}"`), { code: 'INVALID_FEATURE_CHANGE', exitCode: EXIT.USAGE })
+    }
+    addedFeatures.push({
+      id: parts[0], domain: parts[1], title: parts[2], summary: parts[3],
+      dependsOn: parts[4] ? parts[4].split(',').map((x) => x.trim()).filter(Boolean) : [],
+    })
+  }
+  const removedFeatures = []
+  for (const raw of rawRemoved) {
+    const parts = String(raw ?? '').split('|').map((x) => x.trim())
+    if (parts.length < 2 || !parts[0] || !parts[1]) {
+      throw Object.assign(new Error(`INVALID_FEATURE_CHANGE: --remove-feature 须为 "id|reason[|replacementId]"，收到："${raw}"`), { code: 'INVALID_FEATURE_CHANGE', exitCode: EXIT.USAGE })
+    }
+    removedFeatures.push({ id: parts[0], reason: parts[1], ...(parts[2] ? { replacementId: parts[2] } : {}) })
+  }
+  return { affectedFeatures, featureChanges, addedFeatures, removedFeatures }
+}
+
 export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
   const topicId = opts.topic ? normalizeTopicId(opts.topic) : null
   const taskId = opts.task ? sanitizeTaskId(opts.task) : null
@@ -227,7 +275,10 @@ export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
 
   const title = opts.title ?? null
   const verdict = opts.verdict ?? null
-  const affectedFeatures = opts['affected-feature'] ?? []
+  const rawAffected = opts['affected-feature'] ?? []
+  const rawAdded = opts['add-feature'] ?? []
+  const rawRemoved = opts['remove-feature'] ?? []
+  const { affectedFeatures, featureChanges, addedFeatures, removedFeatures } = parseBriefFeatureSpecs(rawAffected, rawAdded, rawRemoved)
   const flowDeltas = opts['flow-delta'] ?? []
   const prototypesToAdd = opts.prototype ?? []
   const selectPrototypeId = opts['select-prototype'] ?? null
@@ -237,7 +288,8 @@ export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
 
   const hasMutation = Boolean(
     title || verdict || confirm || selectPrototypeId || sourceSkill
-    || affectedFeatures.length > 0 || flowDeltas.length > 0 || prototypesToAdd.length > 0
+    || rawAffected.length > 0 || rawAdded.length > 0 || rawRemoved.length > 0
+    || flowDeltas.length > 0 || prototypesToAdd.length > 0
     || opts.decision || (opts.exclude?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
   )
 
@@ -277,6 +329,9 @@ export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
     title: title ?? existing?.title ?? resolvedKey,
     verdict: verdict ?? undefined,
     affectedFeatures,
+    featureChanges,
+    addedFeatures,
+    removedFeatures,
     flowDeltas,
     decisions: opts.decision ? [opts.decision] : [],
     nonGoals: opts.exclude ?? [],

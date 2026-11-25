@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用基线 | 以仓库当前源码与 `SKILL.md` 当前 `metadata.version`（`7.0.0`）为准 |
-| 最近更新日期 | `2026-11-25` |
+| 最近更新日期 | `2026-11-26` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |
 | 托管平台适配范围 | 产品层注册表当前注册 `github`；未匹配远端降级为 `generic-git`，无远端按 `local-only` 运行 |
@@ -349,7 +349,7 @@ flowchart LR
 `kit/skills/lib/empirical-artifacts.mjs` 把「真实产出」和「使用什么外部工具」彻底拆开：
 - **通用 `--artifact <path>` 附件校验**：`flow.mjs verify` 支持重复传入 `--artifact`，校验每个路径必须真实存在、为常规文件、非 `0` 字节且不超过 `50 MB`，计算 SHA256 前缀并写入仓外 `evidence.json`，不修改任何 Git 跟踪文件；`submit` 阶段自动在 PR 正文生成结构化实证附件清单。
 - **界面变更禁用布尔开关自证（含派生架构图精确豁免）**：所有 UI 判定统一走 `static-gates.mjs` 的 `isUiVisualFile(file, { repoRoot })`（由 `shared.mjs` 重导出，仅依赖叶子 `feature-map-graph.mjs` 校验首行指纹，无循环导入）。只要变更命中 `UI_VISUAL_EXT_RE` 且不满足 `docs/architecture-map.html` 与当前 `docs/feature-map.json` 实时 SHA256 一致的豁免条件，单独传入 `--visual-checked` 会被 `BLOCKED_VISUAL_EVIDENCE_REQUIRED`（或命中旧式硬编码串报 `BLOCKED_VISUAL_EVIDENCE_PLACEHOLDER`）以退出码 `3` 拦截，必须至少满足一项：附真实非空 `--artifact`、写下包含界面与观察结果的实质摘要、或在确无渲染节点时显式声明 `--visual-blocked-reason`。
-- **双模零依赖视觉投影（架构全景图 + 仓外活需求简报）**：共享 `kit/skills/lib/visual-layout.mjs`、`kit/skills/lib/visual-render.mjs` 与 `kit/skills/lib/visual-render-assets.mjs` 生成自包含离线交互 HTML（浅深色主题、自动居中适配缩放、`模块详情` 独立切换检查器、分业务流泳道高亮、`walk-bar` 键盘导览与三级 `file://` 剪贴板降级，零 `homedir()` 泄露）。仓内 `docs/architecture-map.html` 由写操作自动渲染同步，只读命令（`reconcile`、`verify`、`edit-gate --final`、`render --check`）纯只读核验漂移；仓外 `<gitCommonDir>/project-forge-flow/briefs/` 由 `kit/skills/lib/visual-brief.mjs` 与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` 实时投影 `workRoot` 优先拓扑、1:N 切片与宿主中立 UI 原型（`<= 512 KB` 及 `http`/`https`/`file` 白名单），确认后变更自动置 `confirmedState: stale`。
+- **双模零依赖视觉投影（架构全景图 + 仓外活需求简报）**：共享 `kit/skills/lib/visual-layout.mjs`、`kit/skills/lib/visual-render.mjs`、`kit/skills/lib/visual-render-panels.mjs` 与 `kit/skills/lib/visual-render-assets.mjs` 生成自包含离线交互 HTML（浅/深/跟随系统单色高对比主题、`全景架构`与`泳道流转`双无限画布、正交圆角侧道连线与拖拽实时重路由、底部焦点聚光条、居中 Quick-Look 详情窗、`⌘K` 命令与目录面板、`walk-bar` 键盘导览与三级 `file://` 剪贴板降级，零 `homedir()` 泄露）。仓内 `docs/architecture-map.html` 由写操作自动渲染同步，只读命令（`reconcile`、`verify`、`edit-gate --final`、`render --check`）纯只读核验漂移；仓外 `<gitCommonDir>/project-forge-flow/briefs/` 由 `kit/skills/lib/visual-brief.mjs` 与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` 实时投影 `workRoot` 优先拓扑、1:N 切片与宿主中立 UI 原型（`<= 512 KB` 及 `http`/`https`/`file` 白名单），确认后变更自动置 `confirmedState: stale`。
 
 ### 支柱三：先最小运行复现（`PoC-first`）与整类根治（Tier 1 / Tier 2）
 

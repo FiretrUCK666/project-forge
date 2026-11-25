@@ -114,6 +114,48 @@ function normalizePrototypeEntry(p, idx = 0) {
   }
 }
 
+function normFeatureChangesMap(rawMap) {
+  if (!rawMap || typeof rawMap !== 'object' || Array.isArray(rawMap)) return {}
+  const out = {}
+  for (const [rawId, val] of Object.entries(rawMap)) {
+    const id = String(rawId ?? '').trim()
+    if (!id || !val || typeof val !== 'object') continue
+    const state = ['added', 'modified', 'removed', 'impacted', 'context'].includes(val.state) ? val.state : 'modified'
+    out[id] = {
+      state,
+      ...(val.note ? { note: String(val.note).trim().slice(0, 400) } : {}),
+      ...(val.before ? { before: String(val.before).trim().slice(0, 300) } : {}),
+      ...(val.after ? { after: String(val.after).trim().slice(0, 300) } : {}),
+      ...(val.reason ? { reason: String(val.reason).trim().slice(0, 300) } : {}),
+      ...(val.replacementId ? { replacementId: String(val.replacementId).trim().slice(0, 120) } : {}),
+      ...(val.targetDomain ? { targetDomain: String(val.targetDomain).trim().slice(0, 120) } : {}),
+    }
+  }
+  return out
+}
+
+function normAddedFeaturesList(rawList) {
+  const out = [], seen = new Set()
+  for (const item of Array.isArray(rawList) ? rawList : []) {
+    const id = String(item?.id ?? '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push({ id, domain: String(item.domain ?? 'planned').trim() || 'planned', title: String(item.title ?? id).trim().slice(0, 120), summary: String(item.summary ?? item.description ?? '').trim().slice(0, 300), dependsOn: uniqClean(item.dependsOn ?? []) })
+  }
+  return out
+}
+
+function normRemovedFeaturesList(rawList) {
+  const out = [], seen = new Set()
+  for (const item of Array.isArray(rawList) ? rawList : []) {
+    const id = String(item?.id ?? '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push({ id, reason: String(item.reason ?? '').trim().slice(0, 300), ...(item.replacementId ? { replacementId: String(item.replacementId).trim().slice(0, 120) } : {}) })
+  }
+  return out
+}
+
 export function normalizeSidecar(raw = {}, fallbackKey = 'default') {
   const briefKey = sanitizeBriefKey(raw.briefKey || fallbackKey)
   const kindRaw = String(raw.kind ?? 'topic').trim().toLowerCase()
@@ -133,6 +175,9 @@ export function normalizeSidecar(raw = {}, fallbackKey = 'default') {
     nonGoals: uniqClean(raw.nonGoals ?? []),
     affectedDomains: uniqClean(raw.affectedDomains ?? []),
     affectedFeatures: uniqClean(raw.affectedFeatures ?? []),
+    featureChanges: normFeatureChangesMap(raw.featureChanges),
+    addedFeatures: normAddedFeaturesList(raw.addedFeatures),
+    removedFeatures: normRemovedFeaturesList(raw.removedFeatures),
     affectedFlows: uniqClean(raw.affectedFlows ?? []),
     flowDeltas: uniqClean(raw.flowDeltas ?? []),
     decisions: uniqClean(raw.decisions ?? []),
@@ -170,6 +215,7 @@ export function computeBriefFingerprint(sidecar) {
   return sha256Text(JSON.stringify({
     title: n.title, verdict: n.verdict, goals: n.goals, nonGoals: n.nonGoals,
     affectedDomains: n.affectedDomains, affectedFeatures: n.affectedFeatures,
+    featureChanges: n.featureChanges, addedFeatures: n.addedFeatures, removedFeatures: n.removedFeatures,
     affectedFlows: n.affectedFlows, flowDeltas: n.flowDeltas,
     decisions: n.decisions, openQuestions: n.openQuestions,
     prototypes: n.prototypes.map((p) => ({
@@ -370,7 +416,13 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
   const masterPrdInfo = matchingMasterPrd ? { rel: matchingMasterPrd.rel, status: matchingMasterPrd.status, approved: isPlanDocApproved(matchingMasterPrd) } : null
   const visualModel = buildVisualModel({
     featureMap,
-    diffOverlay: { modified: modifiedFeatureIds, changedFiles: topicAnchors },
+    diffOverlay: {
+      modified: modifiedFeatureIds,
+      changedFiles: topicAnchors,
+      addedNodes: norm.addedFeatures,
+      removed: norm.removedFeatures,
+      featureChanges: norm.featureChanges,
+    },
     mode: 'visual-brief',
     title: `${norm.title} — 实时规划简报`,
     briefSpec: {
@@ -385,7 +437,7 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
       ],
       metrics: [
         { label: '状态', value: verdictStatus },
-        { label: '受影响模块', value: String(modifiedFeatureIds.length) },
+        { label: '受影响模块', value: String(modifiedFeatureIds.length + norm.addedFeatures.length + norm.removedFeatures.length) },
         { label: '已拍板', value: String(mergedDecisions.length) },
         { label: '待确认', value: String(mergedOpen.length + livePendingDecisions.length) },
         { label: '切片进度', value: `${childSlices.filter((s) => s.done).length}/${childSlices.length}` },
@@ -410,6 +462,13 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
       },
     },
   })
+  if (visualModel.briefData) {
+    const groups = { added: [], modified: [], removed: [], impacted: [] }
+    for (const n of visualModel.tree.nodes) {
+      if (groups[n.diffState]) groups[n.diffState].push({ id: n.id, title: n.title, domain: n.domain, domainTitle: n.domainTitle, diffState: n.diffState, changeDetail: n.changeDetail, impactReasons: n.impactReasons || [], summary: n.description || '' })
+    }
+    visualModel.briefData.changeGroups = groups
+  }
 
   return {
     sidecar: norm, briefFingerprint, confirmedState, featureMapSource, featureMapSha256,
@@ -453,7 +512,8 @@ export function buildBriefSummaryObject(mainRoot, sidecar, extra = {}) {
 
 export function upsertVisualBrief(mainRoot, {
   workRoot = mainRoot, briefKey, kind, parentBriefKey, title, topicId, taskId, masterPrdRel,
-  verdict, goals, nonGoals, affectedDomains, affectedFeatures, affectedFlows, flowDeltas,
+  verdict, goals, nonGoals, affectedDomains, affectedFeatures, featureChanges, addedFeatures, removedFeatures,
+  affectedFlows, flowDeltas,
   decisions, openQuestions, prototypesToAdd = [], selectPrototypeId = null, sourceSkill = '', prototypeNote = '', confirm = false,
 } = {}) {
   const effMain = resolve(String(mainRoot || process.cwd()))
@@ -461,6 +521,19 @@ export function upsertVisualBrief(mainRoot, {
   const paths = resolveBriefPaths(effMain, key)
   const existing = readBriefSidecar(effMain, key)
   const now = new Date().toISOString()
+
+  const mergedAdded = [...(existing?.addedFeatures ?? [])]
+  for (const item of normAddedFeaturesList(addedFeatures)) {
+    const idx = mergedAdded.findIndex((x) => x.id === item.id)
+    if (idx >= 0) mergedAdded[idx] = item
+    else mergedAdded.push(item)
+  }
+  const mergedRemoved = [...(existing?.removedFeatures ?? [])]
+  for (const item of normRemovedFeaturesList(removedFeatures)) {
+    const idx = mergedRemoved.findIndex((x) => x.id === item.id)
+    if (idx >= 0) mergedRemoved[idx] = item
+    else mergedRemoved.push(item)
+  }
 
   const next = normalizeSidecar({
     ...(existing ?? {}),
@@ -476,6 +549,9 @@ export function upsertVisualBrief(mainRoot, {
     nonGoals: uniqClean(nonGoals ?? [], existing?.nonGoals ?? []),
     affectedDomains: uniqClean(affectedDomains ?? [], existing?.affectedDomains ?? []),
     affectedFeatures: uniqClean(affectedFeatures ?? [], existing?.affectedFeatures ?? []),
+    featureChanges: { ...(existing?.featureChanges ?? {}), ...normFeatureChangesMap(featureChanges) },
+    addedFeatures: mergedAdded,
+    removedFeatures: mergedRemoved,
     affectedFlows: uniqClean(affectedFlows ?? [], existing?.affectedFlows ?? []),
     flowDeltas: uniqClean(flowDeltas ?? [], existing?.flowDeltas ?? []),
     decisions: uniqClean(decisions ?? [], existing?.decisions ?? []),

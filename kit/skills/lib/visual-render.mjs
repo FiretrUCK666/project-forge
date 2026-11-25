@@ -7,9 +7,25 @@ import {
   sanitizeSafeHref,
   sanitizeSafeImgSrc,
   toRelPath,
+  truncateLabel,
 } from './visual-layout.mjs'
+import { buildClientScript, buildStylesCss } from './visual-render-assets.mjs'
 
 export const MAX_PROTOTYPE_SRCDOC_BYTES = 512 * 1024
+
+const DIFF_LABELS = { added: '新增', modified: '修改', impacted: '受波及' }
+const VERDICT_LABELS = {
+  SYNCED: '已同步',
+  CHANGED: '有变更',
+  DRAFT: '草稿',
+  CONFIRMED: '已确认',
+  STALE: '待重审',
+}
+
+function localizeVerdictStatus(raw) {
+  const key = String(raw || 'SYNCED').trim()
+  return VERDICT_LABELS[key.toUpperCase()] || key
+}
 
 export function buildGeneratedHeaderLine({ mode = 'architecture-map', featureMapSha256 = '' } = {}) {
   const kind = mode === 'visual-brief' ? 'visual-brief' : 'architecture-map'
@@ -25,9 +41,10 @@ function renderDomainTreeSvg(tree) {
     const fill = escapeXml(dom.palette.fill)
     return [
       `<g class="pf-domain-box" data-domain-id="${escapeXml(dom.id)}">`,
-      `<rect x="${dom.x}" y="${dom.y}" width="${dom.w}" height="${dom.h}" rx="12" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />`,
-      `<text x="${dom.x + 16}" y="${dom.y + 28}" class="pf-domain-title" fill="${stroke}">${escapeXml(dom.shortTitle)}</text>`,
-      `<text x="${dom.x + dom.w - 16}" y="${dom.y + 28}" text-anchor="end" class="pf-domain-meta">${dom.featureCount} features</text>`,
+      `<rect x="${dom.x}" y="${dom.y}" width="${dom.w}" height="${dom.h}" rx="10" fill="${fill}" stroke="${stroke}" stroke-opacity="0.32" stroke-width="1" />`,
+      `<circle cx="${dom.x + 18}" cy="${dom.y + 24}" r="4" fill="${stroke}" />`,
+      `<text x="${dom.x + 28}" y="${dom.y + 28}" class="pf-domain-title">${escapeXml(dom.shortTitle)}</text>`,
+      `<text x="${dom.x + dom.w - 16}" y="${dom.y + 28}" text-anchor="end" class="pf-domain-meta">${dom.featureCount} 个模块</text>`,
       `</g>`,
     ].join('')
   }).join('\n')
@@ -38,22 +55,25 @@ function renderDomainTreeSvg(tree) {
   }).join('\n')
 
   const nodeXml = tree.nodes.map((node) => {
-    const diffBadge = node.diffState !== 'context' ? `<rect x="${node.x + node.w - 72}" y="${node.y + 10}" width="60" height="18" rx="9" class="pf-badge pf-badge-${escapeXml(node.diffState)}" /><text x="${node.x + node.w - 42}" y="${node.y + 22}" text-anchor="middle" class="pf-badge-text">${escapeXml(node.diffState)}</text>` : ''
+    const diffText = DIFF_LABELS[node.diffState] || ''
+    const diffBadge = diffText
+      ? `<rect x="${node.x + node.w - 58}" y="${node.y + 11}" width="46" height="18" rx="4" class="pf-badge-${escapeXml(node.diffState)}" /><text x="${node.x + node.w - 35}" y="${node.y + 23}" text-anchor="middle" class="pf-badge-text">${escapeXml(diffText)}</text>`
+      : ''
+    const roleSummary = node.shortSummary || truncateLabel(node.description || toRelPath(node.primaryAnchor) || node.id, 32)
+    const riskTspan = node.risk === 'high' ? ` · <tspan class="pf-risk-high">高风险</tspan>` : ''
     return [
       `<g class="pf-node pf-diff-${escapeXml(node.diffState)}" tabindex="0" role="button" data-node-id="${escapeXml(node.id)}" data-node-label="${escapeXml(node.title)}" data-domain-id="${escapeXml(node.domain)}" data-diff-state="${escapeXml(node.diffState)}">`,
-      `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="9" class="pf-node-card" />`,
-      `<rect x="${node.x}" y="${node.y}" width="5" height="${node.h}" rx="2" fill="${escapeXml(node.palette.stroke)}" />`,
+      `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="8" class="pf-node-card" />`,
       diffBadge,
       `<text x="${node.x + 14}" y="${node.y + 26}" class="pf-node-title">${escapeXml(node.shortTitle)}</text>`,
-      `<text x="${node.x + 14}" y="${node.y + 46}" class="pf-node-sub">${escapeXml(toRelPath(node.primaryAnchor) || node.id)}</text>`,
-      `<text x="${node.x + 14}" y="${node.y + 68}" class="pf-node-stats">mod ${node.modules.length} | test ${node.tests.length} | dep ${node.dependsOn.length}</text>`,
-      `<text x="${node.x + 14}" y="${node.y + 88}" class="pf-node-risk">risk: ${escapeXml(node.risk)} | status: ${escapeXml(node.status)}</text>`,
+      `<text x="${node.x + 14}" y="${node.y + 52}" class="pf-node-sub">${escapeXml(roleSummary)}</text>`,
+      `<text x="${node.x + 14}" y="${node.y + 79}" class="pf-node-stats">${node.modules.length} 模块 · ${node.tests.length} 测试${riskTspan}</text>`,
       `</g>`,
     ].join('')
   }).join('\n')
 
   return [
-    `<svg id="svg-tree" class="pf-svg" viewBox="0 0 ${tree.width} ${tree.height}" width="${tree.width}" height="${tree.height}" role="img" aria-label="Domain and Feature Architecture Map">`,
+    `<svg id="svg-tree" class="pf-svg" viewBox="0 0 ${tree.width} ${tree.height}" width="${tree.width}" height="${tree.height}" role="img" aria-label="领域与功能架构全景图">`,
     `<defs><marker id="pf-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="currentColor" /></marker></defs>`,
     `<g class="pf-zoom-layer">`,
     domainGroupXml,
@@ -70,9 +90,10 @@ function renderFlowDagSvg(flow) {
     const fill = escapeXml(lane.palette.fill)
     return [
       `<g class="pf-lane" data-lane-id="${escapeXml(lane.id)}">`,
-      `<rect x="${lane.x}" y="${lane.y}" width="${lane.w}" height="${lane.h}" rx="8" fill="${fill}" stroke="${stroke}" stroke-opacity="0.35" stroke-width="1" />`,
-      `<rect x="${lane.x}" y="${lane.y}" width="${lane.labelW}" height="${lane.h}" rx="8" fill="${fill}" stroke="${stroke}" stroke-opacity="0.45" stroke-width="1" />`,
-      `<text x="${lane.x + 14}" y="${lane.y + lane.h / 2 + 4}" class="pf-lane-label" fill="${stroke}">${escapeXml(lane.shortTitle)}</text>`,
+      `<rect x="${lane.x}" y="${lane.y}" width="${lane.w}" height="${lane.h}" rx="8" fill="${fill}" stroke="${stroke}" stroke-opacity="0.24" stroke-width="1" />`,
+      `<rect x="${lane.x}" y="${lane.y}" width="${lane.labelW}" height="${lane.h}" rx="8" fill="${fill}" stroke="${stroke}" stroke-opacity="0.32" stroke-width="1" />`,
+      `<circle cx="${lane.x + 16}" cy="${lane.y + lane.h / 2}" r="3.5" fill="${stroke}" />`,
+      `<text x="${lane.x + 26}" y="${lane.y + lane.h / 2 + 4}" class="pf-lane-label">${escapeXml(lane.shortTitle)}</text>`,
       `</g>`,
     ].join('')
   }).join('\n')
@@ -82,16 +103,20 @@ function renderFlowDagSvg(flow) {
     return `<path class="${cls}" data-edge-id="${escapeXml(edge.id)}" data-from-id="${escapeXml(edge.fromId)}" data-to-id="${escapeXml(edge.toId)}" d="${escapeXml(edge.pathD)}" marker-end="url(#pf-flow-arrow)" />`
   }).join('\n')
 
-  const nodeXml = flow.nodes.map((node) => [
-    `<g class="pf-node pf-diff-${escapeXml(node.diffState)}" tabindex="0" role="button" data-node-id="${escapeXml(node.id)}" data-node-label="${escapeXml(node.title)}" data-diff-state="${escapeXml(node.diffState)}">`,
-    `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="8" class="pf-node-card" />`,
-    `<text x="${node.x + 12}" y="${node.y + 28}" class="pf-node-title">${escapeXml(node.shortTitle)}</text>`,
-    `<text x="${node.x + 12}" y="${node.y + 50}" class="pf-node-stats">stage ${node.rank + 1} | ${escapeXml(node.diffState)}</text>`,
-    `</g>`,
-  ].join('')).join('\n')
+  const nodeXml = flow.nodes.map((node) => {
+    const diffText = DIFF_LABELS[node.diffState] || ''
+    const stageLine = diffText ? `阶段 ${node.rank + 1} · ${diffText}` : `阶段 ${node.rank + 1}`
+    return [
+      `<g class="pf-node pf-diff-${escapeXml(node.diffState)}" tabindex="0" role="button" data-node-id="${escapeXml(node.id)}" data-node-label="${escapeXml(node.title)}" data-diff-state="${escapeXml(node.diffState)}">`,
+      `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="8" class="pf-node-card" />`,
+      `<text x="${node.x + 12}" y="${node.y + 28}" class="pf-node-title">${escapeXml(node.shortTitle)}</text>`,
+      `<text x="${node.x + 12}" y="${node.y + 50}" class="pf-node-stats">${escapeXml(stageLine)}</text>`,
+      `</g>`,
+    ].join('')
+  }).join('\n')
 
   return [
-    `<svg id="svg-flow" class="pf-svg" viewBox="0 0 ${flow.width} ${flow.height}" width="${flow.width}" height="${flow.height}" role="img" aria-label="Cross-Feature Swimlane Flow DAG">`,
+    `<svg id="svg-flow" class="pf-svg" viewBox="0 0 ${flow.width} ${flow.height}" width="${flow.width}" height="${flow.height}" role="img" aria-label="跨功能角色泳道流转图">`,
     `<defs><marker id="pf-flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="currentColor" /></marker></defs>`,
     `<g class="pf-zoom-layer">`,
     laneXml,
@@ -102,570 +127,168 @@ function renderFlowDagSvg(flow) {
   ].join('\n')
 }
 
+function renderFlowBarHtml(flows = []) {
+  if (!Array.isArray(flows) || flows.length === 0) return ''
+  const btns = [
+    '<button type="button" class="pf-seg-btn is-active" data-flow-select="">全部流程</button>',
+    ...flows.map((f) => `<button type="button" class="pf-seg-btn" data-flow-select="${escapeHtml(f.id)}">${escapeHtml(f.title)}</button>`),
+  ].join('')
+  return `<div id="pf-flow-bar" class="pf-flow-bar"><span class="pf-inspector-label">业务流筛选：</span><div class="pf-seg">${btns}</div></div><div id="pf-flow-ribbon" class="pf-flow-ribbon" hidden></div>`
+}
+
+function renderPrototypeCard(proto, idx, activeIdx) {
+  const title = escapeHtml(proto?.title || `方案 ${idx + 1}`)
+  const kind = String(proto?.kind || (proto?.srcdoc ? 'iframe' : (proto?.imgSrc || proto?.src) ? 'img' : 'url')).toLowerCase()
+  const selectedBadge = proto?.selected ? `<span class="pf-pill pf-pill-selected">已选定</span>` : ''
+  const caption = proto?.caption ? `<p class="pf-proto-cap">${escapeHtml(proto.caption)}</p>` : ''
+  const hiddenAttr = idx === activeIdx ? '' : ' hidden'
+  let body = ''
+  if (kind === 'iframe' && typeof proto?.srcdoc === 'string') {
+    const byteLen = Buffer.byteLength(proto.srcdoc, 'utf8')
+    body = byteLen > MAX_PROTOTYPE_SRCDOC_BYTES
+      ? `<p class="pf-proto-blocked">原型内容超出 512 KB 上限，已阻止内联渲染（当前 ${byteLen} 字节）。</p>`
+      : `<iframe class="pf-proto-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="${escapeHtml(proto.srcdoc)}" title="${title}"></iframe>`
+  } else if (kind === 'img') {
+    const safeImg = sanitizeSafeImgSrc(proto?.src || proto?.imgSrc || '')
+    body = safeImg
+      ? `<img class="pf-proto-img" src="${escapeHtml(safeImg)}" alt="${title}" loading="lazy" />`
+      : `<p class="pf-proto-blocked">图片地址不符合安全协议规范，已阻止渲染。</p>`
+  } else {
+    const safeUrl = sanitizeSafeHref(proto?.url || proto?.href || '')
+    body = safeUrl
+      ? `<p><a href="${escapeHtml(safeUrl)}" rel="noopener noreferrer">${escapeHtml(safeUrl)}</a></p>`
+      : `<p class="pf-proto-blocked">原型链接协议受限：仅允许 http:、https: 与 file: 协议。</p>`
+  }
+  return `<article class="pf-proto-card" data-proto-index="${idx}"${hiddenAttr}><div class="pf-proto-head"><h4>${title}</h4>${selectedBadge}</div>${body}${caption}</article>`
+}
+
 export function renderPrototypeSlot(prototypes = []) {
   if (!Array.isArray(prototypes) || prototypes.length === 0) {
-    return `<div class="pf-empty-box">No external prototypes attached to this snapshot. Feature anchors and SVG maps remain interactive offline.</div>`
+    return `<div class="pf-empty-box">当前简报尚未挂载界面原型，可通过 doc-plan brief --prototype 添加 HTML、图片或链接。</div>`
   }
-  return prototypes.map((proto, idx) => {
-    const title = escapeHtml(proto?.title || `Prototype ${idx + 1}`)
-    const kind = String(proto?.kind || (proto?.srcdoc ? 'iframe' : proto?.imgSrc ? 'img' : 'url')).toLowerCase()
-    const caption = proto?.caption ? `<p class="pf-proto-cap">${escapeHtml(proto.caption)}</p>` : ''
-    if (kind === 'iframe' && typeof proto?.srcdoc === 'string') {
-      const byteLen = Buffer.byteLength(proto.srcdoc, 'utf8')
-      if (byteLen > MAX_PROTOTYPE_SRCDOC_BYTES) {
-        return `<article class="pf-proto-card"><h4>${title}</h4><p class="pf-proto-blocked">Prototype iframe blocked: srcdoc (${byteLen} bytes) exceeds 512 KB cap.</p>${caption}</article>`
-      }
-      return `<article class="pf-proto-card"><h4>${title}</h4><iframe class="pf-proto-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="${escapeHtml(proto.srcdoc)}" title="${title}"></iframe>${caption}</article>`
-    }
-    if (kind === 'img') {
-      const safeImg = sanitizeSafeImgSrc(proto?.src || proto?.imgSrc || '')
-      if (!safeImg) {
-        return `<article class="pf-proto-card"><h4>${title}</h4><p class="pf-proto-blocked">Image blocked by safe URI scheme policy.</p>${caption}</article>`
-      }
-      return `<article class="pf-proto-card"><h4>${title}</h4><img class="pf-proto-img" src="${escapeHtml(safeImg)}" alt="${title}" loading="lazy" />${caption}</article>`
-    }
-    const safeUrl = sanitizeSafeHref(proto?.url || proto?.href || '')
-    if (!safeUrl) {
-      return `<article class="pf-proto-card"><h4>${title}</h4><p class="pf-proto-blocked">Prototype URL blocked: only http:, https:, and file: schemes are permitted.</p>${caption}</article>`
-    }
-    return `<article class="pf-proto-card"><h4>${title}</h4><p><a class="pf-proto-link" href="${escapeHtml(safeUrl)}" rel="noopener noreferrer">${escapeHtml(safeUrl)}</a></p>${caption}</article>`
+  const selIdx = prototypes.findIndex((p) => p?.selected)
+  const activeIdx = selIdx >= 0 ? selIdx : 0
+  return prototypes.map((proto, idx) => renderPrototypeCard(proto, idx, activeIdx)).join('\n')
+}
+
+function renderPrototypeSwitcher(prototypes = []) {
+  if (!Array.isArray(prototypes) || prototypes.length === 0) return ''
+  const selIdx = prototypes.findIndex((p) => p?.selected)
+  const activeIdx = selIdx >= 0 ? selIdx : 0
+  const tabs = prototypes.map((p, idx) => {
+    const cls = idx === activeIdx ? 'pf-seg-btn is-active' : 'pf-seg-btn'
+    const mark = p?.selected ? '<span class="pf-pill pf-pill-selected">已选定</span>' : ''
+    return `<button type="button" class="${cls}" data-proto-tab="${idx}">${escapeHtml(p?.title || `方案 ${idx + 1}`)}${mark}</button>`
+  }).join('')
+  const compare = prototypes.length >= 2
+    ? `<button type="button" class="pf-seg-btn" data-proto-mode="compare">并排对比</button>`
+    : ''
+  return `<div class="pf-seg">${tabs}${compare}</div>`
+}
+
+function renderListItems(items, emptyText) {
+  return Array.isArray(items) && items.length > 0
+    ? `<ul class="pf-brief-list">${items.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`
+    : `<p class="pf-inspector-desc">${escapeHtml(emptyText)}</p>`
+}
+
+function renderBriefBoardHtml(briefData, verdict) {
+  if (!briefData) return ''
+  const slices = (briefData.childSlices || []).map((s) => `${s.key}：${s.rel}（${s.status}${s.done ? '，已完成' : ''}）`)
+  const masterItems = briefData.masterPrd
+    ? [`总控 PRD：${briefData.masterPrd.rel}（${briefData.masterPrd.status}，${briefData.masterPrd.approved ? '已批准' : '未批准'}）`, ...slices]
+    : slices
+  const wtItems = (briefData.activeWorktrees || []).map((w) => `工作树 ${w.taskId} [${w.status}] ${w.branch || ''}`.trim())
+  const openItems = [
+    ...(briefData.mergedOpen || []),
+    ...(briefData.pendingDecisions || []).map((p) => `${p.file}:${p.line} ${p.text}`),
+  ]
+  return [
+    '<div class="pf-scroll-panel"><div class="pf-brief-grid">',
+    `<section class="pf-brief-card"><h3>核心目标与不做项</h3><span class="pf-inspector-label">目标</span>${renderListItems(briefData.goals, '暂未登记目标')}<span class="pf-inspector-label">不做项</span>${renderListItems(briefData.nonGoals, '暂未登记不做边界')}</section>`,
+    `<section class="pf-brief-card"><h3>变更与流程影响</h3><p class="pf-inspector-desc">${escapeHtml(briefData.verdict || verdict.summary || '')}</p><span class="pf-inspector-label">流程变化</span>${renderListItems(briefData.flowDeltas, '暂无流程变更记录')}</section>`,
+    `<section class="pf-brief-card"><h3>1:N 切片与 Worktree 实时盘面</h3><span class="pf-inspector-label">总控与子切片</span>${renderListItems(masterItems, '独立规划（无 1:N 总控切片）')}<span class="pf-inspector-label">活跃隔离工作树</span>${renderListItems(wtItems, '当前无活跃工作树')}</section>`,
+    `<section class="pf-brief-card"><h3>已定决策与待拍板</h3><span class="pf-inspector-label">已定决策</span>${renderListItems(briefData.mergedDecisions, '暂无已拍板决策')}<span class="pf-inspector-label">待拍板事项</span>${renderListItems(openItems, '待拍板事项已清零')}</section>`,
+    '</div></div>',
+  ].join('\n')
+}
+
+function renderCatalogHtml(tree) {
+  const nodes = tree?.nodes || []
+  const domains = tree?.domains || []
+  if (nodes.length === 0) return '<div class="pf-empty-box">暂无已映射模块。</div>'
+  const byDom = new Map()
+  for (const d of domains) byDom.set(d.id, { dom: d, items: [] })
+  for (const n of nodes) {
+    if (!byDom.has(n.domain)) byDom.set(n.domain, { dom: { id: n.domain, title: n.domainTitle || n.domain, palette: n.palette }, items: [] })
+    byDom.get(n.domain).items.push(n)
+  }
+  return Array.from(byDom.values()).filter((g) => g.items.length > 0).map((g) => {
+    const color = escapeXml(g.dom.palette?.stroke || '#1b5e6b')
+    const itemsHtml = g.items.map((n) => {
+      const diffText = DIFF_LABELS[n.diffState] || ''
+      const badge = diffText ? `<span class="pf-pill pf-pill-${escapeXml(n.diffState)}">${escapeXml(diffText)}</span>` : ''
+      const sub = n.shortSummary || toRelPath(n.primaryAnchor || n.entrypoints?.[0] || n.modules?.[0] || '') || n.id
+      return `<div class="pf-catalog-item" tabindex="0" role="button" data-target-id="${escapeXml(n.id)}"><div class="pf-catalog-head"><span>${escapeHtml(n.title)}</span>${badge}</div><p class="pf-catalog-paths">${escapeXml(sub)}</p></div>`
+    }).join('')
+    return `<section class="pf-catalog-group" data-domain-group="${escapeXml(g.dom.id)}"><div class="pf-catalog-dom"><span class="pf-catalog-dom-left"><span class="pf-dot" style="background:${color}"></span><span>${escapeHtml(g.dom.title)}</span></span><span>${g.items.length}</span></div>${itemsHtml}</section>`
   }).join('\n')
 }
 
-function buildStylesCss() {
-  return `
-:root {
-  --bg: #f6f8fb;
-  --surface: #ffffff;
-  --surface-alt: #eef2f7;
-  --border: #d7dee8;
-  --text: #0f172a;
-  --muted: #475569;
-  --accent: #4f46e5;
-  --accent-soft: rgba(79, 70, 229, 0.12);
-  --pass: #059669;
-  --warn: #d97706;
-  --danger: #e11d48;
-  --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="auto"] {
-    --bg: #0b1120;
-    --surface: #111827;
-    --surface-alt: #1e293b;
-    --border: #2c3a4f;
-    --text: #f1f5f9;
-    --muted: #94a3b8;
-    --accent: #818cf8;
-    --accent-soft: rgba(129, 140, 248, 0.16);
-    --shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0b1120;
-  --surface: #111827;
-  --surface-alt: #1e293b;
-  --border: #2c3a4f;
-  --text: #f1f5f9;
-  --muted: #94a3b8;
-  --accent: #818cf8;
-  --accent-soft: rgba(129, 140, 248, 0.16);
-  --shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-}
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); line-height: 1.5; }
-button, input, textarea { font-family: inherit; color: inherit; }
-.pf-shell { max-width: 1480px; margin: 0 auto; padding: 20px 24px 72px; }
-.pf-header { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); display: grid; gap: 14px; }
-.pf-header-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 14px; }
-.pf-title { margin: 0; font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em; }
-.pf-subtitle { margin: 4px 0 0; font-size: 0.875rem; color: var(--muted); }
-.pf-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pf-btn { border: 1px solid var(--border); background: var(--surface-alt); color: var(--text); border-radius: 8px; padding: 6px 12px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: border-color 140ms, background 140ms; }
-.pf-btn:hover, .pf-btn:focus-visible { border-color: var(--accent); outline: none; }
-.pf-btn-primary { background: var(--accent); color: #ffffff; border-color: var(--accent); }
-.pf-search { border: 1px solid var(--border); background: var(--bg); border-radius: 8px; padding: 6px 11px; font-size: 0.85rem; min-width: 220px; }
-.pf-verdict-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
-.pf-verdict-card { display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 10px; background: var(--surface-alt); border: 1px solid var(--border); font-size: 0.86rem; }
-.pf-verdict-pill { padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; background: var(--pass); color: #ffffff; }
-.pf-verdict-pill[data-tone="warn"] { background: var(--warn); }
-.pf-verdict-pill[data-tone="danger"] { background: var(--danger); }
-.pf-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.scope-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 0.76rem; font-family: var(--font-mono); background: var(--accent-soft); color: var(--accent); border: 1px solid transparent; }
-.pf-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-.pf-metric-card { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
-.pf-metric-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-.pf-metric-value { font-size: 1.15rem; font-weight: 700; font-family: var(--font-mono); }
-.pf-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 12px; }
-.pf-tab { border: 1px solid var(--border); background: var(--surface); border-radius: 9px; padding: 7px 14px; font-size: 0.84rem; font-weight: 600; cursor: pointer; }
-.pf-tab.is-active { background: var(--accent); color: #ffffff; border-color: var(--accent); }
-.pf-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-@media (max-width: 1080px) { .pf-workspace { grid-template-columns: 1fr; } }
-.pf-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
-.pf-panel[hidden] { display: none; }
-.pf-panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface-alt); }
-.pf-panel-title { margin: 0; font-size: 0.96rem; font-weight: 700; }
-.pf-viewport { position: relative; height: 610px; overflow: hidden; background: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0); background-size: 20px 20px; cursor: grab; user-select: none; }
-.pf-viewport.is-dragging { cursor: grabbing; }
-.pf-svg { display: block; transform-origin: 0 0; }
-.pf-domain-title { font-size: 14px; font-weight: 700; }
-.pf-domain-meta { font-size: 11px; fill: var(--muted); font-family: var(--font-mono); }
-.pf-lane-label { font-size: 12px; font-weight: 700; }
-.pf-node { cursor: pointer; transition: opacity 150ms; }
-.pf-node-card { fill: var(--surface); stroke: var(--border); stroke-width: 1.4; }
-.pf-node:hover .pf-node-card, .pf-node.is-selected .pf-node-card, .pf-node:focus-visible .pf-node-card { stroke: var(--accent); stroke-width: 2.4; }
-.pf-node.is-dimmed { opacity: 0.25; }
-.pf-node.is-neighbor .pf-node-card { stroke: var(--pass); stroke-width: 2; }
-.pf-node-title { fill: var(--text); font-size: 13px; font-weight: 700; }
-.pf-node-sub { fill: var(--muted); font-size: 10.5px; font-family: var(--font-mono); }
-.pf-node-stats, .pf-node-risk { fill: var(--muted); font-size: 10.5px; }
-.pf-edge { fill: none; stroke: var(--muted); stroke-opacity: 0.55; stroke-width: 1.5; color: var(--muted); }
-.pf-edge-impacted, .pf-edge.is-highlighted { stroke: var(--accent); color: var(--accent); stroke-opacity: 0.95; stroke-width: 2.3; }
-.pf-edge.is-dimmed { stroke-opacity: 0.12; }
-.pf-badge-added { fill: #059669; }
-.pf-badge-modified { fill: #d97706; }
-.pf-badge-impacted { fill: #0284c7; }
-.pf-badge-text { fill: #ffffff; font-size: 9.5px; font-weight: 700; text-transform: uppercase; }
-.pf-sidebar { display: grid; gap: 12px; }
-.pf-catalog { max-height: 540px; overflow-y: auto; padding: 10px; display: grid; gap: 8px; }
-.pf-catalog-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-alt); cursor: pointer; transition: border-color 140ms; }
-.pf-catalog-item:hover, .pf-catalog-item.is-selected { border-color: var(--accent); background: var(--accent-soft); }
-.pf-catalog-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; font-size: 0.86rem; }
-.pf-catalog-desc { margin: 4px 0 0; font-size: 0.78rem; color: var(--muted); }
-.pf-catalog-paths { margin: 6px 0 0; font-size: 0.73rem; font-family: var(--font-mono); color: var(--muted); word-break: break-all; }
-.pf-anchor-card { position: fixed; right: 20px; bottom: 72px; width: 320px; max-width: calc(100vw - 40px); background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); z-index: 40; font-size: 0.8rem; }
-.pf-anchor-card[hidden] { display: none; }
-.pf-anchor-title { margin: 0 0 6px; font-weight: 700; font-size: 0.88rem; }
-.pf-anchor-list { margin: 4px 0 0; padding-left: 16px; font-family: var(--font-mono); font-size: 0.73rem; color: var(--muted); }
-.walk-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--accent); border-radius: 999px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; box-shadow: var(--shadow); z-index: 50; max-width: calc(100vw - 24px); }
-.walk-bar[hidden] { display: none; }
-.walk-bar-text { font-size: 0.82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42vw; }
-.pf-dialog { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 70; }
-.pf-dialog[hidden] { display: none; }
-.pf-dialog-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; width: min(620px, 100%); box-shadow: var(--shadow); display: grid; gap: 12px; }
-.pf-dialog-area { width: 100%; min-height: 150px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--bg); font-family: var(--font-mono); font-size: 0.8rem; }
-.pf-clipboard-fallback { border: 1px dashed var(--warn); border-radius: 8px; padding: 10px; background: var(--surface-alt); display: grid; gap: 6px; }
-.pf-clipboard-fallback[hidden] { display: none; }
-.pf-selection-float { position: fixed; z-index: 65; box-shadow: var(--shadow); }
-.pf-selection-float[hidden] { display: none; }
-.pf-proto-grid { padding: 16px; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-.pf-proto-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface-alt); }
-.pf-proto-frame { width: 100%; min-height: 280px; border: 1px solid var(--border); border-radius: 8px; background: #ffffff; }
-.pf-proto-img { max-width: 100%; border-radius: 8px; display: block; }
-.pf-proto-blocked { color: var(--danger); font-size: 0.82rem; font-weight: 600; }
-.pf-empty-box { padding: 20px; color: var(--muted); font-size: 0.88rem; }
-.pf-diff-grid { padding: 16px; display: grid; gap: 10px; }
-.pf-diff-row { border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--surface-alt); }
-.pf-toast { position: fixed; top: 18px; right: 18px; background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 0.82rem; font-weight: 600; z-index: 90; }
-.pf-toast[hidden] { display: none; }
-`.trim()
-}
-
-function buildClientScript() {
-  return `
-(function () {
-  var dataEl = document.getElementById('pf-visual-data');
-  var model = dataEl ? JSON.parse(dataEl.textContent || '{}') : {};
-  var nodes = (model.tree && model.tree.nodes) || [];
-  var edges = (model.tree && model.tree.edges) || [];
-  var walkthrough = model.walkthrough || [];
-  var nodeById = {};
-  nodes.forEach(function (n) { nodeById[n.id] = n; });
-
-  var themeOrder = ['auto', 'light', 'dark'];
-  var rootEl = document.documentElement;
-  function readSavedTheme() {
-    try { return window.localStorage.getItem('pf-visual-theme') || 'auto'; } catch (err) { return 'auto'; }
-  }
-  function saveTheme(theme) {
-    try { window.localStorage.setItem('pf-visual-theme', theme); } catch (err) {}
-  }
-  function applyTheme(theme) {
-    var next = themeOrder.indexOf(theme) >= 0 ? theme : 'auto';
-    rootEl.setAttribute('data-theme', next);
-    var btn = document.getElementById('btn-theme');
-    if (btn) btn.textContent = 'Theme: ' + next;
-    saveTheme(next);
-  }
-  applyTheme(readSavedTheme());
-  var themeBtn = document.getElementById('btn-theme');
-  if (themeBtn) {
-    themeBtn.addEventListener('click', function () {
-      var cur = rootEl.getAttribute('data-theme') || 'auto';
-      var next = themeOrder[(themeOrder.indexOf(cur) + 1) % themeOrder.length];
-      applyTheme(next);
-    });
-  }
-
-  var toastEl = document.getElementById('pf-toast');
-  var toastTimer = null;
-  function showToast(msg) {
-    if (!toastEl) return;
-    toastEl.textContent = msg;
-    toastEl.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.hidden = true; }, 2200);
-  }
-
-  function showManualClipboardBox(text) {
-    var box = document.getElementById('clipboard-fallback');
-    var area = document.getElementById('clipboard-fallback-text');
-    if (!box || !area) return;
-    area.value = text;
-    box.hidden = false;
-    area.focus();
-    area.select();
-    showToast('Press Ctrl+C / Cmd+C to copy');
-  }
-
-  function copyTextWithFallback(text) {
-    var value = String(text || '');
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      return navigator.clipboard.writeText(value).then(function () {
-        showToast('Copied to clipboard');
-        return true;
-      }).catch(function () {
-        return legacyExecCopy(value);
-      });
-    }
-    return Promise.resolve(legacyExecCopy(value));
-  }
-
-  function legacyExecCopy(value) {
-    try {
-      var ta = document.createElement('textarea');
-      ta.value = value;
-      ta.setAttribute('readonly', 'readonly');
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      var ok = document.execCommand && document.execCommand('copy');
-      document.body.removeChild(ta);
-      if (ok) {
-        showToast('Copied to clipboard');
-        return true;
-      }
-    } catch (err) {}
-    showManualClipboardBox(value);
-    return false;
-  }
-
-  var viewportState = {};
-  function setupViewport(viewportId, svgId) {
-    var vp = document.getElementById(viewportId);
-    var svg = document.getElementById(svgId);
-    if (!vp || !svg) return;
-    var state = { scale: 1, tx: 12, ty: 12, dragging: false, startX: 0, startY: 0 };
-    viewportState[viewportId] = { state: state, vp: vp, svg: svg };
-    function applyTransform() {
-      svg.style.transform = 'translate(' + state.tx + 'px,' + state.ty + 'px) scale(' + state.scale + ')';
-      var lbl = vp.parentElement && vp.parentElement.querySelector('[data-zoom-label]');
-      if (lbl) lbl.textContent = Math.round(state.scale * 100) + '%';
-    }
-    state.apply = applyTransform;
-    applyTransform();
-
-    vp.addEventListener('wheel', function (ev) {
-      ev.preventDefault();
-      var rect = vp.getBoundingClientRect();
-      var mx = ev.clientX - rect.left;
-      var my = ev.clientY - rect.top;
-      var factor = ev.deltaY < 0 ? 1.12 : 0.89;
-      var nextScale = Math.min(2.6, Math.max(0.35, state.scale * factor));
-      state.tx = mx - (mx - state.tx) * (nextScale / state.scale);
-      state.ty = my - (my - state.ty) * (nextScale / state.scale);
-      state.scale = nextScale;
-      applyTransform();
-    }, { passive: false });
-
-    vp.addEventListener('pointerdown', function (ev) {
-      if (ev.target && ev.target.closest && ev.target.closest('.pf-node')) return;
-      state.dragging = true;
-      state.startX = ev.clientX - state.tx;
-      state.startY = ev.clientY - state.ty;
-      vp.classList.add('is-dragging');
-    });
-    window.addEventListener('pointermove', function (ev) {
-      if (!state.dragging) return;
-      state.tx = ev.clientX - state.startX;
-      state.ty = ev.clientY - state.startY;
-      applyTransform();
-    });
-    window.addEventListener('pointerup', function () {
-      if (!state.dragging) return;
-      state.dragging = false;
-      vp.classList.remove('is-dragging');
-    });
-  }
-  setupViewport('vp-tree', 'svg-tree');
-  setupViewport('vp-flow', 'svg-flow');
-
-  document.addEventListener('click', function (ev) {
-    var zoomBtn = ev.target && ev.target.closest && ev.target.closest('[data-zoom-action]');
-    if (!zoomBtn) return;
-    var targetVp = zoomBtn.getAttribute('data-zoom-target');
-    var entry = viewportState[targetVp];
-    if (!entry) return;
-    var act = zoomBtn.getAttribute('data-zoom-action');
-    if (act === 'in') entry.state.scale = Math.min(2.6, entry.state.scale * 1.18);
-    if (act === 'out') entry.state.scale = Math.max(0.35, entry.state.scale * 0.84);
-    if (act === 'reset') { entry.state.scale = 1; entry.state.tx = 12; entry.state.ty = 12; }
-    entry.state.apply();
-  });
-
-  var selectedId = '';
-  function getNeighbors(nodeId) {
-    var set = {};
-    set[nodeId] = true;
-    edges.forEach(function (e) {
-      if (e.fromId === nodeId) set[e.toId] = true;
-      if (e.toId === nodeId) set[e.fromId] = true;
-    });
-    return set;
-  }
-
-  function showAnchorCard(nodeId) {
-    var card = document.getElementById('anchor-card');
-    var n = nodeById[nodeId];
-    if (!card || !n) { if (card) card.hidden = true; return; }
-    document.getElementById('anchor-title').textContent = n.title + ' (' + n.id + ')';
-    document.getElementById('anchor-meta').textContent = 'domain=' + n.domain + ' | diff=' + n.diffState + ' | risk=' + n.risk;
-    var list = document.getElementById('anchor-list');
-    list.innerHTML = '';
-    var items = [].concat(n.entrypoints || [], n.modules || [], n.tests || []).slice(0, 6);
-    if (items.length === 0) items = ['(no file paths recorded)'];
-    items.forEach(function (p) {
-      var li = document.createElement('li');
-      li.textContent = p;
-      list.appendChild(li);
-    });
-    card.hidden = false;
-  }
-
-  function selectNode(nodeId, scrollCatalog) {
-    selectedId = nodeId || '';
-    var neighborMap = selectedId ? getNeighbors(selectedId) : null;
-    document.querySelectorAll('.pf-node').forEach(function (el) {
-      var id = el.getAttribute('data-node-id');
-      el.classList.toggle('is-selected', id === selectedId);
-      el.classList.toggle('is-neighbor', Boolean(neighborMap && id !== selectedId && neighborMap[id]));
-      el.classList.toggle('is-dimmed', Boolean(neighborMap && !neighborMap[id]));
-    });
-    document.querySelectorAll('.pf-edge').forEach(function (el) {
-      var from = el.getAttribute('data-from-id');
-      var to = el.getAttribute('data-to-id');
-      var hit = !selectedId || from === selectedId || to === selectedId;
-      el.classList.toggle('is-highlighted', Boolean(selectedId && hit));
-      el.classList.toggle('is-dimmed', Boolean(selectedId && !hit));
-    });
-    document.querySelectorAll('.pf-catalog-item').forEach(function (el) {
-      var match = el.getAttribute('data-target-id') === selectedId;
-      el.classList.toggle('is-selected', match);
-      if (match && scrollCatalog) el.scrollIntoView({ block: 'nearest' });
-    });
-    if (selectedId) showAnchorCard(selectedId);
-  }
-
-  document.addEventListener('click', function (ev) {
-    var svgNode = ev.target && ev.target.closest && ev.target.closest('.pf-node[data-node-id]');
-    if (svgNode) {
-      var nid = svgNode.getAttribute('data-node-id');
-      selectNode(selectedId === nid ? '' : nid, true);
-      return;
-    }
-    var catItem = ev.target && ev.target.closest && ev.target.closest('.pf-catalog-item[data-target-id]');
-    if (catItem) {
-      var tid = catItem.getAttribute('data-target-id');
-      selectNode(tid, false);
-    }
-  });
-
-  document.addEventListener('mouseover', function (ev) {
-    var node = ev.target && ev.target.closest && ev.target.closest('.pf-node[data-node-id]');
-    if (node) showAnchorCard(node.getAttribute('data-node-id'));
-  });
-
-  var anchorClose = document.getElementById('anchor-close');
-  if (anchorClose) {
-    anchorClose.addEventListener('click', function () {
-      var card = document.getElementById('anchor-card');
-      if (card) card.hidden = true;
-    });
-  }
-
-  var searchInput = document.getElementById('pf-search');
-  if (searchInput) {
-    searchInput.addEventListener('input', function () {
-      var q = searchInput.value.trim().toLowerCase();
-      if (!q) {
-        selectNode('', false);
-        document.querySelectorAll('.pf-catalog-item').forEach(function (el) { el.hidden = false; });
-        return;
-      }
-      var matched = {};
-      nodes.forEach(function (n) {
-        var hay = [n.id, n.title, n.domain, n.description].concat(n.modules || [], n.entrypoints || []).join(' ').toLowerCase();
-        if (hay.indexOf(q) >= 0) matched[n.id] = true;
-      });
-      document.querySelectorAll('.pf-node').forEach(function (el) {
-        var id = el.getAttribute('data-node-id');
-        el.classList.toggle('is-dimmed', !matched[id]);
-        el.classList.toggle('is-selected', Boolean(matched[id]));
-      });
-      document.querySelectorAll('.pf-catalog-item').forEach(function (el) {
-        el.hidden = !matched[el.getAttribute('data-target-id')];
-      });
-    });
-  }
-
-  document.querySelectorAll('[data-tab-target]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var target = btn.getAttribute('data-tab-target');
-      document.querySelectorAll('[data-tab-target]').forEach(function (b) {
-        b.classList.toggle('is-active', b === btn);
-      });
-      document.querySelectorAll('.pf-panel[data-tab-panel]').forEach(function (p) {
-        p.hidden = p.getAttribute('data-tab-panel') !== target;
-      });
-    });
-  });
-
-  var walkBar = document.getElementById('walk-bar');
-  var walkIdx = -1;
-  function renderWalkStep() {
-    if (!walkBar || walkthrough.length === 0) return;
-    if (walkIdx < 0) walkIdx = 0;
-    if (walkIdx >= walkthrough.length) walkIdx = walkthrough.length - 1;
-    var step = walkthrough[walkIdx];
-    walkBar.hidden = false;
-    document.getElementById('walk-step-label').textContent = (walkIdx + 1) + '/' + walkthrough.length + ': ' + step.title + ' — ' + step.detail;
-    if (step.targetId) selectNode(step.targetId, true);
-  }
-  function closeWalkthrough() {
-    if (walkBar) walkBar.hidden = true;
-    walkIdx = -1;
-    selectNode('', false);
-  }
-  var walkStart = document.getElementById('btn-walk-start');
-  if (walkStart) walkStart.addEventListener('click', function () { walkIdx = 0; renderWalkStep(); });
-  var walkPrev = document.getElementById('walk-prev');
-  if (walkPrev) walkPrev.addEventListener('click', function () { walkIdx = (walkIdx - 1 + walkthrough.length) % walkthrough.length; renderWalkStep(); });
-  var walkNext = document.getElementById('walk-next');
-  if (walkNext) walkNext.addEventListener('click', function () { walkIdx = (walkIdx + 1) % walkthrough.length; renderWalkStep(); });
-  var walkClose = document.getElementById('walk-close');
-  if (walkClose) walkClose.addEventListener('click', closeWalkthrough);
-
-  document.addEventListener('keydown', function (ev) {
-    var dlg = document.getElementById('prompt-dialog');
-    if (ev.key === 'Escape') {
-      if (dlg && !dlg.hidden) { dlg.hidden = true; return; }
-      if (walkBar && !walkBar.hidden) { closeWalkthrough(); return; }
-    }
-    if (walkBar && !walkBar.hidden && document.activeElement !== searchInput) {
-      if (ev.key === 'ArrowRight') { ev.preventDefault(); walkIdx = (walkIdx + 1) % walkthrough.length; renderWalkStep(); }
-      if (ev.key === 'ArrowLeft') { ev.preventDefault(); walkIdx = (walkIdx - 1 + walkthrough.length) % walkthrough.length; renderWalkStep(); }
-    }
-  });
-
-  var dialog = document.getElementById('prompt-dialog');
-  var dialogArea = document.getElementById('prompt-dialog-text');
-  function openPromptDialog(panelTitle, excerpt) {
-    if (!dialog || !dialogArea) return;
-    var active = selectedId && nodeById[selectedId] ? nodeById[selectedId] : null;
-    var lines = [
-      'Context: ' + (model.title || 'Architecture Map') + ' (' + panelTitle + ')',
-      active ? ('Selected feature: ' + active.id + ' [' + active.domain + ', diff=' + active.diffState + ']') : 'Selected feature: (all)',
-      active && active.modules && active.modules.length ? ('Modules: ' + active.modules.join(', ')) : '',
-      excerpt ? ('Selection: ' + excerpt) : '',
-      'Follow-up request: Inspect this boundary, verify dependencies, and outline any needed changes.',
-    ].filter(Boolean);
-    dialogArea.value = lines.join('\\n');
-    var fb = document.getElementById('clipboard-fallback');
-    if (fb) fb.hidden = true;
-    dialog.hidden = false;
-    dialogArea.focus();
-  }
-  document.addEventListener('click', function (ev) {
-    var btn = ev.target && ev.target.closest && ev.target.closest('[data-followup-panel]');
-    if (!btn) return;
-    openPromptDialog(btn.getAttribute('data-followup-panel') || 'Panel', '');
-  });
-  var copyBtn = document.getElementById('prompt-copy-btn');
-  if (copyBtn) copyBtn.addEventListener('click', function () { copyTextWithFallback(dialogArea ? dialogArea.value : ''); });
-  var closeDlg = document.getElementById('prompt-close-btn');
-  if (closeDlg) closeDlg.addEventListener('click', function () { if (dialog) dialog.hidden = true; });
-
-  var floatBtn = document.getElementById('pf-selection-float');
-  document.addEventListener('mouseup', function (ev) {
-    if (!floatBtn || (dialog && !dialog.hidden)) return;
-    var sel = window.getSelection ? String(window.getSelection().toString() || '').trim() : '';
-    if (sel.length >= 6) {
-      floatBtn.style.left = Math.min(window.innerWidth - 180, Math.max(12, ev.clientX + 8)) + 'px';
-      floatBtn.style.top = Math.min(window.innerHeight - 48, Math.max(12, ev.clientY - 36)) + 'px';
-      floatBtn.setAttribute('data-selection-excerpt', sel.slice(0, 240));
-      floatBtn.hidden = false;
-    } else {
-      floatBtn.hidden = true;
-    }
-  });
-  if (floatBtn) {
-    floatBtn.addEventListener('click', function () {
-      var excerpt = floatBtn.getAttribute('data-selection-excerpt') || '';
-      floatBtn.hidden = true;
-      openPromptDialog('Selection', excerpt);
-    });
-  }
-})();
-`.trim()
+function renderDiffRowsHtml(nodes) {
+  const active = nodes.filter((n) => n.diffState !== 'context')
+  if (active.length === 0) return '<div class="pf-empty-box">当前无活跃变更，所有模块均处于已同步状态。</div>'
+  return active.map((n) => {
+    const label = DIFF_LABELS[n.diffState] || n.diffState
+    return `<div class="pf-diff-row" data-target-id="${escapeXml(n.id)}"><div><strong>${escapeHtml(n.title)}</strong> <span class="pf-subtitle">(${escapeHtml(n.domainTitle || n.domain)})</span></div><span class="pf-pill pf-pill-${escapeXml(n.diffState)}">${escapeXml(label)}</span></div>`
+  }).join('\n')
 }
 
 export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'architecture-map' } = {}) {
   const model = visualModel || {}
   const resolvedMode = mode === 'visual-brief' || model.mode === 'visual-brief' ? 'visual-brief' : 'architecture-map'
+  const isBrief = resolvedMode === 'visual-brief'
   const headerLine = buildGeneratedHeaderLine({ mode: resolvedMode, featureMapSha256 })
-  const title = escapeHtml(model.title || 'Architecture Map')
-  const verdict = model.verdict || { status: 'SYNCED', tone: 'pass', summary: '' }
-  const chipsHtml = (model.scopeChips || []).map((c) => `<span class="scope-chip">${escapeHtml(c)}</span>`).join('')
-  const metricsHtml = (model.metrics || [])
-    .map((m) => `<div class="pf-metric-card"><div class="pf-metric-label">${escapeHtml(m.label)}</div><div class="pf-metric-value">${escapeHtml(m.value)}</div></div>`)
-    .join('')
-
-  const catalogHtml = (model.tree?.nodes || []).map((n) => {
-    const paths = [...(n.entrypoints || []), ...(n.modules || [])].slice(0, 3).map(toRelPath).join(', ')
-    return [
-      `<div class="pf-catalog-item" tabindex="0" role="button" data-target-id="${escapeXml(n.id)}">`,
-      `<div class="pf-catalog-head"><span>${escapeHtml(n.title)}</span><span class="scope-chip">${escapeHtml(n.diffState)}</span></div>`,
-      `<p class="pf-catalog-desc">${escapeHtml(n.description || `Domain: ${n.domain} | Risk: ${n.risk}`)}</p>`,
-      `<p class="pf-catalog-paths">${escapeHtml(paths || n.id)}</p>`,
-      `</div>`,
-    ].join('')
-  }).join('\n')
-
-  const diffRowsHtml = (model.tree?.nodes || []).map((n) => [
-    `<div class="pf-diff-row" data-target-id="${escapeXml(n.id)}">`,
-    `<div><strong>${escapeHtml(n.title)}</strong> <span class="pf-subtitle">(${escapeHtml(n.domain)})</span></div>`,
-    `<span class="scope-chip">${escapeHtml(n.diffState)}</span>`,
-    `</div>`,
-  ].join('')).join('\n')
+  const title = escapeHtml(model.title || (isBrief ? '实时规划简报' : '架构全景图'))
+  const subtitle = isBrief ? '仓外实时投影简报（离线确定性渲染）' : '由 docs/feature-map.json 离线确定性生成（零运行态依赖）'
+  const verdict = model.verdict || { status: '已同步', tone: 'pass', summary: '' }
+  const verdictLabel = escapeHtml(localizeVerdictStatus(verdict.status || '已同步'))
+  const tree = model.tree || { width: 640, height: 360, domains: [], nodes: [], edges: [] }
+  const flow = model.flow || { width: 640, height: 280, lanes: [], nodes: [], edges: [], flows: [] }
+  const flowsList = Array.isArray(flow.flows) ? flow.flows : []
+  const inlineStats = `${tree.domains.length} 域 · ${tree.nodes.length} 模块 · ${flowsList.length} 条主流程`
+  const prototypes = Array.isArray(model.prototypes) ? model.prototypes : []
+  const showDiffTab = Boolean(model.hasActiveDiff) || isBrief
+  const showProtoTab = prototypes.length > 0 || isBrief
 
   const compactClientModel = {
-    title: model.title || 'Architecture Map',
+    title: model.title || (isBrief ? '实时规划简报' : '架构全景图'),
     tree: {
-      nodes: (model.tree?.nodes || []).map((n) => ({
+      nodes: tree.nodes.map((n) => ({
         id: n.id,
         title: n.title,
         domain: n.domain,
+        domainTitle: n.domainTitle || n.domain,
         diffState: n.diffState,
         risk: n.risk,
         description: n.description || '',
+        cx: n.cx,
+        cy: n.cy,
         entrypoints: (n.entrypoints || []).slice(0, 3),
-        modules: (n.modules || []).slice(0, 4),
-        tests: (n.tests || []).slice(0, 3),
+        modules: (n.modules || []).slice(0, 12),
+        tests: (n.tests || []).slice(0, 8),
+        verifyTools: (n.verifyTools || []).slice(0, 6),
+        docAnchors: (n.docAnchors || []).slice(0, 6),
       })),
-      edges: (model.tree?.edges || []).map((e) => ({ fromId: e.fromId, toId: e.toId })),
+      edges: tree.edges.map((e) => ({ fromId: e.fromId, toId: e.toId })),
+    },
+    flow: {
+      flows: flowsList.map((fl) => ({
+        id: fl.id,
+        title: fl.title,
+        featureIds: fl.featureIds || [],
+        steps: fl.steps || [],
+      })),
     },
     walkthrough: (model.walkthrough || []).map((w) => ({
       targetId: w.targetId,
@@ -673,12 +296,28 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
       detail: w.detail,
     })),
   }
-  const serializedModel = escapeJsonForScript(compactClientModel)
+
+  const tabsHtml = [
+    '<button class="pf-tab is-active" type="button" data-tab-target="tree">架构总览</button>',
+    '<button class="pf-tab" type="button" data-tab-target="flow">业务流转</button>',
+    isBrief ? '<button class="pf-tab" type="button" data-tab-target="brief">规划盘面</button>' : '',
+    showDiffTab ? '<button class="pf-tab" type="button" data-tab-target="diff">变更影响</button>' : '',
+    showProtoTab ? '<button class="pf-tab" type="button" data-tab-target="prototypes">方案原型</button>' : '',
+  ].filter(Boolean).join('')
+
+  const zoomToolbar = (vpId, panelName) => [
+    `<button class="pf-btn pf-btn-sm" type="button" data-zoom-action="in" data-zoom-target="${vpId}">放大</button>`,
+    `<button class="pf-btn pf-btn-sm" type="button" data-zoom-action="out" data-zoom-target="${vpId}">缩小</button>`,
+    `<button class="pf-btn pf-btn-sm" type="button" data-zoom-action="fit" data-zoom-target="${vpId}">适配画布</button>`,
+    `<button class="pf-btn pf-btn-sm" type="button" data-zoom-action="reset" data-zoom-target="${vpId}">100%</button>`,
+    '<span class="pf-zoom-readout" data-zoom-label>100%</span>',
+    `<button class="pf-btn pf-btn-sm" type="button" data-followup-panel="${panelName}">复制追问</button>`,
+  ].join('')
 
   const html = [
     headerLine,
     '<!DOCTYPE html>',
-    '<html lang="en" data-theme="auto">',
+    '<html lang="zh-CN" data-theme="auto">',
     '<head>',
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -687,96 +326,76 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
     '</head>',
     '<body>',
     '<main class="pf-shell">',
-    '<header class="pf-header">',
-    '<div class="pf-header-top">',
-    `<div><h1 class="pf-title">${title}</h1><p class="pf-subtitle">Deterministic architecture visualization generated from docs/feature-map.json</p></div>`,
+    '<header class="pf-topbar">',
+    '<div class="pf-brand">',
+    `<h1 class="pf-title">${title}</h1>`,
+    `<span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span>`,
+    `<span class="pf-stats-inline">${inlineStats}</span>`,
+    `<span class="pf-subtitle">${subtitle}</span>`,
+    '</div>',
     '<div class="pf-controls">',
-    '<input id="pf-search" class="pf-search" type="search" placeholder="Search feature, module, domain..." aria-label="Search architecture features" />',
-    '<button id="btn-walk-start" class="pf-btn" type="button">Walkthrough</button>',
-    '<button id="btn-theme" class="pf-btn" type="button">Theme: auto</button>',
+    '<input id="pf-search" class="pf-search" type="search" placeholder="搜索模块、域或路径..." aria-label="搜索模块、域或路径" />',
+    '<button id="btn-walk-start" class="pf-btn" type="button">分步导览</button>',
+    '<button id="btn-theme" class="pf-btn" type="button">主题：跟随系统</button>',
     '</div>',
-    '</div>',
-    '<div class="pf-verdict-row">',
-    `<div class="pf-verdict-card"><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${escapeHtml(verdict.status || 'SYNCED')}</span><span>${escapeHtml(verdict.summary || '')}</span></div>`,
-    `<div class="pf-chips">${chipsHtml}</div>`,
-    '</div>',
-    `<div class="pf-metrics">${metricsHtml}</div>`,
     '</header>',
-    '<nav class="pf-tabs" aria-label="Visual views">',
-    '<button class="pf-tab is-active" type="button" data-tab-target="tree">Domain Tree</button>',
-    '<button class="pf-tab" type="button" data-tab-target="flow">Flow Swimlanes</button>',
-    '<button class="pf-tab" type="button" data-tab-target="diff">Diff Overlay</button>',
-    '<button class="pf-tab" type="button" data-tab-target="prototypes">Prototypes</button>',
-    '</nav>',
+    `<div class="pf-nav-row"><nav class="pf-tabs" aria-label="视图切换">${tabsHtml}</nav></div>`,
     '<section class="pf-workspace">',
     '<div>',
     '<article class="pf-panel" data-tab-panel="tree">',
-    '<div class="pf-panel-head">',
-    '<h2 class="pf-panel-title">Domain -> Feature Layered Architecture</h2>',
-    '<div class="pf-controls">',
-    '<button class="pf-btn" type="button" data-zoom-action="in" data-zoom-target="vp-tree">+</button>',
-    '<button class="pf-btn" type="button" data-zoom-action="out" data-zoom-target="vp-tree">-</button>',
-    '<button class="pf-btn" type="button" data-zoom-action="reset" data-zoom-target="vp-tree">Reset</button>',
-    '<span class="scope-chip" data-zoom-label>100%</span>',
-    '<button class="pf-btn" type="button" data-followup-panel="Domain Tree">Follow-up Prompt</button>',
-    '</div>',
-    '</div>',
-    `<div id="vp-tree" class="pf-viewport">\n${renderDomainTreeSvg(model.tree || { width: 640, height: 360, domains: [], nodes: [], edges: [] })}\n</div>`,
+    `<div class="pf-panel-head"><h2 class="pf-panel-title">领域与模块分层架构</h2><div class="pf-controls">${zoomToolbar('vp-tree', '架构总览')}</div></div>`,
+    `<div id="vp-tree" class="pf-viewport">\n${renderDomainTreeSvg(tree)}\n</div>`,
     '</article>',
     '<article class="pf-panel" data-tab-panel="flow" hidden>',
-    '<div class="pf-panel-head">',
-    '<h2 class="pf-panel-title">Cross-Feature Actor Swimlanes &amp; Flow DAG</h2>',
-    '<div class="pf-controls">',
-    '<button class="pf-btn" type="button" data-zoom-action="in" data-zoom-target="vp-flow">+</button>',
-    '<button class="pf-btn" type="button" data-zoom-action="out" data-zoom-target="vp-flow">-</button>',
-    '<button class="pf-btn" type="button" data-zoom-action="reset" data-zoom-target="vp-flow">Reset</button>',
-    '<button class="pf-btn" type="button" data-followup-panel="Flow Swimlanes">Follow-up Prompt</button>',
-    '</div>',
-    '</div>',
-    `<div id="vp-flow" class="pf-viewport">\n${renderFlowDagSvg(model.flow || { width: 640, height: 280, lanes: [], nodes: [], edges: [] })}\n</div>`,
+    `<div class="pf-panel-head"><h2 class="pf-panel-title">跨功能角色泳道与流转 DAG</h2><div class="pf-controls">${zoomToolbar('vp-flow', '业务流转')}</div></div>`,
+    renderFlowBarHtml(flowsList),
+    `<div id="vp-flow" class="pf-viewport">\n${renderFlowDagSvg(flow)}\n</div>`,
     '</article>',
-    '<article class="pf-panel" data-tab-panel="diff" hidden>',
-    '<div class="pf-panel-head"><h2 class="pf-panel-title">Diff Impact Overlay</h2><button class="pf-btn" type="button" data-followup-panel="Diff Overlay">Follow-up Prompt</button></div>',
-    `<div class="pf-diff-grid">${diffRowsHtml || '<div class="pf-empty-box">No features registered.</div>'}</div>`,
-    '</article>',
-    '<article class="pf-panel" data-tab-panel="prototypes" hidden>',
-    '<div class="pf-panel-head"><h2 class="pf-panel-title">Sandboxed Prototypes &amp; Safe Links</h2><button class="pf-btn" type="button" data-followup-panel="Prototypes">Follow-up Prompt</button></div>',
-    `<div class="pf-proto-grid">${renderPrototypeSlot(model.prototypes)}</div>`,
-    '</article>',
+    isBrief ? `<article class="pf-panel" data-tab-panel="brief" hidden><div class="pf-panel-head"><h2 class="pf-panel-title">规划盘面与实时投影</h2><button class="pf-btn pf-btn-sm" type="button" data-followup-panel="规划盘面">复制追问</button></div>${renderBriefBoardHtml(model.briefData, verdict)}</article>` : '',
+    showDiffTab ? `<article class="pf-panel" data-tab-panel="diff" hidden><div class="pf-panel-head"><h2 class="pf-panel-title">变更与波及范围</h2><button class="pf-btn pf-btn-sm" type="button" data-followup-panel="变更影响">复制追问</button></div><div class="pf-scroll-panel">${renderDiffRowsHtml(tree.nodes)}</div></article>` : '',
+    showProtoTab ? `<article class="pf-panel" data-tab-panel="prototypes" hidden><div class="pf-panel-head"><h2 class="pf-panel-title">方案原型对比与安全链接</h2><div class="pf-controls">${renderPrototypeSwitcher(prototypes)}<button class="pf-btn pf-btn-sm" type="button" data-followup-panel="方案原型">复制追问</button></div></div><div id="pf-proto-grid" class="pf-proto-grid">${renderPrototypeSlot(prototypes)}</div></article>` : '',
     '</div>',
     '<aside class="pf-sidebar pf-panel">',
-    '<div class="pf-panel-head"><h2 class="pf-panel-title">Feature Index</h2><button class="pf-btn" type="button" data-followup-panel="Feature Index">Ask</button></div>',
-    `<div class="pf-catalog">${catalogHtml || '<div class="pf-empty-box">No mapped features yet.</div>'}</div>`,
+    '<div id="pf-dir-view" class="pf-side-view">',
+    '<div class="pf-panel-head"><h2 class="pf-panel-title">模块目录</h2><button class="pf-btn pf-btn-sm" type="button" data-followup-panel="模块目录">复制追问</button></div>',
+    `<div class="pf-catalog">${renderCatalogHtml(tree)}</div>`,
+    '</div>',
+    '<div id="pf-detail-view" class="pf-side-view" hidden>',
+    '<div class="pf-panel-head"><button id="insp-back" class="pf-btn pf-btn-sm" type="button">← 返回目录</button><div class="pf-chip-row"><span id="insp-domain" class="pf-pill"></span><span id="insp-diff" class="pf-pill" hidden></span><span id="insp-risk" class="pf-pill"></span></div></div>',
+    '<div class="pf-detail-body">',
+    '<h3 id="insp-title" class="pf-inspector-title">模块详情</h3>',
+    '<section class="pf-detail-sec"><div class="pf-sec-title">核心职责</div><p id="insp-desc" class="pf-inspector-desc"></p></section>',
+    '<section class="pf-detail-sec"><div class="pf-sec-title">上下游关系（点击可跳转）</div><div class="pf-inspector-group"><span class="pf-inspector-label">上游依赖（本模块依赖谁）</span><div id="insp-up" class="pf-chip-row"></div></div><div class="pf-inspector-group"><span class="pf-inspector-label">下游影响（谁依赖本模块）</span><div id="insp-down" class="pf-chip-row"></div></div></section>',
+    '<section class="pf-detail-sec"><div class="pf-sec-title">参与业务流</div><div id="insp-flows" class="pf-flow-refs"></div></section>',
+    '<section class="pf-detail-sec"><div class="pf-sec-title">关键文件与验证</div><div id="insp-entrypoints"></div><div id="insp-fold-area" class="pf-fold-area"></div></section>',
+    '<section class="pf-detail-actions"><button id="insp-center" class="pf-btn pf-btn-sm" type="button">画布居中定位</button><button class="pf-btn pf-btn-sm pf-btn-primary" type="button" data-followup-panel="模块详情">针对此模块追问</button></section>',
+    '</div>',
+    '</div>',
     '</aside>',
     '</section>',
     '</main>',
-    '<aside id="anchor-card" class="pf-anchor-card" hidden>',
-    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h3 id="anchor-title" class="pf-anchor-title">Anchor</h3><button id="anchor-close" class="pf-btn" type="button">Close</button></div>',
-    '<div id="anchor-meta" class="pf-subtitle"></div>',
-    '<ul id="anchor-list" class="pf-anchor-list"></ul>',
-    '</aside>',
     '<div id="walk-bar" class="walk-bar" hidden>',
-    '<button id="walk-prev" class="pf-btn" type="button">Prev</button>',
+    '<button id="walk-prev" class="pf-btn pf-btn-sm" type="button">上一步</button>',
     '<span id="walk-step-label" class="walk-bar-text"></span>',
-    '<button id="walk-next" class="pf-btn" type="button">Next</button>',
-    '<button id="walk-close" class="pf-btn" type="button">Close</button>',
+    '<button id="walk-next" class="pf-btn pf-btn-sm" type="button">下一步</button>',
+    '<button id="walk-close" class="pf-btn pf-btn-sm" type="button">退出导览</button>',
     '</div>',
     '<div id="prompt-dialog" class="pf-dialog" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-title" hidden>',
     '<div class="pf-dialog-card">',
-    '<div style="display:flex;justify-content:space-between;align-items:center;"><h3 id="prompt-dialog-title" style="margin:0;">Follow-up Prompt</h3><button id="prompt-close-btn" class="pf-btn" type="button">Esc</button></div>',
+    '<div style="display:flex;justify-content:space-between;align-items:center;"><h3 id="prompt-dialog-title" style="margin:0;font-size:0.95rem;">继续追问</h3><button id="prompt-close-btn" class="pf-btn pf-btn-sm" type="button">关闭</button></div>',
     '<textarea id="prompt-dialog-text" class="pf-dialog-area" readonly></textarea>',
-    '<div id="clipboard-fallback" class="pf-clipboard-fallback" hidden><span class="pf-subtitle">Clipboard unavailable on this context; select and copy below:</span><textarea id="clipboard-fallback-text" class="pf-dialog-area" style="min-height:80px;" readonly></textarea></div>',
-    '<div style="display:flex;justify-content:flex-end;gap:8px;"><button id="prompt-copy-btn" class="pf-btn pf-btn-primary" type="button">Copy Prompt</button></div>',
+    '<div id="clipboard-fallback" class="pf-clipboard-fallback" hidden><span class="pf-subtitle">当前环境不支持自动复制，请全选下方内容复制：</span><textarea id="clipboard-fallback-text" class="pf-dialog-area" style="min-height:80px;" readonly></textarea></div>',
+    '<div style="display:flex;justify-content:flex-end;gap:8px;"><button id="prompt-copy-btn" class="pf-btn pf-btn-primary" type="button">复制追问内容</button></div>',
     '</div>',
     '</div>',
-    '<button id="pf-selection-float" class="pf-btn pf-btn-primary pf-selection-float" type="button" hidden>Ask about selection</button>',
+    '<button id="pf-selection-float" class="pf-btn pf-btn-primary pf-selection-float" type="button" hidden>追问选中内容</button>',
     '<div id="pf-toast" class="pf-toast" hidden></div>',
-    `<script id="pf-visual-data" type="application/json">${serializedModel}</script>`,
+    `<script id="pf-visual-data" type="application/json">${escapeJsonForScript(compactClientModel)}</script>`,
     `<script>\n${buildClientScript()}\n</script>`,
     '</body>',
     '</html>',
     '',
-  ].join('\n')
+  ].filter((x) => x !== '').join('\n')
 
   return {
     html,

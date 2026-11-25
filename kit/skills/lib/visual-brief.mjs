@@ -266,23 +266,22 @@ function buildRenderablePrototypes(mainRoot, briefKey, sidecarPrototypes = []) {
   const { prototypesDir } = resolveBriefPaths(mainRoot, briefKey)
   const out = []
   for (const p of sidecarPrototypes) {
-    const label = `${p.title}${p.selected ? ' [SELECTED]' : ''}`
-    const caption = [p.sourceSkill ? `source: ${p.sourceSkill}` : '', p.note || ''].filter(Boolean).join(' | ')
+    const caption = [p.sourceSkill ? `来源：${p.sourceSkill}` : '', p.note || ''].filter(Boolean).join(' · ')
     if (p.kind === 'html' && p.stagedFile) {
       const stagedAbs = join(prototypesDir, basename(p.stagedFile))
       if (existsSync(stagedAbs)) {
         const buf = readFileSync(stagedAbs)
         if (buf.byteLength <= MAX_PROTOTYPE_FILE_BYTES) {
-          out.push({ title: label, kind: 'iframe', srcdoc: buf.toString('utf8'), caption })
+          out.push({ id: p.id, title: p.title, selected: Boolean(p.selected), kind: 'iframe', srcdoc: buf.toString('utf8'), caption })
           continue
         }
       }
     }
     if (p.kind === 'image' && p.stagedFile) {
-      out.push({ title: label, kind: 'img', src: `./${briefKey}-prototypes/${encodeURIComponent(basename(p.stagedFile))}`, caption })
+      out.push({ id: p.id, title: p.title, selected: Boolean(p.selected), kind: 'img', src: `./${briefKey}-prototypes/${encodeURIComponent(basename(p.stagedFile))}`, caption })
       continue
     }
-    out.push({ title: label, kind: 'url', url: p.target, caption })
+    out.push({ id: p.id, title: p.title, selected: Boolean(p.selected), kind: 'url', url: p.target, caption })
   }
   return out
 }
@@ -354,52 +353,68 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
   const featureList = Array.isArray(featureMap?.features) ? featureMap.features : []
   const domainAffected = norm.affectedDomains.length > 0 ? featureList.filter((f) => norm.affectedDomains.includes(f?.domain)).map((f) => f.id) : []
   const modifiedFeatureIds = uniqClean([...norm.affectedFeatures, ...domainAffected])
-  const verdictStatus = confirmedState === 'confirmed' ? 'CONFIRMED' : (confirmedState === 'stale' ? 'STALE' : 'DRAFT')
+  const verdictStatus = confirmedState === 'confirmed' ? '已确认' : (confirmedState === 'stale' ? '待重审' : '草稿')
   const verdictSummary = norm.verdict || (confirmedState === 'stale'
-    ? 'Brief changed after confirmation; review updates and re-confirm.'
-    : `${norm.title} (${norm.kind}) — ${mergedDecisions.length} decisions, ${mergedOpen.length + livePendingDecisions.length} open items, ${childSlices.length} slices.`)
+    ? '简报在确认后发生变更，请复核更新并重新确认。'
+    : `${norm.title} — ${mergedDecisions.length} 项已拍板，${mergedOpen.length + livePendingDecisions.length} 项待确认，${childSlices.length} 个切片。`)
 
   const walkthrough = [
-    ...norm.goals.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: 'Goal', detail })),
-    ...norm.flowDeltas.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: 'Flow Delta', detail })),
-    ...mergedDecisions.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: 'Decision', detail })),
-    ...childSlices.map((sl) => ({ targetId: modifiedFeatureIds[0] || '', title: `Slice: ${sl.key}`, detail: `${sl.rel} (${sl.status})` })),
-    ...mergedOpen.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: 'Open Question', detail })),
-    ...livePendingDecisions.map((pd) => ({ targetId: modifiedFeatureIds[0] || '', title: `Pending (${pd.file})`, detail: pd.text })),
+    ...norm.goals.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: '目标', detail })),
+    ...norm.flowDeltas.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: '流程变化', detail })),
+    ...mergedDecisions.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: '已拍板决策', detail })),
+    ...childSlices.map((sl) => ({ targetId: modifiedFeatureIds[0] || '', title: `切片：${sl.key}`, detail: `${sl.rel}（${sl.status}）` })),
+    ...mergedOpen.map((detail) => ({ targetId: modifiedFeatureIds[0] || '', title: '待确认问题', detail })),
+    ...livePendingDecisions.map((pd) => ({ targetId: modifiedFeatureIds[0] || '', title: `待拍板（${pd.file}）`, detail: pd.text })),
   ]
 
+  const masterPrdInfo = matchingMasterPrd ? { rel: matchingMasterPrd.rel, status: matchingMasterPrd.status, approved: isPlanDocApproved(matchingMasterPrd) } : null
   const visualModel = buildVisualModel({
     featureMap,
     diffOverlay: { modified: modifiedFeatureIds, changedFiles: topicAnchors },
     mode: 'visual-brief',
-    title: `${norm.title} — Living Visual Brief`,
+    title: `${norm.title} — 实时规划简报`,
     briefSpec: {
       repoName: norm.title,
-      title: `${norm.title} — Living Visual Brief`,
+      title: `${norm.title} — 实时规划简报`,
       verdict: { status: verdictStatus, tone: confirmedState === 'confirmed' ? 'pass' : 'warn', summary: verdictSummary },
       scopeChips: [
-        `brief:${norm.briefKey}`, `kind:${norm.kind}`, `state:${confirmedState}`, `fmap:${featureMapSource}`,
-        ...(norm.parentBriefKey ? [`parent:${norm.parentBriefKey}`] : []),
-        ...(childSlices.length > 0 ? [`slices:${childSlices.filter((s) => s.done).length}/${childSlices.length}`] : []),
-        `protos:${norm.prototypes.length}`,
+        `简报:${norm.briefKey}`, `类型:${norm.kind}`, `状态:${verdictStatus}`, `拓扑:${featureMapSource}`,
+        ...(norm.parentBriefKey ? [`父简报:${norm.parentBriefKey}`] : []),
+        ...(childSlices.length > 0 ? [`切片:${childSlices.filter((s) => s.done).length}/${childSlices.length}`] : []),
+        `原型:${norm.prototypes.length}`,
       ],
       metrics: [
-        { label: 'State', value: verdictStatus },
-        { label: 'Affected', value: String(modifiedFeatureIds.length) },
-        { label: 'Decisions', value: String(mergedDecisions.length) },
-        { label: 'Open', value: String(mergedOpen.length + livePendingDecisions.length) },
-        { label: 'Slices', value: `${childSlices.filter((s) => s.done).length}/${childSlices.length}` },
-        { label: 'Prototypes', value: String(norm.prototypes.length) },
+        { label: '状态', value: verdictStatus },
+        { label: '受影响模块', value: String(modifiedFeatureIds.length) },
+        { label: '已拍板', value: String(mergedDecisions.length) },
+        { label: '待确认', value: String(mergedOpen.length + livePendingDecisions.length) },
+        { label: '切片进度', value: `${childSlices.filter((s) => s.done).length}/${childSlices.length}` },
+        { label: '方案原型', value: String(norm.prototypes.length) },
       ],
       walkthrough: walkthrough.length > 0 ? walkthrough : undefined,
       prototypes: buildRenderablePrototypes(effMain, norm.briefKey, norm.prototypes),
+      briefData: {
+        kind: norm.kind,
+        confirmedState,
+        verdict: verdictSummary,
+        goals: norm.goals,
+        nonGoals: mergedNonGoals,
+        flowDeltas: norm.flowDeltas,
+        masterPrd: masterPrdInfo,
+        childSlices,
+        activeWorktrees,
+        mergedDecisions,
+        mergedOpen,
+        pendingDecisions: livePendingDecisions,
+        critiqueRounds: liveCritiqueRounds,
+      },
     },
   })
 
   return {
     sidecar: norm, briefFingerprint, confirmedState, featureMapSource, featureMapSha256,
     liveProjection: {
-      masterPrd: matchingMasterPrd ? { rel: matchingMasterPrd.rel, status: matchingMasterPrd.status, approved: isPlanDocApproved(matchingMasterPrd) } : null,
+      masterPrd: masterPrdInfo,
       childSlices, sliceGraphOk: sliceEval.ok, sliceGraphErrors: sliceEval.errors.length,
       activeWorktrees, pendingDecisions: livePendingDecisions, critiqueRounds: liveCritiqueRounds,
       mergedDecisions, mergedNonGoals, mergedOpen,

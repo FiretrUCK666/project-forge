@@ -11,6 +11,7 @@ import { gitRun, posixPath, sha256Text } from './git.mjs'
 import { validateIssueBodyQuality } from './issue-quality.mjs'
 import { hydrateIssueBody } from './issue-template-hydrate.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
+import { readTaskLedger, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
 import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from './platform.mjs'
 import { createTaskBackend } from './task-backend.mjs'
 
@@ -460,6 +461,26 @@ export function evaluateNoEscalateExemption({ noEscalate = false, reason = '' } 
   return { ok: true, skip: true, reason: clean }
 }
 
+async function recordEscalatedIssueIfTracked(repoRoot, item, issueNumber) {
+  const num = Number(issueNumber)
+  const baseRoot = item?.mainRoot ?? repoRoot
+  if (!baseRoot || !item?.taskId || !Number.isInteger(num) || num <= 0) return
+  const isE2e = Boolean(item.e2eBlocking || (Array.isArray(item.labels) && item.labels.includes('e2e-fail')))
+  if (!isE2e) return
+  try {
+    const ledgerRoot = await resolveLedgerRoot(baseRoot)
+    const cur = readTaskLedger(ledgerRoot, item.taskId)
+    if (!cur) return
+    await updateTaskLedger(ledgerRoot, item.taskId, (latest) => {
+      const prev = Array.isArray(latest?.escalatedIssues) ? latest.escalatedIssues : []
+      return {
+        ...(latest ?? cur),
+        escalatedIssues: [...new Set([...prev, num].map(Number).filter((n) => Number.isInteger(n) && n > 0))],
+      }
+    })
+  } catch { /* ledger record best-effort */ }
+}
+
 /**
  * 统一 Escalation 建单出口：带未闭环标题去重、质量底线校验与远端写入门禁，适配三态后端。
  */
@@ -561,6 +582,7 @@ export async function escalateToBackend({
               await activeBackend.postComment({ repo: resolvedRepo, number: dup.number, body: progressBody, deduplicate: true })
             } catch { /* ignore progress comment fallback error */ }
           }
+          await recordEscalatedIssueIfTracked(repoRoot, item, dup.number)
           return {
             ok: true,
             deduplicated: true,
@@ -594,6 +616,7 @@ export async function escalateToBackend({
       error: res?.error ?? 'Issue create failed',
     }
   }
+  await recordEscalatedIssueIfTracked(repoRoot, item, res.number)
   return {
     ok: true,
     tier: payload.escalationTier,

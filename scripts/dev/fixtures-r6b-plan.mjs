@@ -364,7 +364,7 @@ export function registerR6bPlanCases(cases) {
         role: 'implementer',
         ledger: { taskId: 'c7-t', specFile: 'docs/specs/261120-c7-spec.md', branch: 'feat/c7-t', baseBranch: 'main' },
       })
-      if (!implHp.prompt.includes('doc-locate.mjs --file "docs/specs/261120-c7-spec.md" --section "设计方案"')
+      if (!implHp.prompt.includes('doc-locate.mjs --file "docs/specs/261120-c7-spec.md" --section "二、设计方案与契约变更"')
         || implHp.prompt.includes('设计细节第 25 步')) {
         return `implementer 长设计节未转为 doc-locate 指针：\n${implHp.prompt}`
       }

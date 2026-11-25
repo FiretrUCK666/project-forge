@@ -83,7 +83,7 @@ export const INJECTIONS_PARALLEL_DISPATCH = [
     what: 'flow-merge 吞掉多目标写回失败而不记录 ledger.syncFailures',
     file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
     from: '  if (syncFailures.length > 0) {\n    ledger.syncFailures = [...(Array.isArray(ledger.syncFailures) ? ledger.syncFailures : []), ...syncFailures]\n  }',
-    to: '  if (false && syncFailures.length > 0) {\n    ledger.syncFailures = []\n  }',
+    to: '  if (false && syncFailures.length > 0) {\n    ledger.syncFailures = []\n  }\n  ledger.syncFailures = []',
     expect: 'C7a：外部 PR 受理、SPEC issue 继承',
   },
   {

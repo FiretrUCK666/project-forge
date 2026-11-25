@@ -246,7 +246,9 @@ export async function evaluatePlanNextState({
   const auditRes = typeof auditDocFn === 'function' ? auditDocFn({ repoRoot: selectedDoc.root, file: relDoc }) : null
   const auditNonPendingErrors = (auditRes?.errors ?? []).filter((e) => e.code !== 'BLOCKED_PENDING_DECISIONS')
 
-  const continueActive = Boolean(critiqueEntry?.continued?.active && critiqueEntry.continued.sha === currentSha)
+  const continueActive = Boolean(critiqueEntry?.continued?.active)
+  const continueFromSha = critiqueEntry?.continued?.fromSha ?? critiqueEntry?.continued?.sha ?? null
+  const continueShaUnchanged = Boolean(continueActive && (!continueFromSha || continueFromSha === currentSha))
   const rejectUnfixed = Boolean(lastRound?.verdict === 'rejected' && (!lastRound.sha || lastRound.sha === currentSha))
   const stopLossActive = Boolean(lastRound?.stopLossTriggered && readiness.blocked && !continueActive)
 
@@ -293,18 +295,18 @@ export async function evaluatePlanNextState({
     blockingReasons.push('STOP_LOSS_ESCALATE')
     nextAction = `规划 Critique 已触发第 ${lastRound?.round ?? 3} 轮停损熔断；须由人类审阅后决定 critique-override 放行或 critique-continue 带修改意见打回重写。`
     command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-override --file "${relDoc}" --human-approved --reason "<维护者裁决原因>"`
-  } else if (continueActive || rejectUnfixed) {
+  } else if (continueShaUnchanged || rejectUnfixed) {
     phase = 'needs-revision'
     ownerRole = 'planner'
-    blockingReasons.push(continueActive ? 'HUMAN_REVISION_REQUESTED' : 'CRITIQUE_REJECTED')
-    nextAction = continueActive
+    blockingReasons.push(continueShaUnchanged ? 'HUMAN_REVISION_REQUESTED' : 'CRITIQUE_REJECTED')
+    nextAction = continueShaUnchanged
       ? '收到人类修改意见：优先续聊/发消息给既有 planner 子代理先读最新文档与意见后修订，重跑 audit 并由新独立 critic 复核。'
       : `Round ${lastRound?.round ?? 1} 独立 Critique 退回修改：优先续聊既有 planner 子代理逐条修清 Must Fix 后重跑 audit，再换新 critic 复审。`
     command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${relDoc}"`
-  } else if (readiness.blocked) {
+  } else if (readiness.blocked || continueActive) {
     phase = 'needs-critique'
     ownerRole = 'critic'
-    blockingReasons.push(readiness.basis || 'CRITIQUE_UNREADY')
+    blockingReasons.push(readiness.basis || (continueActive ? 'HUMAN_REVISION_REQUESTED' : 'CRITIQUE_UNREADY'))
     nextAction = `请新建独立只读 critic 子代理（排除：${excludedReviewers.join(', ') || '作者'}）运行 critique-scope 并按事实给出 Round ${nextRound} 结论。`
     command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${relDoc}" --round ${nextRound}`
   } else if (!isPlanDocApproved(selectedDoc)) {
@@ -388,6 +390,7 @@ export async function evaluatePlanNextState({
       excludedReviewers,
       findings: reviewFindings,
       stopLossActive,
+      continueActive,
       readiness,
     },
     reviewChoices,

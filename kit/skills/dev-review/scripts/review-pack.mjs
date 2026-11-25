@@ -80,7 +80,7 @@ function printHelp() {
     '  --task <id> --round <N> --verdict pass|changes --reviewer-id <id> --review-token <token>',
     '  [--implementer-id <id>] [--must-fix <textOrJson>...] [--should-fix <text>...]',
     '  [--pre-existing <text>...] [--disposition "<idOrFp>:<outcome>"...]',
-    '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
+    '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>] [--summary <text>]',
     '  [--enforce-gates] [--no-enforce-gates] [--evidence <text>] [--artifact <path>]... [--e2e-evidence <text>] [--visual-blocked-reason <text>] [--visual-checked] [--visual-evidence <text>] [--no-escalate --reason <text>] [--human-approved] [--reason <text>]',
     '',
     `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.FACT}=BLOCKED_EMPIRICAL_FIRST/DIRTY_RESIDUE/UNTRUSTED_HAZARD, ${EXIT.HUMAN}=STOP_LOSS_ESCALATE`,
@@ -156,7 +156,14 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
   }
 
   let slotSyncRes = null
-  if (syncSlot) {
+  const hasExistingReviewSlot = Boolean(
+    mode === 'task' && task && (
+      (task.reviewWorktreePath && existsSync(resolve(mainRoot, task.reviewWorktreePath)))
+      || (task.taskId && existsSync(join(mainRoot, '.worktrees', `review-${task.taskId}`)))
+    ),
+  )
+  const shouldPinExistingSlot = Boolean(opts['include-diff'] && hasExistingReviewSlot && !opts['reset-review-slot'])
+  if (syncSlot && !shouldPinExistingSlot) {
     const dirtyCheck = await checkDirtyFaultResidueBeforeSync({ mainRoot, gitDir: roots.gitDir, opts, task, mode, prNo })
     if (dirtyCheck.blocked) {
       return {
@@ -337,7 +344,7 @@ async function main(argv = process.argv.slice(2)) {
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
         'review-token', 'phase',
         'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
-        'reason', 'e2e-evidence', 'visual-evidence', 'visual-blocked-reason', 'agent', 'evidence',
+        'summary', 'reason', 'e2e-evidence', 'visual-evidence', 'visual-blocked-reason', 'agent', 'evidence',
       ],
       multiFlags: ['cmd', 'artifact', 'must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
       usageHint: `review-pack.mjs [${SUBCOMMANDS.join('|')}] [dir] [options]`,

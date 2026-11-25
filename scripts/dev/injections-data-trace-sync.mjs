@@ -57,8 +57,8 @@ export const INJECTIONS_TRACE_SYNC = [
     id: 'I416',
     what: 'flow-context syncTaskDocsSafe 跳过后绑 --issue 自动 plan-backfill',
     file: 'kit/skills/dev-flow/scripts/flow-context.mjs',
-    from: '    if (postHocIssues.length > 0 && postFiles.length > 0 && !overrides.skipPlanBackfill) {',
-    to: '    if (false && postHocIssues.length > 0 && postFiles.length > 0 && !overrides.skipPlanBackfill) {',
+    from: '    if (targetSyncIssues.length > 0 && postFiles.length > 0 && !overrides.skipPlanBackfill) {',
+    to: '    if (false && targetSyncIssues.length > 0 && postFiles.length > 0 && !overrides.skipPlanBackfill) {',
     expect: 'trace-sync-C1b',
   },
 ]

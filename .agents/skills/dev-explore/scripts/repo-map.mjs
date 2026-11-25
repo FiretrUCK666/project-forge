@@ -16,7 +16,7 @@ import {
   gitLsFilesTextAndCode, gitRun, isMainModule, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots,
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { createExploredEvidence, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { createExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { discoverWorkspacePackages, parseAgentsProfile } from '../../lib/profile.mjs'
 import { TEST_FILE_RE, isTestOrFixtureFile } from '../../lib/static-gates.mjs'
 import { extractSymbols, summarizeSymbolCoverage } from '../../lib/symbol-index.mjs'
@@ -404,7 +404,7 @@ async function main(argv) {
         by: cli.opts.by ?? 'repo-map',
         source: 'repo-map',
       })
-      writeTaskLedger(roots.mainRoot, ledger)
+      await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), explored: ledger.explored }), { createIfMissing: true })
     }
     if (cli.json) {
       process.stdout.write(`${JSON.stringify(map, null, 2)}\n`)

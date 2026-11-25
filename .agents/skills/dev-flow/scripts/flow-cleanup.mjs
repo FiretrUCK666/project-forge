@@ -5,8 +5,8 @@
  */
 
 import { EXIT } from '../../lib/exit-codes.mjs'
-import { existsSync } from 'node:fs'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { existsSync, rmSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from '../../lib/doc-slice-graph.mjs'
@@ -18,7 +18,7 @@ import {
   parseWorktreeListPorcelain, posixPath, resolveDefaultBranch, samePath,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { collectTaskLivenessBuckets, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { collectTaskLivenessBuckets, resolveTaskContext, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite,
 } from '../../lib/platform.mjs'
@@ -496,22 +496,55 @@ export async function handleAbort(opts, roots) {
   if (!rmOut.ok) return { exitCode: rmOut.exitCode }
   const { removedWorktrees } = rmOut
   if (ledger.branch && !opts['keep-branch'] && ledger.branch !== ledger.baseBranch) {
-    const fastAbrBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
-    const cur = fastAbrBr ? { ok: true, stdout: fastAbrBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-    const abortBase = ledger.baseBranch || await resolveDefaultBranch(roots.mainRoot, { strict: true })
-    if (cur.ok && cur.stdout.trim() === ledger.branch && abortBase) await gitRun(roots.mainRoot, ['switch', abortBase])
-    await gitRun(roots.mainRoot, opts.force ? ['branch', '-D', ledger.branch] : ['branch', '-d', ledger.branch])
+    const hasBr = (roots.gitDir && !existsSync(join(roots.gitDir, 'reftable')))
+      ? Boolean(resolveRefShaFast(roots.gitDir, `refs/heads/${ledger.branch}`))
+      : (await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${ledger.branch}`])).ok
+    if (hasBr) {
+      const fastAbrBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
+      const cur = fastAbrBr ? { ok: true, stdout: fastAbrBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+      const abortBase = ledger.baseBranch || await resolveDefaultBranch(roots.mainRoot, { strict: true })
+      if (cur.ok && cur.stdout.trim() === ledger.branch && abortBase) await gitRun(roots.mainRoot, ['switch', abortBase])
+      const delBr = await gitRun(roots.mainRoot, opts.force ? ['branch', '-D', ledger.branch] : ['branch', '-d', ledger.branch])
+      if (!delBr.ok) {
+        const msg = `BLOCKED_BRANCH_DELETE_FAILED: 删除分支 ${ledger.branch} 失败（若包含未合并提交请传 --force 或 --keep-branch）：${(delBr.stderr || delBr.stdout || '').trim()}`
+        if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_BRANCH_DELETE_FAILED', taskId, branch: ledger.branch, reason: msg }, null, 2)}\n`)
+        process.stderr.write(`${msg}\n`)
+        return { exitCode: EXIT.FACT }
+      }
+    }
   }
   const verifyScratchCleanup = await cleanupTaskVerifyScratch(roots, taskId, ledger, 'flow-abort')
-  await releaseGitClaimLease(roots.mainRoot, taskId, { role: ledger.role, opts })
+  const removedArtifacts = []
+  const cleanFileOrDir = (absTarget, label) => {
+    if (!absTarget || !existsSync(absTarget)) return
+    rmSync(absTarget, { recursive: true, force: true })
+    removedArtifacts.push(label)
+  }
+  const safeTaskId = sanitizeTaskId(taskId)
+  if (roots.gitDir) {
+    const taskStateDir = join(roots.gitDir, 'project-forge-flow', 'tasks', safeTaskId)
+    cleanFileOrDir(join(taskStateDir, 'evidence.json'), 'evidence.json')
+    cleanFileOrDir(join(taskStateDir, 'review-empirical.json'), 'review-empirical.json')
+  }
+  const privDirs = new Set([
+    ledger.privateDocsDir ? resolve(roots.mainRoot, ledger.privateDocsDir) : null,
+    join(roots.mainRoot, '.worktrees', '.state', 'private-docs', taskId),
+    join(roots.mainRoot, '.worktrees', '.state', 'private-docs', safeTaskId),
+  ].filter(Boolean))
+  for (const pd of privDirs) cleanFileOrDir(pd, 'private-docs')
+
+  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
+  const remoteUrls = parseRemoteUrls(remoteRes.stdout)
+  await releaseGitClaimLease(roots.mainRoot, taskId, { remoteUrls, role: ledger.role, opts })
   ledger.status = 'aborted'
   ledger.abortedAt = new Date().toISOString()
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
-  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees, verifyScratchCleanup }, null, 2)}\n`)
+  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees, verifyScratchCleanup, removedArtifacts }, null, 2)}\n`)
   else {
     process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
     printUnmountedLinksText(removedWorktrees)
   }
-  return { exitCode: EXIT.OK, removedWorktrees, verifyScratchCleanup }
+  return { exitCode: EXIT.OK, removedWorktrees, verifyScratchCleanup, removedArtifacts }
 }

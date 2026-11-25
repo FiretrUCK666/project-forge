@@ -377,6 +377,10 @@ export function createDefaultLedger(partial = {}) {
     explored: normalizeExploredEvidence(partial.explored),
     /** 历史实施者集合（含接管前的原认领人），供三处自审判定按「历史 ∪ 当前」比对。 */
     previousImplementers: Array.isArray(partial.previousImplementers) ? partial.previousImplementers.map(String) : [],
+    /** 关联的 E2E/阻塞升级工单号（flow merge 合并后自动关闭仍 OPEN 的升级工单）。 */
+    escalatedIssues: Array.isArray(partial.escalatedIssues)
+      ? [...new Set(partial.escalatedIssues.map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+      : [],
     taskId,
   }
 }

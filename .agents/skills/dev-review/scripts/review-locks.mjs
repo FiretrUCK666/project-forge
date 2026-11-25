@@ -23,7 +23,7 @@ import { resolveHostMode } from '../../lib/harness-context.mjs'
 import { verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
-import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence, runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
+import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence, resolveEffectiveBaseSha, runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
 import { EXIT, hasCommits } from './review-diff.mjs'
 
 export { checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId }
@@ -527,7 +527,7 @@ export async function evaluatePassBlockers({
   let filesRes = null
   let changedFiles = []
   if (targetRoot && (await hasCommits(targetRoot))) {
-    const ref = ledger?.baseSha || ledger?.baseBranch
+    const ref = await resolveEffectiveBaseSha(targetRoot, ledger, { gitCommonDir: gitDir })
     filesRes = ref ? await gitDiffRawEntriesAndText(targetRoot, `${ref}..HEAD`) : { ok: false, entries: [] }
     changedFiles = filesRes.ok ? filesRes.entries.filter((e) => e.status !== 'D').map((e) => e.file) : []
   }

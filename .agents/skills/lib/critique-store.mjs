@@ -11,7 +11,7 @@ import path, { resolve } from 'node:path'
 import { EXIT } from './exit-codes.mjs'
 import { resolveGitDirFast } from './git-fast.mjs'
 import {
-  posixPath, readJsonSafe, readTextSafe, sha256Text, withFileLockSync, writeJsonAtomic,
+  posixPath, readJsonSafe, readTextSafe, sha256Text, withFileLock, withFileLockSync, writeJsonAtomic,
 } from './git.mjs'
 import { readTaskLedger, sanitizeTaskId, updateTaskLedger, writeTaskLedger } from './ledger.mjs'
 
@@ -19,23 +19,78 @@ function makeStoreError(code, exitCode, message) {
   return Object.assign(new Error(message), { code, exitCode })
 }
 
+function resolveCommonGitDir(rawGitDir) {
+  if (!rawGitDir || !existsSync(rawGitDir)) return null
+  const resolved = resolve(rawGitDir)
+  const cdFile = path.join(resolved, 'commondir')
+  if (!existsSync(cdFile)) return resolved
+  const common = resolve(resolved, (readTextSafe(cdFile) ?? '').trim())
+  return existsSync(common) ? common : resolved
+}
+
 export function resolveEffectiveRoots(repoRoot, mainRoot, gitDir) {
   const rawGitDir = gitDir && existsSync(resolve(gitDir))
     ? resolve(gitDir)
     : (resolveGitDirFast(repoRoot) ?? (mainRoot && mainRoot !== repoRoot ? resolveGitDirFast(mainRoot) : null))
-  const effGitDir = rawGitDir && existsSync(rawGitDir) ? rawGitDir : null
+  const effGitDir = resolveCommonGitDir(rawGitDir)
   let effMainRoot = mainRoot && mainRoot !== repoRoot ? resolve(mainRoot) : resolve(repoRoot)
-  if ((!mainRoot || mainRoot === repoRoot) && effGitDir) {
-    const cdFile = path.join(effGitDir, 'commondir')
-    const common = existsSync(cdFile) ? resolve(effGitDir, (readTextSafe(cdFile) ?? '').trim()) : effGitDir
-    if (path.basename(common) === '.git') effMainRoot = path.dirname(common)
+  if ((!mainRoot || mainRoot === repoRoot) && effGitDir && path.basename(effGitDir) === '.git') {
+    effMainRoot = path.dirname(effGitDir)
   }
   return { effMainRoot, effGitDir }
 }
 
 export function sidecarCritiqueFile(repoRoot, effectiveGitDir) {
-  if (effectiveGitDir) return path.join(effectiveGitDir, 'project-forge-flow', 'plan-critique-state.json')
+  const commonGitDir = resolveCommonGitDir(effectiveGitDir) ?? effectiveGitDir
+  if (commonGitDir) return path.join(commonGitDir, 'project-forge-flow', 'plan-critique-state.json')
   return path.join(os.tmpdir(), 'pf-plan-critique', `${sha256Text(resolve(repoRoot)).slice(0, 16)}.json`)
+}
+
+function mergeCritiqueEntries(sidecarEntry, ledgerEntry) {
+  if (!sidecarEntry) return ledgerEntry ?? null
+  if (!ledgerEntry) return sidecarEntry
+  const roundsMap = new Map()
+  for (const r of Array.isArray(sidecarEntry.rounds) ? sidecarEntry.rounds : []) {
+    if (r && typeof r === 'object') roundsMap.set(Number(r.round) || 0, r)
+  }
+  for (const r of Array.isArray(ledgerEntry.rounds) ? ledgerEntry.rounds : []) {
+    if (r && typeof r === 'object') roundsMap.set(Number(r.round) || 0, r)
+  }
+  const rounds = [...roundsMap.values()].sort((a, b) => (Number(a.round) || 0) - (Number(b.round) || 0))
+  const findingsSeen = new Set()
+  const findings = []
+  for (const f of [...(sidecarEntry.findings ?? []), ...(ledgerEntry.findings ?? [])]) {
+    if (!f || typeof f !== 'object') continue
+    const k = `${f.round ?? ''}:${f.verdict ?? ''}:${(Array.isArray(f.items) ? f.items : [f.text]).join('|')}`
+    if (!findingsSeen.has(k)) { findingsSeen.add(k); findings.push(f) }
+  }
+  const structMap = new Map()
+  for (const sf of Array.isArray(sidecarEntry.structuredFindings) ? sidecarEntry.structuredFindings : []) {
+    if (sf?.id) structMap.set(sf.id, sf)
+  }
+  for (const sf of Array.isArray(ledgerEntry.structuredFindings) ? ledgerEntry.structuredFindings : []) {
+    if (sf?.id) structMap.set(sf.id, sf)
+  }
+  const sideContAt = Date.parse(sidecarEntry.continued?.at ?? '') || 0
+  const ledContAt = Date.parse(ledgerEntry.continued?.at ?? '') || 0
+  const continued = sideContAt > ledContAt
+    ? sidecarEntry.continued
+    : (ledgerEntry.continued ?? sidecarEntry.continued)
+  const sideUp = Date.parse(sidecarEntry.updatedAt ?? '') || 0
+  const ledUp = Date.parse(ledgerEntry.updatedAt ?? '') || 0
+  return {
+    ...sidecarEntry,
+    ...ledgerEntry,
+    rounds,
+    findings,
+    structuredFindings: [...structMap.values()],
+    roundSnapshots: { ...(sidecarEntry.roundSnapshots ?? {}), ...(ledgerEntry.roundSnapshots ?? {}) },
+    ...(continued ? { continued } : {}),
+    override: ledgerEntry.override ?? sidecarEntry.override ?? null,
+    skipApproved: ledgerEntry.skipApproved ?? sidecarEntry.skipApproved ?? null,
+    anchors: ledgerEntry.anchors ?? sidecarEntry.anchors ?? null,
+    updatedAt: sideUp > ledUp ? sidecarEntry.updatedAt : (ledgerEntry.updatedAt ?? sidecarEntry.updatedAt),
+  }
 }
 
 export function findCritiqueEntryInMap(map, relDoc) {
@@ -53,22 +108,22 @@ export function findCritiqueEntryInMap(map, relDoc) {
   return null
 }
 
-/** 同步读取规划内审条目（优先任务账本 `ledger.planCritique`，无账本时回退 sidecar）。 */
+/** 同步读取规划内审条目（合并任务账本 `ledger.planCritique` 与共享 Git commondir sidecar 历史）。 */
 export function readPlanCritiqueEntrySync({ repoRoot, mainRoot = repoRoot, gitDir = null, taskId = null, fmData = {}, relDoc }) {
   const { effMainRoot, effGitDir } = resolveEffectiveRoots(repoRoot, mainRoot, gitDir)
   const rawTaskId = taskId ?? fmData?.task_id ?? null
   const effTaskId = rawTaskId ? sanitizeTaskId(rawTaskId) : null
-  if (effMainRoot && effTaskId) {
-    const ledger = readTaskLedger(effMainRoot, effTaskId)
-    const hit = findCritiqueEntryInMap(ledger?.planCritique, relDoc)
-    if (hit) {
-      return { entry: hit, ledger, gitDir: effGitDir, mainRoot: effMainRoot, taskId: effTaskId }
-    }
-    if (ledger) return { entry: null, ledger, gitDir: effGitDir, mainRoot: effMainRoot, taskId: effTaskId }
-  }
   const sidecar = sidecarCritiqueFile(repoRoot, effGitDir)
-  const data = readJsonSafe(sidecar, null)
-  return { entry: findCritiqueEntryInMap(data, relDoc), ledger: null, gitDir: effGitDir, mainRoot: effMainRoot, taskId: effTaskId }
+  const sidecarData = readJsonSafe(sidecar, null)
+  const sidecarHit = findCritiqueEntryInMap(sidecarData, relDoc)
+  let ledger = null
+  let ledgerHit = null
+  if (effMainRoot && effTaskId) {
+    ledger = readTaskLedger(effMainRoot, effTaskId)
+    ledgerHit = findCritiqueEntryInMap(ledger?.planCritique, relDoc)
+  }
+  const merged = mergeCritiqueEntries(sidecarHit, ledgerHit)
+  return { entry: merged, ledger, gitDir: effGitDir, mainRoot: effMainRoot, taskId: effTaskId }
 }
 
 /** 按 task_id 从任务账本读取规划内审条目；无账本时回退到隔离 sidecar。 */
@@ -128,11 +183,13 @@ export async function persistPlanCritiqueEntry({ repoRoot, mainRoot = repoRoot, 
     }
   }
   const sidecar = sidecarCritiqueFile(repoRoot, effGitDir)
-  const cur = (await readJsonSafe(sidecar, {})) ?? {}
-  await writeJsonAtomic(sidecar, { ...cur, [relDoc]: entry })
-  const readBack = await readJsonSafe(sidecar, null)
-  if (!readBack?.[relDoc] || readBack[relDoc].updatedAt !== entry.updatedAt) {
-    throw makeStoreError('PLAN_CRITIQUE_PERSIST_FAILED', EXIT.ACTION, `规划内审 sidecar (${relDoc}) 回读校验失败`)
-  }
-  return { storedIn: 'sidecar', entry: readBack[relDoc] }
+  return withFileLock(`${sidecar}.lock`, async () => {
+    const cur = readJsonSafe(sidecar, {}) ?? {}
+    writeJsonAtomic(sidecar, { ...cur, [relDoc]: entry })
+    const readBack = readJsonSafe(sidecar, null)
+    if (!readBack?.[relDoc] || readBack[relDoc].updatedAt !== entry.updatedAt) {
+      throw makeStoreError('PLAN_CRITIQUE_PERSIST_FAILED', EXIT.ACTION, `规划内审 sidecar (${relDoc}) 回读校验失败`)
+    }
+    return { storedIn: 'sidecar', entry: readBack[relDoc] }
+  })
 }

@@ -379,6 +379,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
     const mStaleHead = await handleMerge({ task: 't-t2' }, roots)
     if (mStaleHead.exitCode === 0) return '新提交仅 verify 未复审却被 merge 放行了（reviewPassedHead 校验失效）'
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--task', 't-t2', '--json'], { cwd: dir })
 
     // Round 2 changes 必须清空 reviewPassedHead -> merge 阻断；再提交新 HEAD 触发 Round 3 stop-loss 后 override 解锁
     await handleRecord({ task: 't-t2', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-t2', 2) }, roots)
@@ -390,6 +391,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 4\n')
     gitCommitFast(implAbs, 'feat: v4', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--task', 't-t2', '--json'], { cwd: dir })
     const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-c', 'review-token': await issueTokenFor(dir, 't-t2', 3) }, roots)
     if (r3Stop !== 4) return `Round 3 未触发 STOP_LOSS_ESCALATE (exit=4)：${r3Stop}`
     const ov = await handleOverride({ task: 't-t2', 'human-approved': true, reason: 'human verified' }, roots)

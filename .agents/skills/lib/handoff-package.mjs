@@ -1,34 +1,26 @@
 
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { buildContextBrief, extractDocPaths } from './context-brief.mjs'
 import { extractCriteria } from './criteria-lock.mjs'
-import { readTextSafe } from './git.mjs'
+import { posixPath, readTextSafe } from './git.mjs'
 import { parseDocFrontmatter } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
 
 /**
- * 抽出「设计方案 / 契约变更」整节正文。
- *
- * ## 为什么这一节必须进交接包
- *
- * 交接包此前只给三样：验收标准（做什么）、影响路径（能改哪）、非目标（别顺手做什么）。
- * 看起来齐了，其实缺的是**怎么做**——而那一节恰恰写着「改哪个函数、签名怎么变、
- * 数据从哪来、失败怎么降级」。缺了它，实现子代理只能自己重新推导一遍，
- * 推错了就是「每条判据都过、实现却不对」。
- *
- * 这也解释了为什么 SPEC 会越来越厚：写的时候知道不写清就没人知道怎么做。
+ * 抽出「设计方案 / 契约变更」整节正文与实际匹配的二级标题名，供动态 `--section` 指针命令使用。
  */
-function extractDesignSection(text) {
-  const body = String(text ?? "").replace(/\r\n/g, "\n")
-  const matches = [...body.matchAll(/^##[^\n]*(?:设计方案|方案与契约|设计说明|技术方案|技术设计|接口契约)[^\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/gm)]
-  if (matches.length === 0) return ""
-  // 去掉 section 标记与 HTML 注释，交接包里不需要它们
-  return matches
-    .map((m) => m[1].replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim())
+function extractDesignSectionWithHeading(text) {
+  const body = String(text ?? '').replace(/\r\n/g, '\n')
+  const matches = [...body.matchAll(/^##\s*([^\n]*(?:设计方案|方案与契约|设计说明|技术方案|技术设计|接口契约)[^\n]*)\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/gm)]
+  if (matches.length === 0) return { text: '', heading: null }
+  const firstHeading = String(matches[0][1] ?? '').trim()
+  const content = matches
+    .map((m) => m[2].replace(/<!--[\s\S]*?-->/g, '').replace(/\n{3,}/g, '\n\n').trim())
     .filter(Boolean)
-    .join("\n\n")
+    .join('\n\n')
+  return { text: content, heading: firstHeading || null }
 }
 
 /**
@@ -212,8 +204,76 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     ...(Array.isArray(todoFm?.data?.scope_files) ? todoFm.data.scope_files : []),
     ...(Array.isArray(prdFm?.data?.scope_files) ? prdFm.data.scope_files : []),
   ].map((s) => String(s ?? '').trim()).filter(Boolean)
-  const criteria = specText ? extractCriteria(specText) : (todoText ? extractCriteria(todoText) : extractCriteria(prdText))
-  const sourceDoc = specText ? specRel : (todoText ? todoRel : (prdText ? prdRel : null))
+  const extractChecklistWithFallback = (txt) => {
+    const strict = extractCriteria(txt)
+    if (strict.length > 0) return strict
+    const out = []
+    let inFence = false
+    let nextAuto = 1
+    for (const rawLine of String(txt ?? '').replace(/\r\n/g, '\n').split('\n')) {
+      if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
+      if (inFence) continue
+      const m = /^- \[([ xX])\]\s+(.+)$/.exec(rawLine.trim())
+      if (!m) continue
+      out.push({ id: `C${nextAuto}`, text: m[2].trim(), checked: m[1].toLowerCase() === 'x' })
+      nextAuto += 1
+    }
+    return out
+  }
+  let criteria = []
+  let sourceDoc = null
+  for (const [txt, rel] of [[specText, specRel], [todoText, todoRel], [prdText, prdRel]]) {
+    if (!txt) continue
+    const list = extractCriteria(txt)
+    if (list.length > 0) { criteria = list; sourceDoc = rel; break }
+  }
+  if (criteria.length === 0 && ledger?.planBootstrap === true) {
+    const cands = []
+    for (const f of Array.isArray(ledger?.files) ? ledger.files : []) {
+      const nf = posixPath(f).replace(/^\.\//, '')
+      if (/^docs\/(?:specs|todo|prd)\/.*\.md$/.test(nf)) cands.push(nf)
+    }
+    for (const dirRel of ['docs/specs', 'docs/todo', 'docs/prd']) {
+      for (const root of docRoots) {
+        const dirAbs = join(root, dirRel)
+        if (!existsSync(dirAbs)) continue
+        try {
+          for (const name of readdirSync(dirAbs).sort()) {
+            if (name.endsWith('.md')) cands.push(`${dirRel}/${name}`)
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    const ordered = [
+      ...cands.filter((p) => p.startsWith('docs/specs/')),
+      ...cands.filter((p) => p.startsWith('docs/todo/')),
+      ...cands.filter((p) => p.startsWith('docs/prd/')),
+    ]
+    for (const cand of [...new Set(ordered)]) {
+      const txt = readFromDocRoots(cand)
+      const list = extractCriteria(txt)
+      if (list.length > 0) { criteria = list; sourceDoc = cand; break }
+    }
+  }
+  if (criteria.length === 0) {
+    for (const iss of Array.isArray(ledger?.issueContext) ? ledger.issueContext : []) {
+      const list = extractChecklistWithFallback(iss?.body || iss?.summary || '')
+      if (list.length > 0) {
+        criteria = list
+        sourceDoc = iss?.number ? `issue#${iss.number}` : 'issueContext'
+        break
+      }
+    }
+  }
+  if (criteria.length === 0 && ledger?.prContext && typeof ledger.prContext === 'object') {
+    const list = extractChecklistWithFallback(ledger.prContext.body || ledger.prContext.summary || '')
+    if (list.length > 0) {
+      const prNum = ledger.prNumber ?? ledger.prContext.number ?? null
+      criteria = list
+      sourceDoc = prNum ? `pr#${prNum}` : 'prContext'
+    }
+  }
+  if (!sourceDoc) sourceDoc = specText ? specRel : (todoText ? todoRel : (prdText ? prdRel : null))
   const paths = [...new Set([...fmScopeFiles, ...extractDocPaths(specText), ...extractDocPaths(todoText), ...extractDocPaths(prdText)])]
   // 去重要按「说了同一件事」判，不是按字符串相等：
   // SPEC 写「不引入第三方解析器（零依赖是不变量）；不做 LSP 级语义分析」，
@@ -270,6 +330,7 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   // 验收命令从 AGENTS.md 的 Dev Profile 读，不在这里编。
   const agentsText = mainRoot ? (readTextSafe(join(mainRoot, 'AGENTS.md')) ?? '') : ''
   const quick = /^\s*quick-test:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
+  const smoke = /^\s*smoke-verify:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
   const full = /^\s*full-test:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
   const mergeGate = /^\s*merge-gate:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
 
@@ -321,6 +382,24 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   }
   lines.push('')
 
+  const issueCtxItems = Array.isArray(ledger?.issueContext) ? ledger.issueContext.filter((x) => x?.fetched) : []
+  const prCtx = ledger?.prContext && ledger.prContext.fetched ? ledger.prContext : null
+  if (issueCtxItems.length > 0 || prCtx) {
+    lines.push('## 关联工单与 PR 上下文')
+    lines.push('')
+    for (const iss of issueCtxItems) {
+      lines.push(`- **Issue #${iss.number}**${iss.state ? ` (${iss.state})` : ''}：${iss.title ?? '(无标题)'}`)
+      const sum = String(iss.summary ?? iss.body ?? '').trim().split('\n').slice(0, 6).join(' / ').slice(0, 260)
+      if (sum) lines.push(`  - 摘要：${sum}`)
+    }
+    if (prCtx) {
+      lines.push(`- **PR #${prCtx.number ?? ledger?.prNumber ?? '?'}**${prCtx.state ? ` (${prCtx.state})` : ''}：${prCtx.title ?? '(无标题)'}`)
+      const sum = String(prCtx.summary ?? prCtx.body ?? '').trim().split('\n').slice(0, 6).join(' / ').slice(0, 260)
+      if (sum) lines.push(`  - 摘要：${sum}`)
+    }
+    lines.push('')
+  }
+
   lines.push('## 能改哪里')
   lines.push('')
   if (paths.length > 0) {
@@ -337,11 +416,11 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   lines.push(`- 起始 HEAD：\`${headSha ?? ledger?.baseSha ?? '(未登记)'}\``)
   lines.push('')
 
-  const design = extractDesignSection(specText)
+  const { text: design, heading: designHeading } = extractDesignSectionWithHeading(specText)
   const visibleDesign = isExploreOrCritic ? '' : design
   const isLongDesign = Boolean(visibleDesign && (visibleDesign.split('\n').length > 24 || visibleDesign.length > 1500))
-  const designPointer = (visibleDesign && specRel)
-    ? `node .agents/skills/dev-explore/scripts/doc-locate.mjs --file "${specRel}" --section "设计方案"`
+  const designPointer = (visibleDesign && specRel && designHeading)
+    ? `node .agents/skills/dev-explore/scripts/doc-locate.mjs --file "${specRel}" --section "${designHeading}"`
     : null
   if (visibleDesign) {
     lines.push('## 怎么做（来自 SPEC 的设计方案）')
@@ -407,8 +486,9 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
 
   lines.push('## 怎么算做完')
   lines.push('')
-  if (quick || full) {
+  if (quick || smoke || full || mergeGate) {
     if (quick) lines.push(`- 快测：\`${quick}\``)
+    if (smoke) lines.push(`- 冒烟：\`${smoke}\``)
     if (full) lines.push(`- 全测：\`${full}\``)
     if (mergeGate) lines.push(`- 合前：\`${mergeGate}\``)
     lines.push('')
@@ -617,7 +697,7 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     explored: ledger?.explored ?? null,
     reworkFeedback,
     receiptTemplate,
-    commands: { quick, full, mergeGate },
+    commands: { quick, smoke, full, mergeGate },
     requiredGates: gates,
   }
   Object.defineProperties(fields, {

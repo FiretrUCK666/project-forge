@@ -17,6 +17,7 @@ import {
 } from '../../lib/overlay.mjs'
 import { readDecisions } from '../../lib/profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
+import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 
@@ -185,9 +186,10 @@ export function readForgeHooksConfig(mainRoot, implRoot = null) {
 }
 
 /**
- * 在 finalize 阶段核对 `docs/feature-map.json` 同步：
- * 若目标仓存在 `docs/feature-map.json` 且本次改动新增了核心源码模块/入口文件（跳过纯文档、测试与 `--no-tdd`），
- * 检查新模块是否已覆盖或随本 PR 更新；缺同步时输出提醒，在 `--strict-sync` / `strict` 模式下阻断。
+ * 在 finalize / verify 阶段核对 `docs/feature-map.json` 同步：
+ * 若目标仓存在 `docs/feature-map.json` 且本次改动新增、删除或重命名了核心源码模块/入口文件
+ * （跳过纯文档、测试、常规原地修改与 `--no-tdd` / `no-tdd`），
+ * 默认阻断（`BLOCKED_FEATURE_MAP_SYNC`，退出码 1），直至补充或清理对应 feature 条目并随本 PR 同步更新。
  */
 export async function checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger, opts = {}, changedEntries = null } = {}) {
   const root = implRoot || mainRoot
@@ -208,16 +210,25 @@ export async function checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger
   const normalizedEntries = entries.map((e) => ({
     status: String(e.status ?? '').trim().toUpperCase(),
     file: posixPath(e.file ?? '').replace(/^\.\//, ''),
-  })).filter((e) => e.file)
+    oldFile: e.oldFile ? posixPath(e.oldFile).replace(/^\.\//, '') : '',
+  })).filter((e) => e.file || e.oldFile)
 
+  const isCoreSource = (f) => Boolean(f) && CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f) && !isToolOwnedPath(f) && !/^docs\//.test(f) && !/^scripts\/dev\//.test(f)
   const featureMapUpdated = normalizedEntries.some((e) => e.file === FEATURE_MAP_REL)
   const addedCoreModules = normalizedEntries
     .filter((e) => e.status.startsWith('A') || e.status.startsWith('R'))
     .map((e) => e.file)
-    .filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f) && !isToolOwnedPath(f) && !/^docs\//.test(f) && !/^scripts\/dev\//.test(f))
+    .filter(isCoreSource)
+  const removedCoreModules = normalizedEntries
+    .flatMap((e) => {
+      if (e.status.startsWith('D')) return [e.file]
+      if (e.status.startsWith('R') && e.oldFile && e.oldFile !== e.file) return [e.oldFile]
+      return []
+    })
+    .filter(isCoreSource)
 
-  if (addedCoreModules.length === 0 || featureMapUpdated) {
-    return { ok: true, featureMapUpdated, addedCoreModules, uncovered: [] }
+  if ((addedCoreModules.length === 0 && removedCoreModules.length === 0) || featureMapUpdated) {
+    return { ok: true, featureMapUpdated, addedCoreModules, removedCoreModules, uncovered: [], staleEntries: [] }
   }
 
   const coveredPaths = new Set()
@@ -235,23 +246,77 @@ export async function checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger
     }
   }
   const uncovered = addedCoreModules.filter((mod) => ![...coveredPaths].some((cp) => mod === cp || mod.startsWith(`${cp}/`)))
-  if (uncovered.length === 0) return { ok: true, featureMapUpdated: false, addedCoreModules, uncovered: [] }
-
-  const msg = `新增核心源码模块/入口未同步更新 ${FEATURE_MAP_REL}：${uncovered.slice(0, 6).join(', ')}；请补充对应 feature 条目或随本 PR 同步刷新。`
-  if (ledger) {
-    ledger.hooks = { ...(ledger.hooks ?? {}), featureMapSyncMissing: uncovered }
+  const staleEntries = removedCoreModules.filter((mod) => coveredPaths.has(mod) && !existsSync(join(root, mod)))
+  if (uncovered.length === 0 && staleEntries.length === 0) {
+    return { ok: true, featureMapUpdated: false, addedCoreModules, removedCoreModules, uncovered: [], staleEntries: [] }
   }
-  if (opts['strict-sync']) {
+
+  const parts = []
+  if (uncovered.length > 0) parts.push(`新增未覆盖核心模块 ${uncovered.slice(0, 6).join(', ')}`)
+  if (staleEntries.length > 0) parts.push(`已删除或重命名的失效路径仍残留在 feature-map 中 ${staleEntries.slice(0, 6).join(', ')}`)
+  const msg = `${FEATURE_MAP_REL} 未同步更新（${parts.join('；')}）；请补充或清理对应 feature 条目并随本 PR 同步提交。`
+  if (ledger) {
+    ledger.hooks = {
+      ...(ledger.hooks ?? {}),
+      featureMapSyncMissing: uncovered,
+      featureMapStaleEntries: staleEntries,
+    }
+  }
+  return {
+    ok: false,
+    blocked: true,
+    code: 'BLOCKED_FEATURE_MAP_SYNC',
+    exitCode: EXIT.ACTION,
+    uncovered,
+    staleEntries,
+    message: `BLOCKED_FEATURE_MAP_SYNC: ${msg}`,
+  }
+}
+
+/**
+ * Case 2 结构漂移守卫：常规原地修复（仅 M 或测试改动）零触发；
+ * 若 Case 2 任务实际新增/删除/重命名了非测试核心源码模块，则复用 `checkTddSyncParity` 与 `checkFeatureMapSyncOnFinalize` 阻断漂移。
+ */
+export async function checkCase2StructuralDriftOnVerify({
+  mainRoot, implRoot, ledger, opts = {}, effectiveBase = null, changedFiles = [], statusEntries = [], diffText = undefined,
+} = {}) {
+  if (!ledger || Number(ledger.caseType) !== 2) return { ok: true, skipped: true }
+  const root = implRoot || mainRoot
+  if (!root || opts['no-tdd']) return { ok: true, skipped: true }
+  const agentsRoot = existsSync(join(root, 'AGENTS.md')) ? root : mainRoot
+  const decisions = agentsRoot ? readDecisions(readTextSafe(join(agentsRoot, 'AGENTS.md')) ?? '') : new Set()
+  if (decisions.has('no-tdd')) return { ok: true, skipped: true }
+
+  const baseRef = effectiveBase || ledger?.baseSha || ledger?.baseBranch || 'HEAD~1'
+  const diffRes = await gitDiffNameStatusZ(root, [baseRef, 'HEAD'])
+  const committed = diffRes?.ok ? (diffRes.entries ?? []) : []
+  const dirtyEntries = (Array.isArray(statusEntries) ? statusEntries : [])
+    .map((e) => ({ status: String(e.xy ?? '').trim(), file: e.file, oldFile: e.oldFile }))
+    .filter((e) => /^(?:A|\?\?|D|R)/.test(e.status) || /[ADR]/.test(e.status))
+  const allEntries = [...committed, ...dirtyEntries]
+  const isCoreSource = (f) => Boolean(f) && CODE_EXT_RE.test(posixPath(f)) && !TEST_FILE_RE.test(posixPath(f)) && !isToolOwnedPath(posixPath(f)) && !/^(?:docs|scripts\/dev)\//.test(posixPath(f))
+  const hasStructuralCoreChange = allEntries.some((e) => {
+    const st = String(e.status ?? '').trim().toUpperCase()
+    if (!(st.startsWith('A') || st.startsWith('D') || st.startsWith('R') || st === '??')) return false
+    return isCoreSource(e.file) || isCoreSource(e.oldFile)
+  })
+  if (!hasStructuralCoreChange) return { ok: true, skipped: true, reason: 'no-core-structural-change' }
+
+  const fmCheck = await checkFeatureMapSyncOnFinalize({ implRoot: root, mainRoot, ledger, opts, changedEntries: allEntries })
+  if (!fmCheck.ok) return fmCheck
+
+  const parity = await checkTddSyncParity(root, changedFiles, ledger, { statusEntries, diffEntries: allEntries, diffText })
+  if (parity.tddSyncWarning) {
     return {
       ok: false,
       blocked: true,
-      code: 'BLOCKED_FEATURE_MAP_SYNC',
+      code: 'BLOCKED_TDD_SYNC',
       exitCode: EXIT.ACTION,
-      uncovered,
-      message: `BLOCKED_FEATURE_MAP_SYNC: ${msg}`,
+      parity,
+      message: `BLOCKED_TDD_SYNC: Case 2 任务新增/删除/重命名核心源码模块但未同步权威架构文档：${parity.tddSyncWarning}`,
     }
   }
-  return { ok: true, warning: `[FEATURE-MAP SYNC REMINDER]: ${msg}`, uncovered }
+  return { ok: true }
 }
 
 function resolveSkillScript(mainRoot, implRoot, relPath) {

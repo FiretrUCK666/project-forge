@@ -29,6 +29,7 @@ import {
   hasRepoCiWorkflow,
   resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateReviewRecordClosure,
 } from '../../lib/workflow-policy.mjs'
+import { collectPlanSummaryMeta, syncIssueSummaryBody } from '../../lib/plan-sync.mjs'
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
@@ -40,6 +41,137 @@ import {
 import { runTrialMerge } from './flow-trial-merge.mjs'
 
 export { analyzeIssueClaimState, handleAbort, handleClaim, handleCleanup, handleRelease, handleStatus }
+
+export const MERGE_STALE_LABELS = Object.freeze([
+  'planning', 'in-progress', 'in-review', 'changes-requested', 'needs-human-decision',
+])
+
+async function removeLabelsBestEffort(backend, { repo = null, taskId = null, number, labels }) {
+  for (const label of labels) {
+    await Promise.resolve(backend.removeLabel({
+      ...(repo ? { repo } : {}),
+      ...(taskId ? { taskId } : {}),
+      number,
+      label,
+    })).catch(() => ({ ok: false }))
+  }
+}
+
+async function syncMergedIssuesAndEscalations({
+  backend, repo = null, mainRoot, implRoot, ledger, taskId, baseBranch,
+  issueCommentBody, statePayload, mergeComments, syncFailures, issueCloseDecisions,
+}) {
+  const uniqueLinked = [...new Set(
+    (ledger?.linkedIssues ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0),
+  )]
+  const docRoot = existsSync(implRoot) ? implRoot : mainRoot
+  const terminalFiles = [
+    ledger?.archivedSpecFile ?? ledger?.specFile,
+    ledger?.archivedTodoFile ?? ledger?.todoFile,
+    ledger?.archivedPrdFile ?? ledger?.prdFile,
+  ].filter(Boolean)
+  const renamedPaths = [
+    ledger?.specFile && ledger?.archivedSpecFile && ledger.specFile !== ledger.archivedSpecFile
+      ? { from: ledger.specFile, to: ledger.archivedSpecFile } : null,
+    ledger?.todoFile && ledger?.archivedTodoFile && ledger.todoFile !== ledger.archivedTodoFile
+      ? { from: ledger.todoFile, to: ledger.archivedTodoFile } : null,
+  ].filter(Boolean)
+
+  for (const iss of uniqueLinked) {
+    try {
+      const closeGuard = evaluateMasterIssueCloseGuard({
+        mainRoot, implRoot, issueNumber: iss, ledger, taskId, baseBranch,
+      })
+      const issBody = closeGuard.progressNote ? `${issueCommentBody}\n\n${closeGuard.progressNote}` : issueCommentBody
+      const issCmt = judgeCommentOutcome(await backend.postComment({
+        ...(repo ? { repo } : {}),
+        ...(taskId ? { taskId } : {}),
+        number: iss,
+        body: issBody,
+        statePayload,
+      }))
+      mergeComments.push({ target: `Issue #${iss}`, ...issCmt })
+      if (!issCmt.ok) syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: issCmt.reason || issCmt.error || 'comment_failed' })
+
+      const labelsToRemove = closeGuard.shouldClose
+        ? MERGE_STALE_LABELS
+        : MERGE_STALE_LABELS.filter((l) => l !== 'planning')
+      await removeLabelsBestEffort(backend, { repo, taskId, number: iss, labels: labelsToRemove })
+
+      if (closeGuard.shouldClose) {
+        if (terminalFiles.length > 0) {
+          const summaryMeta = collectPlanSummaryMeta({
+            repoRoot: docRoot,
+            mainRoot,
+            ledger,
+            files: terminalFiles,
+            phase: 'merge',
+            round: 0,
+            metaLabel: 'merged',
+            targetIssueNumber: iss,
+          })
+          await syncIssueSummaryBody(backend, {
+            repo,
+            number: iss,
+            summaryBlock: summaryMeta.summaryBlock,
+            renamedPaths,
+          })
+        }
+        await backend.closeIssue({
+          ...(repo ? { repo } : {}),
+          number: iss,
+          reason: `merged into ${baseBranch}`,
+        })
+        issueCloseDecisions.push({ issue: iss, action: 'closed', reason: closeGuard.reason ?? 'merged' })
+      } else {
+        issueCloseDecisions.push({
+          issue: iss,
+          action: 'kept-open',
+          reason: closeGuard.reason,
+          masterPrd: closeGuard.masterPrd,
+          remainingSiblings: closeGuard.remainingSiblings,
+        })
+      }
+    } catch (err) {
+      const msg = err?.message ?? String(err)
+      mergeComments.push({ target: `Issue #${iss}`, ok: false, reason: msg })
+      syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: msg })
+    }
+  }
+
+  const linkedSet = new Set(uniqueLinked)
+  const escalatedList = [...new Set(
+    (ledger?.escalatedIssues ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0 && !linkedSet.has(n)),
+  )]
+  for (const escNum of escalatedList) {
+    try {
+      if (typeof backend.getIssue === 'function') {
+        const curIss = await Promise.resolve(backend.getIssue({ ...(repo ? { repo } : {}), number: escNum })).catch(() => null)
+        if (curIss?.ok && String(curIss.state ?? '').toUpperCase() === 'CLOSED') continue
+      }
+      const escBody = `已在 ${ledger?.prNumber ? `PR #${ledger.prNumber}` : `分支 \`${ledger?.branch ?? '-'}\``}（合入 \`${baseBranch}\`，任务 \`${taskId}\`）合并后解决，自动关闭关联 E2E 升级工单。`
+      const escCmt = judgeCommentOutcome(await backend.postComment({
+        ...(repo ? { repo } : {}),
+        ...(taskId ? { taskId } : {}),
+        number: escNum,
+        body: escBody,
+        statePayload: { ...statePayload, escalatedResolved: true },
+      }))
+      mergeComments.push({ target: `Escalated Issue #${escNum}`, ...escCmt })
+      await removeLabelsBestEffort(backend, { repo, taskId, number: escNum, labels: MERGE_STALE_LABELS })
+      await backend.closeIssue({
+        ...(repo ? { repo } : {}),
+        number: escNum,
+        reason: `resolved by merge into ${baseBranch}`,
+      })
+      issueCloseDecisions.push({ issue: escNum, action: 'closed', reason: 'escalated-e2e-resolved' })
+    } catch (err) {
+      const msg = err?.message ?? String(err)
+      mergeComments.push({ target: `Escalated Issue #${escNum}`, ok: false, reason: msg })
+      syncFailures.push({ target: `Escalated Issue #${escNum}`, phase: 'merge', error: msg })
+    }
+  }
+}
 
 /**
  * 一次写评论的成败，从后端返回值里读。
@@ -207,10 +339,10 @@ export async function assertPreMergeGates({
     ledger.agent,
     ledger.implementerId,
   ].map(normActor).filter(Boolean))
-  const callerActor = normActor(opts.agent ?? opts.actor ?? opts.reviewer)
+  const callerActor = normActor(opts['reviewer-id'] ?? opts.agent ?? opts.actor ?? opts.reviewer)
   const allowSingleSessionSelf = resolveHostMode(opts) === 'single-session' && Boolean(opts['human-approved'])
   const requiresReview = hasDevReview && (policy.independentReviewRequired || (policy.riskTier !== 'low' && (rounds.length > 0 || Boolean(ledger.lastReview))))
-  if (callerActor && !allowSingleSessionSelf && (requiresReview || (hasDevReview && Number(ledger.caseType ?? 3) >= 2)) && implementerSet.has(callerActor)) {
+  if (callerActor && !allowSingleSessionSelf && (requiresReview || (hasDevReview && Number(ledger.caseType ?? 3) >= 2) || Boolean(opts['reviewer-id'])) && implementerSet.has(callerActor)) {
     const msg = `BLOCKED_SELF_MERGE: 实施者（${callerActor}）禁止自合并自己实施或认领的任务，须由独立审查者或调度者执行 flow.mjs merge。`
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_SELF_MERGE', actor: callerActor, taskId }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
@@ -400,44 +532,26 @@ export async function handleMerge(opts, roots) {
       }))
       mergeComments.push({ target: `PR #${ledger.prNumber}`, ...prCmt })
       if (!prCmt.ok) syncFailures.push({ target: `PR #${ledger.prNumber}`, phase: 'merge', error: prCmt.reason || prCmt.error || 'comment_failed' })
+      await removeLabelsBestEffort(backend, { repo: originFull, number: ledger.prNumber, labels: MERGE_STALE_LABELS })
     } catch (err) {
       const msg = err?.message ?? String(err)
       mergeComments.push({ target: `PR #${ledger.prNumber}`, ok: false, reason: msg })
       syncFailures.push({ target: `PR #${ledger.prNumber}`, phase: 'merge', error: msg })
     }
-    for (const iss of ledger.linkedIssues ?? []) {
-      try {
-        const closeGuard = evaluateMasterIssueCloseGuard({
-          mainRoot: roots.mainRoot, implRoot, issueNumber: iss, ledger, taskId, baseBranch,
-        })
-        const issBody = closeGuard.progressNote ? `${mergeIssueBody}\n\n${closeGuard.progressNote}` : mergeIssueBody
-        const issCmt = judgeCommentOutcome(await backend.postComment({
-          repo: originFull, number: iss, body: issBody,
-          statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
-        }))
-        mergeComments.push({ target: `Issue #${iss}`, ...issCmt })
-        if (!issCmt.ok) syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: issCmt.reason || issCmt.error || 'comment_failed' })
-        await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
-        await backend.removeLabel({ repo: originFull, number: iss, label: 'in-review' })
-        await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
-        if (closeGuard.shouldClose) {
-          await backend.closeIssue({ repo: originFull, number: iss })
-          issueCloseDecisions.push({ issue: iss, action: 'closed', reason: closeGuard.reason ?? 'merged' })
-        } else {
-          issueCloseDecisions.push({
-            issue: iss,
-            action: 'kept-open',
-            reason: closeGuard.reason,
-            masterPrd: closeGuard.masterPrd,
-            remainingSiblings: closeGuard.remainingSiblings,
-          })
-        }
-      } catch (err) {
-        const msg = err?.message ?? String(err)
-        mergeComments.push({ target: `Issue #${iss}`, ok: false, reason: msg })
-        syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: msg })
-      }
-    }
+    await syncMergedIssuesAndEscalations({
+      backend,
+      repo: originFull,
+      mainRoot: roots.mainRoot,
+      implRoot,
+      ledger,
+      taskId,
+      baseBranch,
+      issueCommentBody: mergeIssueBody,
+      statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
+      mergeComments,
+      syncFailures,
+      issueCloseDecisions,
+    })
   } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
     const isGenericRemote = ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git'
     if (isGenericRemote) {
@@ -474,7 +588,7 @@ export async function handleMerge(opts, roots) {
         fetch: Boolean(mergeRes?.fetched),
       })
     }
-    if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
+    if (((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0) && mergeRes?.merged !== false) {
       const mergeImplLayers = resolveIdentityLayers({
         ledgerAccount: ledger.account,
         ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
@@ -490,39 +604,19 @@ export async function handleMerge(opts, roots) {
         reviewerId: effectiveReviewer, reviewerDisplay, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
         humanApprovedReason: ledger.humanApprovedReason ?? null, bypassed: mergeBypassed,
       })
-      for (const iss of ledger.linkedIssues ?? []) {
-        try {
-          const closeGuard = evaluateMasterIssueCloseGuard({
-            mainRoot: roots.mainRoot, implRoot, issueNumber: iss, ledger, taskId, baseBranch,
-          })
-          const issBody = closeGuard.progressNote ? `${localMergeBody}\n\n${closeGuard.progressNote}` : localMergeBody
-          const issCmt = judgeCommentOutcome(await backend.postComment({
-            taskId, number: iss, body: issBody,
-            statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null },
-          }))
-          mergeComments.push({ target: `Issue #${iss}`, ...issCmt })
-          if (!issCmt.ok) syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: issCmt.reason || issCmt.error || 'comment_failed' })
-          await backend.removeLabel({ taskId, number: iss, label: 'in-progress' })
-          await backend.removeLabel({ taskId, number: iss, label: 'in-review' })
-          await backend.removeLabel({ taskId, number: iss, label: 'changes-requested' })
-          if (closeGuard.shouldClose) {
-            await backend.closeIssue({ number: iss, reason: `merged into ${baseBranch}` })
-            issueCloseDecisions.push({ issue: iss, action: 'closed', reason: closeGuard.reason ?? 'merged' })
-          } else {
-            issueCloseDecisions.push({
-              issue: iss,
-              action: 'kept-open',
-              reason: closeGuard.reason,
-              masterPrd: closeGuard.masterPrd,
-              remainingSiblings: closeGuard.remainingSiblings,
-            })
-          }
-        } catch (err) {
-          const msg = err?.message ?? String(err)
-          mergeComments.push({ target: `Issue #${iss}`, ok: false, reason: msg })
-          syncFailures.push({ target: `Issue #${iss}`, phase: 'merge', error: msg })
-        }
-      }
+      await syncMergedIssuesAndEscalations({
+        backend,
+        mainRoot: roots.mainRoot,
+        implRoot,
+        ledger,
+        taskId,
+        baseBranch,
+        issueCommentBody: localMergeBody,
+        statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null },
+        mergeComments,
+        syncFailures,
+        issueCloseDecisions,
+      })
     }
   }
 

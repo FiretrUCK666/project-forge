@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用基线 | 以仓库当前源码与 `SKILL.md` 当前 `metadata.version`（`6.0.0`）为准 |
-| 最近更新日期 | `2026-11-24` |
+| 最近更新日期 | `2026-11-25` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |
 | 托管平台适配范围 | 产品层注册表当前注册 `github`；未匹配远端降级为 `generic-git`，无远端按 `local-only` 运行 |
@@ -118,7 +118,7 @@ flowchart LR
 | `kit/skills/dev-govern/` | 产品层 | 只读静态体检、三层常青文档与工作树巡检、信号聚类、倒金字塔复盘与发版筹备（`kit/skills/dev-govern/scripts/govern-audit.mjs`、`kit/skills/dev-govern/scripts/govern-retro.mjs`、`kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs` 等子模块） |
 | `kit/skills/dev-iterate/` | 产品层 | 盲区与热点识别、原生测试扩展（过 `edit-gate`）、并发压测、缺陷升级建单与有界优化循环（`iterate.mjs`、`iterate-cycle.mjs`） |
 | `assets/readme/` | 产品层 | 双语 README 浅深色自适应 SVG 图解（`hero`/`architecture`/`docs-layers`/`skills-cycle`/`workflow` 及 `-en` 副本） |
-| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（含 `scripts/dev/subcommand-parity.mjs`、`scripts/dev/fixtures-w4-harness.mjs`、`scripts/dev/injections-data-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/injections-data-trace-sync.mjs`、`scripts/dev/fixtures-w5-blind-fixes.mjs`、`scripts/dev/injections-data-w5-blind-fixes.mjs`、`scripts/dev/fixtures-w6b-kit-hygiene.mjs`、`scripts/dev/injections-data-w6b.mjs`、`scripts/dev/fixtures-w6c-harness-gates.mjs`、`scripts/dev/fixtures-w6c-context-brief.mjs`、`scripts/dev/injections-data-w6c.mjs`、`scripts/dev/fixtures-gates-retro-routing.mjs`、`scripts/dev/fixtures-r5-plan-flow.mjs` 等） |
+| `scripts/dev/` | 自用层 | 全仓结构门禁、正反双向行为夹具、故障注入矩阵、性能基准台、打包 E2E 与盲测台（含 `scripts/dev/subcommand-parity.mjs`、`scripts/dev/fixtures-w4-harness.mjs`、`scripts/dev/injections-data-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/injections-data-trace-sync.mjs`、`scripts/dev/fixtures-w5-blind-fixes.mjs`、`scripts/dev/injections-data-w5-blind-fixes.mjs`、`scripts/dev/fixtures-w6b-kit-hygiene.mjs`、`scripts/dev/injections-data-w6b.mjs`、`scripts/dev/fixtures-w6c-harness-gates.mjs`、`scripts/dev/fixtures-w6c-context-brief.mjs`、`scripts/dev/injections-data-w6c.mjs`、`scripts/dev/fixtures-gates-retro-routing.mjs`、`scripts/dev/fixtures-r5-plan-flow.mjs`、`scripts/dev/fixtures-conv-s1.mjs`、`scripts/dev/fixtures-conv-s1-merge.mjs`、`scripts/dev/injections-data-conv-s1.mjs` 等） |
 | `<gitCommonDir>/project-forge-{flow,govern,verify,iterate}/` | 仓外运行时 | 四域仓外持久化目录：分别存放任务账本/`session-state.json`/`planning-provenance.json`、`signals.jsonl` 与基线、`slots/<slotKey>/cache.json` 与 `scratch/`、迭代循环历史状态，严禁污染工作区 |
 
 ### 模块分层与禁引规则
@@ -417,8 +417,8 @@ flowchart TD
 | --- | --- | --- |
 | `scripts/dev/preflight.mjs` | 入口预算、引用可达性、模板零残留、7 键单源、`arch-rules`、套件行数、参数与退出码对拍、写路径联网守卫、Mermaid `16/12`、自举与端到端冒烟（支持 `--changed`） | 每次提交前；退出码 `0` |
 | `scripts/dev/gap-coverage.mjs` | `survey` 全部缺口规则在 `review.mjs` 与参考文档中的配对覆盖 | 改动勘察或体检规则后；`0` 遗漏 |
-| `scripts/dev/fixtures.mjs` | 全功能域正反双向行为断言（含身份、装配、v3 三方融合、平台注册表、工作流、规划波次、实证循环、治理演进、`fixtures-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/fixtures-w5-blind-fixes.mjs`、`scripts/dev/fixtures-r6a-state.mjs`、`scripts/dev/fixtures-r6b-plan.mjs`、`scripts/dev/fixtures-r6c-gates.mjs`、`scripts/dev/fixtures-r6d-contracts.mjs`、`scripts/dev/fixtures-r7-rootfix.mjs`、`scripts/dev/fixtures-issue-quality.mjs` 与 `scripts/dev/fixtures-issue-binding.mjs`） | 每次改动判定或工作流后；`0` 失败 |
-| `scripts/dev/verify-injections.mjs` | 在整树隔离副本上逐条注入退化故障（含 `injections-data-w4-harness.mjs`、`scripts/dev/injections-data-trace-sync.mjs`、`scripts/dev/injections-data-w5-blind-fixes.mjs`、`scripts/dev/injections-data-r6a.mjs`、`scripts/dev/injections-data-r6b.mjs`、`scripts/dev/injections-data-r6c.mjs`、`scripts/dev/injections-data-r6d.mjs`、`scripts/dev/injections-data-r7.mjs`、`scripts/dev/injections-data-issue-quality.mjs` 与 `scripts/dev/injections-data-issue-binding.mjs`），验证对应检查必红、还原后全绿 | 高风险改动与发版前；全部故障可捕获 |
+| `scripts/dev/fixtures.mjs` | 全功能域正反双向行为断言（含身份、装配、v3 三方融合、平台注册表、工作流、规划波次、实证循环、治理演进、`fixtures-w4-harness.mjs`、`scripts/dev/fixtures-trace-sync.mjs`、`scripts/dev/fixtures-w5-blind-fixes.mjs`、`scripts/dev/fixtures-r6a-state.mjs`、`scripts/dev/fixtures-r6b-plan.mjs`、`scripts/dev/fixtures-r6c-gates.mjs`、`scripts/dev/fixtures-r6d-contracts.mjs`、`scripts/dev/fixtures-r7-rootfix.mjs`、`scripts/dev/fixtures-issue-quality.mjs`、`scripts/dev/fixtures-issue-binding.mjs`、`scripts/dev/fixtures-conv-s1.mjs` 与 `scripts/dev/fixtures-conv-s1-merge.mjs`） | 每次改动判定或工作流后；`0` 失败 |
+| `scripts/dev/verify-injections.mjs` | 在整树隔离副本上逐条注入退化故障（含 `injections-data-w4-harness.mjs`、`scripts/dev/injections-data-trace-sync.mjs`、`scripts/dev/injections-data-w5-blind-fixes.mjs`、`scripts/dev/injections-data-r6a.mjs`、`scripts/dev/injections-data-r6b.mjs`、`scripts/dev/injections-data-r6c.mjs`、`scripts/dev/injections-data-r6d.mjs`、`scripts/dev/injections-data-r7.mjs`、`scripts/dev/injections-data-issue-quality.mjs`、`scripts/dev/injections-data-issue-binding.mjs` 与 `scripts/dev/injections-data-conv-s1.mjs`），验证对应检查必红、还原后全绿 | 高风险改动与发版前；全部故障可捕获 |
 | `scripts/dev/merge-gate.mjs` | 从 `.github/workflows/check.yml` 单源派生全链路静态与重型校验，并行只读池 + 串行重锁步骤 | 合入前实跑；四档互斥全过 |
 | `scripts/dev/bench.mjs` | 同轮校准单位负载 `unitMs`（受 `MAX_CALIBRATION_UNIT_MS` 与 `runawayCapMs` 防失控裁剪）与 `--strict-budget` `1x` 绝对上限（如 `survey(self) <= 250ms`、`backup.zip(1000 files) <= 250ms`），无环境变量倍率开关 | 改动扫描、流转或备份逻辑后；零超时 |
 | `scripts/dev/e2e-zip-harness.mjs` | 基于真实 `git archive --format=zip HEAD` 解压包，多进程隔离驱动本地 HTTP/bare 远端跑通生命周期与演进场景 | CI 矩阵与发版前；退出码 `0` |

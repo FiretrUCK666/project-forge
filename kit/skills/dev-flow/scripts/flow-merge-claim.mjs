@@ -125,12 +125,24 @@ export function evaluateMasterIssueCloseGuard({
   const ledgerPrdNorm = ledger?.prdFile ? posixPath(ledger.prdFile) : (ledger?.archivedPrdFile ? posixPath(ledger.archivedPrdFile) : null)
   const ledgerSpecNorm = ledger?.specFile ? posixPath(ledger.specFile) : (ledger?.archivedSpecFile ? posixPath(ledger.archivedSpecFile) : null)
   const master = prds.find((p) => {
-    if (Number(p.data?.issue) === issNum) return true
+    const masterIssue = Number(p.data?.issue)
+    if (Number.isInteger(masterIssue) && masterIssue > 0) return masterIssue === issNum
     if (ledgerPrdNorm && (posixPath(p.rel) === ledgerPrdNorm || posixPath(p.rel).endsWith(`/${ledgerPrdNorm.split('/').pop()}`))) return true
     return (graph.slices ?? []).some((s) => s.kind === 'spec' && s.masterRel === p.rel && Number(s.data?.issue) === issNum)
   })
   if (!master) {
     return { shouldClose: true, isMasterPrd: false, remainingSiblings: [], progressNote: null }
+  }
+
+  if (ledger?.planBootstrap === true) {
+    return {
+      shouldClose: false,
+      isMasterPrd: true,
+      masterPrd: master.rel,
+      reason: 'plan-bootstrap-master-issue',
+      remainingSiblings: [],
+      progressNote: `[规划引导合并保护] 本 PR 为总控 PRD \`${master.rel}\` 的规划引导拆分（planBootstrap），保留 Master Issue #${issNum} 开启。`,
+    }
   }
 
   const implSliceState = new Map()
@@ -341,9 +353,10 @@ export async function handleClaim(opts, roots) {
     return { exitCode: EXIT.USAGE }
   }
 
-  const prevAgent = ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? null
+  const rawPrevAgent = ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? null
+  const prevAgent = (rawPrevAgent && String(rawPrevAgent).trim() !== 'local-agent') ? String(rawPrevAgent).trim() : null
   const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-  const explicitOrAgent = String(opts.agent ?? '').trim() || (prevAgent && prevAgent !== 'local-agent' ? String(prevAgent).trim() : null)
+  const explicitOrAgent = String(opts.agent ?? '').trim() || prevAgent || null
   const provGate = assertClaimOrMergeProvenance({
     mainRoot: roots.mainRoot, docRoot: claimRoot, ledger, taskId, actor: explicitOrAgent, opts,
   })
@@ -411,7 +424,7 @@ export async function handleClaim(opts, roots) {
     }
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
-    ledger.claimedBy = String(opts.agent ?? '').trim() || localLayers.agent || localLayers.account || null
+    ledger.claimedBy = localLayers.agent || localLayers.account || String(opts.agent ?? '').trim() || null
     if (isTakeover) {
       ledger.takeoverReason = takeoverReason
       ledger.takenOverAt = ledger.claimedAt
@@ -517,7 +530,7 @@ export async function handleClaim(opts, roots) {
 
   ledger.status = 'claimed'
   ledger.claimedAt = new Date().toISOString()
-  ledger.claimedBy = String(opts.agent ?? '').trim() || onlineLayers.agent || onlineLayers.account || null
+  ledger.claimedBy = onlineLayers.agent || onlineLayers.account || String(opts.agent ?? '').trim() || null
   if (isTakeover) {
     ledger.takeoverReason = takeoverReason
     ledger.takenOverAt = ledger.claimedAt

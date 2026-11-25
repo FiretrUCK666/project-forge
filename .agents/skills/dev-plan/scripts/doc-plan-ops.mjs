@@ -15,6 +15,7 @@ import {
   renderStandardDocTemplate, resolveRepoCustomDocTemplate, serializeDocFrontmatter,
   slugify, syncDocsLifecycle, syncPlanDocBodyMeta, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
+import { DECIDED_RE, RISK_NON_DECISION_HEADING_RE } from '../../lib/pending-decisions.mjs'
 import { resolveApprovalBasis } from '../../lib/plan-exit-gate.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { canonicalPath, ensureWorktreesIgnored, gitRun, isDefaultBranch, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
@@ -95,7 +96,17 @@ export function approveSpec({
     const priorRounds = parseCritiqueRounds(fm.data, workingText, planCritiqueEntry)
     const critiqueState = evaluateCritiqueOverride(workingText, fm.data, planCritiqueEntry)
     const override = critiqueState.override
-    const hasStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
+    const roundsAtContinue = Array.isArray(planCritiqueEntry?.continued?.roundsAtContinue)
+      ? planCritiqueEntry.continued.roundsAtContinue.map(Number).filter(Number.isFinite)
+      : []
+    const continueMaxRound = roundsAtContinue.length > 0
+      ? Math.max(...roundsAtContinue)
+      : (Number(planCritiqueEntry?.continued?.roundBaseline) || 0)
+    const hasPostContinuePass = Boolean(
+      planCritiqueEntry?.continued
+      && priorRounds.some((r) => String(r?.verdict ?? '').toLowerCase() === 'passed' && Number(r?.round) > continueMaxRound),
+    )
+    const hasStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered)) && !hasPostContinuePass
     if (hasStopLoss && !override?.approved) {
       throw Object.assign(new Error(`STOP_LOSS_ESCALATE: ${audit.file} 已触发规划 Critique 停损且尚未解锁；请先运行 doc-plan.mjs critique-override --file "${audit.file}" --human-approved --reason "..."`), { code: 'STOP_LOSS_ESCALATE', exitCode: EXIT.HUMAN })
     }
@@ -248,6 +259,125 @@ export function supersedeSpec({ repoRoot, oldSpecPath, newSpecPath }) {
   return { oldSpec: posixPath(relative(repoRoot, oldAbs)), newSpec: posixPath(relative(repoRoot, newAbs)), status: 'superseded', supersededBy: relOldToNew }
 }
 
+const CLARIFY_PENDING_HEADING_RE = /^#{2,4}\s*(?:[一二三四五六七八九十百]+[、.]\s*)?([^\n]*)$/
+const CLARIFY_PENDING_WORDS_RE = /(?:待拍板|未决问题|待确认|待决定|开放问题|待定事项|仍待.*?拍板|open\s+questions?|pending\s+decisions?)/i
+const CLARIFY_EMPTY_ITEM_RE = /^(?:\s*(?:[-*]\s*)?(?:待确认|待拍板|未决)\s*[:：]\s*)?(?:无|没有|暂无|无待拍板(?:事项|问题)?|无待定(?:事项|问题)?|无未决(?:事项|问题)?|none|n\/a)(?:$|[。.,，；;：:\s])/i
+const CLARIFY_INLINE_UNRESOLVED_RE = /(?:仍待定|（待拍板[^）]*）|\(待拍板[^)]*\)|（待定[^）]*）|\(待定[^)]*\)|待拍板\s*[:：]\s*(?!(?:无|没有|暂无)(?=$|[\s，,。.；;）)])|none\b)|待确认\s*[:：]\s*(?!(?:无|没有|暂无)(?=$|[\s，,。.；;）)])|none\b)|\bTBD\b)/i
+
+function normPendingMatchText(s) {
+  return String(s ?? '')
+    .replace(/^(?:[-*]|\d+[.、)])\s+/, '')
+    .replace(/^(?:待确认|待拍板|未决|待决定|Q\d+)\s*[:：]\s*/i, '')
+    .replace(/(?:（|\()待(?:拍板|定)[^）)]*(?:）|\))/g, '')
+    .replace(/\bTBD\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function scrubUnresolvedMarkers(line) {
+  return String(line ?? '')
+    .replace(/(?:待确认|待拍板|未决|待决定)\s*[:：]\s*/gi, '已确认：')
+    .replace(/(?:（|\()待(?:拍板|定)[^）)]*(?:）|\))/g, '')
+    .replace(/仍待定/g, '已定')
+    .replace(/\bTBD\b/gi, '已定')
+}
+
+function resolvePendingSectionItems(lines, { question, decision, today, byNote }) {
+  const cleanDecision = String(decision ?? '').trim()
+  const qNorm = normPendingMatchText(question)
+  const blocks = []
+  const covered = new Set()
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const h = CLARIFY_PENDING_HEADING_RE.exec(lines[i])
+    if (!h || !CLARIFY_PENDING_WORDS_RE.test(h[1])) continue
+    if (RISK_NON_DECISION_HEADING_RE.test(h[1]) && !/(?:待拍板|待确认|待决定|未决问题|pending\s+decisions?)/i.test(h[1])) continue
+    const startLevel = (lines[i].match(/^#+/) ?? ['##'])[0].length
+    let endIdx = lines.length
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const m = /^(#+)\s/.exec(lines[j])
+      if (m && m[1].length <= startLevel) { endIdx = j; break }
+    }
+    for (let k = i; k < endIdx; k += 1) covered.add(k)
+    const body = lines.slice(i + 1, endIdx)
+    const hasList = body.some((l) => /^(?:[-*]|\d+[.、)])\s+/.test(l))
+    let cur = null
+    for (let off = 0; off < body.length; off += 1) {
+      const l = body[off]
+      const absIdx = i + 1 + off
+      if (/^\s*(?:>|<!--)/.test(l)) continue
+      if (/^(?:[-*]|\d+[.、)])\s+/.test(l)) {
+        if (cur) blocks.push(cur)
+        cur = { start: absIdx, end: absIdx + 1, head: l.replace(/^(?:[-*]|\d+[.、)])\s+/, ''), text: l }
+        continue
+      }
+      if (cur) { cur.end = absIdx + 1; cur.text += `\n${l}` }
+      else if (!hasList && l.trim()) {
+        cur = { start: absIdx, end: absIdx + 1, head: l.trim(), text: l }
+      }
+    }
+    if (cur) blocks.push(cur)
+  }
+
+  const unresolvedBlocks = blocks.filter((b) => {
+    const cleanHead = b.head.replace(/^[-*]\s*/, '')
+    if (CLARIFY_EMPTY_ITEM_RE.test(cleanHead) && !CLARIFY_INLINE_UNRESOLVED_RE.test(b.text)) return false
+    if (DECIDED_RE.test(b.text) && !CLARIFY_INLINE_UNRESOLVED_RE.test(b.text)) return false
+    return true
+  })
+
+  const matchesQ = (candText) => {
+    if (!qNorm) return false
+    const cNorm = normPendingMatchText(candText)
+    if (!cNorm) return false
+    if (cNorm === qNorm || cNorm.includes(qNorm) || (cNorm.length >= 3 && qNorm.includes(cNorm))) return true
+    const qTokens = qNorm.split(/[\s、，,。；;：:（）()[\]/]+/).filter((t) => t.length >= 2)
+    return qTokens.length > 0 && qTokens.filter((t) => cNorm.includes(t)).length >= Math.ceil(qTokens.length * 0.6)
+  }
+
+  let matchedBlocks = qNorm
+    ? unresolvedBlocks.filter((b) => matchesQ(b.head) || matchesQ(b.text))
+    : (unresolvedBlocks.length === 1 ? [unresolvedBlocks[0]] : [])
+
+  let resolvedCount = 0
+  for (const b of matchedBlocks) {
+    for (let k = b.start; k < b.end; k += 1) {
+      lines[k] = scrubUnresolvedMarkers(lines[k])
+    }
+    const first = lines[b.start]
+    const prefixM = /^(\s*(?:[-*]|\d+[.、)])\s+)/.exec(first)
+    const rest = prefixM ? first.slice(prefixM[1].length) : first.trimStart()
+    const cleanRest = rest.replace(/^已确认\s*[:：]\s*/i, '').trim()
+    const hasDecision = cleanDecision && cleanRest.includes(cleanDecision)
+    const suffix = hasDecision ? `（${today}${byNote}）` : `（已定：${cleanDecision}，${today}${byNote}）`
+    lines[b.start] = `${prefixM ? prefixM[1] : ''}已确认：${cleanRest}${suffix}`
+    resolvedCount += 1
+  }
+
+  if (resolvedCount === 0) {
+    const inlineIdx = []
+    let inFence = false
+    for (let i = 0; i < lines.length; i += 1) {
+      if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
+      if (inFence || covered.has(i)) continue
+      const trimmed = lines[i].trim()
+      if (!trimmed || /^\s*(?:>|<!--)/.test(trimmed) || /^---+$/.test(trimmed)) continue
+      if (DECIDED_RE.test(trimmed) && !CLARIFY_INLINE_UNRESOLVED_RE.test(trimmed)) continue
+      if (CLARIFY_INLINE_UNRESOLVED_RE.test(trimmed)) inlineIdx.push(i)
+    }
+    const targets = qNorm ? inlineIdx.filter((idx) => matchesQ(lines[idx])) : (inlineIdx.length === 1 ? inlineIdx : [])
+    for (const idx of targets) {
+      const scrubbed = scrubUnresolvedMarkers(lines[idx])
+      lines[idx] = DECIDED_RE.test(scrubbed)
+        ? `${scrubbed.trimEnd()}（已定：${cleanDecision}）`
+        : `${scrubbed.trimEnd()}（已确认：${cleanDecision}）`
+      resolvedCount += 1
+    }
+  }
+  return resolvedCount
+}
+
 /** 向规划文档追加已拍板澄清记录（可选同时新增 `C<N>` 验收条款）。 */
 export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user', explicitBy = undefined, criterion = '' }) {
   if (!file || !decision || !String(decision).trim()) {
@@ -275,6 +405,9 @@ export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user
   const entry = `- 已确认（${today}${byNote}）：${qText}${String(decision).trim()}`
 
   const lines = norm.split('\n')
+  const resolvedPendingCount = resolvePendingSectionItems(lines, {
+    question, decision, today, byNote,
+  })
   const secIdx = lines.findIndex((l) => /^##\s+澄清与补充记录(?:\s|$)/.test(l))
   if (secIdx >= 0) {
     let endIdx = lines.length
@@ -325,7 +458,7 @@ export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user
     const docType = detectDocType(posixPath(relative(repoRoot, abs)), updatedText)
     updateDocFrontmatter(abs, { updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
   }
-  return { file: posixPath(relative(repoRoot, abs)), entry, addedCriterion, updated: today }
+  return { file: posixPath(relative(repoRoot, abs)), entry, addedCriterion, resolvedPendingCount, updated: today }
 }
 
 function parseInitIssueArg(rawIssue) {

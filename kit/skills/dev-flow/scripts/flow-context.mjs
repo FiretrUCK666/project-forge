@@ -407,8 +407,14 @@ export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
     if (res.byKind?.spec) ledger.specFile = res.byKind.spec
     if (res.byKind?.todo) ledger.todoFile = res.byKind.todo
 
+    const renamedPaths = (res.renamed ?? res.moved ?? [])
+      .filter((m) => m?.from && m?.to && m.from !== m.to)
+      .map((m) => ({ from: posixPath(m.from), to: posixPath(m.to) }))
     const postFiles = [ledger.prdFile, ledger.specFile, ledger.todoFile].filter(Boolean)
-    if (postHocIssues.length > 0 && postFiles.length > 0 && !overrides.skipPlanBackfill) {
+    const targetSyncIssues = renamedPaths.length > 0
+      ? [...new Set([...postHocIssues, ...(ledger.linkedIssues ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0)])]
+      : postHocIssues
+    if (targetSyncIssues.length > 0 && postFiles.length > 0 && !overrides.skipPlanBackfill) {
       const syncRes = await syncPlanPhaseToBackend({
         repoRoot: workRoot,
         mainRoot: overrides.mainRoot ?? workRoot,
@@ -416,11 +422,12 @@ export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
         phase: 'plan-backfill',
         file: ledger.specFile ?? ledger.todoFile ?? ledger.prdFile,
         files: postFiles,
+        renamedPaths,
         taskId: ledger.taskId ?? null,
-        issueNumbers: postHocIssues,
+        issueNumbers: targetSyncIssues,
         role: ledger.role,
         providerId: ledger.providerId,
-        reason: `后绑定 Issue ${postHocIssues.map((n) => `#${n}`).join(', ')}，回补既有规划状态摘要`,
+        reason: `后绑定 Issue ${targetSyncIssues.map((n) => `#${n}`).join(', ')}，回补既有规划状态摘要`,
         ...(overrides._ghClient ? { _ghClient: overrides._ghClient } : {}),
         ...(overrides._ghProbe ? { _ghProbe: overrides._ghProbe } : {}),
       }).catch(() => null)

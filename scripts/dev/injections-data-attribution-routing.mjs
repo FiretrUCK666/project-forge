@@ -28,8 +28,8 @@ export const INJECTIONS_ATTRIBUTION_ROUTING = [
     what: 'parseAcceptanceCriteria 跳过 issueContext 与 prContext 复选框回退解析',
     file: 'kit/skills/dev-review/scripts/review-gates.mjs',
     alsoDropIn: ['.agents/skills/dev-review/scripts/review-gates.mjs'],
-    from: '  if (criteria.length === 0) {',
-    to: '  if (false && criteria.length === 0) {',
+    from: '  // Case 2 或外部 PR 无本地规划文件时，回退解析账本 issueContext 与 prContext 复选框\n  if (criteria.length === 0) {',
+    to: '  // Case 2 或外部 PR 无本地规划文件时，回退解析账本 issueContext 与 prContext 复选框\n  if (false && criteria.length === 0) {',
     expect: 'C2：中文生命周期标签统一',
   },
   {

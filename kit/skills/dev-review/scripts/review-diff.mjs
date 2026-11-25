@@ -40,8 +40,22 @@ export async function hasCommits(repoRoot) {
   return (await gitRun(repoRoot, ['rev-parse', '--verify', 'HEAD'])).ok
 }
 
-export async function resolveReviewTargetSha(mainRoot, worktreeRoot, task, headRef = 'HEAD') {
+export async function resolveReviewTargetSha(mainRoot, worktreeRoot, task, headRef = 'HEAD', { preferReviewSlot = false } = {}) {
   if (task) {
+    if (preferReviewSlot) {
+      const revCand = task.reviewWorktreePath
+        ? resolve(mainRoot, task.reviewWorktreePath)
+        : (task.taskId ? join(mainRoot, '.worktrees', `review-${task.taskId}`) : null)
+      if (revCand && existsSync(revCand)) {
+        if (headRef === 'HEAD') {
+          const fastRev = readHeadFast(resolveGitDirFast(revCand))?.oid
+          if (fastRev) return fastRev
+        }
+        const revRes = await gitRun(revCand, ['rev-parse', headRef])
+        if (revRes.ok && revRes.stdout.trim()) return revRes.stdout.trim()
+      }
+      if (headRef === 'HEAD' && task.reviewWorktreeHead) return task.reviewWorktreeHead
+    }
     const implRoot = task.worktreePath ? resolve(mainRoot, task.worktreePath) : null
     if (implRoot && existsSync(implRoot)) {
       if (headRef === 'HEAD') {
@@ -126,7 +140,8 @@ export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts
   const reviewWtAbs = resolve(mainRoot, reviewRel)
   const targetSha = await resolveReviewTargetSha(mainRoot, worktreeRoot, task, opts.head ?? 'HEAD')
   if (existsSync(reviewWtAbs)) {
-    const umRes = await callReviewDepsHelper('unmountSharedDeps', mainRoot, reviewWtAbs, { mode: 'deps' })
+    const mountedPaths = task.mountedDepsByWorktree?.[reviewRel] ?? task.mountedDeps ?? []
+    const umRes = await callReviewDepsHelper('unmountSharedDeps', mainRoot, reviewWtAbs, { mode: 'deps', mountedPaths })
     if (umRes && (umRes.ok === false || umRes.mode === 'failed')) {
       throw new Error(`同步审查槽 ${reviewRel} 前解绑共享依赖失败：${umRes.reason ?? JSON.stringify(umRes.blocked ?? [])}`)
     }

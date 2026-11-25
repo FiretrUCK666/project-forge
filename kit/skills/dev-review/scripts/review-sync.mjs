@@ -244,7 +244,7 @@ function resolveFaultInjectionSummary(opts = {}, ledger = {}) {
 
 export async function syncReviewToGitHub({
   mainRoot, workTreeRoot, ledger, round, verdict, headSha, reviewerId, implementerId,
-  empiricalSummary: empiricalSummaryArg = '', stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList = [],
+  empiricalSummary: empiricalSummaryArg = '', summary: summaryArg = '', stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList = [],
   rebuttedItems = [], resolvedItems = [], nextSteps = [], opts = {},
 }) {
   const prNum = parsePrNumber(ledger.prNumber)
@@ -257,6 +257,7 @@ export async function syncReviewToGitHub({
   }
 
   const empiricalSummary = String(empiricalSummaryArg || ledger.reviewEmpirical || opts?.evidence || '').trim()
+  const reviewSummary = String(summaryArg || opts?.summary || '').trim()
   const isLocalBackendRole = ledger.role === 'local-only'
     || ledger.role === 'generic-git'
     || ledger.providerId === 'generic-git'
@@ -291,7 +292,7 @@ export async function syncReviewToGitHub({
     const { issueCommentBody } = buildReviewComments({
       round, verdict, baseSha: ledger.baseSha, headSha,
       sourceLine: '独立审查上下文（隔离 worktree 复核）',
-      reviewerDisplay, implementerDisplay, empiricalSummary,
+      reviewerDisplay, implementerDisplay, empiricalSummary, summary: reviewSummary,
       criteria, criteriaStatusText, faultInjectionText, stopLoss, stopReasons,
       mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems,
       prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
@@ -381,7 +382,7 @@ export async function syncReviewToGitHub({
 
     const built = buildReviewComments({
       round, verdict, baseSha: ledger.baseSha, headSha, sourceLine,
-      reviewerDisplay, implementerDisplay, empiricalSummary, criteria, criteriaStatusText,
+      reviewerDisplay, implementerDisplay, empiricalSummary, summary: reviewSummary, criteria, criteriaStatusText,
       faultInjectionText, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList,
       rebuttedItems, resolvedItems, prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })

@@ -27,7 +27,7 @@ function blockerMatchesCriterion(m, criterionId) {
 /** 渲染结构化 PR 全量审查单与 Issue 摘要单（支持双层归属、实证核验、逐条标准对照表与 Must/Should/Pre-existing 分区）。 */
 export function buildReviewComments({
   round, verdict, baseSha, headSha, sourceLine,
-  reviewerDisplay = '', implementerDisplay = '', empiricalSummary = '',
+  reviewerDisplay = '', implementerDisplay = '', empiricalSummary = '', summary = '',
   criteria = [], criteriaStatusText,
   faultInjectionText, stopLoss = false, stopReasons = [], mustFixList = [],
   shouldFixList = [], preExistingList = [], rebuttedItems = [], resolvedItems = [],
@@ -44,12 +44,14 @@ export function buildReviewComments({
   const cleanReviewer = String(reviewerDisplay ?? '').trim()
   const cleanImplementer = String(implementerDisplay ?? '').trim()
   const cleanEmpirical = String(empiricalSummary ?? '').trim()
+  const cleanSummary = String(summary ?? '').trim()
 
   const prLines = [
     `### ${cnVerdict} · Round ${round}（${statusTagText} @ \`${baselineText}\`）`,
     '',
     ...(cleanReviewer ? [`- **审查人**：${cleanReviewer}`] : []),
     ...(cleanImplementer ? [`- **实施人**：${cleanImplementer}`] : []),
+    ...(cleanSummary ? [`- **审查结论**：${cleanSummary}`] : []),
     `- **审查来源**：${sourceLine}`,
     `- **逐条标准状态**：${criteriaStatusText}`,
     `- **故障注入记录**：${faultInjectionText}`,
@@ -107,6 +109,7 @@ export function buildReviewComments({
     '',
     ...(cleanReviewer ? [`- **审查人**：${cleanReviewer}`] : []),
     ...(cleanImplementer ? [`- **实施人**：${cleanImplementer}`] : []),
+    ...(cleanSummary ? [`- **审查结论**：${cleanSummary}`] : []),
     `- **审查来源**：${sourceLine}`,
     `- **逐条状态与标签**：${criteriaStatusText}${labelNote}`,
     `- **故障注入摘要**：${faultInjectionText}`,

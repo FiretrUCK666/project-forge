@@ -18,7 +18,10 @@ import {
   persistPlanCritiqueEntry, persistPlanCritiqueEntrySync,
   readPlanCritiqueEntry, readPlanCritiqueEntrySync,
 } from './critique-store.mjs'
-import { collectOwnerHistory, DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, stripCritiqueMeta, updateDocFrontmatter } from './docs.mjs'
+import {
+  collectOwnerHistory, DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter,
+  serializeDocFrontmatter, stripCritiqueMeta, syncPlanDocBodyMeta, updateDocFrontmatter,
+} from './docs.mjs'
 import { isValidActorName } from './harness-context.mjs'
 import { extractDocSnapshot } from './doc-substantive.mjs'
 import { posixPath, readTextSafe, sha256Text, writeAtomic } from './git.mjs'
@@ -105,11 +108,14 @@ export function evaluateThreeRoundStopLoss({
   humanApproved = false,
   matchesSame = null,
   maxRounds = STOP_LOSS_MAX_ROUNDS,
+  roundBaseline = 0,
 } = {}) {
   const rNum = Number(round) || 1
+  const baseRound = Math.max(0, Number(roundBaseline) || 0)
+  const relRound = Math.max(1, rNum - baseRound)
   const vLow = String(verdict ?? '').toLowerCase()
   const isBlocking = vLow === 'changes' || vLow === 'reject' || vLow === 'rejected' || items.length > 0
-  const maxRoundsExceeded = rNum >= maxRounds && isBlocking
+  const maxRoundsExceeded = relRound >= maxRounds && isBlocking
   const sameFn = typeof matchesSame === 'function'
     ? matchesSame
     : (a, b) => {
@@ -117,13 +123,17 @@ export function evaluateThreeRoundStopLoss({
         const tb = normCritItemText(b)
         return Boolean(ta && tb && ta === tb)
       }
-  const repeatedItems = (rNum >= 2 && Array.isArray(items) && items.length > 0 && Array.isArray(prevItems) && prevItems.length > 0)
+  const repeatedItems = (relRound >= 2 && Array.isArray(items) && items.length > 0 && Array.isArray(prevItems) && prevItems.length > 0)
     ? items.filter((it) => prevItems.some((pm) => sameFn(it, pm)))
     : []
-  const repeatedTrigger = rNum >= 2 && repeatedItems.length > 0
+  const repeatedTrigger = relRound >= 2 && repeatedItems.length > 0
   const stopLoss = (maxRoundsExceeded || repeatedTrigger) && !humanApproved
   const reasons = []
-  if (maxRoundsExceeded) reasons.push(`round ${rNum} >= ${maxRounds} with unresolved verdict/blockers`)
+  if (maxRoundsExceeded) {
+    reasons.push(baseRound > 0
+      ? `round ${rNum} (post-continue ${relRound} >= ${maxRounds}) with unresolved verdict/blockers`
+      : `round ${rNum} >= ${maxRounds} with unresolved verdict/blockers`)
+  }
   if (repeatedTrigger) reasons.push(`repeated blocker across consecutive rounds (${repeatedItems.length} item(s))`)
   return { stopLoss, maxRoundsExceeded, repeatedTrigger, repeatedItems, reasons, exitCode: stopLoss ? EXIT.HUMAN : EXIT.OK }
 }
@@ -441,6 +451,10 @@ export async function critiquePassDoc({
     updated: docIsoDate(),
   })
 
+  const resolvedContinued = priorEntry?.continued
+    ? { ...priorEntry.continued, active: false, resolvedAt: new Date().toISOString(), resolvedBy: String(reviewer).trim(), resolvedRound: effectiveRound }
+    : undefined
+
   await persistPlanCritiqueEntry({
     repoRoot, mainRoot, gitDir, taskId: taskId ?? fm.data?.task_id ?? null, fmData: fm.data, relDoc,
     entry: {
@@ -450,6 +464,7 @@ export async function critiquePassDoc({
       findings: nextFindings,
       structuredFindings: assignedPass.list,
       roundSnapshots: nextSnapshots,
+      ...(resolvedContinued ? { continued: resolvedContinued } : {}),
       override: priorEntry?.override ?? parseCritiqueOverride(fm.data),
       updatedAt: new Date().toISOString(),
     },
@@ -519,9 +534,14 @@ export async function critiqueRejectDoc({
   const prevSnapKey = String(prevRound?.round ?? (effectiveRound - 1))
   const prevLines = priorEntry?.roundSnapshots?.[prevSnapKey] ?? null
   const auditFailure = typeof auditDoc === 'function' ? !auditDoc({ repoRoot, file }).ok : false
+  const roundBaseline = Number(priorEntry?.continued?.roundBaseline) || 0
+  const activeContinueReason = priorEntry?.continued?.active
+    ? priorEntry.continued.reason
+    : (priorEntry?.continued?.reason && roundBaseline > 0 && effectiveRound === roundBaseline + 1 ? priorEntry.continued.reason : '')
   const scopeCheck = evaluateRound2CritiqueScope({
     effectiveRound, prevLines, currLines, blockingItems: classified.blocking,
-    openPriorBlockers, usedSummaryFallback, auditFailure, file: relDoc, reviewer: String(reviewer).trim(),
+    openPriorBlockers, usedSummaryFallback, auditFailure, continuedReason: activeContinueReason,
+    file: relDoc, reviewer: String(reviewer).trim(),
   })
   if (scopeCheck.blocked) {
     throw makePlanError('BLOCKED_OUT_OF_SCOPE_CRITIQUE', EXIT.FACT, scopeCheck.message, {
@@ -537,6 +557,7 @@ export async function critiqueRejectDoc({
 
   const sl = evaluateThreeRoundStopLoss({
     round: effectiveRound, verdict: 'reject', items: blockingTexts, prevItems, humanApproved: Boolean(override?.approved),
+    roundBaseline,
   })
 
   const stampValue = `rejected (reviewer=${String(reviewer).trim()}, round=${effectiveRound}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
@@ -552,6 +573,9 @@ export async function critiqueRejectDoc({
     recordedAt: new Date().toISOString(),
   }].sort((a, b) => Number(a.round) - Number(b.round))
   const nextSnapshots = { ...(priorEntry?.roundSnapshots ?? {}), [String(effectiveRound)]: currLines }
+  const resolvedContinued = priorEntry?.continued
+    ? { ...priorEntry.continued, active: false, resolvedAt: new Date().toISOString(), resolvedBy: String(reviewer).trim(), resolvedRound: effectiveRound }
+    : undefined
 
   persistCritiqueFrontmatter(abs, text, fm, effType, {
     plan_critique: stampValue,
@@ -567,6 +591,7 @@ export async function critiqueRejectDoc({
       findings: nextFindings,
       structuredFindings: assigned.list,
       roundSnapshots: nextSnapshots,
+      ...(resolvedContinued ? { continued: resolvedContinued } : {}),
       override: priorEntry?.override ?? override,
       updatedAt: new Date().toISOString(),
     },
@@ -644,12 +669,37 @@ export async function critiqueContinueDoc({
     repoRoot, mainRoot, gitDir, taskId, fmData: fm.data, relDoc,
   })
   const priorRounds = parseCritiqueRounds(fm.data, text, priorEntry)
+  const roundBaseline = priorRounds.reduce((m, r) => Math.max(m, Number(r?.round) || 0), 0)
+  const curStatus = String(fm.data?.status ?? (/^(?:-\s+)?Status:\s*(\S+)/mi.exec(text)?.[1] ?? '')).trim().toLowerCase()
+  const wasApproved = Boolean(
+    fm.data?.approved === true
+    || ['approved', 'implementing', 'in_review'].includes(curStatus)
+    || ((effType === 'prd' || effType === 'todo') && curStatus === 'active'),
+  )
+  if (wasApproved) {
+    const today = docIsoDate()
+    if (fm.hasFrontmatter) {
+      const patch = { status: 'draft', updated: today }
+      if ('approved' in (fm.data ?? {}) || effType === 'spec' || effType === 'todo') patch.approved = false
+      updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? effType] ?? [] })
+      const afterFm = parseDocFrontmatter(readTextSafe(abs) ?? text)
+      const syncedBody = syncPlanDocBodyMeta(afterFm.body.replace(/^\n+/, ''), afterFm.data, {
+        status: 'draft', today, critiquePassed: /^passed/i.test(String(afterFm.data?.plan_critique ?? '')),
+      })
+      const keyOrder = [...(DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? effType] ?? []), ...afterFm.keyOrder, ...Object.keys(afterFm.data)]
+      writeAtomic(abs, `${serializeDocFrontmatter(afterFm.data, keyOrder)}\n${syncedBody.endsWith('\n') ? syncedBody : `${syncedBody}\n`}`)
+    } else if (/^((?:-\s+)?Status:\s*)\S+/mi.test(text)) {
+      writeAtomic(abs, text.replace(/^((?:-\s+)?Status:\s*)\S+(\s*)$/mi, '$1draft$2'))
+    }
+  }
   const continuedObj = {
     active: true,
     reason: cleanReason,
     by: String(by ?? 'human-maintainer').trim() || 'human-maintainer',
     at: new Date().toISOString(),
     sha: digest,
+    fromSha: digest,
+    roundBaseline,
     roundsAtContinue: priorRounds.map((r) => r.round),
   }
 
@@ -669,6 +719,9 @@ export async function critiqueContinueDoc({
     file: relDoc,
     docType: effType,
     sha: digest,
+    fromSha: digest,
+    roundBaseline,
+    approvalRevoked: wasApproved,
     continued: continuedObj,
     unlockApprove: false,
     excludedReviewers: collectExcludedReviewers(priorRounds, fm.data?.owner),
@@ -707,10 +760,7 @@ export async function critiqueOverrideDoc({
     overriddenRounds: priorRounds.filter((r) => r.stopLossTriggered).map((r) => r.round),
   }
   if (fm.hasFrontmatter) {
-    updateDocFrontmatter(abs, {
-      [CRITIQUE_OVERRIDE_KEY]: JSON.stringify(overrideObj),
-      updated: docIsoDate(),
-    }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? effType] ?? [] })
+    updateDocFrontmatter(abs, { [CRITIQUE_OVERRIDE_KEY]: JSON.stringify(overrideObj), updated: docIsoDate() }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? effType] ?? [] })
   } else {
     const line = `- Critique Override: ${JSON.stringify(overrideObj)}`
     let updated = text
@@ -721,22 +771,14 @@ export async function critiqueOverrideDoc({
     writeAtomic(abs, updated)
   }
 
+  const resolvedContinued = priorEntry?.continued
+    ? { ...priorEntry.continued, active: false, resolvedAt: overrideObj.at, resolvedBy: overrideObj.by }
+    : undefined
+
   await persistPlanCritiqueEntry({
     repoRoot, mainRoot, gitDir, taskId: taskId ?? fm.data?.task_id ?? null, fmData: fm.data, relDoc,
-    entry: {
-      ...(priorEntry ?? {}),
-      rounds: priorRounds,
-      override: overrideObj,
-      updatedAt: overrideObj.at,
-    },
+    entry: { ...(priorEntry ?? {}), rounds: priorRounds, ...(resolvedContinued ? { continued: resolvedContinued } : {}), override: overrideObj, updatedAt: overrideObj.at },
   })
 
-  return {
-    ok: true,
-    status: 'CRITIQUE_STOP_LOSS_OVERRIDDEN',
-    file: relDoc,
-    sha: digest,
-    override: overrideObj,
-    nextStep: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${relDoc}"`,
-  }
+  return { ok: true, status: 'CRITIQUE_STOP_LOSS_OVERRIDDEN', file: relDoc, sha: digest, override: overrideObj, nextStep: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${relDoc}"` }
 }

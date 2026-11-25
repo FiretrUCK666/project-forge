@@ -432,8 +432,8 @@ export const INJECTIONS_WORKFLOW = [
     id: 'I104',
     what: '交接包不再带设计方案（实现子代理只能自己重新推导一遍）',
     file: 'kit/skills/lib/handoff-package.mjs',
-    from: '  const design = extractDesignSection(specText)',
-    to: '  const design = String()',
+    from: '  const { text: design, heading: designHeading } = extractDesignSectionWithHeading(specText)',
+    to: '  const { text: design, heading: designHeading } = { text: String(), heading: null }',
     expect: '交接包必须带设计方案',
   },
 

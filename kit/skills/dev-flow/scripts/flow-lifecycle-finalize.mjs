@@ -121,21 +121,30 @@ export async function handleFinalize(opts, roots) {
     return { exitCode: planningCheck.exitCode ?? EXIT.FACT }
   }
 
-  for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', prdGate.checkPrdInFinalize ? prdRel : null]]) {
-    if (!relDoc) continue
-    const absDoc = join(implRoot, relDoc)
-    if (!existsSync(absDoc)) continue
-    const unchecked = findUncheckedLines(readTextSafe(absDoc) ?? '')
-    if (unchecked.length > 0) {
-      process.stderr.write(`BLOCKED_UNCHECKED_${label}: ${relDoc} 仍有未勾选验收条目：\n${unchecked.map((u) => `  ${u}`).join('\n')}\n`)
-      return { exitCode: EXIT.ACTION }
+  const isPlanBootstrapDocs = Boolean(
+    ledger.planBootstrap === true
+    && (prdRel || specRel || stZ.entries.some((e) => /^docs\/(?:prd|specs)\//.test(posixPath(e.file ?? '')))),
+  )
+
+  if (!isPlanBootstrapDocs) {
+    for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', prdGate.checkPrdInFinalize ? prdRel : null]]) {
+      if (!relDoc) continue
+      const absDoc = join(implRoot, relDoc)
+      if (!existsSync(absDoc)) continue
+      const unchecked = findUncheckedLines(readTextSafe(absDoc) ?? '')
+      if (unchecked.length > 0) {
+        process.stderr.write(`BLOCKED_UNCHECKED_${label}: ${relDoc} 仍有未勾选验收条目：\n${unchecked.map((u) => `  ${u}`).join('\n')}\n`)
+        return { exitCode: EXIT.ACTION }
+      }
     }
   }
 
   const criteriaDrift = checkFrozenCriteria(ledger, implRoot)
   if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: EXIT.ACTION } }
-  const specNoteCheck = ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note: opts.note })
-  if (!specNoteCheck.ok) { process.stderr.write(specNoteCheck.message); return { exitCode: EXIT.ACTION } }
+  if (!isPlanBootstrapDocs) {
+    const specNoteCheck = ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note: opts.note })
+    if (!specNoteCheck.ok) { process.stderr.write(specNoteCheck.message); return { exitCode: EXIT.ACTION } }
+  }
 
   const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir })
   const finDiff = effectiveBase
@@ -164,7 +173,12 @@ export async function handleFinalize(opts, roots) {
   }
 
   let archivedGroup = { moved: [], byKind: { prd: prdRel, spec: specRel, todo: todoRel }, archivedMasterPrd: null }
-  if (prdRel || specRel || todoRel) {
+  if (isPlanBootstrapDocs) {
+    // 规划引导 PR 阶段保留活跃 PRD/SPEC/Todo 在原目录，供后续各切片实施时逐步推进与归档
+    if (specRel && existsSync(join(implRoot, specRel))) {
+      syncSpecStatusTableOnDisk(implRoot, specRel, { today, prdRel, todoRel })
+    }
+  } else if (prdRel || specRel || todoRel) {
     const existingSpecOwner = specRel && existsSync(join(implRoot, specRel))
       ? parseDocFrontmatter(readTextSafe(join(implRoot, specRel)) ?? '').data?.owner
       : null
@@ -184,7 +198,13 @@ export async function handleFinalize(opts, roots) {
         ? archivedGroup.byKind.prd
         : null
     }
-    if (archivedGroup.byKind.spec) { ledger.specFile = archivedGroup.byKind.spec; ledger.archivedSpecFile = archivedGroup.byKind.spec }
+    if (archivedGroup.byKind.spec) {
+      ledger.specFile = archivedGroup.byKind.spec
+      ledger.archivedSpecFile = archivedGroup.byKind.spec
+      if (ledger.criteriaFingerprint && archivedGroup.byKind.spec.startsWith('docs/archive/')) {
+        ledger.criteriaFrozenFrom = archivedGroup.byKind.spec
+      }
+    }
     if (archivedGroup.byKind.todo) { ledger.todoFile = archivedGroup.byKind.todo; ledger.archivedTodoFile = archivedGroup.byKind.todo }
     syncSpecStatusTableOnDisk(implRoot, archivedGroup.byKind.spec ?? specRel, {
       today,

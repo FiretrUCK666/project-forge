@@ -525,7 +525,7 @@ export function evaluateNextState({
       code: 'WARN_WORKING_IN_MAIN_CHECKOUT',
       message: `主工作区有 ${rt.mainDirtyCount} 处未提交改动，而这条任务的实施位是 ${t.worktreePath}`
         + '——Case 2/3/4 的活应该落在隔离位；小改动（Case 1）才在主工作区直接改。'
-        + '不改也行，但「这次改动包含什么」会因此说不清。',
+        + '请在主仓合并前整理并清理或迁出这些未提交改动，以免被脏主仓门禁拦截或混入无关修改。',
     })
   }
 

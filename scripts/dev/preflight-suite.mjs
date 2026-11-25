@@ -8,7 +8,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import {
-  FORBIDDEN_PLATFORM_RE, KIT_SKILL_MAX_LINES, PF_MANIFEST_REL,
+  FORBIDDEN_PLATFORM_RE, KIT_SKILL_MAX_BYTES, KIT_SKILL_MAX_LINES, KIT_SKILL_WARN_BYTES, PF_MANIFEST_REL,
   REPO_ONLY_DIRS, REPO_ONLY_FILES, UNIFIED_SKILL_NAMES, discoverKitSkillsDetailed, templateVarsOf,
 } from '../lib/protocol.mjs'
 import { checkEquip } from '../equip.mjs'
@@ -28,6 +28,7 @@ import { validateDocTocAnchors } from './preflight-contracts.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 import { runKernelParityChecks } from './preflight-kernel-parity.mjs'
 import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
+import { countTextLines } from '../../kit/skills/lib/static-gates.mjs'
 import { buildLexedViews } from '../../kit/skills/lib/static-gates-lexer.mjs'
 import {
   checkEvergreenFreshness,
@@ -487,6 +488,32 @@ export function scanKitPrivateLeaks(ROOT, readTextFn = null) {
   return leaks
 }
 
+export function evaluateKitSkillBudget(dirName, content, {
+  warnBytes = KIT_SKILL_WARN_BYTES,
+  maxBytes = KIT_SKILL_MAX_BYTES,
+  maxLines = KIT_SKILL_MAX_LINES,
+} = {}) {
+  const raw = String(content ?? '')
+  const bytes = Buffer.byteLength(raw, 'utf8')
+  const lines = countTextLines(raw)
+  const errors = []
+  const warnings = []
+  if (lines > maxLines) errors.push(`kit/skills/${dirName}/SKILL.md 有 ${lines} 行，超过上限 ${maxLines} 行`)
+  if (bytes > maxBytes) {
+    errors.push(`kit/skills/${dirName}/SKILL.md 有 ${bytes} 字节，超过硬上限 ${maxBytes} 字节 (16 KB)`)
+  } else if (bytes > warnBytes) {
+    warnings.push({
+      code: 'WARN_KIT_SKILL_BUDGET',
+      skill: dirName,
+      bytes,
+      warnBytes,
+      maxBytes,
+      message: `kit/skills/${dirName}/SKILL.md 有 ${bytes} 字节，超过告警阈值 ${warnBytes} 字节 (14 KB)，建议拆包去重`,
+    })
+  }
+  return { ok: errors.length === 0, dirName, bytes, lines, status: errors.length ? 'fail' : (warnings.length ? 'warn' : 'ok'), errors, warnings }
+}
+
 export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, note }, syntaxErrors) {
   const kitSkillsRoot = join(ROOT, 'kit', 'skills')
   const eq = checkEquip(ROOT, { kitDir: kitSkillsRoot })
@@ -523,11 +550,14 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
     fail(`内置 Skill 缺失必需核心技能（UNIFIED_SKILL_NAMES ${UNIFIED_SKILL_NAMES.length} 个）：缺少 [${missingUnified.join(', ')}]`)
   }
 
+  let maxSkillBytes = 0
   for (const skill of discovered) {
     const entry = join(kitSkillsRoot, skill.dirName, 'SKILL.md')
     if (!existsSync(entry)) { fail(`kit/skills 缺必需内置 Skill：kit/skills/${skill.dirName}/SKILL.md`); continue }
-    const lineCount = countLines(readText(entry))
-    if (lineCount > KIT_SKILL_MAX_LINES) fail(`kit/skills/${skill.dirName}/SKILL.md 有 ${lineCount} 行，超过上限 ${KIT_SKILL_MAX_LINES} 行`)
+    const res = evaluateKitSkillBudget(skill.dirName, readText(entry))
+    if (res.bytes > maxSkillBytes) maxSkillBytes = res.bytes
+    for (const err of res.errors) fail(err)
+    for (const warn of res.warnings) note(`${warn.code}: ${warn.message}`)
   }
 
   const kitScripts = walk(kitSkillsRoot, (f) => f.endsWith('.mjs'))
@@ -547,7 +577,7 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
     const synErr = syntaxErrors.get(file)
     if (synErr) fail(`${name} 语法错误：${synErr}`)
   }
-  note(`工程套件：${discovered.length} 个 Skill（<= ${KIT_SKILL_MAX_LINES} 行）、${kitScripts.length} 个脚本（<= 800 行）自包含，与 .agents/skills/ 字节级一致`)
+  note(`工程套件：${discovered.length} 个 Skill（<= ${KIT_SKILL_MAX_LINES} 行，最大 ${maxSkillBytes} B <= ${KIT_SKILL_MAX_BYTES} B）、${kitScripts.length} 个脚本（<= 800 行）自包含，与 .agents/skills/ 字节级一致`)
 }
 
 function checkHygiene({ ROOT, rel, walk, fail, changedSet }) {

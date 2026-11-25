@@ -69,15 +69,15 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" batch <plan|check-disjoint|merge
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm] [--allow-outbound <路径>]
 
 # 3. 实施者探索 / 认领 / 释放 / 归档锁（--include-master-prd）与分层实证
-node ".agents/skills/dev-flow/scripts/flow.mjs" explore [--task <id>] [--tier <tier>] [--focus <dir>]
+node ".agents/skills/dev-flow/scripts/flow.mjs" explore [--task <id>] [--mode <mode>] [--agent <id>] [--focus <dir>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N|URL>] [--takeover --reason "<接管原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" release [--task <id>] [--reason "<释放原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" finalize [--strict-sync] [--include-master-prd]
-node ".agents/skills/dev-flow/scripts/flow.mjs" verify --tier quick [--target <file>]
+node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode quick [--target <file>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke|full|gate [--e2e-evidence "<运行观察>"] [--visual-evidence "<视觉观察>"] [--artifact <path>]... [--visual-checked] [--visual-blocked-reason "<原因>"]
 
 # 4. 实施者提交待审 -> 移交 dev-review -> 返工 -> 审查者合入 -> 确认清理
-node ".agents/skills/dev-flow/scripts/flow.mjs" submit --agent <id> [--host-mode <multi-agent|single-session>] [--single-session] [--human-approved] [--draft] [--new-pr] [--offline] [--reset-review-slot]
+node ".agents/skills/dev-flow/scripts/flow.mjs" submit --agent <id> [--host-mode <multi-agent|single-session>] [--human-approved] [--draft] [--new-pr] [--offline] [--reset-review-slot]
 node ".agents/skills/dev-flow/scripts/flow.mjs" rework [--rebut "<findingId>: <reason>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" merge [--method merge|squash|rebase] [--human-approved] [--reason "<原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --confirm --preview-hash <hash> [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--allow-outbound <路径>]

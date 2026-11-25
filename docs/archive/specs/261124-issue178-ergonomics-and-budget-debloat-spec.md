@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: CLI 契约归一化、Skill 预算门禁与常青瘦身
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
-updated: 2026-11-24
-issue: null
+updated: 2026-11-25
+issue: 178
 pr: null
-branch: feat/conv-arch-plan
+branch: feat/feat-cli-契约归一化-skill-预算门禁与常青瘦身
 owner: planner-conv-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=2213a625664b, summary=切片 3 SPEC 体积基线精确（dev-govern 15572B / dev-review 15030B），14KB 告警与 16KB 硬限门禁及 C9-C12 同步链路完整可验)"
 related_prd: ../prd/261124-conversational-state-machine-prd.md
-related_todo: ../todo/261124-ergonomics-and-budget-debloat-todo.md
+related_todo: ../todo/261124-issue178-ergonomics-and-budget-debloat-todo.md
 high_risk_paths: [kit/, scripts/lib/, scripts/dev/preflight.mjs, templates/, AGENTS.md]
 task_id: ergonomics-and-budget-debloat
 depends_on: [conversational-lifecycle-model]
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/cli.mjs, kit/skills/lib/subcommand-meta.mjs, kit/sk
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（公共 CLI 契约归一化、体积门禁引入与全套文档对齐；未 `approved` 前不编码） |
-| 创建 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / Issue / PR | `feat/conv-arch-plan` / `#169` / 未关联 |
+| 创建 / 更新 | `2026-11-24` / `2026-11-25` |
+| 分支 / Issue / PR | `feat/feat-cli-契约归一化-skill-预算门禁与常青瘦身` / #178 / 未关联 |
 | 负责人 / 内审状态 | planner-conv-arch / `passed` |
 | 规划态 | `interactive`（关键设计与 5 项决策已确认，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261124-conversational-state-machine-prd.md` / `../todo/261124-ergonomics-and-budget-debloat-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261124-conversational-state-machine-prd.md` / `docs/archive/todo/261124-issue178-ergonomics-and-budget-debloat-todo.md` |
 
 - **变更一句话**：归一化公共 CLI 参数与 `[NEXT STEP]` / `nextSteps` 输出，落地 14KB/16KB Skill 体积门禁并完成全部 `SKILL.md` 与常青文档瘦身同步。
 
@@ -122,10 +122,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C9: `cli.mjs` / `subcommand-meta.mjs` / `doc-plan.mjs` / `flow.mjs` / `flow-inspect.mjs` / `review-pack.mjs` 将公开标志、help 与 `[NEXT STEP]` 统一至 `--agent`、`--mode`、`--host-mode` 同时静默保留旧别名兼容；`doc-plan triage` `[NEXT STEP]` 包含 `--agent`（兼容 `--owner`）、`doc-plan audit` 仅输出一次 `printNextStep`、`flow start` 复用分支给出准确 `[NEXT STEP]`，且 `--json` 输出结构化 `nextSteps`，由 `node scripts/dev/fixtures.mjs` 与 `node scripts/dev/subcommand-parity.mjs` 断言通过。
-- [ ] C10: `kit/skills/lib/tool-owned.mjs` 定义并由 `scripts/lib/protocol.mjs` 单源重导出 `KIT_SKILL_WARN_BYTES = 14 * 1024` 与 `KIT_SKILL_MAX_BYTES = 16 * 1024`，`scripts/dev/preflight.mjs` / `scripts/dev/preflight-suite.mjs` 对超 14KB 告警、超 16KB 失败阻断（含正反 fixture），由 `node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs` 断言通过。
-- [ ] C11: 全部 8 套 `kit/skills/*/SKILL.md` 完成去膨胀（拆解千字节级超长列表与重复错误码罗列而不丢失有效规则），每一份字节数严格低于 `KIT_SKILL_WARN_BYTES`（14336 B），且 `node scripts/dev/preflight.mjs`（含 `preflight-contracts.mjs`）与 `node scripts/dev/verify-injections.mjs --jobs 4` 全部通过。
-- [ ] C12: 修复 `templates/agents-project.md` 与 `AGENTS.md` 中的 Case 1 矛盾与 `WARN_WORKING_IN_MAIN_CHECKOUT` 文案，同步更新 `docs/TDD.md`、`references/collaboration.md`、`README.md` 与 `README.en.md`，并执行 `node scripts/compose-agents.mjs . --check`、`node scripts/equip.mjs . --check`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node scripts/review.mjs .`（0 个「缺」）、`node scripts/dev/e2e-zip-harness.mjs` 与 `node scripts/dev/merge-gate.mjs` 全部通过。
+- [x] C9: `cli.mjs` / `subcommand-meta.mjs` / `doc-plan.mjs` / `flow.mjs` / `flow-inspect.mjs` / `review-pack.mjs` 将公开标志、help 与 `[NEXT STEP]` 统一至 `--agent`、`--mode`、`--host-mode` 同时静默保留旧别名兼容；`doc-plan triage` `[NEXT STEP]` 包含 `--agent`（兼容 `--owner`）、`doc-plan audit` 仅输出一次 `printNextStep`、`flow start` 复用分支给出准确 `[NEXT STEP]`，且 `--json` 输出结构化 `nextSteps`，由 `node scripts/dev/fixtures.mjs` 与 `node scripts/dev/subcommand-parity.mjs` 断言通过。
+- [x] C10: `kit/skills/lib/tool-owned.mjs` 定义并由 `scripts/lib/protocol.mjs` 单源重导出 `KIT_SKILL_WARN_BYTES = 14 * 1024` 与 `KIT_SKILL_MAX_BYTES = 16 * 1024`，`scripts/dev/preflight.mjs` / `scripts/dev/preflight-suite.mjs` 对超 14KB 告警、超 16KB 失败阻断（含正反 fixture），由 `node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs` 断言通过。
+- [x] C11: 全部 8 套 `kit/skills/*/SKILL.md` 完成去膨胀（拆解千字节级超长列表与重复错误码罗列而不丢失有效规则），每一份字节数严格低于 `KIT_SKILL_WARN_BYTES`（14336 B），且 `node scripts/dev/preflight.mjs`（含 `preflight-contracts.mjs`）与 `node scripts/dev/verify-injections.mjs --jobs 4` 全部通过。
+- [x] C12: 修复 `templates/agents-project.md` 与 `AGENTS.md` 中的 Case 1 矛盾与 `WARN_WORKING_IN_MAIN_CHECKOUT` 文案，同步更新 `docs/TDD.md`、`references/collaboration.md`、`README.md` 与 `README.en.md`，并执行 `node scripts/compose-agents.mjs . --check`、`node scripts/equip.mjs . --check`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node scripts/review.mjs .`（0 个「缺」）、`node scripts/dev/e2e-zip-harness.mjs` 与 `node scripts/dev/merge-gate.mjs` 全部通过。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -143,6 +143,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：在 `cli.mjs` 落地 `flagPresets`、`resolveNextSteps` 与 `withNextSteps` 单源生成，统一 `doc-plan.mjs`、`flow.mjs`、`flow-intake.mjs`、`flow-inspect.mjs`、`flow-next.mjs`、`flow-lifecycle*.mjs`、`flow-merge*.mjs`、`flow-cleanup.mjs`、`flow-batch.mjs`、`review-pack.mjs`、`review-ledger.mjs` 的 `--agent`/`--mode`/`--host-mode` 规范参数与 `--json` `nextSteps` 输出，保持 `--owner`/`--actor`/`--implementer`/`--by`/`--tier`/`--single-session` 静默兼容；在 `tool-owned.mjs`、`protocol.mjs` 与 `preflight-suite.mjs` 落地 `KIT_SKILL_WARN_BYTES` (14KB) / `KIT_SKILL_MAX_BYTES` (16KB) 预算门禁；对 8 套 `kit/skills/*/SKILL.md` 去膨胀至全部低于 14KB（最大 `dev-flow` 13071 B）；修复 Case 1 与 `WARN_WORKING_IN_MAIN_CHECKOUT` 矛盾并同步常青双语文档与 `fixtures-conv-s3.mjs` / `injections-data-conv-s3.mjs`。
+- **与草案的差异**：`flow-inspect.mjs` 将复用分支 `[NEXT STEP]` 辅助函数 `buildStartReuseNextSteps` 下沉至 `flow-start-helpers.mjs` 以守住内置脚本单文件 `<= 800` 行上限；其余与草案完全一致。
+- **关联同步文件**：`.agents/skills/`、`AGENTS.md`、`docs/TDD.md`、`references/collaboration.md`、`README.md`、`README.en.md`、`docs/feature-map.json`、`docs/archive/prd/261124-conversational-state-machine-prd.md`。

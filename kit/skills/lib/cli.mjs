@@ -96,6 +96,7 @@ export function parseStandardCli(argv = [], schema = {}) {
   const valueFlags = toSet(['dir', 'repo', ...(schema.valueFlags ?? [])])
   const multiFlags = toSet(schema.multiFlags ?? [])
   const aliases = { h: 'help', repo: 'dir', ...(schema.aliases ?? {}) }
+  const flagPresets = schema.flagPresets && typeof schema.flagPresets === 'object' ? schema.flagPresets : {}
   const strict = schema.strict !== false
 
   let sub = null
@@ -154,6 +155,14 @@ export function parseStandardCli(argv = [], schema = {}) {
     if (booleanFlags.has(canonicalKey) || booleanFlags.has(rawKey)) {
       const targetKey = booleanFlags.has(canonicalKey) ? canonicalKey : rawKey
       opts[targetKey] = hasInlineVal ? parseBooleanValue(rawKey, inlineVal) : true
+      continue
+    }
+
+    const preset = flagPresets[rawKey]
+    if (preset && typeof preset === 'object' && preset.flag) {
+      const enabled = hasInlineVal ? parseBooleanValue(rawKey, inlineVal) : true
+      if (enabled) opts[preset.flag] = preset.value
+      if (preset.keepBoolean !== false) opts[rawKey] = enabled
       continue
     }
 
@@ -421,11 +430,9 @@ function formatStepItem(item, skillsInfo, fallbackMap) {
 }
 
 /**
- * 在每个 CLI 输出末尾打印清晰的下一步唯一合法动作卡片。
- * 当传入 repoRoot 或 availableSkills 时，对缺失的兄弟技能自动降级为纯 Git / 人工指令。
+ * 单源解析与降级 `[NEXT STEP]` 条目，供文本输出（`printNextStep`）与 `--json`（`nextSteps`）共用。
  */
-export function printNextStep(lines, { jsonMode = false, repoRoot, availableSkills, kitDir } = {}) {
-  if (jsonMode) return
+export function resolveNextSteps(lines, { repoRoot, availableSkills, kitDir } = {}) {
   const skillsInfo = availableSkills ?? (repoRoot ? resolveAvailableSkills(repoRoot, { kitDir }) : null)
   const fallbackMap = getSkillFallbacks(kitDir)
   const rawItems = Array.isArray(lines) ? lines : [lines]
@@ -435,11 +442,27 @@ export function printNextStep(lines, { jsonMode = false, repoRoot, availableSkil
     const line = formatStepItem(item, skillsInfo, fallbackMap)
     if (line && !rendered.includes(line)) rendered.push(line)
   }
-  if (rendered.length === 0) return
+  return rendered
+}
+
+/** 为 `--json` 输出对象单源附加规范化 `nextSteps` 字段。 */
+export function withNextSteps(payload, lines, opts = {}) {
+  const nextSteps = resolveNextSteps(lines, opts)
+  return { ...(payload ?? {}), nextSteps }
+}
+
+/**
+ * 在每个 CLI 输出末尾打印清晰的下一步唯一合法动作卡片。
+ * 当传入 repoRoot 或 availableSkills 时，对缺失的兄弟技能自动降级为纯 Git / 人工指令。
+ */
+export function printNextStep(lines, { jsonMode = false, repoRoot, availableSkills, kitDir } = {}) {
+  const rendered = resolveNextSteps(lines, { repoRoot, availableSkills, kitDir })
+  if (jsonMode || rendered.length === 0) return rendered
   process.stdout.write('\n[NEXT STEP]\n')
   for (const line of rendered) {
     process.stdout.write(`  - ${line}\n`)
   }
+  return rendered
 }
 
 function flushWritable(stream) {

@@ -8,10 +8,10 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import {
-  ackInboundExternalPr, applyLocalAutoClaim, backfillCriteriaFingerprint, calibrateLedgerBaseBranch, checkStartAuthorSeparation,
+  ackInboundExternalPr, applyLocalAutoClaim, backfillCriteriaFingerprint, buildStartReuseNextSteps, calibrateLedgerBaseBranch, checkStartAuthorSeparation,
   checkStartMainCleanAndSlot, checkStartTriageDowngrade, collectDocIssueNumbers, emitBlockedStart,
   inheritExploredCredentials, markStartTriageConsumed, promotePlanningToStarted,
   resolveOrBindStartIssue, resolveStartIdentity, runStartPlanGate, validateStartIssueFlags,
@@ -311,11 +311,12 @@ export async function handleStart(opts, roots) {
           { choice: 'local', desc: '仅本地使用不推远端：写入 .git/pf-local-mode' },
         ],
       }
-      if (opts.json) process.stdout.write(`${JSON.stringify(guidance, null, 2)}\n`)
+      const cloneNextSteps = [`重新运行带上选择：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${hintTask} --clone-choice <fork|standalone|local>`]
+      if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(guidance, cloneNextSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
       else {
         process.stdout.write(`停下确认：检测到当前仓库为只读克隆（${state.identity.reason}）。请选择协作方式：\n`)
         for (const c of guidance.choices) process.stdout.write(`  --clone-choice ${c.choice.padEnd(10)} : ${c.desc}\n`)
-        printNextStep([`重新运行带上选择：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${hintTask} --clone-choice <fork|standalone|local>`], { repoRoot: roots.mainRoot })
+        printNextStep(cloneNextSteps, { repoRoot: roots.mainRoot })
       }
       return { exitCode: EXIT.HUMAN }
     }
@@ -469,11 +470,12 @@ export async function handleStart(opts, roots) {
     if (!isPlanning) inheritExploredCredentials({ mainRoot: roots.mainRoot, docRoot: existingWorkRoot, ledger: existing })
     backfillCriteriaFingerprint(existingWorkRoot, existing)
     await updateTaskLedger(roots.mainRoot, existing.taskId, (cur) => ({ ...(cur ?? existing), ...existing }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ...existing, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
+    const reuseNextSteps = buildStartReuseNextSteps(existing, taskId)
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ ...existing, ...(createdIssue ? { createdIssue } : {}) }, reuseNextSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
       process.stdout.write(`任务 ${taskId} 已存在（幂等复用）：isolation=${existing.isolation}, branch=${existing.branch ?? 'detached'}\n`)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${taskId}` }], { repoRoot: roots.mainRoot })
+      printNextStep(reuseNextSteps, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -575,10 +577,11 @@ export async function handleStart(opts, roots) {
       inboundAck,
     })
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`)
+    const extNextSteps = [{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${effectiveExternalPr} --untrusted-scan` }]
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(ledger, extNextSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(`已建立外部 PR 审查隔离位：${reviewRel}（detached @ ${targetSha.slice(0, 7)}，未挂载依赖）\n`)
-      printNextStep([{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${effectiveExternalPr} --untrusted-scan` }], { repoRoot: roots.mainRoot })
+      printNextStep(extNextSteps, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -689,19 +692,19 @@ export async function handleStart(opts, roots) {
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger, { mainRoot: roots.mainRoot, gitDir: roots.gitDir, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, skipPlanBackfill: Boolean(opts.knownIssueStates && !opts._ghClient && !opts._ghProbe) })
     await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
+    const nextTier1 = isPlanning
+      ? [
+          { skill: 'dev-plan', text: `1. 在分支 ${ledger.branch} 起草规划文档并经 critique-pass 与 approve` },
+          { skill: 'dev-flow', text: `2. 过审后执行 flow.mjs start --task ${taskId} 转入实施` },
+        ]
+      : [
+          { skill: 'dev-flow', text: `1. 执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
+          { skill: 'dev-flow', text: `2. 完成实施并提交后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
+        ]
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, nextTier1, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
       process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 ${inPlaceOnExisting ? 'Case 1 原地微调' : '初始无提交分支'}模式${isPlanning ? '·规划阶段' : ''}）：branch=${ledger.branch}, role=${role}\n`)
-      const nextTier1 = isPlanning
-        ? [
-            { skill: 'dev-plan', text: `1. 在分支 ${ledger.branch} 起草规划文档并经 critique-pass 与 approve` },
-            { skill: 'dev-flow', text: `2. 过审后执行 flow.mjs start --task ${taskId} 转入实施` },
-          ]
-        : [
-            { skill: 'dev-flow', text: `1. 执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
-            { skill: 'dev-flow', text: `2. 完成实施并提交后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
-          ]
       printNextStep(nextTier1, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
@@ -765,8 +768,17 @@ export async function handleStart(opts, roots) {
   await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   markStartTriageConsumed(roots.mainRoot, { taskId: ledger.taskId, slug: ledger.slug })
 
+  const nextTier2 = isPlanning
+    ? [
+        { skill: 'dev-plan', text: `1. 在 ${implRel} 内编写/完善 SPEC 与 Todo 并完成 critique-pass 与 approve` },
+        { skill: 'dev-flow', text: `2. 过审后在同工作区执行 flow.mjs start --task ${taskId} 转入实施阶段` },
+      ]
+    : [
+        { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
+        `2. 在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,
+      ]
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, nextTier2, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {
     if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
     process.stdout.write(`任务 ${taskId} 已就绪（Tier 2 Worktree 模式${isPlanning ? '·规划隔离' : ''}）：\n`)
@@ -776,15 +788,6 @@ export async function handleStart(opts, roots) {
     if (Array.isArray(state.driftWarnings)) {
       for (const w of state.driftWarnings) process.stdout.write(`- [提醒] ${w.message}\n`)
     }
-    const nextTier2 = isPlanning
-      ? [
-          { skill: 'dev-plan', text: `1. 在 ${implRel} 内编写/完善 SPEC 与 Todo 并完成 critique-pass 与 approve` },
-          { skill: 'dev-flow', text: `2. 过审后在同工作区执行 flow.mjs start --task ${taskId} 转入实施阶段` },
-        ]
-      : [
-          { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
-          `2. 在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,
-        ]
     printNextStep(nextTier2, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }

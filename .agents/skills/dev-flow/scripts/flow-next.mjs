@@ -8,7 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { collectExcludedReviewers } from '../../lib/critique-rounds.mjs'
 import { gitRun, readJsonSafe } from '../../lib/git.mjs'
 import { readGitConfigFast } from '../../lib/git-fast.mjs'
@@ -414,7 +414,7 @@ export async function handleNext(opts, roots) {
   }
 
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps(payload, [{ skill: 'dev-flow', text: payload.command }], { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {
     process.stdout.write(`# flow next (${payload.phase} | owner=${payload.ownerRole})\n`)
     // 冷启动：没有任何任务时，光说「去 start」等于让新会话自己翻目录。

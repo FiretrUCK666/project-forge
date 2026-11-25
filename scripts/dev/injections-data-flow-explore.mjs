@@ -10,8 +10,8 @@ export const INJECTIONS_FLOW_EXPLORE = [
     what: 'flow start Tier 2 [NEXT STEP] 漏掉 claim 引导',
     file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-inspect.mjs'],
-    from: "      : [\n          { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node \".agents/skills/dev-flow/scripts/flow.mjs\" claim --task ${taskId}` },\n          `2. 在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,\n        ]",
-    to: "      : [\n          `在 ${implRel} 中推进实施；提交评审时将自动同步创建 ${reviewRel} 审查工作树。`,\n        ]",
+    from: "    : [\n        { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node \".agents/skills/dev-flow/scripts/flow.mjs\" claim --task ${taskId}` },\n        `2. 在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,\n      ]",
+    to: "    : [\n        `在 ${implRel} 中推进实施；提交评审时将自动同步创建 ${reviewRel} 审查工作树。`,\n      ]",
     expect: 'flow start [NEXT STEP] 在 Tier 2',
   },
   {
@@ -19,8 +19,8 @@ export const INJECTIONS_FLOW_EXPLORE = [
     what: 'flow start Tier 1 [NEXT STEP] 退回仅提示 verify 而漏掉 claim',
     file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-inspect.mjs'],
-    from: "        : [\n            { skill: 'dev-flow', text: `1. 执行 flow.mjs claim 认领任务：node \".agents/skills/dev-flow/scripts/flow.mjs\" claim --task ${taskId}` },\n            { skill: 'dev-flow', text: `2. 完成实施并提交后运行：node \".agents/skills/dev-flow/scripts/flow.mjs\" verify --task ${taskId}` },\n          ]",
-    to: "        : [\n            { skill: 'dev-flow', text: `node \".agents/skills/dev-flow/scripts/flow.mjs\" verify --task ${taskId}` },\n          ]",
+    from: "      : [\n          { skill: 'dev-flow', text: `1. 执行 flow.mjs claim 认领任务：node \".agents/skills/dev-flow/scripts/flow.mjs\" claim --task ${taskId}` },\n          { skill: 'dev-flow', text: `2. 完成实施并提交后运行：node \".agents/skills/dev-flow/scripts/flow.mjs\" verify --task ${taskId}` },\n        ]",
+    to: "      : [\n          { skill: 'dev-flow', text: `node \".agents/skills/dev-flow/scripts/flow.mjs\" verify --task ${taskId}` },\n        ]",
     expect: 'flow start [NEXT STEP] 在 Tier 2',
   },
   {

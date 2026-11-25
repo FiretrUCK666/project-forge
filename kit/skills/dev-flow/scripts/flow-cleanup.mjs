@@ -8,7 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync, rmSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
-import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import {
   DOC_FRONTMATTER_KEY_ORDER, docIsoDate, isSharedMasterPrd,
   parseDocFrontmatter, serializeDocFrontmatter, syncPlanDocBodyMeta, updateDocFrontmatter,
@@ -284,11 +284,12 @@ export async function handleCleanup(opts, roots) {
   })
 
   if (!opts.confirm) {
-    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', previewHash, checklist: cl }, null, 2)}\n`)
+    const confirmNext = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm --preview-hash ${previewHash}` }]
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', previewHash, checklist: cl }, confirmNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(`BLOCKED_CONFIRMATION_REQUIRED: 缺少 --confirm，已拒绝执行删除（previewHash=${previewHash}）。\n`)
       printCleanupChecklistText(cl)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm --preview-hash ${previewHash}` }], { repoRoot: roots.mainRoot })
+      printNextStep(confirmNext, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.FACT }
   }
@@ -367,11 +368,12 @@ export async function handleCleanup(opts, roots) {
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, cleanedAt: ledger.cleanedAt, ...(ledger.hooks ? { hooks: ledger.hooks } : {}) }), { createIfMissing: true })
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
   const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, verifyScratchCleanup, status: ledger.status }
-  if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
+  const cleanupDoneNext = ['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。']
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(summary, cleanupDoneNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个（保留 ${keptWorktrees.length} 个），本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}${verifyScratchCleanup?.destroyed ? `，已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
     printUnmountedLinksText(removedWorktrees)
-    printNextStep(['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。'], { repoRoot: roots.mainRoot })
+    printNextStep(cleanupDoneNext, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK, ...summary }
 }
@@ -452,11 +454,12 @@ export async function handleStatus(opts, roots) {
     ctx = await resolveTaskContext(roots, opts)
   } catch (err) {
     if (opts.task || active.length === 0) throw err
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, ambiguous: true, activeTasks: active }, null, 2)}\n`)
+    const statusNext = active.map((t) => ({ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${t.taskId}` }))
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ ok: true, ambiguous: true, activeTasks: active }, statusNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(`当前有 ${active.length} 个未闭环任务：\n`)
       for (const t of active) process.stdout.write(`- ${t.taskId}: status=${t.status}, branch=${t.branch ?? '-'}\n`)
-      printNextStep(active.map((t) => ({ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${t.taskId}` })), { repoRoot: roots.mainRoot })
+      printNextStep(statusNext, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -476,10 +479,11 @@ export async function handleStatus(opts, roots) {
     finalized: ledger.finalized, verifiedHead: ledger.verifiedHead, reviewPassed: Boolean(ledger.reviewPassed),
     blockingReasons: evaluated.blockingReasons, nextAction, command: evaluated.command, nextSummary: evaluated.nextAction,
   }
-  if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+  const statusSteps = [{ skill: 'dev-flow', text: nextAction }]
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(payload, statusSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`任务状态：${taskId}（推断来源=${source}，phase=${evaluated.phase}）\n- status=${ledger.status} | role=${ledger.role} | branch=${ledger.branch ?? '-'}\n- HEAD=${head?.slice(0, 7) ?? 'unborn'} | dirty=${snap.dirty} | verified=${ledger.verifiedHead === head} | reviewPassed=${Boolean(ledger.reviewPassed)}\n`)
-    printNextStep([{ skill: 'dev-flow', text: nextAction }], { repoRoot: roots.mainRoot })
+    printNextStep(statusSteps, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }
@@ -489,10 +493,11 @@ export async function handleAbort(opts, roots) {
   const { taskId, ledger } = ctx
   const worktrees = [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean).map((p) => ({ path: p, abs: resolve(roots.mainRoot, p) })).filter((w) => existsSync(w.abs))
   if (!opts.confirm) {
-    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', taskId, worktrees: worktrees.map((w) => w.path), branch: ledger.branch }, null, 2)}\n`)
+    const abortNext = [{ skill: 'dev-flow', text: `确认放弃后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` }]
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', taskId, worktrees: worktrees.map((w) => w.path), branch: ledger.branch }, abortNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(`BLOCKED_CONFIRMATION_REQUIRED: 放弃任务 ${taskId} 将移除 worktree (${worktrees.map((w) => w.path).join(', ') || '无'}) 并标记账本为 aborted。\n`)
-      printNextStep([{ skill: 'dev-flow', text: `确认放弃后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
+      printNextStep(abortNext, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.FACT }
   }

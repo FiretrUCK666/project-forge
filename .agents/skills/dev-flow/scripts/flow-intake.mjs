@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 
-import { flushAndExit, assertNoAsciiControlChars, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, assertNoAsciiControlChars, parseStandardCli, printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { stripPfStateTags } from '../../lib/github-client.mjs'
 import {
@@ -285,7 +285,7 @@ export async function handleIntake(opts = {}, rootsArg = null) {
     ghLogin: ghProbe?.env?.trackB?.login ?? state.github?.trackB?.login,
     ghTier: ghProbe?.env?.trackB?.tier ?? state.github?.trackB?.tier,
     gitName: state.gitIdentity?.name,
-    explicitAgent: opts.actor ?? opts.agent,
+    explicitAgent: opts.agent ?? opts.actor,
   })
 
   const evaluation = evaluateIntakeTriage(mainRoot, {
@@ -418,15 +418,16 @@ export async function handleIntake(opts = {}, rootsArg = null) {
     ...(recordPath ? { recordPath } : {}),
   }
 
+  const nextSteps = applyMode
+    ? (evaluation.shouldClose
+        ? [`已完成 ${targetType.toUpperCase()} #${targetNumber} 分诊关闭与落盘；${evaluation.rollbackHint}`]
+        : [`已完成 ${targetType.toUpperCase()} #${targetNumber} 分诊评论与打标（decision=${evaluation.decision}）。`])
+    : [`核对上述分诊结论后，加 \`--apply\` 执行评论/打标${evaluation.shouldClose ? '/关闭' : ''}与持久化记录。`]
+
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps(result, nextSteps, { repoRoot: mainRoot }), null, 2)}\n`)
   } else {
     process.stdout.write(formatIntakeMarkdown(result))
-    const nextSteps = applyMode
-      ? (evaluation.shouldClose
-          ? [`已完成 ${targetType.toUpperCase()} #${targetNumber} 分诊关闭与落盘；${evaluation.rollbackHint}`]
-          : [`已完成 ${targetType.toUpperCase()} #${targetNumber} 分诊评论与打标（decision=${evaluation.decision}）。`])
-      : [`核对上述分诊结论后，加 \`--apply\` 执行评论/打标${evaluation.shouldClose ? '/关闭' : ''}与持久化记录。`]
     printNextStep(nextSteps, { repoRoot: mainRoot })
   }
 
@@ -451,7 +452,6 @@ function printHelp() {
     '  --files <a,b>             补充涉及路径（逗号分隔）',
     '  --branch <name>           补充源分支名',
     '  --labels <a,b>            补充标签（逗号分隔）',
-    '  --actor <id>              分诊执行者',
     '  --agent <id>              分诊代理标识',
     '  --apply                   执行写入评论/标签/关闭与持久化分诊记录',
     '  --dry-run                 仅预演不写入（默认）',
@@ -466,8 +466,9 @@ export async function runFlowIntake(repoRoot = process.cwd(), argv = []) {
     booleanFlags: ['apply', 'dry-run', 'help'],
     valueFlags: [
       'pr', 'issue', 'feature-ref', 'decision', 'rationale', 'rationale-file',
-      'duplicate-of', 'task', 'title', 'body', 'files', 'branch', 'labels', 'actor', 'agent',
+      'duplicate-of', 'task', 'title', 'body', 'files', 'branch', 'labels', 'agent',
     ],
+    aliases: { actor: 'agent' },
     usageHint: 'flow-intake.mjs (--pr <M> | --issue <N>) [--decision <d>] [--rationale "<text>"] [--rationale-file <path>] [--duplicate-of <#N>] [--feature-ref <id>] [--apply] [--dry-run] [--json]',
   })
   if (cli.help) {

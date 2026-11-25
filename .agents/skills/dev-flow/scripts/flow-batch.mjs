@@ -10,7 +10,7 @@ import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { buildSliceGraph } from '../../lib/doc-slice-graph.mjs'
 import {
   gitRun, posixPath, readJsonSafe, resolveDefaultBranch, withFileLock, writeJsonAtomic,
@@ -236,7 +236,13 @@ async function handleBatchPlan(opts, roots) {
     out.handoffWave = targetWave[0]?.wave ?? null
   }
 
-  if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+  const wave1 = waves[0]?.tasks ?? []
+  const batchPlanNext = wave1.length >= 2
+    ? [{ skill: 'dev-flow', text: `并行派发 Wave 1（${wave1.map((t) => t.taskId).join(', ')}）至各自隔离工作位` }]
+    : (wave1.length === 1
+      ? [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${wave1[0].taskId}` }]
+      : [])
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(out, batchPlanNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`并行波次规划（共 ${out.totalTasks} 个任务/就绪切片，${waves.length} 个波次，parallelDispatch=${out.parallelDispatch}）：\n`)
     for (const w of waves) process.stdout.write(`  Wave ${w.wave} (${w.canParallel ? '可并行' : '串行'}): ${w.tasks.map((t) => t.taskId).join(', ')}\n`)
@@ -249,12 +255,7 @@ async function handleBatchPlan(opts, roots) {
         if (h.dependsOn.length > 0) process.stdout.write(`  依赖：${h.dependsOn.join(', ')}\n`)
       }
     }
-    const wave1 = waves[0]?.tasks ?? []
-    if (wave1.length >= 2) {
-      printNextStep([{ skill: 'dev-flow', text: `并行派发 Wave 1（${wave1.map((t) => t.taskId).join(', ')}）至各自隔离工作位` }], { repoRoot: roots.mainRoot })
-    } else if (wave1.length === 1) {
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${wave1[0].taskId}` }], { repoRoot: roots.mainRoot })
-    }
+    if (batchPlanNext.length > 0) printNextStep(batchPlanNext, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK, ...out }
 }
@@ -521,10 +522,11 @@ async function handleResumeSession(opts, roots) {
     nextAction: nextState.nextAction,
     command: nextState.command,
   }
-  if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+  const resumeNext = [{ skill: 'dev-flow', text: nextState.command }]
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(out, resumeNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`会话句柄已轮换（task=${taskId}, epoch=${sessionHandle.epoch}, token=${sessionHandle.handoffToken}）。\n`)
-    printNextStep([{ skill: 'dev-flow', text: nextState.command }], { repoRoot: roots.mainRoot })
+    printNextStep(resumeNext, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK, ...out }
 }

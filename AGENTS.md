@@ -182,7 +182,7 @@ node scripts/dev/verify-injections.mjs --jobs 4
   | **Case 4** | `L3` 跨模块/契约变更或高风险 | `docs/specs/` + `docs/todo/` Todo；经 `audit` + 3 轮 Critique（禁自审）-> `approve` |
   | **Case 5** | 与 `docs/TDD.md`（若存在）或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**（若存在），内审获批后继续 |
 
-  风险定级：`low`（非可执行文本，走 `runLowRiskDocStaticCheck`）/ `medium` / `high`（高风险/`one-way`/Case>=4 须独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 1-4 在隔离 `impl` 位派 `impl` 代理。
+  风险定级：`low`（非可执行文本，走 `runLowRiskDocStaticCheck`）/ `medium` / `high`（高风险/`one-way`/Case>=4 须独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 2-4 在隔离 `impl` 位派 `impl` 代理（Case 1 允许原地微调）。
 
 - **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 允许原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。**只读探索转任何非 `Case 1` 文件写改（含仅补测试归 Case 2/3、治理修复与归档校准）必先 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack`。**
 

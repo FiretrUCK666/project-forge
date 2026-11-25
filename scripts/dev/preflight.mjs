@@ -18,12 +18,13 @@ import {
   finishStepBodies, finishStepsState, matchHeadings, reviewBlockMissing,
   runContractChecks, validateDocTocAnchors,
 } from './preflight-contracts.mjs'
-import { runSuiteChecks } from './preflight-suite.mjs'
+import { evaluateKitSkillBudget, runSuiteChecks } from './preflight-suite.mjs'
 import { runE2eChecks } from './preflight-e2e.mjs'
 
 export {
   acceptanceIdMissing,
   completionRecordBeforeMerge,
+  evaluateKitSkillBudget,
   finishCommandsOf,
   finishRequiredMissing,
   finishSectionRange,

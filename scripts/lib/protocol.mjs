@@ -52,6 +52,8 @@ export {
   AGENTS_COMPACT_RECOMMENDED_BYTES,
   AGENTS_MAX_BYTES,
   AGENTS_WARN_BYTES,
+  KIT_SKILL_MAX_BYTES,
+  KIT_SKILL_WARN_BYTES,
   hasRealContent,
   isToolOwnedPath,
   isToolSkeletonFile,

@@ -400,7 +400,9 @@
         "scripts/dev/fixtures-r6b-plan.mjs",
         "scripts/dev/injections-data-r6b.mjs",
         "scripts/dev/fixtures-conv-s2.mjs",
-        "scripts/dev/injections-data-conv-s2.mjs"
+        "scripts/dev/injections-data-conv-s2.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
@@ -561,7 +563,9 @@
         "scripts/dev/fixtures-issue-binding.mjs",
         "scripts/dev/injections-data-issue-binding.mjs",
         "scripts/dev/fixtures-conv-s2.mjs",
-        "scripts/dev/injections-data-conv-s2.mjs"
+        "scripts/dev/injections-data-conv-s2.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -677,7 +681,9 @@
         "scripts/dev/fixtures-issue-binding.mjs",
         "scripts/dev/injections-data-issue-binding.mjs",
         "scripts/dev/fixtures-conv-s2.mjs",
-        "scripts/dev/injections-data-conv-s2.mjs"
+        "scripts/dev/injections-data-conv-s2.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -845,7 +851,9 @@
         "scripts/dev/fixtures-issue-quality.mjs",
         "scripts/dev/injections-data-issue-quality.mjs",
         "scripts/dev/fixtures-issue-binding.mjs",
-        "scripts/dev/injections-data-issue-binding.mjs"
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -997,7 +1005,9 @@
         "scripts/dev/fixtures-issue-quality.mjs",
         "scripts/dev/injections-data-issue-quality.mjs",
         "scripts/dev/fixtures-issue-binding.mjs",
-        "scripts/dev/injections-data-issue-binding.mjs"
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -1096,7 +1106,9 @@
         }
       ],
       "testRefs": [
-        "scripts/dev/fixtures-core.mjs"
+        "scripts/dev/fixtures-core.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#2-系统架构全景与模块边界"

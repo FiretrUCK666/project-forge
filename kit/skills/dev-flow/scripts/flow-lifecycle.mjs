@@ -8,7 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync, lstatSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { buildSubmitComments, docIsoDate, formatAttribution } from '../../lib/docs.mjs'
 import {
@@ -115,7 +115,7 @@ export async function handleVerify(opts, roots) {
       prdRel: vPrdRel, specRel: vSpecRel, todoRel: vTodoRel, ledger, isVerify: true, taskId,
     })
     if (prdGateV.blocked) {
-      if (opts.json) process.stdout.write(`${JSON.stringify(prdGateV, null, 2)}\n`)
+      if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(prdGateV, [prdGateV.nextStep], { repoRoot: roots.mainRoot }), null, 2)}\n`)
       process.stderr.write(`${prdGateV.message}\n`)
       printNextStep([prdGateV.nextStep], { repoRoot: roots.mainRoot })
       return { exitCode: prdGateV.exitCode }
@@ -123,7 +123,7 @@ export async function handleVerify(opts, roots) {
   }
 
   const profile = parseAgentsProfile(implRoot)
-  const mode = opts.tier ?? opts.mode ?? 'quick'
+  const mode = opts.mode ?? opts.tier ?? 'quick'
   if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-mode', severity: 'low', source: 'flow-verify', message: `invalid verify mode: ${mode}`, taskId })
     process.stderr.write(`INVALID_VERIFY_MODE: --mode / --tier 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
@@ -250,12 +250,13 @@ export async function handleVerify(opts, roots) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.shallowE2eEvidence?.code ?? 'BLOCKED_VERIFY_EVIDENCE', exitCode: evRec.overallExit || EXIT.FACT, reason: evRec.shallowE2eEvidence?.reason ?? null }, null, 2)}\n`)
       return { exitCode: evRec.overallExit || EXIT.FACT }
     }
+    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+    const explicitNoneNext = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }]
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: EXIT.OK, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, null, 2)}\n`)
+      process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: EXIT.OK, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, explicitNoneNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     } else {
       process.stdout.write(`verify (${mode}): AGENTS.md Dev Profile 显式配置 \`${profileKey}: none\`，已放行并绑定 HEAD=${currentHead ?? 'unborn'}\n`)
-      const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }], { repoRoot: roots.mainRoot })
+      printNextStep(explicitNoneNext, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -483,7 +484,7 @@ export async function handleSubmit(opts, roots) {
     const unlockCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${taskId}`
     const msg = `BLOCKED_PLAN_NOT_READY: 任务 ${taskId} 仍处于规划阶段（planning），请先批准规划并运行 flow.mjs start --task ${taskId} 转入实施后再提交。`
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', taskId, reason: msg, nextStep: unlockCmd }, null, 2)}\n`)
+      process.stdout.write(`${JSON.stringify(withNextSteps({ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', taskId, reason: msg, nextStep: unlockCmd }, [{ skill: 'dev-flow', text: unlockCmd }], { repoRoot: roots.mainRoot }), null, 2)}\n`)
     }
     process.stderr.write(`${msg}\n`)
     if (!opts.json) printNextStep([{ skill: 'dev-flow', text: unlockCmd }], { repoRoot: roots.mainRoot })
@@ -551,10 +552,11 @@ export async function handleSubmit(opts, roots) {
     ledger.lastSubmittedHead = currentHead
     ledger.status = 'local-ready'
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, reviewSlotSync }, null, 2)}\n`)
+    const submitNext = buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview })
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ ...ledger, reviewSlotSync }, submitNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(`本地模式提交校验已通过（HEAD=${shortHead}，未配置远端不执行 push）。\n`)
-      printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
+      printNextStep(submitNext, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -595,12 +597,13 @@ export async function handleSubmit(opts, roots) {
     ledger.deferredPush = deferredPush
     ledger.deferredPushReason = deferredPushReason
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, deferredPush, deferredPushReason, head: currentHead, pushRemote, reviewSlotSync }, null, 2)}\n`)
+    const submitNext = buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview })
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, deferredPush, deferredPushReason, head: currentHead, pushRemote, reviewSlotSync }, submitNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(deferredPush
         ? `submit 完成（generic-git 离线/延迟推送模式：${deferredPushReason}，本地已就绪 @ ${currentHead?.slice(0, 7)}，合前须手工推送并在远端托管完成合并，随后执行 flow.mjs merge 现场取回核验）。\n`
         : `submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
-      printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
+      printNextStep(submitNext, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -691,12 +694,13 @@ export async function handleSubmit(opts, roots) {
   ledger.lastSubmittedHead = currentHead
   ledger.status = ledger.role === 'contributor-fork' ? 'awaiting-upstream-merge' : 'submitted'
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, status: ledger.status, head: currentHead, prResult, commentResults, reviewSlotSync }, null, 2)}\n`)
+  const submitNext = buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview })
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, role: ledger.role, status: ledger.status, head: currentHead, prResult, commentResults, reviewSlotSync }, submitNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`submit 完成：已推分支 ${pushRemote}/${ledger.branch} @ ${shortHead}，状态=${ledger.status}\n`)
     if (prResult?.oneClickPrUrl) process.stdout.write(`- 一键创建 PR 链接：${prResult.oneClickPrUrl}\n`)
     if (prResult?.delegated) process.stdout.write(`- 待宿主 MCP 代理执行 PR 载荷：${JSON.stringify(prResult.jsonPayload)}\n`)
-    printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
+    printNextStep(submitNext, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }

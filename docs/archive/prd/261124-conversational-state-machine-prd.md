@@ -1,10 +1,10 @@
 ---
 kind: prd
 title: 对话记忆、全周期两态状态机与契约瘦身
-status: active
+status: done
 created: 2026-11-24
-updated: 2026-11-24
-issue: null
+updated: 2026-11-25
+issue: 169
 pr: null
 owner: planner-conv-arch
 plan_mode: interactive
@@ -20,9 +20,9 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
-| 创建 / 更新 | `2026-11-24` / `2026-11-24` |
-| 关联 Issue / PR | `#169` / 未关联 |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 创建 / 更新 | `2026-11-24` / `2026-11-25` |
+| 关联 Issue / PR | #169 / 未关联 |
 | 提出方 / 负责人 | planner-conv-arch |
 | 规划态 | `interactive`（全部关键设计与 5 项决策已由用户确认，待拍板为零） |
 | 切片架构 | 1:N 总控 PRD -> 3 份串行切片 SPEC + Todo（Wave 1 -> Wave 2 -> Wave 3） |
@@ -104,18 +104,18 @@ multi_spec: true
 
 ## 八、验收标准
 
-- [ ] C1: 切片 1（`core-state-integrity`）修复 `doc-plan-ops.mjs`（`clarifyDoc` 同步更新 `## 待拍板问题`、`approveSpec` 支持 `critique-continue` 后再 `critique-pass`）、`critique-store.mjs`（`commondir` 侧车路径、账本与 sidecar 合并及 `persistPlanCritiqueEntry` 文件锁）及 `critique-rounds.mjs` / `critique-diff.mjs` / `plan-next.mjs`（`fromSha` + `roundBaseline`、`continued.active` 清理、R2 范围纳入 `continued.reason`、已批文档重跑撤销 `approved`、编辑期间保留 `continueActive`），由 `node scripts/dev/fixtures.mjs` 全部正反用例验证通过。
-- [ ] C2: 切片 1（`core-state-integrity`）修复 `flow-sync.mjs`（clean rebase 清除 `queueConflict` 并刷新 `finalizedHead`，`unmountSharedDeps` 传入 `mountedPaths`）、`flow-merge.mjs`（`callerActor` 纳入 `opts['reviewer-id']` 阻断自合）、`flow-cleanup.mjs`（`handleAbort` 传 `remoteUrls`、校分支删除退出码、清 `private-docs` / `evidence.json` / `review-empirical.json`）及 `flow-lifecycle.mjs` / `flow-inspect.mjs` / `repo-map.mjs`（`local-only`/`generic-git` `submit` 写 `lastSubmittedHead`、`handleVerify` 校验槽位边界、`in-place` 复用、`repo-map --task` 原子更新账本），由 `node scripts/dev/fixtures.mjs` 验证通过。
-- [ ] C3: 切片 1（`core-state-integrity`）修复 `review-pack.mjs` / `review-diff.mjs` / `review-ledger.mjs` / `review-locks.mjs` / `review-empirical.mjs`：`--include-diff` 与 `record` 钉住 `review-<id>` 槽位及已审 `headSha`（审查中途不快进或读取 `impl-<id>`），卸载传 `mountedPaths`，`evaluatePassBlockers` 使用 `resolveEffectiveBaseSha`，`faultRequired` 时 `evaluateIncludeDiffGate` 强制核对 `check-fault:fail` 与 `check-fault:restore`。
-- [ ] C4: 切片 1（`core-state-integrity`）修复 `criteria-lock.mjs` / `flow-lifecycle-finalize.mjs` / `flow-start-helpers.mjs` / `handoff-package.mjs`：归档时更新 `criteriaFrozenFrom` 至 `docs/archive/specs/`，在 `flow start` 为批准于建账前的文档回填 `criteriaFingerprint`，移除死字段 `frozenCriteriaSnapshot`，在 `submit` 与 `review-pack record` 强制 `checkFrozenCriteria`，并在 `buildHandoff` 渲染 `issueContext`/`prContext`、动态 `--section` 标题与 `## 怎么算做完` 中的 `smoke-verify`。
-- [ ] C5: 切片 2（`conversational-lifecycle-model`）将 `kit/skills/lib/session-state.mjs` 升级至 `schemaVersion: 2`（向后兼容读 v1）：按 `topics[topicId]` 聚合 `preInit` 与 `triage`（最多 5 个活跃主题、每主题 6144 B 上限、可覆写 `facts` 键值对、通过 `--resolve` 关闭 `open`、`nonGoals`、优先淘汰可重建 `anchors`、永不静默 FIFO 删除 `facts`），严格按 topic/task/slug 隔离 `markTriageConsumed` 与 `resolveInheritedTriagePlanMode`，并在 `kit/skills/lib/session-orient.mjs` 完整渲染活跃主题（取消 `.slice(-4)` 截断）且 `includeWorktrees: true` 按新鲜度去重。
-- [ ] C6: 切片 2（`conversational-lifecycle-model`）扩展 `kit/skills/dev-plan/scripts/doc-plan.mjs` 与 `doc-plan-ops.mjs` 的 `note`（`--topic`、`--fact k=v`、`--resolve`、`--drop`、`--reset`）；`triage` 绑定 `topic` 且省略 `--paths` 时不再自动吸入脏 `git status` 文件；`init` 在 `open.length > 0` 时报 `BLOCKED_OPEN_QUESTIONS_UNRESOLVED`（除非 `--allow-open-draft`，且仅将 `open` 写入主文档并只消费目标主题）；修复 `init --kind prd --multi-spec` 无账本 worktree 陷阱；`kit/skills/dev-explore/scripts/doc-locate.mjs` 与 `repo-map.mjs` 默认零写入，仅显式传 `--topic <id>` 时向仓外 `session-state.json` `topics[topicId].anchors` 写入已验真相对路径。
-- [ ] C7: 切片 2（`conversational-lifecycle-model`）新增不超过 200 行的单源纯函数模块 `kit/skills/lib/mutability.mjs` (new) 导出 `evaluateMutability`（`open` / `locked` + `safeExits`）并接入 `doc-plan next`、`clarify`、`flow next`、`flow rework`；`clarifyDoc` 对 `LOCKED` 阻断报 `BLOCKED_DOC_FROZEN` 并附 3 个安全出口，支持 `--drop-criterion C<N> --reason --by user` 并在 `checkDocRegression` 放行用户授权删除同时继续拦截静默删除；在 `VALID_STATUS_BY_TYPE`、`doc-plan archive --drop --reason` 与 `flow abort` 落地 `dropped` 终态；`checkOrphanSlices` 允许互不关联的独立 SPEC，`checkMasterCriteriaCoverage` 在 Master PRD `active` 期允许分阶段切片并在收口时强制 100% 覆盖，`plan-next` 在 `--task` 同时命中 PRD 与 SPEC 时优先 PRD 且不饿死次要活跃计划。
-- [ ] C8: 切片 2（`conversational-lifecycle-model`）加固 `kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `kit/skills/dev-flow/scripts/flow-next.mjs`：`flow rework` 默认仅在 `changes` 或 `queueConflict` 时放行，在 `LOCKED` 态缺 `--reopen --reason` 报 `BLOCKED_REWORK_REQUIRES_REOPEN`，带 `--reopen --reason` 时原子吊销未消费 `reviewTokens`、清空 `reviewPassed*` 并退回 `OPEN`；`ambiguous` 阶段为每个任务暴露各自 `phase` 与 `mutability` 并仅将就绪/实施中任务送入 `batch plan`。
-- [ ] C9: 切片 3（`ergonomics-and-budget-debloat`）在 `kit/skills/lib/cli.mjs`、`kit/skills/lib/subcommand-meta.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` 与 `kit/skills/dev-review/scripts/review-pack.mjs` 归一化公共 CLI 标志、帮助文档与 `[NEXT STEP]`（规范名为 `--agent`、`--mode`、`--host-mode`，旧参数保留为静默别名），修复 `doc-plan triage` `[NEXT STEP]` 漏 `--owner`/`--agent`、移除 `audit` 重复 `printNextStep`、修复 `flow start` 复用分支 `[NEXT STEP]` 并在 `--json` 模式统一输出 `nextSteps`。
-- [ ] C10: 切片 3（`ergonomics-and-budget-debloat`）在 `scripts/lib/protocol.mjs`（与 `kit/skills/lib/tool-owned.mjs` 单源同步）及 `scripts/dev/preflight.mjs` / `scripts/dev/preflight-suite.mjs` 定义并强制执行 `KIT_SKILL_WARN_BYTES = 14 * 1024` 与 `KIT_SKILL_MAX_BYTES = 16 * 1024`。
-- [ ] C11: 切片 3（`ergonomics-and-budget-debloat`）在不丢失任何有效约束与错误码语义的前提下，拆解 `kit/skills/*/SKILL.md` 内 1000B 级超长列表与重复错误码罗列，使全部 8 套内置 Skill 文档体积均舒适低于 14KB / 16KB 预算并通过 `scripts/dev/preflight-contracts.mjs` 关键契约覆盖检查。
-- [ ] C12: 切片 3（`ergonomics-and-budget-debloat`）对齐 `templates/agents-project.md` 与 `AGENTS.md` 中的 Case 1 隔离矛盾及 `WARN_WORKING_IN_MAIN_CHECKOUT` 文案，同步更新 `docs/TDD.md`、`references/collaboration.md`、`README.md` 与 `README.en.md`，并全量通过 `compose-agents.mjs .`、`equip.mjs .`、`sync-toc.mjs --check`、`review.mjs .`、`preflight.mjs` 与 `fixtures.mjs`。
+- [x] C1: 切片 1（`core-state-integrity`）修复 `doc-plan-ops.mjs`（`clarifyDoc` 同步更新 `## 待拍板问题`、`approveSpec` 支持 `critique-continue` 后再 `critique-pass`）、`critique-store.mjs`（`commondir` 侧车路径、账本与 sidecar 合并及 `persistPlanCritiqueEntry` 文件锁）及 `critique-rounds.mjs` / `critique-diff.mjs` / `plan-next.mjs`（`fromSha` + `roundBaseline`、`continued.active` 清理、R2 范围纳入 `continued.reason`、已批文档重跑撤销 `approved`、编辑期间保留 `continueActive`），由 `node scripts/dev/fixtures.mjs` 全部正反用例验证通过。
+- [x] C2: 切片 1（`core-state-integrity`）修复 `flow-sync.mjs`（clean rebase 清除 `queueConflict` 并刷新 `finalizedHead`，`unmountSharedDeps` 传入 `mountedPaths`）、`flow-merge.mjs`（`callerActor` 纳入 `opts['reviewer-id']` 阻断自合）、`flow-cleanup.mjs`（`handleAbort` 传 `remoteUrls`、校分支删除退出码、清 `private-docs` / `evidence.json` / `review-empirical.json`）及 `flow-lifecycle.mjs` / `flow-inspect.mjs` / `repo-map.mjs`（`local-only`/`generic-git` `submit` 写 `lastSubmittedHead`、`handleVerify` 校验槽位边界、`in-place` 复用、`repo-map --task` 原子更新账本），由 `node scripts/dev/fixtures.mjs` 验证通过。
+- [x] C3: 切片 1（`core-state-integrity`）修复 `review-pack.mjs` / `review-diff.mjs` / `review-ledger.mjs` / `review-locks.mjs` / `review-empirical.mjs`：`--include-diff` 与 `record` 钉住 `review-<id>` 槽位及已审 `headSha`（审查中途不快进或读取 `impl-<id>`），卸载传 `mountedPaths`，`evaluatePassBlockers` 使用 `resolveEffectiveBaseSha`，`faultRequired` 时 `evaluateIncludeDiffGate` 强制核对 `check-fault:fail` 与 `check-fault:restore`。
+- [x] C4: 切片 1（`core-state-integrity`）修复 `criteria-lock.mjs` / `flow-lifecycle-finalize.mjs` / `flow-start-helpers.mjs` / `handoff-package.mjs`：归档时更新 `criteriaFrozenFrom` 至 `docs/archive/specs/`，在 `flow start` 为批准于建账前的文档回填 `criteriaFingerprint`，移除死字段 `frozenCriteriaSnapshot`，在 `submit` 与 `review-pack record` 强制 `checkFrozenCriteria`，并在 `buildHandoff` 渲染 `issueContext`/`prContext`、动态 `--section` 标题与 `## 怎么算做完` 中的 `smoke-verify`。
+- [x] C5: 切片 2（`conversational-lifecycle-model`）将 `kit/skills/lib/session-state.mjs` 升级至 `schemaVersion: 2`（向后兼容读 v1）：按 `topics[topicId]` 聚合 `preInit` 与 `triage`（最多 5 个活跃主题、每主题 6144 B 上限、可覆写 `facts` 键值对、通过 `--resolve` 关闭 `open`、`nonGoals`、优先淘汰可重建 `anchors`、永不静默 FIFO 删除 `facts`），严格按 topic/task/slug 隔离 `markTriageConsumed` 与 `resolveInheritedTriagePlanMode`，并在 `kit/skills/lib/session-orient.mjs` 完整渲染活跃主题（取消 `.slice(-4)` 截断）且 `includeWorktrees: true` 按新鲜度去重。
+- [x] C6: 切片 2（`conversational-lifecycle-model`）扩展 `kit/skills/dev-plan/scripts/doc-plan.mjs` 与 `doc-plan-ops.mjs` 的 `note`（`--topic`、`--fact k=v`、`--resolve`、`--drop`、`--reset`）；`triage` 绑定 `topic` 且省略 `--paths` 时不再自动吸入脏 `git status` 文件；`init` 在 `open.length > 0` 时报 `BLOCKED_OPEN_QUESTIONS_UNRESOLVED`（除非 `--allow-open-draft`，且仅将 `open` 写入主文档并只消费目标主题）；修复 `init --kind prd --multi-spec` 无账本 worktree 陷阱；`kit/skills/dev-explore/scripts/doc-locate.mjs` 与 `repo-map.mjs` 默认零写入，仅显式传 `--topic <id>` 时向仓外 `session-state.json` `topics[topicId].anchors` 写入已验真相对路径。
+- [x] C7: 切片 2（`conversational-lifecycle-model`）新增不超过 200 行的单源纯函数模块 `kit/skills/lib/mutability.mjs` (new) 导出 `evaluateMutability`（`open` / `locked` + `safeExits`）并接入 `doc-plan next`、`clarify`、`flow next`、`flow rework`；`clarifyDoc` 对 `LOCKED` 阻断报 `BLOCKED_DOC_FROZEN` 并附 3 个安全出口，支持 `--drop-criterion C<N> --reason --by user` 并在 `checkDocRegression` 放行用户授权删除同时继续拦截静默删除；在 `VALID_STATUS_BY_TYPE`、`doc-plan archive --drop --reason` 与 `flow abort` 落地 `dropped` 终态；`checkOrphanSlices` 允许互不关联的独立 SPEC，`checkMasterCriteriaCoverage` 在 Master PRD `active` 期允许分阶段切片并在收口时强制 100% 覆盖，`plan-next` 在 `--task` 同时命中 PRD 与 SPEC 时优先 PRD 且不饿死次要活跃计划。
+- [x] C8: 切片 2（`conversational-lifecycle-model`）加固 `kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `kit/skills/dev-flow/scripts/flow-next.mjs`：`flow rework` 默认仅在 `changes` 或 `queueConflict` 时放行，在 `LOCKED` 态缺 `--reopen --reason` 报 `BLOCKED_REWORK_REQUIRES_REOPEN`，带 `--reopen --reason` 时原子吊销未消费 `reviewTokens`、清空 `reviewPassed*` 并退回 `OPEN`；`ambiguous` 阶段为每个任务暴露各自 `phase` 与 `mutability` 并仅将就绪/实施中任务送入 `batch plan`。
+- [x] C9: 切片 3（`ergonomics-and-budget-debloat`）在 `kit/skills/lib/cli.mjs`、`kit/skills/lib/subcommand-meta.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` 与 `kit/skills/dev-review/scripts/review-pack.mjs` 归一化公共 CLI 标志、帮助文档与 `[NEXT STEP]`（规范名为 `--agent`、`--mode`、`--host-mode`，旧参数保留为静默别名），修复 `doc-plan triage` `[NEXT STEP]` 漏 `--owner`/`--agent`、移除 `audit` 重复 `printNextStep`、修复 `flow start` 复用分支 `[NEXT STEP]` 并在 `--json` 模式统一输出 `nextSteps`。
+- [x] C10: 切片 3（`ergonomics-and-budget-debloat`）在 `scripts/lib/protocol.mjs`（与 `kit/skills/lib/tool-owned.mjs` 单源同步）及 `scripts/dev/preflight.mjs` / `scripts/dev/preflight-suite.mjs` 定义并强制执行 `KIT_SKILL_WARN_BYTES = 14 * 1024` 与 `KIT_SKILL_MAX_BYTES = 16 * 1024`。
+- [x] C11: 切片 3（`ergonomics-and-budget-debloat`）在不丢失任何有效约束与错误码语义的前提下，拆解 `kit/skills/*/SKILL.md` 内 1000B 级超长列表与重复错误码罗列，使全部 8 套内置 Skill 文档体积均舒适低于 14KB / 16KB 预算并通过 `scripts/dev/preflight-contracts.mjs` 关键契约覆盖检查。
+- [x] C12: 切片 3（`ergonomics-and-budget-debloat`）对齐 `templates/agents-project.md` 与 `AGENTS.md` 中的 Case 1 隔离矛盾及 `WARN_WORKING_IN_MAIN_CHECKOUT` 文案，同步更新 `docs/TDD.md`、`references/collaboration.md`、`README.md` 与 `README.en.md`，并全量通过 `compose-agents.mjs .`、`equip.mjs .`、`sync-toc.mjs --check`、`review.mjs .`、`preflight.mjs` 与 `fixtures.mjs`。
 
 ## 九、待拍板问题
 

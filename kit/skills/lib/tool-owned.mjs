@@ -10,6 +10,8 @@ import { UNIFIED_SKILL_NAMES } from './skill-discovery.mjs'
 export const AGENTS_MAX_BYTES = 30720
 export const AGENTS_COMPACT_RECOMMENDED_BYTES = 24576
 export const AGENTS_WARN_BYTES = AGENTS_COMPACT_RECOMMENDED_BYTES
+export const KIT_SKILL_WARN_BYTES = 14 * 1024
+export const KIT_SKILL_MAX_BYTES = 16 * 1024
 
 /**
  * 工具严格托管的核心路径前缀（动态对齐 `UNIFIED_SKILL_NAMES`、`lib/`、`templates/` 与清单账本）。

@@ -8,7 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { evaluateMasterPrdClosureState } from '../../lib/doc-substantive.mjs'
 import { evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
@@ -128,13 +128,17 @@ export async function handleRework(opts, roots) {
   ledger.status = 'rework'
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'flow.rework', severity: 'medium', source: 'flow-rework', file: changed[0] ?? '', taskId, message: `rework entered (reopen=${Boolean(opts.reopen)}, revokedTokens=${revokedTokensCount}, rebuts=${addedRebuts.length}, forbidden=${forbiddenTouched.length})`, meta: { forbiddenTouched, rebutCount: addedRebuts.length, reopened: Boolean(opts.reopen), revokedTokensCount } })
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mutability: 'OPEN', reopened: Boolean(opts.reopen), revokedTokensCount, branch: ledger.branch, prNumber: ledger.prNumber, forbiddenTouched, addedRebuts }, null, 2)}\n`)
+  const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+  const reworkNextSteps = [
+    { skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
+    { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` },
+  ]
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, status: ledger.status, mutability: 'OPEN', reopened: Boolean(opts.reopen), revokedTokensCount, branch: ledger.branch, prNumber: ledger.prNumber, forbiddenTouched, addedRebuts }, reworkNextSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`进入返工模式（task=${taskId}，原分支=${ledger.branch}，原 PR=${ledger.prNumber ?? '待创建'}${opts.reopen ? `，已解锁并撤销 ${revokedTokensCount} 枚未消费令牌` : ''}）：\n`)
     if (forbiddenTouched.length > 0) process.stdout.write(`- 警告：以下变更命中 do-not-edit 列表：${forbiddenTouched.join(', ')}\n`)
     if (addedRebuts.length > 0) process.stdout.write(`- 已记录 ${addedRebuts.length} 条有据反驳。\n`)
-    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
-    printNextStep([{ skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }, { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }], { repoRoot: roots.mainRoot })
+    printNextStep(reworkNextSteps, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }
@@ -186,10 +190,11 @@ export async function handleForkFinalize({ implRoot, roots, ledger, taskId, stZ,
   ledger.status = 'finalized'
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   const res = { taskId, role: ledger.role, upstreamUsesDocs: false, privateDocsIsolated: true, relocatedPrivateDocs: relocated, finalizedHead: currentHead, coupledSyncWarnings }
-  if (opts.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
+  const forkFinalizeNext = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }]
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(res, forkFinalizeNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write('Fork finalize 完成（上游未接入 docs/，私有规划已安全隔离到 .worktrees/.state/private-docs/）。\n')
-    printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
+    printNextStep(forkFinalizeNext, { repoRoot: roots.mainRoot })
   }
   if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
     process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则（共 ${coupledSyncWarnings.length} 组）。\n`)
@@ -600,8 +605,22 @@ export function emitVerifyOutcomeOutput({
   if (e2eFailureReport?.diagnostic && !opts.json) {
     process.stderr.write(`E2E_RUNTIME_FAILED:\nEvidence:\n  - ${e2eFailureReport.diagnostic.Evidence.join('\n  - ')}\nUnknowns:\n  - ${e2eFailureReport.diagnostic.Unknowns.join('\n  - ')}\nNextSteps:\n  - ${e2eFailureReport.diagnostic.NextSteps.join('\n  - ')}\n`)
   }
+  let verifyNextSteps = []
+  if (allOk) {
+    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+    verifyNextSteps = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }]
+    if (policy.smokeRequired && !evRec.e2eObservation) {
+      verifyNextSteps.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)
+    } else if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {
+      verifyNextSteps.unshift(`检测到 UI/视觉改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请核验实际渲染、交互与浅深色截图后补 --visual-checked。`)
+    }
+  } else {
+    verifyNextSteps = e2eFailureReport?.diagnostic?.NextSteps?.length
+      ? e2eFailureReport.diagnostic.NextSteps
+      : [`验证未通过（exit=${finalExit}），请修复后重新运行 verify。`]
+  }
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({
+    process.stdout.write(`${JSON.stringify(withNextSteps({
       taskId, mode, target: rawTarget, cmd, ...(targetTip ? { targetTip } : {}),
       ok: allOk, exitCode: finalExit, verifiedHead: ledger.verifiedHead, riskTier: policy.riskTier,
       smokeVerifiedOnHead: evRec.smokeVerifiedOnHead, e2eObservation: evRec.e2eObservation,
@@ -609,30 +628,14 @@ export function emitVerifyOutcomeOutput({
       docStatic: docStaticRes, visualFilesChanged, empiricalVisualCheckRequired,
       visualVerifiedHead: ledger.visualVerifiedHead, visualCheckEvidence: ledger.visualCheckEvidence,
       stdout: runRes.stdout, stderr: runRes.stderr,
-    }, null, 2)}\n`)
+    }, verifyNextSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     return
   }
   if (runRes.stdout) process.stdout.write(`${runRes.stdout}\n`)
   if (runRes.stderr) process.stdout.write(`${runRes.stderr}\n`)
   if (targetTip) process.stdout.write(`${targetTip}\n`)
   process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${finalExit} HEAD=${currentHead ?? 'unborn'} risk=${policy.riskTier}\n`)
-  if (allOk) {
-    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
-    const next = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }]
-    if (policy.smokeRequired && !evRec.e2eObservation) {
-      next.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)
-    } else if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {
-      next.unshift(`检测到 UI/视觉改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请核验实际渲染、交互与浅深色截图后补 --visual-checked。`)
-    }
-    printNextStep(next, { repoRoot: roots.mainRoot })
-  } else {
-    printNextStep(
-      e2eFailureReport?.diagnostic?.NextSteps?.length
-        ? e2eFailureReport.diagnostic.NextSteps
-        : [`验证未通过（exit=${finalExit}），请修复后重新运行 verify。`],
-      { repoRoot: roots.mainRoot },
-    )
-  }
+  printNextStep(verifyNextSteps, { repoRoot: roots.mainRoot })
 }
 
 async function collectSnapshotChangedFiles(cwd, baseRef, statusEntries = [], diffEntries = null) {

@@ -12,7 +12,7 @@
 import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli, withNextSteps } from '../../lib/cli.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
@@ -438,15 +438,16 @@ async function main(argv = process.argv.slice(2)) {
     opts.releaseReason = reasonCheck.cleaned
   }
   if (hazards.length > 0 && !opts.humanApprovedExec) {
-        const payload = {
+        const hazardNext = 'Do NOT mount dependencies or run tests. Show these hazards to a human maintainer; only re-run with --human-approved-exec --reason "<原因>" (and use --ignore-scripts) after explicit approval.'
+        const payload = withNextSteps({
           status: 'BLOCKED_UNTRUSTED_HAZARD',
           exitCode: EXIT.FACT,
           diffScope,
           headSha,
           hazards,
           advisories: untrustedAdvisories,
-          nextStep: 'Do NOT mount dependencies or run tests. Show these hazards to a human maintainer; only re-run with --human-approved-exec --reason "<原因>" (and use --ignore-scripts) after explicit approval.',
-        }
+          nextStep: hazardNext,
+        }, [hazardNext])
         if (opts.json) {
           process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
         } else {

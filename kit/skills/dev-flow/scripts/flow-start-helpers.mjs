@@ -620,3 +620,22 @@ export async function promotePlanningToStarted({
   backfillCriteriaFingerprint(gateRoot, existing)
   return { blocked: false, createdIssue: bindRes.createdIssue ?? null }
 }
+
+export function buildStartReuseNextSteps(existing, taskId) {
+  if (existing.status === 'planning' || existing.planning === true) {
+    return [
+      { skill: 'dev-plan', text: `1. 在 ${existing.worktreePath ?? '.'} 内编写/完善 SPEC 与 Todo 并完成 critique-pass 与 approve` },
+      { skill: 'dev-flow', text: `2. 过审后执行 node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${taskId} 转入实施阶段` },
+    ]
+  }
+  if (existing.isolation === 'review-pr') {
+    return [{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${existing.prNumber ?? ''} --untrusted-scan` }]
+  }
+  if (!existing.claimedAt) {
+    return [
+      { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --agent <id>` },
+      { skill: 'dev-flow', text: `2. 推进任务状态：node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${taskId}` },
+    ]
+  }
+  return [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${taskId}` }]
+}

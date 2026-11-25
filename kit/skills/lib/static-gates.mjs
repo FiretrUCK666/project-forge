@@ -58,10 +58,20 @@ export function isTestOrFixtureFile(rel) {
   return TEST_FILE_RE.test(p) || FIXTURE_FILE_RE.test(p)
 }
 
+const RELEASE_NOTES_DIR_PREFIX = `${['docs', 'release-notes'].join('/')}/`
+
+export function isReleaseNotesDocPath(rel) {
+  const p = posixPath(rel)
+  return p.startsWith(RELEASE_NOTES_DIR_PREFIX) && p.endsWith('.md')
+}
+
 export function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived = new Set()) {
   const rel = posixPath(entry?.file ?? '')
-  if (!rel.startsWith('docs/archive/')) return false
   const st = String(entry?.status ?? '')
+  if (isReleaseNotesDocPath(rel)) {
+    return /^(?:AM?|\?\?)$/i.test(st)
+  }
+  if (!rel.startsWith('docs/archive/')) return false
   if (/^R/i.test(st)) return true
   if (/^(?:A|\?\?|M)/i.test(st)) {
     if (ownArchived.has(rel)) return true

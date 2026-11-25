@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="RELEASING.md"><img src="https://img.shields.io/badge/version-v6.0.0-4E7496?style=flat-square" alt="Version v6.0.0"></a>
+  <a href="RELEASING.md"><img src="https://img.shields.io/badge/version-v7.0.0-4E7496?style=flat-square" alt="Version v7.0.0"></a>
   <a href="#install-and-automatic-updates"><img src="https://img.shields.io/badge/node-%3E%3D18-1F6F5B?style=flat-square" alt="Node.js 18 or newer"></a>
   <a href="SKILL.md"><img src="https://img.shields.io/badge/dependencies-0-1F6F5B?style=flat-square" alt="Zero third-party dependencies"></a>
   <a href="#supported-languages"><img src="https://img.shields.io/badge/languages-any-D96B27?style=flat-square" alt="Works with any language"></a>

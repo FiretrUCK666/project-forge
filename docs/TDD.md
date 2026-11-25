@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 适用基线 | 以仓库当前源码与 `SKILL.md` 当前 `metadata.version`（`6.0.0`）为准 |
+| 适用基线 | 以仓库当前源码与 `SKILL.md` 当前 `metadata.version`（`7.0.0`）为准 |
 | 最近更新日期 | `2026-11-25` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |

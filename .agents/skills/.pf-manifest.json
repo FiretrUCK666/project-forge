@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
-  "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-25T05:11:30.349Z",
+  "forgeVersion": "7.0.0",
+  "installedAt": "2026-11-25T06:21:42.510Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
     },
     "dev-edit/scripts/edit-gate.mjs": {
-      "sha256": "ae0b31143a69a913fcba1bd7d5a531da8d85e1ff213045e5d3d25c892d1dcc68"
+      "sha256": "d6e32e4ddb831bb3e390da0db667817f436e90287ed8f5f0a2c48fe45346dd13"
     },
     "dev-explore/SKILL.md": {
       "sha256": "b42f616ee63a8569ce576ac0c6c4c68da1c1d1d2ab623b25d5c07a2eb29acb3d"
@@ -415,7 +415,7 @@
       "sha256": "2299aff41e991902c485bebee7ad7839751d940e6fc8d10de65ef2683abdac5c"
     },
     "lib/static-gates.mjs": {
-      "sha256": "75e8ab2e236819a7681c2e7ab3ba72d80f24c011082433a9907b14b602ed5f20"
+      "sha256": "93c763c807edea65802b7332209a98fb10f382fd2a19468aa31664794777e464"
     },
     "lib/subcommand-meta.mjs": {
       "sha256": "59ed19630cf88698ce1e85ae1dc07ce90b64904ee5b6f79a39311ab098a8d202"

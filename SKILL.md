@@ -14,7 +14,7 @@ description: |
   只读勘察先行，幂等不覆盖，支持 v3 账本（墓碑/定制豁免/三方合并与 overlay 扩展）与纯本地降级运行；默认私有仓库。
   不用于：纯概念问答、临时只改一行代码且不涉及工程治理、或跳过勘察强行覆盖手写规范。
 metadata:
-  version: "6.0.0"
+  version: "7.0.0"
   source: "https://github.com/FiretrUCK666/project-forge"
 ---
 

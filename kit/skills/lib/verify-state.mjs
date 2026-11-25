@@ -233,7 +233,8 @@ export function resolveVerifySlotKey(repoRoot, mainRoot) {
 
 export function readVerifyCache(gitCommonDir, mainRoot = process.cwd()) {
   const p = resolveVerifyCachePath(gitCommonDir, mainRoot)
-  const raw = readJsonSafe(p)
+  // cache.json 含多槽位 symbolsByFile，超 4 个工作树即突破 512KB 默认上限，不可沿用小文件截断导致静默清零。
+  const raw = readJsonSafe(p, 16 * 1024 * 1024)
   if (!raw || typeof raw !== 'object') return { version: 2, tools: {}, slots: {} }
   const tools = raw.tools && typeof raw.tools === 'object' && !Array.isArray(raw.tools) ? raw.tools : {}
   const slots = raw.slots && typeof raw.slots === 'object' && !Array.isArray(raw.slots) ? raw.slots : {}
@@ -388,7 +389,9 @@ export async function evaluateToolStaleness({
 
   const cache = precomputed?.cache ?? readVerifyCache(gitCommonDir, mainRoot)
   const effSlot = slotKey ?? resolveVerifySlotKey(repoRoot, mainRoot)
-  const baseline = (effSlot ? cache.slots?.[effSlot]?.[tool.id] : null) ?? cache.tools[tool.id] ?? null
+  const slotEntry = effSlot ? cache.slots?.[effSlot]?.[tool.id] : null
+  const mainFallback = (effSlot && effSlot !== 'main') ? cache.slots?.main?.[tool.id] : null
+  const baseline = slotEntry ?? mainFallback ?? cache.tools[tool.id] ?? null
   if (!baseline) {
     const current = skipFingerprintOnUnbaselined ? null : await computeFeatureFingerprint(repoRoot, feature, { tool })
     return {
@@ -413,7 +416,7 @@ export async function evaluateToolStaleness({
     }
   }
   if (changedFilesSet && headSha && baseline.passedAtCommit === headSha) {
-    const toolMods = [...(feature?.modules ?? []), ...(tool?.scriptPath ? [tool.scriptPath] : [])].map((m) => posixPath(String(m ?? '')).replace(/^\.\//, '').replace(/\/+$/, ''))
+    const toolMods = [...(feature?.entrypoints ?? []), ...(feature?.modules ?? []), ...(tool?.scriptPath ? [tool.scriptPath] : [])].map((m) => posixPath(String(m ?? '')).replace(/^\.\//, '').replace(/\/+$/, ''))
     const anyChanged = toolMods.some((m) => m && [...changedFilesSet].some((c) => c === m || c.startsWith(`${m}/`)))
     if (!anyChanged) {
       return {
@@ -464,4 +467,72 @@ export async function evaluateToolStaleness({
     addedSymbols: symDiff.addedSymbols, removedSymbols: symDiff.removedSymbols,
     baseline, current: currentFp,
   }
+}
+
+/**
+ * 合并成功后将已通过 PR 实证的 worktree 槽位基线同步提升至 `cache.slots.main`（仅当 `mainRoot`
+ * 实际文件指纹与槽位已验指纹完全一致时才晋升，避免未覆盖变更假绿）。
+ */
+export async function syncVerifyCacheOnMerge({
+  gitCommonDir,
+  mainRoot,
+  slotKeys = [],
+  verifiedSha = null,
+  mainHeadSha = null,
+} = {}) {
+  if (!gitCommonDir || !mainRoot) return { promoted: [], skipped: [] }
+  const normSlots = [...new Set((Array.isArray(slotKeys) ? slotKeys : []).map((s) => posixPath(String(s ?? '')).trim()).filter((s) => s && s !== 'main'))]
+  if (normSlots.length === 0) return { promoted: [], skipped: [] }
+
+  const cache = readVerifyCache(gitCommonDir, mainRoot)
+  const fm = readJsonSafe(join(mainRoot, 'docs', 'feature-map.json'))
+  const features = Array.isArray(fm?.features) ? fm.features : []
+  if (features.length === 0) return { promoted: [], skipped: [] }
+
+  let effMainHead = mainHeadSha
+  if (!effMainHead) {
+    const hr = await gitRun(mainRoot, ['rev-parse', 'HEAD'])
+    effMainHead = hr.ok ? hr.stdout.trim() : null
+  }
+
+  const promoted = []
+  const skipped = []
+  let dirty = false
+  cache.slots.main = (cache.slots.main && typeof cache.slots.main === 'object') ? cache.slots.main : {}
+
+  for (const feature of features) {
+    for (const tool of feature?.verificationTools ?? []) {
+      if (!tool?.id) continue
+      let candidate = null
+      let fromSlot = null
+      for (const sk of normSlots) {
+        const entry = cache.slots?.[sk]?.[tool.id]
+        if (!entry) continue
+        if (verifiedSha && entry.verifiedSha && entry.verifiedSha !== verifiedSha && entry.passedAtCommit !== verifiedSha) continue
+        candidate = entry
+        fromSlot = sk
+        break
+      }
+      if (!candidate) continue
+      const mainFp = await computeFeatureFingerprint(mainRoot, feature, { tool })
+      const matches = candidate.symbolHash === mainFp.symbolHash
+        && candidate.moduleTreeHash === mainFp.moduleTreeHash
+        && (candidate.scriptHash ?? null) === (mainFp.scriptHash ?? null)
+      if (!matches) {
+        skipped.push({ toolId: tool.id, fromSlot, reason: 'main-fingerprint-mismatch' })
+        continue
+      }
+      cache.slots.main[tool.id] = {
+        ...candidate,
+        slotKey: 'main',
+        verifiedSha: effMainHead ?? candidate.verifiedSha ?? null,
+        passedAtCommit: effMainHead ?? candidate.passedAtCommit ?? null,
+      }
+      promoted.push({ toolId: tool.id, fromSlot })
+      dirty = true
+    }
+  }
+
+  if (dirty) writeJsonAtomic(resolveVerifyCachePath(gitCommonDir, mainRoot), cache)
+  return { promoted, skipped }
 }

@@ -122,13 +122,28 @@ export function evaluateMasterIssueCloseGuard({
     return { shouldClose: true, isMasterPrd: false, remainingSiblings: [], progressNote: null }
   }
 
+  const implSliceState = new Map()
+  let implGraph = null
+  if (implRoot && existsSync(implRoot)) {
+    try {
+      implGraph = buildSliceGraph(implRoot)
+      for (const s of implGraph.slices ?? []) {
+        if (s.kind === 'spec' && s.key) implSliceState.set(s.key, s)
+      }
+    } catch { /* ignore */ }
+  }
+
   const ledgerPrdNorm = ledger?.prdFile ? posixPath(ledger.prdFile) : (ledger?.archivedPrdFile ? posixPath(ledger.archivedPrdFile) : null)
   const ledgerSpecNorm = ledger?.specFile ? posixPath(ledger.specFile) : (ledger?.archivedSpecFile ? posixPath(ledger.archivedSpecFile) : null)
+  const allSlices = [...(graph.slices ?? []), ...(implGraph?.slices ?? [])]
+  const isSliceSpecIssue = allSlices.some((s) => s.kind === 'spec' && Number(s.data?.issue) === issNum)
+  const isSliceTaskOwnIssue = Boolean(ledgerSpecNorm) && ledger?.planBootstrap !== true
   const master = prds.find((p) => {
     const masterIssue = Number(p.data?.issue)
     if (Number.isInteger(masterIssue) && masterIssue > 0) return masterIssue === issNum
+    if (isSliceSpecIssue || isSliceTaskOwnIssue) return false
     if (ledgerPrdNorm && (posixPath(p.rel) === ledgerPrdNorm || posixPath(p.rel).endsWith(`/${ledgerPrdNorm.split('/').pop()}`))) return true
-    return (graph.slices ?? []).some((s) => s.kind === 'spec' && s.masterRel === p.rel && Number(s.data?.issue) === issNum)
+    return false
   })
   if (!master) {
     return { shouldClose: true, isMasterPrd: false, remainingSiblings: [], progressNote: null }
@@ -143,16 +158,6 @@ export function evaluateMasterIssueCloseGuard({
       remainingSiblings: [],
       progressNote: `[规划引导合并保护] 本 PR 为总控 PRD \`${master.rel}\` 的规划引导拆分（planBootstrap），保留 Master Issue #${issNum} 开启。`,
     }
-  }
-
-  const implSliceState = new Map()
-  if (implRoot && existsSync(implRoot)) {
-    try {
-      const implGraph = buildSliceGraph(implRoot)
-      for (const s of implGraph.slices ?? []) {
-        if (s.kind === 'spec' && s.key) implSliceState.set(s.key, s)
-      }
-    } catch { /* ignore */ }
   }
 
   const siblings = (graph.slices ?? []).filter((s) => s.kind === 'spec' && s.masterRel === master.rel)

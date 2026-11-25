@@ -43,8 +43,13 @@ function isCwdInside(wtAbs) {
 }
 
 async function cleanupTaskVerifyScratch(roots, taskId, ledger, source = 'flow-cleanup') {
-  const slotKey = ledger?.worktreePath ? posixPath(ledger.worktreePath) : (ledger?.taskId ? `.worktrees/impl-${ledger.taskId}` : null)
-  if (roots.gitDir && slotKey) reclaimVerifySlotCache(roots.gitDir, slotKey, taskId)
+  const slotKeys = [
+    ledger?.worktreePath ? posixPath(ledger.worktreePath) : (ledger?.taskId ? `.worktrees/impl-${ledger.taskId}` : null),
+    ledger?.reviewWorktreePath ? posixPath(ledger.reviewWorktreePath) : (ledger?.taskId ? `.worktrees/review-${ledger.taskId}` : null),
+  ].filter(Boolean)
+  for (const sk of new Set(slotKeys)) {
+    if (roots.gitDir) reclaimVerifySlotCache(roots.gitDir, sk, roots.mainRoot)
+  }
   const fm = readFeatureMap(roots.mainRoot)
   const ledgerFiles = Array.isArray(ledger?.files) ? ledger.files : []
   const aff = fm && ledgerFiles.length > 0 ? findAffectedFeatures(fm, ledgerFiles) : null

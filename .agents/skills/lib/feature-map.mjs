@@ -27,6 +27,7 @@ import {
   resolveVerifyCachePath,
   resolveVerifySlotKey,
   resolveVerifyStateDir,
+  syncVerifyCacheOnMerge,
   validateE2eEvidenceText,
   writeVerifyCacheEntry,
 } from './verify-state.mjs'
@@ -48,6 +49,7 @@ export {
   resolveVerifyCachePath,
   resolveVerifySlotKey,
   resolveVerifyStateDir,
+  syncVerifyCacheOnMerge,
   validateE2eEvidenceText,
   writeVerifyCacheEntry,
 }

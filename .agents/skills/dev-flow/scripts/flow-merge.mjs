@@ -30,6 +30,7 @@ import {
   resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateReviewRecordClosure,
 } from '../../lib/workflow-policy.mjs'
 import { collectPlanSummaryMeta, syncIssueSummaryBody } from '../../lib/plan-sync.mjs'
+import { syncVerifyCacheOnMerge } from '../../lib/verify-state.mjs'
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
@@ -493,7 +494,7 @@ export async function handleMerge(opts, roots) {
         : (mergeRes.mergeBlocked ? `405 合并受阻(${mergeRes.error ?? ''})` : (mergeRes.state ?? mergeRes.error))
       throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
     }
-    // 先同步 mainRoot，确保 1:N 总控 Issue 关单保护读取到最新主线切片终态。
+    // 先同步 mainRoot，确保 1:N 总控 Issue 关单保护读取到最新主线切片终态，并提升已验证槽位缓存。
     if (!opts._ghProbe) {
       await syncLocalDefaultBranchAfterMerge({
         mainRoot: roots.mainRoot,
@@ -503,6 +504,12 @@ export async function handleMerge(opts, roots) {
         fetch: true,
       })
     }
+    await syncVerifyCacheOnMerge({
+      gitCommonDir: roots.gitDir,
+      mainRoot: roots.mainRoot,
+      slotKeys: [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean),
+      verifiedSha: currentHead,
+    }).catch(() => null)
     const mergeImplLayers = resolveIdentityLayers({
       ghLogin: ghProbe?.env?.trackB?.login,
       ghTier: ghProbe?.env?.trackB?.tier,
@@ -589,6 +596,14 @@ export async function handleMerge(opts, roots) {
         baseBranch,
         fetch: Boolean(mergeRes?.fetched),
       })
+    }
+    if (mergeRes?.merged !== false) {
+      await syncVerifyCacheOnMerge({
+        gitCommonDir: roots.gitDir,
+        mainRoot: roots.mainRoot,
+        slotKeys: [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean),
+        verifiedSha: currentHead,
+      }).catch(() => null)
     }
     if (((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0) && mergeRes?.merged !== false) {
       const mergeImplLayers = resolveIdentityLayers({

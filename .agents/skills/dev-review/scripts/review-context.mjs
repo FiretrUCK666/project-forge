@@ -13,7 +13,7 @@ import { resolveExecutable } from '../../lib/exec.mjs'
 import {
   FEATURE_MAP_REL, detectScratchSolidificationHints, evaluateToolStaleness,
   findAffectedFeatures, matchFeatureMapForPaths, prefillFeatureMapFromRepoMap,
-  resolveTaskScratchDir,
+  readVerifyCache, resolveTaskScratchDir,
 } from '../../lib/feature-map.mjs'
 import {
   LIKELY_DEFAULT_BRANCHES, gitLsFilesTextAndCode, gitRun, posixPath, readTextSafe, resolveDefaultBranch,
@@ -270,7 +270,8 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
     }
   }
   const changedFilesSet = new Set(changedFiles)
-  const precomputed = { headSha: effectiveHeadSha, resolvedBaseSha }
+  const verifyCache = matchedToolsRaw.length > 0 ? readVerifyCache(gitDir, mainRoot) : null
+  const precomputed = { headSha: effectiveHeadSha, resolvedBaseSha, cache: verifyCache }
   const toolChecks = await Promise.all(
     matchedToolsRaw.map(async ({ feature, tool }) => {
       const staleness = await evaluateToolStaleness({
@@ -280,7 +281,8 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
       return { featureId: feature.id, featureName: feature.name, tool, staleness }
     }),
   )
-  const healthyTools = toolChecks.filter((t) => t.staleness.status === 'fresh' || t.staleness.status === 'unbaselined' || (t.staleness.status === 'stale' && t.tool.riskLevel === 'low'))
+  const healthyTools = toolChecks.filter((t) => t.staleness.status === 'fresh' || (t.staleness.status === 'stale' && t.tool.riskLevel === 'low'))
+  const unbaselinedTools = toolChecks.filter((t) => t.staleness.status === 'unbaselined')
   const staleMediumTools = toolChecks.filter((t) => t.staleness.status === 'stale' && t.tool.riskLevel === 'medium')
   const staleHighRiskTools = toolChecks.filter((t) => (t.staleness.status === 'stale' && t.tool.riskLevel === 'high') || t.staleness.status === 'missing-script')
 
@@ -305,6 +307,15 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
       for (const h of healthyTools.slice(0, 4)) {
         const cmd = h.tool.command || (h.tool.scriptPath ? `node ${h.tool.scriptPath}` : '')
         actionItems.push(`优先运行已登记工具 [${h.featureId}/${h.tool.id}]: node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs run --tool ${h.tool.id}${baseRef ? ` --base ${baseRef}` : ''} --task ${taskId}${cmd ? ` (底层命令: ${cmd})` : ''}`)
+      }
+      for (const u of unbaselinedTools.slice(0, 2)) {
+        actionItems.push(`待建基线工具 [${u.featureId}/${u.tool.id}]: node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs run --tool ${u.tool.id}${baseRef ? ` --base ${baseRef}` : ''} --task ${taskId}`)
+      }
+    } else if (unbaselinedTools.length > 0 && staleMediumTools.length === 0) {
+      strategy = 'unbaselined-tools'
+      for (const u of unbaselinedTools.slice(0, 4)) {
+        const cmd = u.tool.command || (u.tool.scriptPath ? `node ${u.tool.scriptPath}` : '')
+        actionItems.push(`工具尚无基线 [${u.featureId}/${u.tool.id}]，须先实跑建基线后再放行：node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs run --tool ${u.tool.id}${baseRef ? ` --base ${baseRef}` : ''} --task ${taskId}${cmd ? ` (底层命令: ${cmd})` : ''}`)
       }
     } else if (staleMediumTools.length > 0) {
       strategy = 'stale-medium-fallback'
@@ -352,6 +363,7 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
       reasons: t.staleness.reasons,
     })),
     healthyToolCommands: healthyTools.map((h) => h.tool.command || (h.tool.scriptPath ? `node ${h.tool.scriptPath}` : '')).filter(Boolean),
+    unbaselinedTools: unbaselinedTools.map((t) => ({ featureId: t.featureId, toolId: t.tool.id, riskLevel: t.tool.riskLevel })),
     staleMediumTools: staleMediumTools.map((t) => ({ featureId: t.featureId, toolId: t.tool.id, reasons: t.staleness.reasons })),
     staleHighRiskTools: staleHighRiskTools.map((t) => ({ featureId: t.featureId, toolId: t.tool.id, code: t.staleness.code, reasons: t.staleness.reasons })),
     runtimeCapabilities,

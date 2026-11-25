@@ -40,6 +40,7 @@ export const SUBCOMMAND_META = Object.freeze({
       entry('note', true),
       entry('triage', false),
       entry('init', true),
+      entry('slice', true),
       entry('clarify', true),
       entry('link', true),
       entry('audit', false),

@@ -39,8 +39,13 @@ export function registerPlanWaveSliceCases(cases) {
       const r = evaluateSliceGraph(good)
       if (!r.ok) return `合规切片图被误判：${JSON.stringify(r.errors.map((e) => e.code))}`
 
-      // 反向 1：总控 C3 没人认领
-      writeFileSync(join(good, 'docs/prd/261120-master-prd.md'), makeMaster({ criteria: ['C1', 'C2', 'C3'] }), 'utf8')
+      // 反向 1：闭环阶段（in_review）总控 C3 没人认领；active 分阶段暂缓仅记 warnings
+      writeFileSync(join(good, 'docs/prd/261120-master-prd.md'), makeMaster({ status: 'active', criteria: ['C1', 'C2', 'C3'] }), 'utf8')
+      const staged = evaluateSliceGraph(good)
+      if (!staged.ok || !staged.warnings.some((w) => w.code === 'UNCOVERED_ACCEPTANCE_CRITERIA' && w.missing.includes('C3'))) {
+        return `active 总控分阶段切片应仅记 warning 而非错误：${JSON.stringify(staged)}`
+      }
+      writeFileSync(join(good, 'docs/prd/261120-master-prd.md'), makeMaster({ status: 'in_review', criteria: ['C1', 'C2', 'C3'] }), 'utf8')
       const uncovered = evaluateSliceGraph(good)
       const hit = uncovered.errors.find((e) => e.code === 'UNCOVERED_ACCEPTANCE_CRITERIA')
       if (!hit || !hit.missing.includes('C3')) return `漏认领的 C3 没被报出来：${JSON.stringify(uncovered.errors)}`
@@ -362,7 +367,7 @@ export function registerPlanWaveSliceCases(cases) {
   cases.push(['auditRepoDocs 不再重复报 UNCOVERED_ACCEPTANCE_CRITERIA，checkSliceMetadata 只检未完成未归档 SPEC', async () => {
     const { auditRepoDocs } = await import('../../kit/skills/dev-plan/scripts/doc-audit.mjs')
     const dir = makeWaveRepo({
-      master: makeMaster({ criteria: ['C1', 'C2'] }),
+      master: makeMaster({ status: 'in_review', criteria: ['C1', 'C2'] }),
       specs: [
         { file: 'docs/specs/261120-issue1-a-spec.md', text: makeSpec({ taskId: 'slice-a', issue: 1, scope: ['kit/a/**'], deps: [], criteria: ['C1'] }) },
         // 已完成的 SPEC 不要求补 scope_files / depends_on

@@ -12,7 +12,8 @@ import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import {
   VALID_LOCATE_KINDS, VALID_LOCATE_SCOPES, formatLocateText, listIndexableDocs, locateDocuments,
 } from '../../lib/doc-locator.mjs'
-import { isMainModule } from '../../lib/git.mjs'
+import { isMainModule, posixPath, resolveRepoRoots } from '../../lib/git.mjs'
+import { recordTopicAnchors } from '../../lib/session-state.mjs'
 
 function printHelp() {
   process.stdout.write([
@@ -29,6 +30,7 @@ function printHelp() {
     '  --max-slices <N>       --limit 的别名',
     '  --budget-lines <N>     切片总行数预算（默认 220）',
     '  --worktree <path>      指定目标仓库或工作树根目录',
+    '  --topic <id>           可选：将命中的已验真路径写入仓外 Working Brief 锚点（默认不写）',
     '  --list                 仅列出可索引文档与路径（不做检索或切片读取）',
     '  --json                 输出结构化 JSON',
     '  --help                 显示帮助',
@@ -45,7 +47,7 @@ export async function runCli(argv = []) {
       booleanFlags: ['list'],
       valueFlags: [
         'file', 'query', 'symbol', 'section', 'kind', 'scope',
-        'limit', 'max-slices', 'worktree', 'budget-lines',
+        'limit', 'max-slices', 'worktree', 'budget-lines', 'topic',
       ],
       aliases: {
         'max-slices': 'limit',
@@ -70,6 +72,13 @@ export async function runCli(argv = []) {
         kind: cli.opts.kind || null,
         limit: cli.opts.limit !== undefined ? Number(cli.opts.limit) : 100,
       })
+      if (cli.opts.topic) {
+        try {
+          const roots = await resolveRepoRoots(repoRoot)
+          const anchors = (listRes.files ?? []).slice(0, 12).map((f) => posixPath(f.file)).filter(Boolean)
+          if (anchors.length > 0) recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors })
+        } catch { /* non-fatal on read-only repo */ }
+      }
       if (cli.json) {
         process.stdout.write(`${JSON.stringify(listRes, null, 2)}\n`)
       } else {
@@ -88,6 +97,18 @@ export async function runCli(argv = []) {
       budgetLines: cli.opts['budget-lines'] !== undefined ? Number(cli.opts['budget-lines']) : undefined,
       worktree: cli.opts.worktree,
     })
+
+    if (cli.opts.topic) {
+      try {
+        const roots = await resolveRepoRoots(repoRoot)
+        const anchors = [...new Set([
+          ...(result.file ? [result.file] : []),
+          ...((result.slices ?? []).map((s) => s?.relPath ?? s?.file).filter(Boolean)),
+          ...((result.matches ?? []).map((m) => m?.relPath ?? m?.file).filter(Boolean)),
+        ].map((p) => posixPath(p)))]
+        if (anchors.length > 0) recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors })
+      } catch { /* non-fatal on read-only repo */ }
+    }
 
     if (cli.json) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)

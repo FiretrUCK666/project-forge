@@ -6,7 +6,7 @@ export const INJECTIONS_CONV_S1 = [
   {
     id: 'I901',
     what: 'clarifyDoc 跳过回写清空 ## 待拍板问题 条目',
-    file: 'kit/skills/dev-plan/scripts/doc-plan-ops.mjs',
+    file: 'kit/skills/lib/doc-plan-clarify.mjs',
     from: '  const resolvedPendingCount = resolvePendingSectionItems(lines, {',
     to: '  const resolvedPendingCount = 0 && resolvePendingSectionItems(lines, {',
     expect: 'Conv-S1 C1',

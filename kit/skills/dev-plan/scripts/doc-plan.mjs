@@ -4,10 +4,11 @@
  *
  * 子命令：
  *   next           [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]
- *   note           [--topic <text>] [--decision <text>] [--exclude <t>...] [--anchor <p>...] [--open <q>...] [--json]
- *   triage         --summary <text> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
- *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
- *   clarify        --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]
+ *   note           [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--decision <text>] [--exclude <t>...] [--anchor <p>...] [--open <q>...] [--json]
+ *   triage         --summary <text> [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
+ *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--topic <id>] [--allow-open-draft] [--spec-slug <slug>] [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
+ *   slice          --prd <prdPath> --spec-slug <slug> --title <title> [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--topic <id>] [--allow-open-draft] [--worktree | --in-place] [--json]
+ *   clarify        --file <docPath> [--decision <结论> | --drop-criterion <C条目> --reason <原因>] [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]
  *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name> --owner-reason "<原因>"] [--status <s>] [--json]
  *   audit          [--file <docPath> | .] [--json]
  *   critique-scope    --file <docPath> [--reviewer <id>] [--round <n>] [--json]
@@ -16,7 +17,7 @@
  *   critique-continue --file <docPath> --reason <改进方向> [--by <actor>] [--task <id>] [--json]
  *   critique-override --file <docPath> --human-approved --reason <text> [--by <actor>] [--json]
  *   approve           --file <specPath> [--skip-critique-reason <text>] [--json]
- *   archive        [<slug-or-path>] [--task <id>] [--done-at YYYY-MM-DD] [--include-master-prd] [--json]
+ *   archive        [<slug-or-path>] [--task <id>] [--done-at YYYY-MM-DD] [--include-master-prd] [--drop --reason <原因>] [--json]
  *   supersede      <oldSpec> --by <newSpec> [--json]
  *   list           [--json]
  */
@@ -53,37 +54,20 @@ import {
 import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
 import { describeAuditNotApplicable } from './doc-audit-repo.mjs'
-import { approveSpec, clarifyDoc, initDoc, supersedeSpec } from './doc-plan-ops.mjs'
+import { approveSpec, clarifyDoc, initDoc, sliceSpec, supersedeSpec } from './doc-plan-ops.mjs'
 import {
   isValidPlanMode, normalizePlanMode, PLAN_MODES, resolveDocPlanMode,
 } from '../../lib/pending-decisions.mjs'
 
 export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
 
-/**
- * 目标目录自身是不是一个独立的工程根（仓库根或 worktree 根）。
- *
- * 判据是「它自己就是一个 git 根」，不是「它长得像」：`.git` 是目录（独立仓）或
- * 指向别处的文件（worktree）都算。
- *
- * 这条判据只承认 git 根，不认「带 `docs/` + `AGENTS.md`」这种形状。理由不是形状不对，
- * 而是形状不够格：一个普通子包目录完全可以两样都有。把它当成独立根，审计范围就从
- * `pkg/` 变成 `.`，仓根下真正该审的那几份受管规划**一份都不在视野里**——扫了个空，
- * 却报全部通过。这与「路径没归一化」是同一类假绿，只是换了个入口。
- *
- * 唯一的例外是审计根之外的目录：那种情况下相对路径根本算不出来，只能按它自己作根。
- */
 function isStandaloneWorkRoot(targetAbs, outerRoot) {
   if (!existsSync(targetAbs)) return false
-  // 两边都归一化再比：同一目录可能经符号链接或长短文件名有两个名字，
-  // 拿字面量比会把「自己」认成「别人」，白跑一遍独立根逻辑。
   const target = canonicalPath(targetAbs)
   const outer = canonicalPath(outerRoot)
   if (target === outer) return false
   if (existsSync(join(target, '.git'))) return true
-  const insideOuter = target.startsWith(outer + sep)
-  const containsOuter = outer.startsWith(target + sep)
-  return !insideOuter && !containsOuter
+  return !target.startsWith(outer + sep) && !outer.startsWith(target + sep)
 }
 
 function parseIssueArg(rawIssue) {
@@ -133,10 +117,11 @@ function printHelp() {
     '',
     '子命令：',
     '  next               [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]',
-    '  note               [--topic <主题>] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
-    '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
-    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--owner <name>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--single-session] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
-    '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
+    '  note               [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
+    '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
+    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--topic <主题>] [--allow-open-draft] [--spec-slug <slug>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--owner <name>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--single-session] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
+    '  slice              --prd <prdPath> --spec-slug <slug> --title <标题> [--kind <spec|pair>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--owner <name>] [--agent <id>] [--topic <主题>] [--allow-open-draft] [--worktree | --in-place] [--json]',
+    '  clarify            --file <docPath> [--decision <结论> | --drop-criterion <C条目> --reason <原因>] [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O> --owner-reason "<变更原因>"] [--status <S>] [--milestone <m>] [--json]',
     '  audit              [--file <docPath> | .] [--json]',
     '  critique-scope     --file <docPath> [--reviewer <id>] [--round <n>] [--run-commands] [--json]',
@@ -145,7 +130,7 @@ function printHelp() {
     '  critique-continue  --file <docPath> --reason <改进方向> [--by <actor>] [--task <id>] [--json]',
     '  critique-override  --file <docPath> --human-approved --reason <原因> [--by <actor>] [--json]',
     '  approve            --file <specPath> [--skip-critique-reason <文本>] [--host-mode <m>] [--single-session] [--human-approved] [--json]',
-    '  archive            [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
+    '  archive            [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--drop --reason <原因>] [--json]',
     '  supersede          <oldSpec> --by <newSpec> [--json]',
     '  list               [--json]',
   ].join('\n') + '\n')
@@ -158,11 +143,14 @@ async function main(argv) {
 
   let cli
   try {
-    cli = parseStandardCli(argv, {
+    const normalizedArgv = argv[0] === 'archive'
+      ? argv.map((a) => (a === '--drop' ? '--drop=true' : a))
+      : argv
+    cli = parseStandardCli(normalizedArgv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'single-session', 'handoff', 'plan-only', 'run-commands'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic'],
-      multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'single-session', 'handoff', 'plan-only', 'run-commands', 'reset', 'allow-open-draft'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'spec-slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'drop-criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic'],
+      multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open', 'fact', 'resolve', 'drop', 'scope', 'criteria', 'depends-on'],
       aliases: { type: 'kind' },
       usageHint: `doc-plan.mjs <${SUBCOMMANDS.join('|')}>`,
     })
@@ -208,35 +196,37 @@ async function main(argv) {
     }
 
     if (sub === 'note') {
-      const hasNote = Boolean(opts.topic || opts.decision || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0)
-      if (!hasNote) throw new Error('note 至少需要传入 --topic / --decision / --exclude / --anchor / --open 之一')
+      const hasNote = Boolean(
+        opts.topic || opts.decision || opts.reset
+        || (opts.fact?.length ?? 0) > 0 || (opts.resolve?.length ?? 0) > 0 || (opts.drop?.length ?? 0) > 0
+        || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
+      )
+      if (!hasNote) throw new Error('note 至少需要传入 --topic / --fact / --resolve / --drop / --reset / --decision / --exclude / --anchor / --open 之一')
       const noteRes = appendPreInitNote(mainRoot, {
-        topic: opts.topic ?? null,
-        decision: opts.decision ?? null,
-        exclusions: opts.exclude ?? [],
-        anchors: opts.anchor ?? [],
-        openQuestions: opts.open ?? [],
+        topic: opts.topic ?? null, facts: opts.fact ?? [], resolve: opts.resolve ?? [], drop: opts.drop ?? [], reset: Boolean(opts.reset),
+        decision: opts.decision ?? null, exclusions: opts.exclude ?? [], anchors: opts.anchor ?? [], openQuestions: opts.open ?? [],
       })
       if (cli.json) process.stdout.write(`${JSON.stringify({ ok: true, ...noteRes }, null, 2)}\n`)
-      else process.stdout.write(`已写入 preInit 讨论缓冲（${noteRes.byteSize} B）：decisions=${noteRes.preInit.decisions.length}, exclusions=${noteRes.preInit.exclusions.length}, anchors=${noteRes.preInit.anchors.length}, open=${noteRes.preInit.openQuestions.length}\n`)
+      else process.stdout.write(`已写入 Working Brief（topic=${noteRes.topicId}, ${noteRes.byteSize} B）：facts=${Object.keys(noteRes.preInit.facts ?? {}).length}, decisions=${noteRes.preInit.decisions.length}, nonGoals=${noteRes.preInit.nonGoals.length}, anchors=${noteRes.preInit.anchors.length}, open=${(noteRes.preInit.unresolvedOpen ?? noteRes.preInit.openQuestions).length}\n`)
       return 0
     }
 
     if (sub === 'triage') {
-      const hasPreInitNote = Boolean(opts.topic || opts.decision || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0)
+      const hasPreInitNote = Boolean(
+        opts.topic || opts.decision || opts.reset
+        || (opts.fact?.length ?? 0) > 0 || (opts.resolve?.length ?? 0) > 0 || (opts.drop?.length ?? 0) > 0
+        || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
+      )
       const summary = opts.summary ?? opts._.join(' ')
       if (!summary && !hasPreInitNote) throw new Error('triage 需要传入 --summary "<需求描述>"')
       if (hasPreInitNote) {
         const noteRes = appendPreInitNote(mainRoot, {
-          topic: opts.topic ?? (summary || null),
-          decision: opts.decision ?? null,
-          exclusions: opts.exclude ?? [],
-          anchors: opts.anchor ?? [],
-          openQuestions: opts.open ?? [],
+          topic: opts.topic ?? (summary || null), facts: opts.fact ?? [], resolve: opts.resolve ?? [], drop: opts.drop ?? [], reset: Boolean(opts.reset),
+          decision: opts.decision ?? null, exclusions: opts.exclude ?? [], anchors: opts.anchor ?? [], openQuestions: opts.open ?? [],
         })
         if (!summary) {
           if (cli.json) process.stdout.write(`${JSON.stringify({ ok: true, ...noteRes }, null, 2)}\n`)
-          else process.stdout.write(`已写入 preInit 讨论缓冲（${noteRes.byteSize} B）。\n`)
+          else process.stdout.write(`已写入 Working Brief（topic=${noteRes.topicId}, ${noteRes.byteSize} B）。\n`)
           return 0
         }
       }
@@ -251,7 +241,7 @@ async function main(argv) {
         if (filesAsPaths.length > 0) triagePaths = [...new Set([...triagePaths, ...filesAsPaths])]
       } else if (filesAsPaths.length > 0) {
         triagePaths = filesAsPaths
-      } else if (roots.isGit) {
+      } else if (roots.isGit && !opts.topic) {
         triagePaths = (await gitStatusPorcelainZ(repoRoot)).entries.map((e) => e.file)
       }
       const filesNum = isNumericFiles ? Number(rawFilesOpt) : (filesAsPaths.length > 0 ? filesAsPaths.length : undefined)
@@ -276,6 +266,7 @@ async function main(argv) {
           paths: triagePaths,
           doorType: result.doorType,
           planMode: result.planMode,
+          topic: opts.topic ?? null,
         })
       } catch { /* non-fatal on non-writable root */ }
       if (cli.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
@@ -306,48 +297,42 @@ async function main(argv) {
       return 0
     }
 
-    if (sub === 'init') {
-      if (!opts.kind || !opts.slug || !opts.title) throw new Error('init 需要 --kind <prd|spec|todo|pair|all>、--slug <slug> 与 --title <title>')
+    if (sub === 'init' || sub === 'slice') {
+      const effectiveKind = sub === 'slice' ? (opts.kind || 'spec') : opts.kind
+      const effectiveSlug = opts['spec-slug'] ?? opts.slug
+      if (sub === 'init' && (!effectiveKind || !effectiveSlug || !opts.title)) throw new Error('init 需要 --kind <prd|spec|todo|pair|all>、--slug <slug> 与 --title <title>')
+      if (sub === 'slice' && (!opts.prd || !effectiveSlug || !opts.title)) throw new Error('slice 需要 --prd <prdPath>、--spec-slug <slug> 与 --title <title>')
       let resolvedOwner = opts.owner
-      if (String(opts.kind).toLowerCase() !== 'tdd') {
+      if (String(effectiveKind).toLowerCase() !== 'tdd') {
         if (opts.owner !== undefined) {
           const chk = validateDocOwnerValue(opts.owner)
           if (!chk.ok) throw Object.assign(new Error(chk.reason), { code: chk.code, exitCode: chk.exitCode })
           resolvedOwner = chk.owner
         } else {
           const hostMode = resolveHostMode(opts)
-          const actorRes = resolveNonEmptyActor([opts.agent], {
-            role: 'doc-owner',
-            hostMode,
-            humanApproved: Boolean(opts['human-approved']),
-            allowSingleSessionWaive: true,
-          })
-          if (!actorRes.ok) {
-            throw Object.assign(new Error(actorRes.reason), { code: 'INVALID_OWNER', exitCode: EXIT.USAGE })
-          }
+          const actorRes = resolveNonEmptyActor([opts.agent], { role: 'doc-owner', hostMode, humanApproved: Boolean(opts['human-approved']), allowSingleSessionWaive: true })
+          if (!actorRes.ok) throw Object.assign(new Error(actorRes.reason), { code: 'INVALID_OWNER', exitCode: EXIT.USAGE })
           resolvedOwner = actorRes.actor
         }
       }
-      const res = await initDoc({
+      const initPayload = {
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
-        kind: opts.kind, slug: opts.slug, title: opts.title, taskId: opts.task,
+        kind: effectiveKind, slug: effectiveSlug, specSlug: opts['spec-slug'] ?? null, title: opts.title, taskId: opts.task,
         issue: opts.issue, owner: resolvedOwner, branch: opts.branch, relatedSpec: opts.spec,
         relatedPrd: opts.prd, milestone: opts.milestone, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
-        planMode: resolveCliPlanMode(opts['plan-mode']),
-        worktree: Boolean(opts.worktree),
-        inPlace: Boolean(opts['in-place']),
-        multiSpec: Boolean(opts['multi-spec']),
-        caseType: opts.case !== undefined ? Number(opts.case) : null,
-      })
+        planMode: resolveCliPlanMode(opts['plan-mode']), worktree: Boolean(opts.worktree), inPlace: Boolean(opts['in-place']),
+        multiSpec: Boolean(opts['multi-spec']), caseType: opts.case !== undefined ? Number(opts.case) : null,
+        topic: opts.topic ?? null, allowOpenDraft: Boolean(opts['allow-open-draft']),
+        scopePaths: opts.scope ?? [], criteria: opts.criteria ?? [], dependsOn: opts['depends-on'] ?? [],
+      }
+      const res = sub === 'slice' ? await sliceSpec({ ...initPayload, prd: opts.prd }) : await initDoc(initPayload)
       res.planSync = await safeSyncPlan({
         repoRoot: res.writeRoot ?? repoRoot, mainRoot, gitDir: roots.gitDir,
         phase: 'init', file: res.file, files: res.files, taskId: res.taskId ?? opts.task ?? null,
         issueNumber: res.issue ?? null, summary: `初始化 ${res.kind.toUpperCase()}: ${opts.title}`,
       })
       res.contextBrief = buildContextBrief(res.writeRoot ?? repoRoot, {
-        paths: opts.spec ? [opts.spec] : [],
-        keywords: [opts.title, opts.slug, opts.task].filter(Boolean),
-        excludeFiles: res.files ?? [],
+        paths: opts.spec ? [opts.spec] : [], keywords: [opts.title, effectiveSlug, opts.task].filter(Boolean), excludeFiles: res.files ?? [],
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
@@ -360,15 +345,18 @@ async function main(argv) {
     }
 
     if (sub === 'clarify') {
-      if (!opts.file || !opts.decision) throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"')
+      if (!opts.file || (!opts.decision && !opts['drop-criterion'])) {
+        throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"（或 --drop-criterion C<N> --reason "<原因>" --by user）')
+      }
       const res = clarifyDoc({
         repoRoot, file: opts.file, question: opts.question ?? '',
-        decision: opts.decision, by: opts.by ?? 'user', explicitBy: opts.by, criterion: opts.criterion ?? '',
+        decision: opts.decision ?? '', by: opts.by ?? 'user', explicitBy: opts.by,
+        criterion: opts.criterion ?? '', dropCriterion: opts['drop-criterion'] ?? '', reason: opts.reason ?? '',
       })
       res.planSync = await safeSyncPlan({
         repoRoot, mainRoot, gitDir: roots.gitDir,
         phase: 'clarify', file: res.file, actor: opts.by ?? 'user',
-        reason: opts.question ? `${opts.question} -> ${opts.decision}` : opts.decision,
+        reason: res.droppedCriterion ? `作废 ${res.droppedCriterion.id}: ${res.droppedCriterion.reason}` : (opts.question ? `${opts.question} -> ${opts.decision}` : opts.decision),
         summary: res.entry + (res.addedCriterion ? `（新增 ${res.addedCriterion.id}）` : ''),
         taskId: resolveDocTaskId(repoRoot, res.file, opts.task ?? null),
         issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
@@ -714,11 +702,17 @@ async function main(argv) {
       const archiveRoot = (taskLedger?.worktreePath && existsSync(join(mainRoot, taskLedger.worktreePath)))
         ? join(mainRoot, taskLedger.worktreePath)
         : repoRoot
+      const archiveDrop = (opts.drop?.length ?? 0) > 0
+      if (archiveDrop && (!opts.reason || !String(opts.reason).trim())) {
+        throw Object.assign(new Error('MISSING_DROP_REASON: archive --drop 必须附带 --reason "<作废原因>"'), { code: 'MISSING_DROP_REASON', exitCode: EXIT.USAGE })
+      }
       const res = await archiveCompletedDocsGroup(archiveRoot, {
         prdFile: taskLedger?.prdFile, specFile: taskLedger?.specFile, todoFile: taskLedger?.todoFile,
         slugOrPath: targetSlugOrPath, issue: taskLedger?.linkedIssues?.[0], pr: taskLedger?.prNumber,
         branch: taskLedger?.branch, owner: taskLedger?.implementerId, doneAt: opts['done-at'],
         includeMasterPrd: Boolean(opts['include-master-prd']),
+        drop: archiveDrop,
+        dropReason: opts.reason ?? '',
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else process.stdout.write(`成对归档完成（移动 ${res.moved.length} 份，更新互链 ${res.updated.length} 份）：${res.archived.join(', ')}\n`)

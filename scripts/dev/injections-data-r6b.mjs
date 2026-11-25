@@ -35,8 +35,8 @@ export const INJECTIONS_R6B = [
     what: 'C8 doc-substantive: 破坏 DOC_REGRESSION_CRITERIA_DROPPED 验收条目缩水拦截',
     file: 'kit/skills/lib/doc-substantive.mjs',
     alsoDropIn: ['.agents/skills/lib/doc-substantive.mjs'],
-    from: '  if (baseCriteria > 0 && curCriteria < baseCriteria) {',
-    to: '  if (false && baseCriteria > 0 && curCriteria < baseCriteria) {',
+    from: '  if (baseCriteria > 0 && (curCriteria + newlyDroppedCount) < baseCriteria) {',
+    to: '  if (false && baseCriteria > 0 && (curCriteria + newlyDroppedCount) < baseCriteria) {',
     expect: 'R6B C8：preInit 有界缓冲与自动吸收、triage 继承与 --kind all、audit 跳 critique-scope 及永恒客观底线',
   },
 ]

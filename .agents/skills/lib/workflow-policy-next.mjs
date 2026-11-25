@@ -9,6 +9,7 @@ import { EXIT } from './exit-codes.mjs'
 import { buildMultiTaskWavePlan, buildSliceGraph, collectPlanDocs, scanUnstartedReadySlices } from './doc-slice-graph.mjs'
 import { posixPath } from './git-core.mjs'
 import { classifyTaskLiveness, nextReviewRound } from './ledger.mjs'
+import { evaluateMutability } from './mutability.mjs'
 
 const CLOSED_STATUSES = new Set(['submitted', 'local-ready', 'awaiting-upstream-merge', 'merged', 'aborted'])
 const TERMINAL_SPEC_STATUSES = new Set(['implemented', 'done', 'superseded', 'dropped', 'archived'])
@@ -151,6 +152,31 @@ function enrichActiveTasksFromSliceSpecs(activeTasks = [], repoRoot = null) {
   return enriched
 }
 
+function inferCandidatePhaseAndMutability(t) {
+  const st = String(t?.status ?? '').trim().toLowerCase()
+  const rounds = Array.isArray(t?.rounds) ? t.rounds : []
+  const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null
+  const stopLossActive = Boolean((t?.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t?.humanApprovedStopLoss)
+  let candPhase
+  if (t?.planning === true || st === 'planning') candPhase = 'planning'
+  else if (st === 'released') candPhase = 'released'
+  else if (st === 'started' && !t?.claimedAt && t?.role !== 'inbound-external-pr') candPhase = 'needs-claim'
+  else if (st === 'merged') candPhase = 'needs-cleanup'
+  else if (st === 'aborted' || st === 'dropped') candPhase = st
+  else if (stopLossActive) candPhase = 'stop-loss-escalated'
+  else if (st === 'rework' && t?.queueConflict) candPhase = 'needs-rework'
+  else if (st === 'verify-failed') candPhase = 'needs-verify'
+  else if (st === 'awaiting-upstream-merge') candPhase = 'awaiting-upstream-merge'
+  else if (st === 'rework' || st === 'changes') candPhase = 'needs-rework'
+  else if (t?.reviewPassed === true && (t?.submitted || t?.localReady)) candPhase = 'ready-to-merge'
+  else if (t?.submitted || t?.localReady) candPhase = 'needs-review'
+  else if (lastRound?.verdict === 'changes') candPhase = 'needs-rework'
+  else if (Number(t?.caseType ?? 3) >= 3 && !t?.explored?.at) candPhase = 'needs-explore'
+  else candPhase = 'implementing'
+  const mut = evaluateMutability({ ledger: t, phase: candPhase, taskId: t?.taskId })
+  return { phase: candPhase, mutability: mut.mutability, mutable: mut.mutable, terminal: mut.terminal }
+}
+
 /** 评估唯一活跃任务或集合状态并给出单一入口下一步路由与精简上下文。 */
 export function evaluateNextState({
   activeTasks = [],
@@ -241,10 +267,26 @@ export function evaluateNextState({
         candidates: [],
       }
     }
-    const activeIds = new Set(enrichedActive.map((t) => t.taskId))
-    const dedupReady = readySlices.filter((s) => !activeIds.has(s.taskId))
-    const combined = [...enrichedActive, ...dedupReady]
-    const wavePlan = buildMultiTaskWavePlan(combined, multiTaskFiles)
+    const candidateItems = liveActiveTasks.map((t) => {
+      const info = inferCandidatePhaseAndMutability(t)
+      return {
+        taskId: t.taskId,
+        status: t.status,
+        phase: info.phase,
+        mutability: info.mutability,
+        terminal: info.terminal,
+        branch: t.branch ?? null,
+        worktreePath: t.worktreePath ?? null,
+      }
+    })
+    const dispatchableActive = enrichedActive.filter((t) => inferCandidatePhaseAndMutability(t).mutable)
+    const activeIds = new Set(dispatchableActive.map((t) => t.taskId))
+    const allLiveIds = new Set(enrichedActive.map((t) => t.taskId))
+    const dedupReady = readySlices.filter((s) => !activeIds.has(s.taskId) && !allLiveIds.has(s.taskId))
+    const combined = [...dispatchableActive, ...dedupReady]
+    const wavePlan = combined.length > 0
+      ? buildMultiTaskWavePlan(combined, multiTaskFiles)
+      : { totalTasks: 0, parallelDispatch: false, waves: [], order: [], parallelizable: [] }
     const parallelDispatch = Boolean(wavePlan.parallelDispatch)
     const waveSummary = wavePlan.waves
       .map((w) => `Wave ${w.wave}(${w.canParallel ? '可并行' : '串行'}): ${w.tasks.map((t) => t.taskId).join(',')}`)
@@ -259,7 +301,9 @@ export function evaluateNextState({
       ...(cleanupBucket.length > 0 ? { pendingCleanupTasks: cleanupBucket } : {}),
       nextAction: parallelDispatch
         ? `检测到 Wave 1 有 ${wavePlan.waves[0].tasks.length} 个可并行任务/就绪切片（${wavePlan.parallelizable.join(', ')}）：${waveSummary}。主会话保持纯调度并并行派发。`
-        : `检测到 ${combined.length} 个任务/切片，按波次顺序推进：${waveSummary}。`,
+        : (combined.length > 0
+            ? `检测到 ${combined.length} 个可推进任务/切片，按波次顺序推进：${waveSummary}。`
+            : `当前 ${liveActiveTasks.length} 个活跃任务均处于冻结/待审态（LOCKED），请指定 --task 查看或通过 --reopen 解锁。`),
       command: parallelDispatch
         ? `node ".agents/skills/dev-flow/scripts/flow.mjs" batch plan --tasks ${wavePlan.parallelizable.join(',')} --json`
         : `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${firstTask}`,
@@ -275,7 +319,7 @@ export function evaluateNextState({
         note: `共 ${wavePlan.waves.length} 波次（Wave 1：${wavePlan.parallelizable.join(', ') || firstTask}；parallelDispatch=${parallelDispatch}）。`,
       },
       compactContext: null,
-      candidates: liveActiveTasks.map((t) => ({ taskId: t.taskId, status: t.status, branch: t.branch ?? null, worktreePath: t.worktreePath ?? null })),
+      candidates: candidateItems,
     }
   }
 
@@ -499,9 +543,11 @@ export function evaluateNextState({
     }
   }
 
+  const singleMut = evaluateMutability({ ledger: t, phase, taskId: t.taskId })
   return {
     taskId: t.taskId,
     phase,
+    mutability: singleMut.mutability,
     ownerRole,
     nextAction,
     command,

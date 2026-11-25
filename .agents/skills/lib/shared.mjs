@@ -431,3 +431,8 @@ export {
   extractPlanDocRefsFromText,
   validateIssueBodyQuality,
 } from './issue-quality.mjs'
+
+export {
+  MUTABILITY,
+  evaluateMutability,
+} from './mutability.mjs'

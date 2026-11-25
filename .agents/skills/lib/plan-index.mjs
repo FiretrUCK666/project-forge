@@ -6,7 +6,7 @@
  * 并切断 `session-orient.mjs -> dev-plan/scripts/doc-audit.mjs` 反向依赖。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
@@ -199,6 +199,7 @@ export function indexPlanDocs(rootOrOpts, extraOpts = {}) {
   const includeTdd = Boolean(opts.includeTdd)
   const managedOnly = Boolean(opts.managedOnly)
   const recursive = Boolean(opts.recursive)
+  const dedupeByFreshness = Boolean(opts.dedupeByFreshness)
   const ledger = opts.ledger ?? null
   const taskId = opts.taskId ?? null
   const file = opts.file ?? null
@@ -209,6 +210,7 @@ export function indexPlanDocs(rootOrOpts, extraOpts = {}) {
 
   const privateRel = ledger?.privateDocsDir ? posixPath(String(ledger.privateDocsDir).trim()) : null
   const byRel = new Map()
+  const mtimeByRel = new Map()
 
   for (const r of roots) {
     const scanDirs = [...PLAN_DIR_KINDS]
@@ -227,7 +229,7 @@ export function indexPlanDocs(rootOrOpts, extraOpts = {}) {
       const locType = dirRel === privateRel ? 'private-docs' : r.source
       for (const abs of listMarkdownFilesSafe(dirAbs, { recursive: recursive && isArchiveDir })) {
         const rel = posixPath(relative(r.dir, abs))
-        if (byRel.has(rel)) continue
+        if (!dedupeByFreshness && byRel.has(rel)) continue
         const text = readTextSafe(abs)
         if (text === undefined) continue
         if (managedOnly && !isManagedPlanDoc(rel, text)) continue
@@ -237,7 +239,11 @@ export function indexPlanDocs(rootOrOpts, extraOpts = {}) {
               ? String(fm.data.kind).toLowerCase()
               : fallbackKind)
           : inferPlanDocKind(rel, fm.data)
-        byRel.set(rel, buildIndexedDocEntry({
+        let mtimeMs = 0
+        if (dedupeByFreshness) {
+          try { mtimeMs = statSync(abs).mtimeMs } catch { mtimeMs = 0 }
+        }
+        const entry = buildIndexedDocEntry({
           root: r.dir,
           abs,
           rel,
@@ -246,7 +252,16 @@ export function indexPlanDocs(rootOrOpts, extraOpts = {}) {
           locationType: locType,
           text,
           fm,
-        }))
+        })
+        if (dedupeByFreshness && byRel.has(rel)) {
+          const prev = byRel.get(rel)
+          const prevUpdated = String(prev?.updated ?? '')
+          const nextUpdated = String(entry.updated ?? '')
+          const prevMtime = mtimeByRel.get(rel) ?? 0
+          if (nextUpdated < prevUpdated || (nextUpdated === prevUpdated && mtimeMs <= prevMtime)) continue
+        }
+        byRel.set(rel, entry)
+        mtimeByRel.set(rel, mtimeMs)
       }
     }
 
@@ -362,10 +377,11 @@ function toDocSummary(doc) {
 }
 
 /** 唯一规划文档摘要列表：直接替换 `doc-audit-repo.mjs` `listDocs` 与 `session-orient.mjs` 反向导入。 */
-export function listPlanDocsSummary(repoRoot) {
+export function listPlanDocsSummary(repoRoot, { includeWorktrees = false } = {}) {
   const docs = indexPlanDocs(repoRoot, {
     includeArchive: true,
-    includeWorktrees: false,
+    includeWorktrees: Boolean(includeWorktrees),
+    dedupeByFreshness: Boolean(includeWorktrees),
     includeTdd: true,
     recursive: true,
   })

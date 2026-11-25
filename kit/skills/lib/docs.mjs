@@ -610,7 +610,7 @@ export async function syncDocsLifecycle(repoRoot, {
 /** 成对归档 PRD / SPEC / Todo 至 `docs/archive/`，同步互链与账本，并按 C19 四态规则闭环总控 PRD。 */
 export async function archiveCompletedDocsGroup(repoRoot, {
   prdFile, specFile, todoFile, slugOrPath, issue, pr, branch, owner, doneAt,
-  includeMasterPrd = false, ledgerRoot = null,
+  includeMasterPrd = false, ledgerRoot = null, drop = false, dropReason = '',
 } = {}) {
   const seedInput = specFile ?? todoFile ?? prdFile ?? slugOrPath
   const explicitRels = [prdFile, specFile, todoFile].filter(Boolean)
@@ -705,7 +705,10 @@ export async function archiveCompletedDocsGroup(repoRoot, {
         }
       }
     }
-    const patch = buildArchivedDocPatch({ kind: item.kind, fmData: fm.data, today, issue, pr, branch, owner, preserveMasterMeta, relatedTargets })
+    const patch = buildArchivedDocPatch({
+      kind: item.kind, fmData: fm.data, today, issue, pr, branch, owner,
+      preserveMasterMeta, relatedTargets, drop: Boolean(drop), dropReason,
+    })
     const merged = { ...fm.data }
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) merged[k] = v
     const keyOrder = [...(DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? []), ...fm.keyOrder, ...Object.keys(merged)]

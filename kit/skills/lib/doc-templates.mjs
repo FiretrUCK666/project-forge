@@ -326,6 +326,7 @@ export function buildStandardDocContent({
   nonGoals,
   doorType,
   rollbackPath,
+  dependsOn = [],
   pruneUnfilled = true,
   noPrune = false,
   docShape = null,
@@ -395,12 +396,17 @@ export function buildStandardDocContent({
   }
 
   if (kind === 'spec') {
+    const cleanScope = Array.isArray(scopePaths) ? scopePaths.map((p) => String(p ?? '').trim()).filter(Boolean) : []
+    const cleanDeps = Array.isArray(dependsOn) ? dependsOn.map((d) => String(d ?? '').trim()).filter(Boolean) : []
     const fm = serializeFm({
       kind: 'spec', title, status: 'draft', tier: 'L3', created: today, updated: today,
       issue: issueNum, pr: null, branch: headBranch, owner: owner ?? null,
       plan_mode: resolveDocPlanMode({ kind: 'spec', tier: 'L3', explicit: planMode }),
       approved: false, implemented: false, plan_critique: 'pending',
-      related_prd: relatedPrdRel ?? null, related_todo: relatedTodoRel ?? null, high_risk_paths: [],
+      related_prd: relatedPrdRel ?? null, related_todo: relatedTodoRel ?? null,
+      ...(cleanScope.length > 0 ? { scope_files: cleanScope } : {}),
+      ...(cleanDeps.length > 0 ? { depends_on: cleanDeps } : {}),
+      high_risk_paths: [],
     }, keyOrders.spec)
     const reuseList = Array.isArray(reusableModules) && reusableModules.length > 0
       ? reusableModules.join('；')
@@ -625,24 +631,36 @@ export function evaluateCoupledSync(changedFiles, rules, repoRoot) {
 /** 构造归档文档的 Frontmatter 补丁；归档 1:N 总控 PRD 时仅更新日期与终态并完整保留原有元信息。 */
 export function buildArchivedDocPatch({
   kind, fmData = {}, today, issue, pr, branch, owner,
-  preserveMasterMeta = false, relatedTargets = {},
+  preserveMasterMeta = false, relatedTargets = {}, drop = false, dropReason = '',
 } = {}) {
   const patch = { updated: today }
   if (kind && !fmData.kind) patch.kind = kind
   if (preserveMasterMeta) {
-    if (kind === 'prd') patch.status = 'done'
+    if (kind === 'prd') patch.status = drop ? 'dropped' : 'done'
+    if (drop) {
+      patch.dropped_at = today
+      if (dropReason) patch.dropped_reason = String(dropReason).trim()
+    }
     return patch
   }
   if (issue !== undefined && issue !== null) patch.issue = Number(issue)
   if (pr !== undefined && pr !== null) patch.pr = Number(pr)
   if (branch) patch.branch = branch
   if (owner) patch.owner = owner
-  if (kind === 'prd') patch.status = 'done'
-  if (kind === 'spec') { patch.status = 'implemented'; patch.implemented = true }
-  if (kind === 'todo') {
-    const curSt = String(fmData?.status ?? '').toLowerCase()
-    patch.status = curSt === 'archived' ? 'archived' : 'done'
-    patch.done_at = fmData?.done_at ?? today
+  if (drop) {
+    patch.status = 'dropped'
+    if (kind === 'spec' || kind === 'todo') patch.approved = false
+    if (kind === 'spec') patch.implemented = false
+    patch.dropped_at = today
+    if (dropReason) patch.dropped_reason = String(dropReason).trim()
+  } else {
+    if (kind === 'prd') patch.status = 'done'
+    if (kind === 'spec') { patch.status = 'implemented'; patch.implemented = true }
+    if (kind === 'todo') {
+      const curSt = String(fmData?.status ?? '').toLowerCase()
+      patch.status = curSt === 'archived' ? 'archived' : 'done'
+      patch.done_at = fmData?.done_at ?? today
+    }
   }
   for (const [rk, relVal] of Object.entries(relatedTargets)) {
     if (relVal) patch[rk] = relVal

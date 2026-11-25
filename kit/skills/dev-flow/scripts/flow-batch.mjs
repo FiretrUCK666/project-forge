@@ -18,6 +18,7 @@ import {
 import { readGitConfigFast, readHeadFast, readRefsFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
+import { evaluateMutability } from '../../lib/mutability.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -149,10 +150,16 @@ async function handleBatchPlan(opts, roots) {
   const taskIds = parseTasksList(opts, roots.mainRoot)
   const graph = buildSliceGraph(roots.mainRoot)
   const sliceMetaByRel = new Map(graph.slices.map((s) => [s.rel, s]))
+  const excludedLockedTasks = []
   const items = (await Promise.all(taskIds.map(async (id) => {
     const ledger = readTaskLedger(roots.mainRoot, id)
     if (!ledger) throw new Error(`找不到任务账本：${id}`)
     if (ledger.prdFile && !ledger.specFile && !ledger.todoFile) return null
+    const mut = evaluateMutability({ ledger, taskId: id })
+    if (!mut.mutable) {
+      excludedLockedTasks.push({ taskId: id, status: ledger.status, mutability: mut.mutability, terminal: mut.terminal, reason: mut.reason })
+      return null
+    }
     const diskSlice = sliceMetaByRel.get(ledger.specFile) ?? sliceMetaByRel.get(ledger.todoFile) ?? null
     const files = [...new Set([
       ...(await collectTaskTouchedFiles(roots.mainRoot, ledger)),
@@ -171,6 +178,7 @@ async function handleBatchPlan(opts, roots) {
       files,
       dependsOn: deps,
       status: ledger.status,
+      mutability: mut.mutability,
       branch: ledger.branch,
     }
   }))).filter(Boolean)
@@ -187,12 +195,14 @@ async function handleBatchPlan(opts, roots) {
     totalTasks: wavePlan.totalTasks,
     parallelDispatch: wavePlan.parallelDispatch,
     readySlicesCount: readySlices.length,
+    ...(excludedLockedTasks.length > 0 ? { excludedLockedTasks } : {}),
     slices: combined.map((it) => ({
       taskId: it.taskId,
       slug: it.slug ?? it.taskId,
       rel: it.specFile ?? it.todoFile ?? null,
       specFile: it.specFile ?? null,
       todoFile: it.todoFile ?? null,
+      mutability: it.mutability ?? 'OPEN',
       dependsOn: it.dependsOn ?? [],
       scopeFiles: it.files ?? [],
     })),

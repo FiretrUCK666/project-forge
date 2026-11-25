@@ -40,7 +40,7 @@ import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { listLocalIssues } from './local-issues.mjs'
 import { detectGitModeMarkers } from './platform.mjs'
 import { APPROVED_STATUS_BY_KIND, listPlanDocsSummary } from './plan-index.mjs'
-import { readPreInitState } from './session-state.mjs'
+import { readAllActiveTopics, readPreInitState } from './session-state.mjs'
 
 /** 这份文档当前卡在哪一格。空数组表示它不需要人管。 */
 function blockOf(doc, kind) {
@@ -49,7 +49,7 @@ function blockOf(doc, kind) {
   if (kind === 'prd' && !APPROVED_STATUS_BY_KIND.prd.has(status) && status !== 'dropped' && status !== 'superseded') {
     out.push('未批准（state=draft，需 critique-pass 后 approve）')
   }
-  if (kind === 'spec' && !APPROVED_STATUS_BY_KIND.spec.has(status) && status !== 'superseded') {
+  if (kind === 'spec' && !APPROVED_STATUS_BY_KIND.spec.has(status) && status !== 'superseded' && status !== 'dropped') {
     out.push('未批准（state=draft，需 critique-pass 后 approve）')
   }
   if (kind === 'todo' && ['draft', 'pending'].includes(status)) {
@@ -82,11 +82,20 @@ function summarize(kind, doc) {
  * @returns {{ docs: object, tasks: object, stuck: Array, nextSteps: Array, text: string }}
  */
 export function buildSessionOrientation(mainRoot) {
-  const listed = listPlanDocsSummary(mainRoot)
-  const preInit = readPreInitState(mainRoot)
+  const listed = listPlanDocsSummary(mainRoot, { includeWorktrees: true })
+  const activeTopics = readAllActiveTopics(mainRoot)
+  const preInit = activeTopics[0] ?? readPreInitState(mainRoot)
+  const mergedAnchors = [...new Set([
+    ...activeTopics.flatMap((t) => t.anchors ?? []),
+    ...(preInit?.anchors ?? []),
+  ])]
+  const mergedKeywords = [...new Set([
+    ...activeTopics.map((t) => t.topic).filter(Boolean),
+    ...(preInit?.topic ? [preInit.topic] : []),
+  ])]
   const contextBrief = buildContextBrief(mainRoot, {
-    paths: preInit?.anchors ?? [],
-    keywords: preInit?.topic ? [preInit.topic] : [],
+    paths: mergedAnchors,
+    keywords: mergedKeywords,
     excludeFiles: ['AGENTS.md'],
   })
   let contextDocs = { architecture: null, subAgents: [], headlessDocs: [], contextIndex: [], docLocateHints: [] }
@@ -259,15 +268,27 @@ export function buildSessionOrientation(mainRoot) {
   })
   lines.push('')
 
-  if (preInit) {
-    lines.push('## 预初始化讨论缓冲（preInit，init 时自动吸收）')
+  const topicsToRender = activeTopics.length > 0 ? activeTopics : (preInit ? [preInit] : [])
+  if (topicsToRender.length > 0) {
+    lines.push('## 预初始化讨论缓冲（Working Brief，init 时按 topic 吸收）')
     lines.push('')
-    if (preInit.topic) lines.push(`- 主题：${preInit.topic}`)
-    if (preInit.decisions.length > 0) lines.push(`- 已定结论（${preInit.decisions.length}）：${preInit.decisions.slice(-4).join('；')}`)
-    if (preInit.exclusions.length > 0) lines.push(`- 明确不做（${preInit.exclusions.length}）：${preInit.exclusions.slice(-4).join('；')}`)
-    if (preInit.anchors.length > 0) lines.push(`- 技术锚点（${preInit.anchors.length}）：${preInit.anchors.slice(-4).join('、')}`)
-    if (preInit.openQuestions.length > 0) lines.push(`- 待拍板问题（${preInit.openQuestions.length}）：${preInit.openQuestions.slice(-4).join('；')}`)
-    lines.push('')
+    for (const t of topicsToRender) {
+      const label = t.topic || t.topicId || 'default'
+      lines.push(`### 主题：${label} (\`${t.topicId || label}\`)`)
+      const factEntries = Object.entries(t.facts ?? {})
+      if (factEntries.length > 0) {
+        lines.push(`- 已定事实（${factEntries.length}）：${factEntries.map(([k, v]) => `${k}=${v}`).join('；')}`)
+      }
+      if ((t.decisions ?? []).length > 0) lines.push(`- 已定结论（${t.decisions.length}）：${t.decisions.join('；')}`)
+      const nonGoals = t.nonGoals ?? t.exclusions ?? []
+      if (nonGoals.length > 0) lines.push(`- 明确不做（${nonGoals.length}）：${nonGoals.join('；')}`)
+      if ((t.anchors ?? []).length > 0) lines.push(`- 技术锚点（${t.anchors.length}）：${t.anchors.join('、')}`)
+      const openItems = Array.isArray(t.open) && t.open.length > 0
+        ? t.open.map((o) => `${o.id ? `${o.id} ` : ''}[${o.status || 'open'}] ${o.text}`)
+        : (t.openQuestions ?? [])
+      if (openItems.length > 0) lines.push(`- 待拍板问题（${openItems.length}）：${openItems.join('；')}`)
+      lines.push('')
+    }
   }
 
   const briefLines = formatContextBriefLines(contextBrief)
@@ -293,6 +314,7 @@ export function buildSessionOrientation(mainRoot) {
     docLocateHints: contextDocs.docLocateHints,
     contextBrief,
     preInit,
+    activeTopics,
     tasks,
     localIssues: openLocalIssues.map((i) => ({ number: i.number, title: i.title, state: i.state, labels: i.labels ?? [], assignees: i.assignees ?? [] })),
     pendingLocalMigration,

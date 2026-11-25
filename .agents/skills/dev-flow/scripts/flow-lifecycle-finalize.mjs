@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { parseDocFrontmatter } from '../../lib/doc-frontmatter.mjs'
 import { archiveCompletedDocsGroup, docIsoDate, syncPlanDocBodyMeta } from '../../lib/docs.mjs'
@@ -108,7 +108,7 @@ export async function handleFinalize(opts, roots) {
     prdRel, specRel, todoRel, includeMasterPrd, ledger, isVerify: false, taskId,
   })
   if (prdGate.blocked) {
-    if (opts.json) process.stdout.write(`${JSON.stringify(prdGate, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(prdGate, [prdGate.nextStep], { repoRoot: roots.mainRoot }), null, 2)}\n`)
     process.stderr.write(`${prdGate.message}\n`)
     printNextStep([prdGate.nextStep], { repoRoot: roots.mainRoot })
     return { exitCode: prdGate.exitCode }
@@ -241,17 +241,18 @@ export async function handleFinalize(opts, roots) {
     specFile: ledger.specFile, todoFile: ledger.todoFile,
     archivedDocs: archivedGroup.moved, coupledSyncWarnings, ...(preCheck.warnings.length ? { lifecycleWarnings: preCheck.warnings } : {}), ...parity,
   }
-  if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+  const finalizeNext = [
+    '1. 若 finalize 移动或更新了文档，先在工作区提交变更：git add -A && git commit -m "..."',
+    { skill: 'dev-flow', text: `2. 运行实证门禁锁定 HEAD：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
+  ]
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(out, finalizeNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`finalize 完成：HEAD=${currentHead ?? 'uncommitted'}，Todo=${ledger.todoFile ?? '无'}，SPEC=${ledger.specFile ?? '无'}\n`)
     if (parity.tddSyncWarning) process.stdout.write(`[TDD SYNC REMINDER]: ${parity.tddSyncWarning}\n`)
     for (const w of coupledSyncWarnings) {
       process.stdout.write(`[COUPLED SYNC]: 触及 ${w.touchedTriggers.join(', ')} -> 需检查伴随更新 ${w.expectedCompanions.join(', ')}\n`)
     }
-    printNextStep([
-      '1. 若 finalize 移动或更新了文档，先在工作区提交变更：git add -A && git commit -m "..."',
-      { skill: 'dev-flow', text: `2. 运行实证门禁锁定 HEAD：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
-    ], { repoRoot: roots.mainRoot })
+    printNextStep(finalizeNext, { repoRoot: roots.mainRoot })
   }
   if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
     process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则且未更新伴随文件（共 ${coupledSyncWarnings.length} 组）。\n`)

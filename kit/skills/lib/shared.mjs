@@ -12,6 +12,8 @@ export {
   parseStandardCli,
   printNextStep,
   resolveAvailableSkills,
+  resolveNextSteps,
+  withNextSteps,
 } from './cli.mjs'
 
 export {
@@ -299,6 +301,11 @@ export {
 } from './verdict.mjs'
 
 export {
+  AGENTS_COMPACT_RECOMMENDED_BYTES,
+  AGENTS_MAX_BYTES,
+  AGENTS_WARN_BYTES,
+  KIT_SKILL_MAX_BYTES,
+  KIT_SKILL_WARN_BYTES,
   hasRealContent,
   isToolOwnedPath,
   isToolSkeletonFile,

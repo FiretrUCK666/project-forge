@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
+import { printNextStep, resolveAvailableSkills, withNextSteps } from '../../lib/cli.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { artifactPathsOf, mergeArtifactRecords, normalizeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { autoEscalateBlockingFindings, buildEscalationIssuePayload, evaluateNoEscalateExemption } from '../../lib/escalation.mjs'
@@ -605,14 +605,14 @@ export async function handleRecord(opts, roots) {
           noEscalateReason: noEscalateExemption.reason ?? '', _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
         }).catch((e) => ({ ok: false, error: e?.message }))
       : null
-    const payload = {
+    const payload = withNextSteps({
       status: 'STOP_LOSS_ESCALATE', exitCode: EXIT.HUMAN, taskId, round, headSha, reasons: stopReasons,
       unresolvedMustFix: mustFixList, rebuttedItems, resolvedItems, excludedReviewers, stopLossPacket, escalationPayload,
       ...(escalatedIssue ? { escalatedIssue } : {}),
       ...(noEscalateExemption.skip ? { escalationSkipped: { reason: noEscalateExemption.reason } } : {}),
       ledgerPath: posixPath(tPath), githubSync,
       nextStep: stopLossPacket.recoveryCommand,
-    }
+    }, [stopLossPacket.recoveryCommand], { repoRoot: mainRoot })
     if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
     else {
       process.stdout.write([

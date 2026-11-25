@@ -59,8 +59,8 @@ export const ENTRY_SPECS = Object.freeze([
  */
 export const DARK_BASELINE = Object.freeze({
   '流程入口': Object.freeze([
-    'action', 'actor', 'branch', 'comment', 'due-on', 'fork-url', 'human-approved-exec',
-    'implementer', 'issues', 'pr-ref', 'run-govern-hook', 'strict-lifecycle',
+    'action', 'branch', 'comment', 'due-on', 'fork-url', 'human-approved-exec',
+    'issues', 'pr-ref', 'run-govern-hook', 'strict-lifecycle',
   ]),
   '规划入口': Object.freeze([
     // approve 是被拒的旧入口参数：它现在带 --approve 会得到 BLOCKED_APPROVAL_HAS_SINGLE_ENTRY，
@@ -177,7 +177,17 @@ export function extractRegistered(text) {
       for (const pair of body.matchAll(/(['"]?)([\w-]+)\1\s*:\s*(['"])([\w-]+)\3/g)) aliases[pair[2]] = pair[4]
     }
   }
-  return { found: true, flags: flags.sort(), aliases }
+  const flagPresets = []
+  const presetMatch = /\bflagPresets\s*:\s*\{/.exec(schemaText)
+  if (presetMatch) {
+    const pOpen = presetMatch.index + presetMatch[0].length - 1
+    const pClose = matchBracket(schemaText, pOpen)
+    if (pClose > 0) {
+      const body = schemaText.slice(pOpen + 1, pClose)
+      for (const pair of body.matchAll(/(['"]?)([\w-]+)\1\s*:\s*\{/g)) flagPresets.push(pair[2])
+    }
+  }
+  return { found: true, flags: flags.sort(), aliases, flagPresets }
 }
 
 /**
@@ -428,7 +438,7 @@ function buildEntryCatalog(ROOT) {
     const reg = extractRegistered(text)
     if (!reg.found) continue
     const base = basename(spec.file)
-    const allowed = new Set([...reg.flags, ...GLOBAL_FLAGS, ...Object.keys(reg.aliases ?? {})])
+    const allowed = new Set([...reg.flags, ...GLOBAL_FLAGS, ...Object.keys(reg.aliases ?? {}), ...(reg.flagPresets ?? [])])
     byBase.set(base, {
       spec,
       base,

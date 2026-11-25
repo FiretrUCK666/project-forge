@@ -8,7 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { buildContextBrief, extractDocBriefSeeds, formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { readTextSafe } from '../../lib/git.mjs'
 import { createExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
@@ -64,8 +64,9 @@ export async function handleExplore(opts, roots) {
     keywords,
     excludeFiles: docRels,
   })
-  const tier = opts.tier ? String(opts.tier).trim() : detectExploreTier(workRoot, map)
-  const by = opts.by ?? opts.agent ?? ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? ledger.account ?? undefined
+  const rawMode = opts.mode ?? opts.tier
+  const tier = rawMode ? String(rawMode).trim() : detectExploreTier(workRoot, map)
+  const by = opts.agent ?? opts.by ?? ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? ledger.account ?? undefined
   const explored = createExploredEvidence({
     at: new Date().toISOString(),
     tier,
@@ -79,6 +80,7 @@ export async function handleExplore(opts, roots) {
   ledger.explored = explored
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), explored }), { createIfMissing: true })
 
+  const nextStepItems = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${taskId}` }]
   const out = {
     ok: true,
     taskId,
@@ -89,12 +91,12 @@ export async function handleExplore(opts, roots) {
     contextBrief,
   }
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps(out, nextStepItems, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {
     process.stdout.write(`探索证据已记入账本（task=${taskId}, tier=${explored.tier}, symbols=${explored.symbolCount}, evergreen=${explored.evergreenDocsCount ?? 0}, features=${explored.featureMapCount ?? 0}, at=${explored.at}）。\n`)
     const briefLines = formatContextBriefLines(contextBrief)
     if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
-    printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${taskId}` }], { repoRoot: roots.mainRoot })
+    printNextStep(nextStepItems, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK, payload: out }
 }

@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { buildContextBrief, extractDocBriefSeeds, formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { formatAttribution } from '../../lib/docs.mjs'
 import { buildSliceGraph } from '../../lib/doc-slice-graph.mjs'
@@ -307,14 +307,15 @@ export async function handleRelease(opts, roots) {
   await releaseGitClaimLease(roots.mainRoot, taskId, { remoteUrls, role: ledger.role, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
+  const releaseNext = [
+    { skill: 'dev-flow', text: `如需由其他人接手：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --agent <agent>` },
+    { skill: 'dev-flow', text: `或安全放弃任务与工作区：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` },
+  ]
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, taskId, role: ledger.role, mode: skipApi ? 'local-ledger-only' : 'remote-synced', status: ledger.status, reason: ledger.releaseReason, releaseResults }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps({ ok: true, taskId, role: ledger.role, mode: skipApi ? 'local-ledger-only' : 'remote-synced', status: ledger.status, reason: ledger.releaseReason, releaseResults }, releaseNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {
     process.stdout.write(`任务 ${taskId} 已释放认领（status=released${skipApi ? '，仅本地账本' : `, issues=${ledger.linkedIssues.join(',')}`}）。\n`)
-    printNextStep([
-      { skill: 'dev-flow', text: `如需由其他人接手：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --agent <agent>` },
-      { skill: 'dev-flow', text: `或安全放弃任务与工作区：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` },
-    ], { repoRoot: roots.mainRoot })
+    printNextStep(releaseNext, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }
@@ -431,13 +432,14 @@ export async function handleClaim(opts, roots) {
     }
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     const contextBrief = computeClaimContextBrief(roots, claimRoot, ledger, taskId)
-    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover, contextBrief }, null, 2)}\n`)
+    const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
+    const localClaimNext = [{ skill: 'dev-flow', text: nextCmd }]
+    if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover, contextBrief }, localClaimNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
       const briefLines = formatContextBriefLines(contextBrief)
       if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
-      const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-      printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
+      printNextStep(localClaimNext, { repoRoot: roots.mainRoot })
     }
     return { exitCode: EXIT.OK }
   }
@@ -481,11 +483,12 @@ export async function handleClaim(opts, roots) {
       const activeClaim = analyzeIssueClaimState(listRes.comments)
       if (activeClaim && !isSameClaimant(activeClaim, actorKey, ghProbe.env.trackB.login)) {
         if (!isTakeover) {
+          const takeoverCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --takeover --reason "<接管原因>"`
           if (opts.json) {
-            process.stdout.write(`${JSON.stringify({
+            process.stdout.write(`${JSON.stringify(withNextSteps({
               blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', taskId, issue: num, activeClaim,
-              nextStep: `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --takeover --reason "<接管原因>"`,
-            }, null, 2)}\n`)
+              nextStep: takeoverCmd,
+            }, [{ skill: 'dev-flow', text: takeoverCmd }], { repoRoot: roots.mainRoot }), null, 2)}\n`)
           }
           process.stderr.write(`BLOCKED_ISSUE_ALREADY_CLAIMED: Issue #${num} 已被 ${activeClaim.actor ?? activeClaim.login ?? '他人'} 认领（分支=${activeClaim.branch ?? '未知'}），且尚无 release/takeover；如需接管请传 --takeover --reason "<接管原因>"。\n`)
           return { exitCode: EXIT.FACT }
@@ -537,14 +540,15 @@ export async function handleClaim(opts, roots) {
   }
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   const contextBrief = computeClaimContextBrief(roots, claimRoot, ledger, taskId)
+  const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
+  const claimNext = [{ skill: 'dev-flow', text: nextCmd }]
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}), contextBrief }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}), contextBrief }, claimNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {
     process.stdout.write(`任务 ${taskId} 已${isTakeover ? '接管' : '认领'}（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
     const briefLines = formatContextBriefLines(contextBrief)
     if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
-    const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-    printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
+    printNextStep(claimNext, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }

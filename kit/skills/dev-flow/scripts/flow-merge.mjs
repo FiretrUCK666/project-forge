@@ -8,7 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { buildMergeComments, formatAttribution } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
@@ -287,14 +287,15 @@ export async function assertPreMergeGates({
   if (gateFindings.length > 0 && !opts['human-approved']) {
     const doorInfo = classifyDoorType({ changedFiles: changed, highRisk: profile.highRisk, gateWeakened: true })
     const summary = gateFindings.map((f) => `[${f.type}] ${f.file}: ${f.detail}`).join('; ')
+    const gateNext = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} --human-approved` }]
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({
+      process.stdout.write(`${JSON.stringify(withNextSteps({
         ok: false, blocked: true, code: 'BLOCKED_GATE_WEAKENING', doorType: doorInfo.doorType, findings: gateFindings,
         nextStep: '请向人类报告上述门禁弱化发现，获准后再附 --human-approved 重试 merge',
-      }, null, 2)}\n`)
+      }, gateNext, { repoRoot: mainRoot }), null, 2)}\n`)
     } else {
       process.stderr.write(`BLOCKED_GATE_WEAKENING (one-way door): 检测到门禁弱化改动，须人类确认：${summary}\n`)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} --human-approved` }], { repoRoot: mainRoot })
+      printNextStep(gateNext, { repoRoot: mainRoot })
     }
     return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_GATE_WEAKENING' }
   }
@@ -479,10 +480,11 @@ export async function handleMerge(opts, roots) {
       }
     }
     if (mergeRes.delegated) {
-      if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, mergeDelegated: mergeRes }, null, 2)}\n`)
+      const delNext = ['请在宿主 MCP 完成合并并回读 state=MERGED 后，再向人展示待清理清单。']
+      if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, mergeDelegated: mergeRes }, delNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
       else {
         process.stdout.write(`无直连 GitHub 凭据，已生成合并代理载荷：${JSON.stringify(mergeRes.jsonPayload)}\n`)
-        printNextStep(['请在宿主 MCP 完成合并并回读 state=MERGED 后，再向人展示待清理清单。'], { repoRoot: roots.mainRoot })
+        printNextStep(delNext, { repoRoot: roots.mainRoot })
       }
       return { exitCode: EXIT.OK }
     }
@@ -645,7 +647,8 @@ export async function handleMerge(opts, roots) {
     knownCleanWorktrees: ledger.worktreePath ? [ledger.worktreePath] : [],
   })
   const unreported = mergeComments.filter((c) => !c.ok)
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist, ...(issueCloseDecisions.length > 0 ? { issueCloseDecisions } : {}), ...(mergeComments.length > 0 ? { mergeComments } : {}), ...(unreported.length > 0 ? { unreportedComments: unreported } : {}), ...(syncFailures.length > 0 ? { syncFailures } : {}) }, null, 2)}\n`)
+  const mergeNext = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId}` }]
+  if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist, ...(issueCloseDecisions.length > 0 ? { issueCloseDecisions } : {}), ...(mergeComments.length > 0 ? { mergeComments } : {}), ...(unreported.length > 0 ? { unreportedComments: unreported } : {}), ...(syncFailures.length > 0 ? { syncFailures } : {}) }, mergeNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
     process.stdout.write(`合并状态已确认（task=${taskId}, status=${ledger.status}）。未自动删除任何分支或 Worktree。\n`)
     for (const d of issueCloseDecisions.filter((x) => x.action === 'kept-open')) {
@@ -658,7 +661,7 @@ export async function handleMerge(opts, roots) {
       process.stdout.write(`  补发命令：node .agents/skills/dev-flow/scripts/flow.mjs issue comment --issue ${num} --body "<回告正文>"\n`)
     }
     printCleanupChecklistText(checklist)
-    printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId}` }], { repoRoot: roots.mainRoot })
+    printNextStep(mergeNext, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
 }

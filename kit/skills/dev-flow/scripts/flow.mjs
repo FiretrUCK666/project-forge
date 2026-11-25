@@ -9,7 +9,7 @@
 import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { flushAndExit, hasSkillSupport, parseStandardCli, printNextStep, validateCrossRepoTarget } from '../../lib/cli.mjs'
+import { flushAndExit, hasSkillSupport, parseStandardCli, printNextStep, validateCrossRepoTarget, withNextSteps } from '../../lib/cli.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
@@ -40,7 +40,7 @@ function printHelp() {
     '子命令（next/explore/claim/release/finalize/verify/submit/rework/sync/merge/cleanup/status/abort 支持自动推断 --task）：',
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
-    '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
+    '  explore   [--task <id>] [--focus <subdir>] [--mode <mode>] [--agent <id>] [--json]',
     '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--no-issue --reason "<原因>"] [--body "<内容>" | --body-file <路径>] [--spec <path>] [--todo <path>] [--prd <path>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--case <1..5>] [--spec <path>] [--todo <path>] [--prd <path>] [--files <a,b>] [--body "<内容>" | --body-file <路径>] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
@@ -49,8 +49,8 @@ function printHelp() {
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--skip-govern] [--json]',
-    '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-evidence <text>] [--artifact <path>] [--visual-checked] [--visual-blocked-reason <text>] [--human-approved] [--skip-edit-gate] [--skip-govern] [--json]',
-    '  submit    [--task <id>] [--agent <id>] [--host-mode <multi-agent|single-session>] [--single-session] [--human-approved] [--draft] [--new-pr] [--offline] [--reset-review-slot] [--json]',
+    '  verify    [--task <id>] [--mode quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-evidence <text>] [--artifact <path>] [--visual-checked] [--visual-blocked-reason <text>] [--human-approved] [--skip-edit-gate] [--skip-govern] [--json]',
+    '  submit    [--task <id>] [--agent <id>] [--host-mode <multi-agent|single-session>] [--human-approved] [--draft] [--new-pr] [--offline] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--reopen --reason "<原因>"] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
     '  merge     [--task <id>] [--reviewer-id <id>] [--method merge|squash|rebase] [--human-approved] [--reason <text>] [--skip-govern] [--json]',
@@ -75,17 +75,26 @@ async function main(argv) {
         'create-issue', 'no-issue', 'takeover', 'reset-review-slot',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd', 'offline',
         'ack-no-issue-context', 'apply', 'dry-run', 'skip-edit-gate', 'skip-govern', 'strict-lifecycle', 'run-govern-hook',
-        'allow-plan-bootstrap', 'planning', 'all', 'single-session', 'reopen',
+        'allow-plan-bootstrap', 'planning', 'all', 'reopen',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
-        'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
-        'agent', 'actor', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'body-file', 'comment', 'state',
-        'labels', 'method', 'reason', 'into', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus', 'by',
+        'branch', 'clone-choice', 'fork-url', 'pr-ref', 'todo', 'spec', 'prd',
+        'agent', 'note', 'mode', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'body-file', 'comment', 'state',
+        'labels', 'method', 'reason', 'into', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus',
         'milestone', 'due', 'due-on', 'description',
         'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
         'visual-blocked-reason', 'host-mode', 'reviewer-id', 'preview-hash',
       ],
+      aliases: {
+        tier: 'mode',
+        by: 'agent',
+        actor: 'agent',
+        implementer: 'agent',
+      },
+      flagPresets: {
+        'single-session': { flag: 'host-mode', value: 'single-session', keepBoolean: true },
+      },
       multiFlags: ['rebut', 'allow-outbound', 'artifact'],
       usageHint: `flow.mjs <${SUBCOMMANDS.join('|')}>`,
     })
@@ -138,7 +147,18 @@ async function main(argv) {
         issue: opts.issue ?? opts.issues,
         pr: opts.pr,
       })
-      if (cli.json) process.stdout.write(`${JSON.stringify(data, null, 2)}\n`)
+      const extPrNum = data.identity.role === 'inbound-external-pr'
+        ? (data.inputs.prs[0]?.number ?? parsePrNumber(opts['external-pr']))
+        : null
+      const hasDevReview = hasSkillSupport(data.mainRoot, 'dev-review')
+      const nextSteps = buildInspectNextSteps({
+        role: data.identity.role,
+        teamProbeHint: data.identity.teamProbeHint,
+        extPrNum,
+        reuseExistingPr: data.inputs.reuseExistingPr,
+        hasDevReview,
+      })
+      if (cli.json) process.stdout.write(`${JSON.stringify(withNextSteps(data, nextSteps, { repoRoot: data.mainRoot }), null, 2)}\n`)
       else {
         const scopeLabel = data.identity.collaborationScope === 'team-collaborator'
           ? ' | 协同范围: 团队协作者'
@@ -160,17 +180,6 @@ async function main(argv) {
           process.stdout.write(`- 以下输入没被使用（认不出来）：${unknownInputs.join('、')}\n`)
           process.stdout.write('- 正确写法：https://<host>/<owner>/<repo>/issues/<N>（或 /pull/<M>）、#N、issue#N、pr#M\n')
         }
-        const extPrNum = data.identity.role === 'inbound-external-pr'
-          ? (data.inputs.prs[0]?.number ?? parsePrNumber(opts['external-pr']))
-          : null
-        const hasDevReview = hasSkillSupport(data.mainRoot, 'dev-review')
-        const nextSteps = buildInspectNextSteps({
-          role: data.identity.role,
-          teamProbeHint: data.identity.teamProbeHint,
-          extPrNum,
-          reuseExistingPr: data.inputs.reuseExistingPr,
-          hasDevReview,
-        })
         printNextStep(nextSteps, { repoRoot: data.mainRoot })
       }
       return 0

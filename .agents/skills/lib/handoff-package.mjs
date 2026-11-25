@@ -7,6 +7,7 @@ import { extractCriteria } from './criteria-lock.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { parseDocFrontmatter } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
+import { getVisualBriefSummary } from './visual-brief.mjs'
 
 /**
  * 抽出「设计方案 / 契约变更」整节正文与实际匹配的二级标题名，供动态 `--section` 指针命令使用。
@@ -704,7 +705,16 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     lines.push('')
   }
 
+  const visualBrief = mainRoot
+    ? getVisualBriefSummary(mainRoot, { briefKey: ledger?.briefKey ?? null, taskId: ledger?.taskId ?? null, masterPrdRel: prdRel })
+    : null
   const receiptTemplate = RECEIPT_LINES.join('\n')
+  if (visualBrief) {
+    lines.push('## Living Visual Brief 快照')
+    lines.push('')
+    lines.push(`- \`${visualBrief.briefKey}\` (${visualBrief.confirmedState}, prototypes=${visualBrief.prototypeCount}${visualBrief.selectedPrototypeId ? `, selected=${visualBrief.selectedPrototypeId}` : ''}) -> ${visualBrief.htmlUri}`)
+    lines.push('')
+  }
   const fields = {
     taskId: ledger?.taskId ?? null,
     sourceDoc,
@@ -716,6 +726,7 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     design: visibleDesign,
     ...(designPointer ? { designPointer } : {}),
     contextBrief,
+    visualBrief,
     explored: ledger?.explored ?? null,
     reworkFeedback,
     receiptTemplate,

@@ -66,7 +66,7 @@ export const DARK_BASELINE = Object.freeze({
     // approve 是被拒的旧入口参数：它现在带 --approve 会得到 BLOCKED_APPROVAL_HAS_SINGLE_ENTRY，
     // 把它写进帮助等于教人用一个必然报错的开关，所以它留在暗参数里而不是补文档。
     'approve', 'decision', 'finding', 'force', 'human-approved', 'implemented', 'kind',
-    'reason', 'slug', 'title', 'type',
+    'reason', 'slug', 'type',
   ]),
   '治理入口': Object.freeze([
     'apply-patches', 'audit-only', 'escalate', 'issues', 'message', 'note', 'plan-only',

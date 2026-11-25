@@ -141,8 +141,8 @@ PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 | --- | --- | --- |
 | **L1 入口契约** | `AGENTS.md` | 每次会话自动读的薄契约：意图路由、命令、协作与联动表（建议 `< 24KB`，上限 `30KB`） |
 | **L2 系统架构** | `docs/TDD.md` | 模块边界、主流程图表与关键不变量，静态检查校对真实路径 |
-| **L3 机读索引** | `docs/feature-map.json` | 功能、模块、业务流与验证工具映射，按导出符号和树哈希自动判旧 |
-| **规划与归档** | `docs/{prd,specs,todo}/` → `docs/archive/` | 冻结 `C1..Cn` 验收标准，提交 PR 前核对全勾选后 `git mv` 成对归档 |
+| **L3 机读索引与全景图** | `docs/feature-map.json` + `docs/architecture-map.html` | `v1/v2` 分层域拓扑、跨模块流转与验证工具映射（按导出符号和树哈希自动判旧），确定性派生离线交互式架构全景图（`no-architecture-html` 可关闭） |
+| **规划、活简报与归档** | `docs/{prd,specs,todo}/` → `docs/archive/` | 冻结 `C1..Cn` 验收标准，Case 3/4 规划同步在仓外实时投影 Living Visual Brief（支持挂载静态 UI 原型与确认快照），提 PR 前 `git mv` 成对归档 |
 
 ## 八个本地研发技能
 

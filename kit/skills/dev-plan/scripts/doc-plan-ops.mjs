@@ -25,6 +25,7 @@ import { parseIssueNumbers } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { buildDuplicatePlanDocError, findDuplicatePlanDocs, indexPlanDocs } from '../../lib/plan-index.mjs'
 import { consumePreInitNotes, readPreInitState, resolveInheritedTriagePlanMode } from '../../lib/session-state.mjs'
+import { migrateVisualBriefOnInit, refreshVisualBriefForDoc } from '../../lib/visual-brief.mjs'
 import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
 import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
@@ -235,11 +236,17 @@ export function approveSpec({
 
   const criteria = extractCriteria(workingText)
   const fingerprint = criteria.length > 0 ? criteriaFingerprint(criteria) : null
+  const approvedRel = posixPath(relative(repoRoot, abs))
+  let visualBrief = null
+  try {
+    visualBrief = refreshVisualBriefForDoc({ mainRoot, workRoot: repoRoot, file: approvedRel, taskId: taskId ?? fm.data?.task_id ?? null })?.summary ?? null
+  } catch { /* non-fatal */ }
   return {
-    file: posixPath(relative(repoRoot, abs)), previousStatus: curStatus, status: nextStatus, critiqueSkipped,
+    file: approvedRel, previousStatus: curStatus, status: nextStatus, critiqueSkipped,
     activatedTodos,
     criteriaCount: criteria.length,
     criteriaFingerprint: fingerprint,
+    ...(visualBrief ? { visualBrief } : {}),
     warning: hasPlaceholder ? '检测到仍有占位描述 <...>，动手实现前请替换成真实可判定条件' : null,
   }
 }
@@ -458,6 +465,27 @@ export async function initDoc({
     }
   }
 
+  let briefMigration = null
+  if (effectiveKind !== 'tdd' && mainRoot) {
+    try {
+      const prdItem = planned.find((p) => p.kind === 'prd')
+      const resolvedRelPrd = inheritedPrdAbs ? posixPath(relative(writeRoot, inheritedPrdAbs)) : (relatedPrd ? posixPath(relatedPrd) : null)
+      briefMigration = migrateVisualBriefOnInit({
+        mainRoot,
+        workRoot: writeRoot,
+        topicId: topic ?? pendingPreInit?.topicId ?? absorbedPreInit?.topicId ?? null,
+        existingBriefKey: absorbedPreInit?.briefKey ?? pendingPreInit?.briefKey ?? null,
+        taskId: effTaskId,
+        slug: safeSlug,
+        kind: effectiveKind,
+        multiSpec: Boolean(multiSpec && effectiveKind === 'prd'),
+        prdRel: prdItem?.file ?? null,
+        relatedPrdRel: resolvedRelPrd,
+        title,
+      })
+    } catch { /* non-fatal */ }
+  }
+
   let ledgerUpdated = false
   if (milestone) {
     for (const item of planned) {
@@ -477,6 +505,7 @@ export async function initDoc({
         next.linkedIssues = [...next.linkedIssues, issueNum]
       }
       if (milestone) next.milestone = milestone
+      if (briefMigration?.briefKey) next.briefKey = briefMigration.briefKey
       if (effWorktree) {
         next.isolation = 'worktree'
         next.worktreePath = planningWorktreeRel
@@ -491,6 +520,7 @@ export async function initDoc({
       createIfMissing: true,
       defaults: {
         taskId: effTaskId, slug: safeSlug,
+        ...(briefMigration?.briefKey ? { briefKey: briefMigration.briefKey } : {}),
         isolation: effWorktree ? 'worktree' : null,
         worktreePath: effWorktree ? planningWorktreeRel : null,
         branch: effWorktree ? planningBranch : null,
@@ -516,6 +546,7 @@ export async function initDoc({
     issue: issueNum, milestone: milestone ?? null, plannedAt: headSha, ledgerUpdated, customTemplates,
     planMode: planMode ?? null,
     absorbedPreInit,
+    ...(briefMigration ? { briefMigration, visualBrief: briefMigration.summary } : {}),
   }
 }
 

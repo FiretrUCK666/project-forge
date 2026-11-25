@@ -5,6 +5,7 @@
  * 子命令：
  *   next           [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]
  *   note           [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--decision <text>] [--exclude <t>...] [--anchor <p>...] [--open <q>...] [--json]
+ *   brief          [--topic <id>] [--task <id>] [--title <title>] [--verdict <text>] [--affected-feature <id>...] [--flow-delta <text>...] [--prototype <t=p>...] [--select-prototype <id>] [--source-skill <name>] [--confirm] [--open-browser] [--json]
  *   triage         --summary <text> [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
  *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--topic <id>] [--allow-open-draft] [--spec-slug <slug>] [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
  *   slice          --prd <prdPath> --spec-slug <slug> --title <title> [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--topic <id>] [--allow-open-draft] [--worktree | --in-place] [--json]
@@ -31,14 +32,13 @@ import { buildPlanHandoff, evaluatePlanNextState } from '../../lib/plan-next.mjs
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { resolveHostMode, resolveNonEmptyActor, isValidActorName, validateDocOwnerValue } from '../../lib/harness-context.mjs'
-import { appendPreInitNote, recordTriageDecision } from '../../lib/session-state.mjs'
 import {
   archiveCompletedDocsGroup, DOC_FRONTMATTER_KEY_ORDER,
   docIsoDate, isApprovingStatusValue, parseDocFilename, parseDocFrontmatter,
   syncDocsLifecycle, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import {
-  gitStatusPorcelainZ, isMainModule,
+  isMainModule,
   canonicalPath, posixPath, readTextSafe, resolveRepoRoots, sha256Text,
 } from '../../lib/git.mjs'
 import {
@@ -54,9 +54,10 @@ import {
 import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
 import { describeAuditNotApplicable } from './doc-audit-repo.mjs'
+import { handleBriefSubcommand, handleNoteSubcommand, handleTriageSubcommand } from './doc-plan-brief.mjs'
 import { approveSpec, clarifyDoc, initDoc, sliceSpec, supersedeSpec } from './doc-plan-ops.mjs'
 import {
-  isValidPlanMode, normalizePlanMode, PLAN_MODES, resolveDocPlanMode,
+  isValidPlanMode, normalizePlanMode, PLAN_MODES,
 } from '../../lib/pending-decisions.mjs'
 
 export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
@@ -118,6 +119,7 @@ function printHelp() {
     '子命令：',
     '  next               [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]',
     '  note               [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
+    '  brief              [--topic <主题>] [--task <id>] [--title <标题>] [--verdict <结论>] [--affected-feature <id>...] [--flow-delta <变化>...] [--prototype "<标题>=<路径或URL>"...] [--select-prototype <id>] [--source-skill <名称>] [--confirm] [--open-browser] [--json]',
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
     '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--topic <主题>] [--allow-open-draft] [--spec-slug <slug>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
     '  slice              --prd <prdPath> --spec-slug <slug> --title <标题> [--kind <spec|pair>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--agent <id>] [--host-mode <m>] [--topic <主题>] [--allow-open-draft] [--worktree | --in-place] [--json]',
@@ -148,9 +150,9 @@ async function main(argv) {
       : argv
     cli = parseStandardCli(normalizedArgv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'handoff', 'plan-only', 'run-commands', 'reset', 'allow-open-draft'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'spec-slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'drop-criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic'],
-      multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open', 'fact', 'resolve', 'drop', 'scope', 'criteria', 'depends-on'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'handoff', 'plan-only', 'run-commands', 'reset', 'allow-open-draft', 'confirm', 'open-browser'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'spec-slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'drop-criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic', 'verdict', 'select-prototype', 'source-skill'],
+      multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open', 'fact', 'resolve', 'drop', 'scope', 'criteria', 'depends-on', 'prototype', 'affected-feature', 'flow-delta'],
       aliases: { type: 'kind', owner: 'agent' },
       flagPresets: { 'single-session': { flag: 'host-mode', value: 'single-session', keepBoolean: true } },
       usageHint: `doc-plan.mjs <${SUBCOMMANDS.join('|')}>`,
@@ -197,107 +199,9 @@ async function main(argv) {
       return 0
     }
 
-    if (sub === 'note') {
-      const hasNote = Boolean(
-        opts.topic || opts.decision || opts.reset
-        || (opts.fact?.length ?? 0) > 0 || (opts.resolve?.length ?? 0) > 0 || (opts.drop?.length ?? 0) > 0
-        || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
-      )
-      if (!hasNote) throw new Error('note 至少需要传入 --topic / --fact / --resolve / --drop / --reset / --decision / --exclude / --anchor / --open 之一')
-      const noteRes = appendPreInitNote(mainRoot, {
-        topic: opts.topic ?? null, facts: opts.fact ?? [], resolve: opts.resolve ?? [], drop: opts.drop ?? [], reset: Boolean(opts.reset),
-        decision: opts.decision ?? null, exclusions: opts.exclude ?? [], anchors: opts.anchor ?? [], openQuestions: opts.open ?? [],
-      })
-      if (cli.json) process.stdout.write(`${JSON.stringify({ ok: true, ...noteRes }, null, 2)}\n`)
-      else process.stdout.write(`已写入 Working Brief（topic=${noteRes.topicId}, ${noteRes.byteSize} B）：facts=${Object.keys(noteRes.preInit.facts ?? {}).length}, decisions=${noteRes.preInit.decisions.length}, nonGoals=${noteRes.preInit.nonGoals.length}, anchors=${noteRes.preInit.anchors.length}, open=${(noteRes.preInit.unresolvedOpen ?? noteRes.preInit.openQuestions).length}\n`)
-      return 0
-    }
-
-    if (sub === 'triage') {
-      const hasPreInitNote = Boolean(
-        opts.topic || opts.decision || opts.reset
-        || (opts.fact?.length ?? 0) > 0 || (opts.resolve?.length ?? 0) > 0 || (opts.drop?.length ?? 0) > 0
-        || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
-      )
-      const summary = opts.summary ?? opts._.join(' ')
-      if (!summary && !hasPreInitNote) throw new Error('triage 需要传入 --summary "<需求描述>"')
-      if (hasPreInitNote) {
-        const noteRes = appendPreInitNote(mainRoot, {
-          topic: opts.topic ?? (summary || null), facts: opts.fact ?? [], resolve: opts.resolve ?? [], drop: opts.drop ?? [], reset: Boolean(opts.reset),
-          decision: opts.decision ?? null, exclusions: opts.exclude ?? [], anchors: opts.anchor ?? [], openQuestions: opts.open ?? [],
-        })
-        if (!summary) {
-          if (cli.json) process.stdout.write(`${JSON.stringify({ ok: true, ...noteRes }, null, 2)}\n`)
-          else process.stdout.write(`已写入 Working Brief（topic=${noteRes.topicId}, ${noteRes.byteSize} B）。\n`)
-          return 0
-        }
-      }
-      const rawFilesOpt = opts.files !== undefined ? String(opts.files).trim() : ''
-      const isNumericFiles = rawFilesOpt !== '' && /^\d+$/.test(rawFilesOpt)
-      const filesAsPaths = (rawFilesOpt !== '' && !isNumericFiles)
-        ? rawFilesOpt.split(',').map((s) => s.trim()).filter(Boolean)
-        : []
-      let triagePaths = []
-      if (opts.paths !== undefined) {
-        triagePaths = String(opts.paths).split(',').map((s) => s.trim()).filter(Boolean)
-        if (filesAsPaths.length > 0) triagePaths = [...new Set([...triagePaths, ...filesAsPaths])]
-      } else if (filesAsPaths.length > 0) {
-        triagePaths = filesAsPaths
-      } else if (roots.isGit && !opts.topic) {
-        triagePaths = (await gitStatusPorcelainZ(repoRoot)).entries.map((e) => e.file)
-      }
-      const filesNum = isNumericFiles ? Number(rawFilesOpt) : (filesAsPaths.length > 0 ? filesAsPaths.length : undefined)
-      const explicitPlanMode = resolveCliPlanMode(opts['plan-mode'])
-      const result = triageTask({
-        summary, files: filesNum, touchesContract: Boolean(opts['touches-contract']),
-        conflictsTdd: Boolean(opts['conflicts-tdd']), docOnly: Boolean(opts['doc-only']),
-        bugfix: Boolean(opts.bugfix), paths: triagePaths, repoRoot,
-      })
-      // 规划态跟着分流结论走：门型与档位是已经判出来的事实，拿它们推默认值，
-      // 人就不用为了「这算不算不可逆」再猜一遍。
-      result.planMode = resolveDocPlanMode({
-        kind: result.docsRequired?.includes('docs/specs/') ? 'spec' : (result.docsRequired?.length ? 'todo' : null),
-        caseType: result.caseType,
-        doorType: result.doorType,
-        explicit: explicitPlanMode,
-      })
-      try {
-        recordTriageDecision(mainRoot, {
-          caseType: result.caseType,
-          summary,
-          paths: triagePaths,
-          doorType: result.doorType,
-          planMode: result.planMode,
-          topic: opts.topic ?? null,
-        })
-      } catch { /* non-fatal on non-writable root */ }
-      const steps = result.caseType === 5
-        ? ['已阻断直接拆解！请先更新 docs/TDD.md 解决冲突并经独立确认。']
-        : result.caseType === 4
-          ? [{
-              skill: 'dev-plan',
-              text: result.prdRequired
-                ? '创建 PRD+SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind all --slug <slug> --title "<标题>" --agent <id>'
-                : '创建 SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug <slug> --title "<标题>" --agent <id>',
-            }]
-          : result.caseType === 3
-            ? [{ skill: 'dev-flow', text: '启动任务隔离：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case 3 --slug <slug> --agent <id>' }]
-            : [{ skill: 'dev-flow', text: `启动任务流转：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case ${result.caseType} --slug <slug> --agent <id>` }]
-      if (cli.json) process.stdout.write(`${JSON.stringify(withNextSteps(result, steps, { repoRoot: mainRoot }), null, 2)}\n`)
-      else {
-        process.stdout.write(`分流结论：Case ${result.caseType} (${result.action})${result.blocked ? ' [BLOCKED]' : ''}\n`)
-        process.stdout.write(`- 门型: ${result.doorType} | 规划内审档位: ${result.critiqueTier} | 规划态: ${result.planMode}\n- 理由: ${result.reason}\n`)
-        process.stdout.write(`- 必建文档: ${result.docsRequired.join(', ') || '无 (0 文档)'}\n`)
-        process.stdout.write(`- Red-Green 回归测试: ${result.redGreenRequired ? '强制' : '不需要'} | 独立审查: ${result.needsReview ? '需要' : '低风险免除'}\n`)
-        for (const w of result.coupledSyncWarnings ?? []) {
-          process.stdout.write(`  * 联动提醒: 触及 ${w.touchedTriggers.join(', ')} -> 检查同步 ${w.expectedCompanions.join(', ')}\n`)
-        }
-        const briefLines = formatContextBriefLines(result.contextBrief)
-        if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
-        printNextStep(steps, { repoRoot: mainRoot })
-      }
-      return 0
-    }
+    if (sub === 'note') return await handleNoteSubcommand({ opts, cli, repoRoot, mainRoot })
+    if (sub === 'brief') return await handleBriefSubcommand({ opts, cli, repoRoot, mainRoot })
+    if (sub === 'triage') return await handleTriageSubcommand({ opts, cli, roots, repoRoot, mainRoot, resolveCliPlanMode })
 
     if (sub === 'init' || sub === 'slice') {
       const effectiveKind = sub === 'slice' ? (opts.kind || 'spec') : opts.kind
@@ -352,7 +256,7 @@ async function main(argv) {
         throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"（或 --drop-criterion C<N> --reason "<原因>" --by user）')
       }
       const res = clarifyDoc({
-        repoRoot, file: opts.file, question: opts.question ?? '',
+        repoRoot, mainRoot, file: opts.file, question: opts.question ?? '',
         decision: opts.decision ?? '', by: opts.by ?? 'user', explicitBy: opts.by,
         criterion: opts.criterion ?? '', dropCriterion: opts['drop-criterion'] ?? '', reason: opts.reason ?? '',
       })

@@ -38,6 +38,7 @@ export const SUBCOMMAND_META = Object.freeze({
     subcommands: Object.freeze([
       entry('next', false),
       entry('note', true),
+      entry('brief', true),
       entry('triage', false),
       entry('init', true),
       entry('slice', true),

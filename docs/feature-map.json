@@ -1,9 +1,86 @@
 {
-  "version": 1,
+  "version": 2,
+  "domains": [
+    {
+      "id": "entry-governance",
+      "name": "Entry & Governance Contracts",
+      "description": "Skill router, AGENTS.md contract composition, delivery review, and handoff",
+      "entrypoints": [
+        "SKILL.md",
+        "scripts/compose-agents.mjs",
+        "scripts/review.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#2-系统架构全景与模块边界"
+      ]
+    },
+    {
+      "id": "onboarding-engine",
+      "name": "Onboarding & Packaging Engine (S1-S4)",
+      "description": "Read-only survey, pre-write external snapshots, and v3 manifest skill equipping",
+      "entrypoints": [
+        "scripts/survey.mjs",
+        "scripts/equip.mjs",
+        "scripts/backup.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"
+      ]
+    },
+    {
+      "id": "kit-skills-core",
+      "name": "Kit Skills: Explore, Plan, Edit & Flow",
+      "description": "On-demand exploration, living brief planning, lexical edit gates, and worktree lifecycle",
+      "entrypoints": [
+        "kit/skills/dev-explore/scripts/repo-map.mjs",
+        "kit/skills/dev-plan/scripts/doc-plan.mjs",
+        "kit/skills/dev-edit/scripts/edit-gate.mjs",
+        "kit/skills/dev-flow/scripts/flow.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转"
+      ]
+    },
+    {
+      "id": "kit-skills-quality",
+      "name": "Kit Skills: Verify, Review, Govern & Iterate",
+      "description": "Feature map visual projection, independent dual-gate review, static governance, and test iteration",
+      "entrypoints": [
+        "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
+        "kit/skills/dev-review/scripts/review-pack.mjs",
+        "kit/skills/dev-govern/scripts/govern-audit.mjs",
+        "kit/skills/dev-iterate/scripts/iterate.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#6-四大工程支柱与调度机制"
+      ]
+    },
+    {
+      "id": "dev-verification",
+      "name": "Self-Hosting Gates, Parity & CI",
+      "description": "Preflight checks, CLI/exit-code parity, merge-gate truth, and GitHub workflows",
+      "entrypoints": [
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/merge-gate.mjs",
+        ".github/workflows/check.yml"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#8-核心不变量安全红线与门禁体系"
+      ]
+    }
+  ],
   "features": [
     {
       "id": "survey",
       "name": "只读勘察与双轴身份缺口判定",
+      "domain": "onboarding-engine",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "maintainer",
+        "explore"
+      ],
       "entrypoints": [
         "scripts/survey.mjs",
         "scripts/lib/platform/index.mjs"
@@ -86,6 +163,15 @@
     {
       "id": "equip",
       "name": "统一技能集装配、v3 账本三方融合与 ABI 回滚校验",
+      "domain": "onboarding-engine",
+      "dependsOn": [
+        "survey",
+        "backup",
+        "cli"
+      ],
+      "actors": [
+        "maintainer"
+      ],
       "entrypoints": [
         "scripts/equip.mjs",
         "scripts/equip-ci.mjs",
@@ -146,6 +232,14 @@
     {
       "id": "compose-agents",
       "name": "受管工程契约渲染与预算门禁",
+      "domain": "entry-governance",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "maintainer",
+        "coordinator"
+      ],
       "entrypoints": [
         "scripts/compose-agents.mjs"
       ],
@@ -190,6 +284,15 @@
     {
       "id": "delivery-review-handoff",
       "name": "交付体检、文档同步、更新与交棒净度扫描",
+      "domain": "entry-governance",
+      "dependsOn": [
+        "survey",
+        "compose-agents"
+      ],
+      "actors": [
+        "maintainer",
+        "reviewer"
+      ],
       "entrypoints": [
         "scripts/review.mjs",
         "scripts/handoff.mjs",
@@ -261,6 +364,14 @@
     {
       "id": "dev-explore",
       "name": "只读资产探索与零写入按需定位",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "explore",
+        "planner"
+      ],
       "entrypoints": [
         "kit/skills/dev-explore/scripts/repo-map.mjs",
         "kit/skills/dev-explore/scripts/doc-locate.mjs"
@@ -318,6 +429,18 @@
     {
       "id": "dev-plan",
       "name": "五档需求分流与四层文档内审",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli",
+        "dev-explore",
+        "flow-truth-exit",
+        "flow-truth-evidence"
+      ],
+      "actors": [
+        "planner",
+        "critic",
+        "human"
+      ],
       "entrypoints": [
         "kit/skills/dev-plan/scripts/doc-plan.mjs"
       ],
@@ -364,12 +487,15 @@
         "kit/skills/templates/docs-prd.md",
         "kit/skills/templates/docs-spec.md",
         "kit/skills/templates/docs-tdd.md",
-        "kit/skills/templates/docs-todo.md"
+        "kit/skills/templates/docs-todo.md",
+        "kit/skills/lib/visual-brief.mjs",
+        "kit/skills/dev-plan/scripts/doc-plan-brief.mjs"
       ],
       "businessFlows": [
         "按 Case 1-5 分流生成 PRD/SPEC/Todo 与冻结 C1..Cn",
         "执行独立内审、不可自审、全历史换人与 3 轮停损校验",
-        "按四层单源模板生成 PRD/SPEC/Todo/TDD 并守护 S1-S4 分流防降档与不可自审边界"
+        "按四层单源模板生成 PRD/SPEC/Todo/TDD 并守护 S1-S4 分流防降档与不可自审边界",
+        "Case 3/4 与多轮讨论在仓外投影 Living Visual Brief，支持宿主中立 UI 原型挂载与确认快照防漂移"
       ],
       "verificationTools": [
         {
@@ -410,7 +536,8 @@
         "scripts/dev/fixtures-conv-s3.mjs",
         "scripts/dev/injections-data-conv-s3.mjs",
         "scripts/dev/fixtures-health-sweep.mjs",
-        "scripts/dev/injections-data-health-sweep.mjs"
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-living-brief.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
@@ -420,6 +547,14 @@
     {
       "id": "dev-edit",
       "name": "改码边界核对与词法静态门禁",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli",
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "implementer"
+      ],
       "entrypoints": [
         "kit/skills/dev-edit/scripts/edit-gate.mjs"
       ],
@@ -466,6 +601,20 @@
     {
       "id": "dev-flow",
       "name": "隔离工作树流转、分诊、实证与清理",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli",
+        "dev-plan",
+        "dev-edit",
+        "dev-verify-tools",
+        "flow-truth-exit",
+        "flow-truth-evidence"
+      ],
+      "actors": [
+        "coordinator",
+        "implementer",
+        "reviewer"
+      ],
       "entrypoints": [
         "kit/skills/dev-flow/scripts/flow.mjs"
       ],
@@ -586,6 +735,17 @@
     {
       "id": "dev-verify-tools",
       "name": "验证工具生命周期与免日期过时校验",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-explore",
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "implementer",
+        "reviewer",
+        "maintainer"
+      ],
       "entrypoints": [
         "kit/skills/dev-verify-tools/scripts/verify-tools.mjs"
       ],
@@ -643,6 +803,19 @@
     {
       "id": "dev-review",
       "name": "先实证后 Diff 独立双门审查与六锁",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-edit",
+        "dev-flow",
+        "dev-verify-tools",
+        "flow-truth-exit",
+        "flow-truth-evidence"
+      ],
+      "actors": [
+        "reviewer",
+        "human"
+      ],
       "entrypoints": [
         "kit/skills/dev-review/scripts/review-pack.mjs"
       ],
@@ -715,6 +888,17 @@
     {
       "id": "dev-govern",
       "name": "基线增量审计与倒金字塔复盘治理",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-explore",
+        "dev-edit",
+        "dev-verify-tools"
+      ],
+      "actors": [
+        "maintainer",
+        "coordinator"
+      ],
       "entrypoints": [
         "kit/skills/dev-govern/scripts/govern-audit.mjs",
         "kit/skills/dev-govern/scripts/govern-retro.mjs"
@@ -778,6 +962,17 @@
     {
       "id": "dev-iterate",
       "name": "正向测试扩展、盲区定向补测与并发压测迭代",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-edit",
+        "dev-verify-tools",
+        "dev-govern"
+      ],
+      "actors": [
+        "implementer",
+        "maintainer"
+      ],
       "entrypoints": [
         "kit/skills/dev-iterate/scripts/iterate.mjs"
       ],
@@ -831,6 +1026,19 @@
     {
       "id": "preflight-gate",
       "name": "全仓结构自检、边界校验与端到端冒烟",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "equip",
+        "compose-agents",
+        "delivery-review-handoff",
+        "flow-truth-cli-parity",
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "maintainer",
+        "implementer",
+        "reviewer"
+      ],
       "entrypoints": [
         "scripts/dev/preflight.mjs"
       ],
@@ -893,6 +1101,14 @@
     {
       "id": "flow-truth-gate",
       "name": "合入门禁单源派生与四档互斥结论",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "maintainer",
+        "reviewer"
+      ],
       "entrypoints": [
         "scripts/dev/merge-gate.mjs",
         "kit/skills/lib/gate-truth.mjs"
@@ -929,6 +1145,13 @@
     {
       "id": "flow-truth-exit",
       "name": "退出码四档单点分层与阻断码登记",
+      "domain": "dev-verification",
+      "dependsOn": [],
+      "actors": [
+        "coordinator",
+        "implementer",
+        "reviewer"
+      ],
       "entrypoints": [
         "kit/skills/lib/exit-codes.mjs"
       ],
@@ -965,6 +1188,15 @@
     {
       "id": "flow-truth-evidence",
       "name": "实证文本实质判据与放行理由契约",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "implementer",
+        "reviewer",
+        "human"
+      ],
       "entrypoints": [
         "kit/skills/lib/evidence-substance.mjs"
       ],
@@ -1002,6 +1234,13 @@
     {
       "id": "flow-truth-cli-parity",
       "name": "参数注册表、帮助声明与读取点三重对拍",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "maintainer"
+      ],
       "entrypoints": [
         "scripts/dev/cli-parity.mjs"
       ],
@@ -1050,6 +1289,11 @@
     {
       "id": "backup",
       "name": "写前增量快照与回滚",
+      "domain": "onboarding-engine",
+      "dependsOn": [],
+      "actors": [
+        "maintainer"
+      ],
       "entrypoints": [
         "scripts/backup.mjs"
       ],
@@ -1082,6 +1326,12 @@
     {
       "id": "skill",
       "name": "SKILL",
+      "domain": "entry-governance",
+      "dependsOn": [],
+      "actors": [
+        "maintainer",
+        "coordinator"
+      ],
       "entrypoints": [
         "SKILL.md"
       ],
@@ -1118,6 +1368,15 @@
     {
       "id": "cli",
       "name": "cli",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "coordinator",
+        "implementer",
+        "planner"
+      ],
       "entrypoints": [
         "kit/skills/lib/cli.mjs"
       ],
@@ -1151,6 +1410,14 @@
     {
       "id": "check",
       "name": "check.yml",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "preflight-gate",
+        "flow-truth-gate"
+      ],
+      "actors": [
+        "maintainer"
+      ],
       "entrypoints": [
         ".github/workflows/check.yml"
       ],
@@ -1187,6 +1454,15 @@
     {
       "id": "release",
       "name": "release.yml",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "check",
+        "skill"
+      ],
+      "actors": [
+        "maintainer",
+        "human"
+      ],
       "entrypoints": [
         ".github/workflows/release.yml"
       ],
@@ -1217,6 +1493,204 @@
       ],
       "docAnchors": [
         "docs/TDD.md#8-核心不变量安全红线与门禁体系"
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "s1-s4-onboarding-flow",
+      "name": "S1-S4 Onboarding Flow",
+      "actors": [
+        "maintainer",
+        "explore",
+        "human"
+      ],
+      "features": [
+        "skill",
+        "survey",
+        "backup",
+        "equip",
+        "compose-agents",
+        "dev-verify-tools",
+        "delivery-review-handoff"
+      ],
+      "steps": [
+        {
+          "feature": "skill",
+          "actor": "maintainer",
+          "action": "Load root routing and gate contracts"
+        },
+        {
+          "feature": "survey",
+          "actor": "explore",
+          "action": "Run read-only survey and build artifactPlan"
+        },
+        {
+          "feature": "backup",
+          "actor": "maintainer",
+          "action": "Create external pre-forge zip snapshot"
+        },
+        {
+          "feature": "equip",
+          "actor": "maintainer",
+          "action": "Install or upgrade unified kit skills with v3 manifest"
+        },
+        {
+          "feature": "compose-agents",
+          "actor": "maintainer",
+          "action": "Render managed AGENTS.md sections within budget"
+        },
+        {
+          "feature": "dev-verify-tools",
+          "actor": "maintainer",
+          "action": "Sync feature-map v2 and render docs/architecture-map.html"
+        },
+        {
+          "feature": "delivery-review-handoff",
+          "actor": "maintainer",
+          "action": "Verify delivery alignment and run handoff scan"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"
+      ]
+    },
+    {
+      "id": "brainstorm-to-plan-flow",
+      "name": "Dynamic Brainstorm-to-Plan Flow",
+      "actors": [
+        "explore",
+        "planner",
+        "critic",
+        "human"
+      ],
+      "features": [
+        "dev-explore",
+        "dev-plan",
+        "dev-verify-tools",
+        "dev-flow"
+      ],
+      "steps": [
+        {
+          "feature": "dev-explore",
+          "actor": "explore",
+          "action": "Locate verified paths and reusable modules read-only"
+        },
+        {
+          "feature": "dev-plan",
+          "actor": "planner",
+          "action": "Triage Case 3/4, project Living Visual Brief, stage prototypes, and confirm"
+        },
+        {
+          "feature": "dev-plan",
+          "actor": "critic",
+          "action": "Audit docs, run independent critique rounds, and approve frozen C1..Cn"
+        },
+        {
+          "feature": "dev-flow",
+          "actor": "coordinator",
+          "action": "Dispatch approved slices into isolated worktrees by wave"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度"
+      ]
+    },
+    {
+      "id": "worktree-impl-review-merge-flow",
+      "name": "Worktree Impl-Review-Merge Flow",
+      "actors": [
+        "coordinator",
+        "implementer",
+        "reviewer"
+      ],
+      "features": [
+        "dev-flow",
+        "dev-edit",
+        "dev-verify-tools",
+        "dev-review",
+        "flow-truth-gate"
+      ],
+      "steps": [
+        {
+          "feature": "dev-flow",
+          "actor": "implementer",
+          "action": "Start isolated impl worktree and claim bound issue"
+        },
+        {
+          "feature": "dev-edit",
+          "actor": "implementer",
+          "action": "Pass pre-edit and lexical static edit-gate checks"
+        },
+        {
+          "feature": "dev-verify-tools",
+          "actor": "implementer",
+          "action": "Run affected verification probes and keep architecture-map synced"
+        },
+        {
+          "feature": "flow-truth-gate",
+          "actor": "implementer",
+          "action": "Execute single-source merge-gate checks for verify"
+        },
+        {
+          "feature": "dev-review",
+          "actor": "reviewer",
+          "action": "Run empirical checks, fault injection, and dual-gate pass"
+        },
+        {
+          "feature": "dev-flow",
+          "actor": "reviewer",
+          "action": "Merge verified PR and run human-confirmed 7-step cleanup"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转"
+      ]
+    },
+    {
+      "id": "govern-and-iterate-flow",
+      "name": "Govern & Iterate Flow",
+      "actors": [
+        "maintainer",
+        "coordinator",
+        "implementer"
+      ],
+      "features": [
+        "dev-govern",
+        "dev-verify-tools",
+        "dev-iterate",
+        "dev-plan",
+        "preflight-gate"
+      ],
+      "steps": [
+        {
+          "feature": "dev-govern",
+          "actor": "maintainer",
+          "action": "Run read-only audit, reconcile, and signal retro"
+        },
+        {
+          "feature": "dev-verify-tools",
+          "actor": "maintainer",
+          "action": "Audit feature-map topology and check architecture-map drift"
+        },
+        {
+          "feature": "dev-iterate",
+          "actor": "implementer",
+          "action": "Detect flow blind spots, generate native tests, and run bounded cycle"
+        },
+        {
+          "feature": "dev-plan",
+          "actor": "planner",
+          "action": "Escalate reproduced gaps into formal planned slices"
+        },
+        {
+          "feature": "preflight-gate",
+          "actor": "maintainer",
+          "action": "Verify full structural, parity, and smoke gates"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"
       ]
     }
   ]

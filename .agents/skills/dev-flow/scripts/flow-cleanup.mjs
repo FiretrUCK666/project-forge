@@ -28,6 +28,7 @@ import {
 } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { markTriageConsumed } from '../../lib/session-state.mjs'
+import { pruneStaleBriefs } from '../../lib/visual-brief.mjs'
 import { buildTargetRepoContext } from './flow-inspect.mjs'
 import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
 import { releaseGitClaimLease } from './flow-merge-claim.mjs'
@@ -372,7 +373,9 @@ export async function handleCleanup(opts, roots) {
   await runLifecycleGovernHook({ stage: 'cleanup', mainRoot: roots.mainRoot, implRoot: roots.mainRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, cleanedAt: ledger.cleanedAt, ...(ledger.hooks ? { hooks: ledger.hooks } : {}) }), { createIfMissing: true })
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
-  const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, verifyScratchCleanup, status: ledger.status }
+  let briefPrune = null
+  try { briefPrune = pruneStaleBriefs(roots.mainRoot, { taskId }) } catch { /* non-fatal */ }
+  const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, verifyScratchCleanup, ...(briefPrune?.pruned?.length ? { prunedBriefs: briefPrune.pruned } : {}), status: ledger.status }
   const cleanupDoneNext = ['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。']
   if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(summary, cleanupDoneNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
@@ -589,6 +592,7 @@ export async function handleAbort(opts, roots) {
   ledger.abortedAt = new Date().toISOString()
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
+  try { pruneStaleBriefs(roots.mainRoot, { taskId }) } catch { /* non-fatal */ }
   if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', droppedDocs, removedWorktrees, verifyScratchCleanup, removedArtifacts }, null, 2)}\n`)
   else {
     process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${droppedDocs.length ? `（已标记 ${droppedDocs.join(', ')} 为 dropped）` : ''}${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)

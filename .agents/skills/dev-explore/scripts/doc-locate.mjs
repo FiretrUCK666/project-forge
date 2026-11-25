@@ -14,6 +14,7 @@ import {
 } from '../../lib/doc-locator.mjs'
 import { isMainModule, posixPath, resolveRepoRoots } from '../../lib/git.mjs'
 import { recordTopicAnchors } from '../../lib/session-state.mjs'
+import { refreshVisualBriefForTopic } from '../../lib/visual-brief.mjs'
 
 function printHelp() {
   process.stdout.write([
@@ -76,7 +77,10 @@ export async function runCli(argv = []) {
         try {
           const roots = await resolveRepoRoots(repoRoot)
           const anchors = (listRes.files ?? []).slice(0, 12).map((f) => posixPath(f.file)).filter(Boolean)
-          if (anchors.length > 0) recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors })
+          if (anchors.length > 0) {
+            recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors })
+            refreshVisualBriefForTopic({ mainRoot: roots.mainRoot, workRoot: roots.workTreeRoot ?? repoRoot, topicId: cli.opts.topic, anchors })
+          }
         } catch { /* non-fatal on read-only repo */ }
       }
       if (cli.json) {
@@ -107,6 +111,7 @@ export async function runCli(argv = []) {
           ...((result.matches ?? []).map((m) => m?.relPath ?? m?.file).filter(Boolean)),
         ].map((p) => posixPath(p)))]
         if (anchors.length > 0) recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors })
+        if (anchors.length > 0) refreshVisualBriefForTopic({ mainRoot: roots.mainRoot, workRoot: roots.workTreeRoot ?? repoRoot, topicId: cli.opts.topic, anchors })
       } catch { /* non-fatal on read-only repo */ }
     }
 

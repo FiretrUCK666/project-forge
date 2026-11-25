@@ -15,6 +15,7 @@ import {
 import { posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { evaluateMutability } from './mutability.mjs'
 import { DECIDED_RE, RISK_NON_DECISION_HEADING_RE } from './pending-decisions.mjs'
+import { refreshVisualBriefForDoc } from './visual-brief.mjs'
 
 const CLARIFY_PENDING_HEADING_RE = /^#{2,4}\s*(?:[一二三四五六七八九十百]+[、.]\s*)?([^\n]*)$/
 const CLARIFY_PENDING_WORDS_RE = /(?:待拍板|未决问题|待确认|待决定|开放问题|待定事项|仍待.*?拍板|open\s+questions?|pending\s+decisions?)/i
@@ -243,7 +244,7 @@ function detectKindFromPath(relFile, fmData) {
 
 /** 向规划文档追加已拍板澄清记录，接入 `OPEN/LOCKED` 冻结守卫并支持 `--drop-criterion` 安全裁剪。 */
 export function clarifyDoc({
-  repoRoot, file, question = '', decision = '', by = 'user', explicitBy = undefined,
+  repoRoot, mainRoot = repoRoot, file, question = '', decision = '', by = 'user', explicitBy = undefined,
   criterion = '', dropCriterion = '', reason = '',
 }) {
   if (!file) throw new Error('clarify 需要 --file <docPath>')
@@ -306,6 +307,13 @@ export function clarifyDoc({
       const nextDropped = prevDropped.includes(targetCid) ? prevDropped : [...prevDropped, targetCid]
       updateDocFrontmatter(abs, { updated: today, dropped_criteria: nextDropped }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fmCheck.data.kind ?? docKind] ?? [] })
     }
+    let visualBrief = null
+    try {
+      visualBrief = refreshVisualBriefForDoc({
+        mainRoot, workRoot: repoRoot, file: relFile, taskId: fmCheck.data?.task_id ?? null,
+        addedDecision: `Dropped ${targetCid}: ${String(reason).trim()}`,
+      })?.summary ?? null
+    } catch { /* non-fatal */ }
     return {
       file: relFile,
       entry,
@@ -313,6 +321,7 @@ export function clarifyDoc({
       addedCriterion: null,
       resolvedPendingCount: 0,
       updated: today,
+      ...(visualBrief ? { visualBrief } : {}),
     }
   }
 
@@ -370,5 +379,12 @@ export function clarifyDoc({
   if (fm.hasFrontmatter) {
     updateDocFrontmatter(abs, { updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docKind] ?? [] })
   }
-  return { file: relFile, entry, addedCriterion, droppedCriterion: null, resolvedPendingCount, updated: today }
+  let visualBrief = null
+  try {
+    visualBrief = refreshVisualBriefForDoc({
+      mainRoot, workRoot: repoRoot, file: relFile, taskId: fm.data?.task_id ?? fmCheck.data?.task_id ?? null,
+      addedDecision: `${qText}${String(decision).trim()}`,
+    })?.summary ?? null
+  } catch { /* non-fatal */ }
+  return { file: relFile, entry, addedCriterion, droppedCriterion: null, resolvedPendingCount, updated: today, ...(visualBrief ? { visualBrief } : {}) }
 }

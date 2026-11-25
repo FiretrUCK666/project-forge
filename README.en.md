@@ -141,8 +141,8 @@ During daily work, `doc-locate.mjs` reads targeted `startLine..endLine` slices b
 | --- | --- | --- |
 | **L1 Entry contract** | `AGENTS.md` | Thin session contract: intent routing, commands, collaboration, and coupled-edit map (`< 24KB` target, `<= 30KB` cap) |
 | **L2 System architecture** | `docs/TDD.md` | Module boundaries, flow diagrams, and invariants checked against real paths |
-| **L3 Machine index** | `docs/feature-map.json` | Machine-readable map of features, modules, flows, and probes checked via exported symbol hashes and Git tree hashes |
-| **Planning & archive** | `docs/{prd,specs,todo}/` → `docs/archive/` | Freezes `C1..Cn` criteria and pairs them into `docs/archive/` via `git mv` before PR submission |
+| **L3 Machine index & map** | `docs/feature-map.json` + `docs/architecture-map.html` | `v1/v2` domain topology, cross-feature flows, and probe map checked via symbol/tree hashes, deterministically rendering an offline interactive architecture map (`no-architecture-html` opts out) |
+| **Planning, brief & archive** | `docs/{prd,specs,todo}/` → `docs/archive/` | Freezes `C1..Cn` criteria, projects an out-of-repo Living Visual Brief for Case 3/4 planning (with host-neutral static UI prototype staging and confirmation snapshots), and pairs archived docs before PR submission |
 
 ## Eight Local Development Skills
 

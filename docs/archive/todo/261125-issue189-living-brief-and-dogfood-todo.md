@@ -1,20 +1,20 @@
 ---
 kind: todo
 title: "Living Visual Brief Engine, Host-Neutral Prototype Mounting and Self-Dogfooding"
-status: active
+status: done
 created: 2026-11-25
 updated: 2026-11-25
-issue: null
-pr: null
-branch: feat/visual-arch-plan
+issue: 189
+pr: 190
+branch: feat/living-brief-and-dogfood
 owner: planner-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-25
 task_id: living-brief-and-dogfood
 planned_at: 887adcbe69441de8649d7e3facede8199c3bc2ea
 related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
-related_spec: ../specs/261125-living-brief-and-dogfood-spec.md
+related_spec: ../specs/261125-issue189-living-brief-and-dogfood-spec.md
 depends_on: [visual-engine-arch-map]
 scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-plan-brief.mjs, kit/skills/lib/session-state.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/lib/doc-plan-clarify.mjs, kit/skills/dev-explore/scripts/doc-locate.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/lib/plan-next.mjs, kit/skills/dev-flow/scripts/flow-next.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/subcommand-meta.mjs, scripts/dev/cli-parity.mjs, templates/agents-project.md, AGENTS.md, SKILL.md, kit/skills/dev-plan/SKILL.md, kit/skills/dev-verify-tools/SKILL.md, kit/skills/dev-explore/SKILL.md, kit/skills/dev-govern/SKILL.md, references/survey.md, references/collaboration.md, docs/TDD.md, README.md, README.en.md, docs/feature-map.json, docs/architecture-map.html, .agents/skills/, scripts/dev/fixtures-living-brief.mjs]
 ---
@@ -25,15 +25,15 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-25` / `2026-11-25` |
-| 分支 / 基线 | `feat/visual-arch-plan` @ `887adcb` |
+| 分支 / 基线 | `feat/living-brief-and-dogfood` @ `887adcb` |
 | 任务编号 | `living-brief-and-dogfood` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与预算已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261125-living-brief-and-dogfood-spec.md` |
+| 关联 Issue / PR / SPEC | #189 / #190 / `docs/archive/specs/261125-issue189-living-brief-and-dogfood-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261125-living-brief-and-dogfood-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261125-issue189-living-brief-and-dogfood-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -45,10 +45,10 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 ## 验收标准与执行清单
 
-- [ ] C9: 新增 `kit/skills/lib/visual-brief.mjs` (new) 与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` (new)，实现仓外 `<gitCommonDir>/project-forge-flow/briefs/<briefKey>.{json,html}` 与 `-prototypes/` Single-Truth 实时投影（`workRoot` 优先于 `mainRoot`，使用 `buildSliceGraph`/`evaluateSliceGraph`）、1:N 迁移与 `slice --prd` 确定性派生 `parentBriefKey`、`confirmedState: stale`、原型暂存（拒绝 `> 512 KB` 及非 `http`/`https`/`file` URI）与 `pruneStaleBriefs`，通过 `scripts/dev/fixtures-living-brief.mjs` (new) 正反与负向断言。
-- [ ] C10: 抽离 `doc-plan.mjs` 处理器至 `doc-plan-brief.mjs` (new)/`doc-plan-ops.mjs` 使其 `< 790` 行且全 `.mjs <= 800` 行，完成 `session-state.mjs`、`doc-plan.mjs`（Case 3/4 自动刷新、`brief` 使用 `--open-browser` 避免 `--open` 冲突、将 `--prototype`/`--select-prototype`/`--confirm`/`--open-browser`/`--source-skill`/`--verdict`/`--affected-feature`/`--flow-delta` 注册进 `printHelp()` 并在 `doc-plan-brief.mjs` (new) 读取、4 处对拍与 `cli-parity.mjs` `DARK_BASELINE` 同步）、`doc-plan-ops.mjs`、`doc-plan-clarify.mjs`、`doc-locate.mjs`（仅 `--topic` 刷新）、`repo-map.mjs --topic`、`plan-next.mjs`、`flow-next.mjs` 与 `handoff-package.mjs` 接入，通过 `preflight.mjs` 与 `fixtures.mjs`。
-- [ ] C11: 在预算内完成 `templates/agents-project.md`（`<= +500 B`、`AGENTS.md < 24576 B`）、根 `SKILL.md`（`<= +400 B`、`< 16384 B`）、`kit/skills/dev-plan/SKILL.md` / `kit/skills/dev-verify-tools/SKILL.md` / `kit/skills/dev-explore/SKILL.md` / `kit/skills/dev-govern/SKILL.md`（`< 14336 B` 且 `<= 180` 行）、`references/survey.md`/`collaboration.md`、`docs/TDD.md`、双语 `README.md`/`README.en.md` 同步，通过 `sync-toc.mjs --check` 与 `compose-agents.mjs . --check`。
-- [ ] C12: 升级本仓 `docs/feature-map.json` 至 v2 并渲染提交 `docs/architecture-map.html` (new)，运行 `equip.mjs .`，全绿通过全套门禁（`preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`e2e-zip-harness.mjs`、`review.mjs .`、`govern-audit.mjs audit . --strict`）及真实浏览器浅深色主题视觉实证（附 `--artifact`）。
+- [x] C9: 新增 `kit/skills/lib/visual-brief.mjs` (new) 与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` (new)，实现仓外 `<gitCommonDir>/project-forge-flow/briefs/<briefKey>.{json,html}` 与 `-prototypes/` Single-Truth 实时投影（`workRoot` 优先于 `mainRoot`，使用 `buildSliceGraph`/`evaluateSliceGraph`）、1:N 迁移与 `slice --prd` 确定性派生 `parentBriefKey`、`confirmedState: stale`、原型暂存（拒绝 `> 512 KB` 及非 `http`/`https`/`file` URI）与 `pruneStaleBriefs`，通过 `scripts/dev/fixtures-living-brief.mjs` (new) 正反与负向断言。
+- [x] C10: 抽离 `doc-plan.mjs` 处理器至 `doc-plan-brief.mjs` (new)/`doc-plan-ops.mjs` 使其 `< 790` 行且全 `.mjs <= 800` 行，完成 `session-state.mjs`、`doc-plan.mjs`（Case 3/4 自动刷新、`brief` 使用 `--open-browser` 避免 `--open` 冲突、将 `--prototype`/`--select-prototype`/`--confirm`/`--open-browser`/`--source-skill`/`--verdict`/`--affected-feature`/`--flow-delta` 注册进 `printHelp()` 并在 `doc-plan-brief.mjs` (new) 读取、4 处对拍与 `cli-parity.mjs` `DARK_BASELINE` 同步）、`doc-plan-ops.mjs`、`doc-plan-clarify.mjs`、`doc-locate.mjs`（仅 `--topic` 刷新）、`repo-map.mjs --topic`、`plan-next.mjs`、`flow-next.mjs` 与 `handoff-package.mjs` 接入，通过 `preflight.mjs` 与 `fixtures.mjs`。
+- [x] C11: 在预算内完成 `templates/agents-project.md`（`<= +500 B`、`AGENTS.md < 24576 B`）、根 `SKILL.md`（`<= +400 B`、`< 16384 B`）、`kit/skills/dev-plan/SKILL.md` / `kit/skills/dev-verify-tools/SKILL.md` / `kit/skills/dev-explore/SKILL.md` / `kit/skills/dev-govern/SKILL.md`（`< 14336 B` 且 `<= 180` 行）、`references/survey.md`/`collaboration.md`、`docs/TDD.md`、双语 `README.md`/`README.en.md` 同步，通过 `sync-toc.mjs --check` 与 `compose-agents.mjs . --check`。
+- [x] C12: 升级本仓 `docs/feature-map.json` 至 v2 并渲染提交 `docs/architecture-map.html` (new)，运行 `equip.mjs .`，全绿通过全套门禁（`preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`e2e-zip-harness.mjs`、`review.mjs .`、`govern-audit.mjs audit . --strict`）及真实浏览器浅深色主题视觉实证（附 `--artifact`）。
 
 ## 执行步骤
 
@@ -81,9 +81,9 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（等待本 SPEC 独立 Critique 与 `approve`）
+- **当前状态**：`已完成 (done)`
 - **待拍板事项**：无
-- **下一步第一件事**：切片 2 合并后，对 `docs/specs/261125-living-brief-and-dogfood-spec.md` 完成 Critique 与 `approve` 并启动 `impl`。
+- **下一步第一件事**：归档并提交 PR，移交独立审查。
 
 ## 澄清与补充记录
 
@@ -93,6 +93,6 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`preflight.mjs`（41/41 通过）、`fixtures.mjs`（含新增 `fixtures-living-brief.mjs` 4/4 正反及负向断言）、`cli-parity.mjs`、`subcommand-parity.mjs`、`verify-tools.mjs audit .`、`verify-tools.mjs render --check`、`govern-audit.mjs audit . --strict`、`review.mjs .`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`sync-toc.mjs --check`、`flow verify --mode gate`（`merge-gate.mjs` 12/12）与真实无头浏览器渲染实证全绿。
+- **文档同步检查**：已同步 `templates/agents-project.md`、`AGENTS.md`（23272 B < 24576 B）、根 `SKILL.md`（14490 B <= 16384 B）、`kit/skills/{dev-plan,dev-verify-tools,dev-explore,dev-govern}/SKILL.md`（均 < 14336 B 且 <= 180 L）、`references/survey.md`、`references/collaboration.md`、`docs/TDD.md`、`README.md`、`README.en.md`、`docs/feature-map.json` v2、`docs/architecture-map.html` 与 `.agents/skills/`。
+- **遗留问题**：无。

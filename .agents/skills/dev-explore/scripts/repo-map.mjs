@@ -20,6 +20,7 @@ import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { createExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { discoverWorkspacePackages, parseAgentsProfile } from '../../lib/profile.mjs'
 import { recordTopicAnchors } from '../../lib/session-state.mjs'
+import { refreshVisualBriefForTopic } from '../../lib/visual-brief.mjs'
 import { TEST_FILE_RE, isTestOrFixtureFile } from '../../lib/static-gates.mjs'
 import { extractSymbols, summarizeSymbolCoverage } from '../../lib/symbol-index.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
@@ -438,7 +439,10 @@ async function main(argv) {
         ...(map.hotspots ?? []).map((h) => (typeof h === 'string' ? h : h?.file ?? h?.path)).filter(Boolean),
       ].map((p) => posixPath(String(p)))
       const verifiedAnchors = [...new Set(candidates)].filter((p) => existsSync(join(map.root, p))).slice(0, 12)
-      if (verifiedAnchors.length > 0) recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors: verifiedAnchors })
+      if (verifiedAnchors.length > 0) {
+        recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors: verifiedAnchors })
+        try { refreshVisualBriefForTopic({ mainRoot: roots.mainRoot, workRoot: map.root, topicId: cli.opts.topic, anchors: verifiedAnchors }) } catch { /* non-fatal */ }
+      }
     }
     if (cli.json) {
       process.stdout.write(`${JSON.stringify(map, null, 2)}\n`)

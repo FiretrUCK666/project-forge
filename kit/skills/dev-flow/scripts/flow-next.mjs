@@ -16,6 +16,7 @@ import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildPlanHandoff, evaluatePlanNextState } from '../../lib/plan-next.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
 import { readSessionState } from '../../lib/session-state.mjs'
+import { getVisualBriefSummary } from '../../lib/visual-brief.mjs'
 import { collectTaskLivenessBuckets, ensureReviewToken, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { computeSignalFingerprint, readSignalsJsonl } from '../../lib/signals.mjs'
@@ -405,9 +406,16 @@ export async function handleNext(opts, roots) {
 
   const orient = out.phase === 'idle' ? buildSessionOrientation(roots.mainRoot) : null
   const sessionState = readSessionState(roots.mainRoot)
+  const visualBrief = out.planState?.visualBrief ?? getVisualBriefSummary(roots.mainRoot, {
+    briefKey: selectedTask?.briefKey ?? (sessionState?.activeTopic ? sessionState.topics?.[sessionState.activeTopic]?.briefKey : null) ?? null,
+    taskId: selectedTask?.taskId ?? null,
+    topicId: sessionState?.activeTopic ?? null,
+    masterPrdRel: selectedTask?.prdFile ?? null,
+  })
   const payload = {
     ...out,
     hydration,
+    visualBrief,
     ...(retroHint ? { retroHint } : {}),
     ...(sessionState ? { sessionState } : {}),
     ...(orient ? { orientation: { docs: orient.docs, stuck: orient.stuck, nextSteps: orient.nextSteps } } : {}),

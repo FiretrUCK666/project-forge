@@ -72,8 +72,8 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 | `ci-release` | `preserve` / `ask-human` / `skip` | 已有发布工作流或工具链保留；待配发版通道时走 5 选 1 决策，默认零额外 Secret 路线 |
 | `branch-protection` | `preserve` / `create` / `ask-human` / `skip` | 有能力后端按开关 A（`equip-ci.mjs --protect-branch`）设分支保护（`require_approvals=0`）；无权限/403 降级为 `git-hooks`；`generic-git` 输出手工清单 |
 | `git-hooks` | `preserve` / `create` / `skip` | 冲突 `.husky/`/`lefthook*` 一律 `preserve`；无冲突且未写 `no-git-hooks` 时通过 `equip.mjs --with-hooks` 装配 `.githooks/pre-push` |
-| `feature-map` | `preserve` / `create` / `skip` | 空白仓或纯文档仓跳过；存量代码仓缺失时运行 `verify-tools.mjs sync` 自动索引生成 `docs/feature-map.json` |
-| `architecture-map` | `preserve` / `calibrate` / `create` / `skip` | 空白仓、纯文档仓或写了 `no-architecture-html` 时跳过；存在代码时运行 `verify-tools.mjs render` 生成或刷新离线交互式 `docs/architecture-map.html` |
+| `feature-map` | `preserve` / `create` / `skip` | 空白仓或纯文档仓跳过；存量代码仓缺失时运行 `verify-tools.mjs sync` 自动索引生成 `docs/feature-map.json`（兼容 v1/v2 分层拓扑与无环依赖校验） |
+| `architecture-map` | `preserve` / `calibrate` / `create` / `skip` | 空白仓、纯文档仓或写了 `no-architecture-html` 时跳过；存在代码时运行 `verify-tools.mjs render` 确定性派生或校验离线交互式 `docs/architecture-map.html`（指纹匹配时豁免 UI 强锁） |
 
 ## 事实来源
 

@@ -54,6 +54,7 @@ function emptyTopicState(topicId = 'default', topicLabel = null) {
     anchors: [],
     openQuestions: [],
     triage: null,
+    briefKey: null,
     updatedAt: null,
     consumedByTaskId: null,
     consumedAt: null,
@@ -138,6 +139,7 @@ function normalizeTopicEntry(topicId, raw = {}) {
     anchors: normalizeList(raw.anchors ?? []),
     openQuestions: [],
     triage: raw.triage && typeof raw.triage === 'object' ? { ...raw.triage } : null,
+    briefKey: raw.briefKey ? String(raw.briefKey).trim().slice(0, 80) : null,
     updatedAt: raw.updatedAt ?? null,
     consumedByTaskId: raw.consumedByTaskId ?? null,
     consumedAt: raw.consumedAt ?? null,
@@ -514,6 +516,7 @@ function formatTopicAsPreInit(t) {
     anchors: [...(t.anchors ?? [])],
     openQuestions: [...(t.openQuestions ?? [])],
     triage: t.triage ? { ...t.triage } : null,
+    briefKey: t.briefKey ?? null,
     updatedAt: t.updatedAt ?? null,
     consumedByTaskId: t.consumedByTaskId ?? null,
     consumedAt: t.consumedAt ?? null,
@@ -692,6 +695,19 @@ export function recordTopicAnchors(mainRoot, { topic, anchors = [] } = {}) {
   const cleanAnchors = [...new Set((Array.isArray(anchors) ? anchors : [anchors]).map((a) => posixPath(String(a ?? '').trim())).filter(Boolean))]
   if (cleanAnchors.length === 0) return null
   return appendPreInitNote(mainRoot, { topic: cleanTopic, anchors: cleanAnchors })
+}
+
+export function setTopicBriefKey(mainRoot, topic, briefKey) {
+  const cleanTopic = String(topic ?? '').trim()
+  const cleanKey = String(briefKey ?? '').trim().slice(0, 80)
+  if (!cleanTopic || !cleanKey) return null
+  const { statePath, state: prev } = readNormalizedState(mainRoot)
+  const key = findTopicKey(prev.topics, cleanTopic) ?? normalizeTopicId(cleanTopic)
+  const cur = prev.topics?.[key] ? normalizeTopicEntry(key, prev.topics[key]) : emptyTopicState(key, cleanTopic)
+  if (cur.briefKey === cleanKey) return cur
+  cur.briefKey = cleanKey
+  writeJsonAtomic(statePath, { ...prev, schemaVersion: SESSION_SCHEMA_VERSION, topics: { ...(prev.topics ?? {}), [key]: cur }, updatedAt: new Date().toISOString() })
+  return cur
 }
 
 /** 在 `initDoc` 吸收后仅清空并标记目标主题，绝不误消费其他并行主题。 */

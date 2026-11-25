@@ -24,6 +24,7 @@ import { analyzePendingDecisions, normalizePlanMode } from './pending-decisions.
 import { resolveCritiqueReadiness } from './plan-exit-gate.mjs'
 import { indexPlanDocs, inferPlanDocKind, isPlanDocApproved, resolveLinkedPlanGraph } from './plan-index.mjs'
 import { readPreInitState } from './session-state.mjs'
+import { getVisualBriefSummary } from './visual-brief.mjs'
 
 const TERMINAL_PLAN_STATUSES = new Set(['done', 'archived', 'implemented', 'superseded', 'dropped'])
 
@@ -165,6 +166,11 @@ export async function evaluatePlanNextState({
       keywords: preInit?.topic ? [preInit.topic] : [],
       excludeFiles: ['AGENTS.md'],
     })
+    const visualBrief = getVisualBriefSummary(effMain, {
+      briefKey: activeLedger?.briefKey ?? preInit?.briefKey ?? null,
+      taskId: resolvedTaskId,
+      topicId: preInit?.topicId ?? null,
+    })
     return {
       ok: true,
       phase: 'needs-triage',
@@ -180,6 +186,7 @@ export async function evaluatePlanNextState({
       critique: { round: 0, nextRound: 1, excludedReviewers: [], findings: [], stopLossActive: false, readiness: null },
       reviewChoices: [],
       preInit,
+      visualBrief,
       contextBrief,
       nextAction: '当前无在途规划文档；先跑 dev-explore 核清仓内复用，再执行 doc-plan.mjs triage 定档分流。',
       command: 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>"',
@@ -206,6 +213,12 @@ export async function evaluatePlanNextState({
   const masterPrdInfo = masterPrd
     ? { file: masterPrd.rel, status: masterPrd.status, approved: isPlanDocApproved(masterPrd) }
     : null
+  const visualBrief = getVisualBriefSummary(effMain, {
+    briefKey: docLedger?.briefKey ?? preInit?.briefKey ?? null,
+    taskId: effTask,
+    topicId: preInit?.topicId ?? null,
+    masterPrdRel: masterPrd?.rel ?? (selectedDoc.kind === 'prd' ? relDoc : null),
+  })
   const sliceSummary = childSlices.length > 0
     ? {
         totalSlices: childSlices.length,
@@ -230,6 +243,7 @@ export async function evaluatePlanNextState({
       critique: { round: 0, nextRound: 1, excludedReviewers: [], findings: [], stopLossActive: false, readiness: null },
       reviewChoices: [],
       preInit,
+      visualBrief,
       contextBrief,
       nextAction: `文档 ${relDoc} 已处于终态（status=${selectedDoc.status}），无需继续规划或开工；如需新需求请另建规划或运行 flow next。`,
       command: 'node ".agents/skills/dev-flow/scripts/flow.mjs" next',
@@ -410,6 +424,7 @@ export async function evaluatePlanNextState({
     },
     reviewChoices,
     preInit,
+    visualBrief,
     contextBrief,
     nextAction,
     command,
@@ -433,6 +448,9 @@ export function buildPlanHandoff({ state, deliveryMode = state?.deliveryMode ?? 
   ]
   if (s.masterPrd) {
     lines.push(`- **总控 PRD（1:N）**：\`${s.masterPrd.file}\` (status=${s.masterPrd.status})${s.sliceSummary ? ` | 切片进度：已过审 ${s.sliceSummary.approvedSlices}/${s.sliceSummary.totalSlices}` : ''}`)
+  }
+  if (s.visualBrief) {
+    lines.push(`- **Living Visual Brief**：\`${s.visualBrief.briefKey}\` (state=${s.visualBrief.confirmedState}, prototypes=${s.visualBrief.prototypeCount}${s.visualBrief.selectedPrototypeId ? `, selected=${s.visualBrief.selectedPrototypeId}` : ''}) -> ${s.visualBrief.htmlUri}`)
   }
   if (s.preInit) {
     lines.push('', '### 预初始化讨论缓冲（init 前保留）')
@@ -494,6 +512,7 @@ export function buildPlanHandoff({ state, deliveryMode = state?.deliveryMode ?? 
       excludedReviewers: s.critique?.excludedReviewers ?? [],
       findingsCount: s.critique?.findings?.length ?? 0,
       pendingCount: s.pendingDecisions?.unresolved?.length ?? 0,
+      visualBrief: s.visualBrief ?? null,
       command: s.command ?? null,
     },
     prompt: `${lines.join('\n')}\n`,

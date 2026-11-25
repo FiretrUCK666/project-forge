@@ -59,6 +59,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep [--from <ta
 - **文档温差、死链与 Frontmatter**：对照最近 80 次提交热点查滞后（`docs.stale-vs-churn`），扫描活跃目录死链（`docs.dead-link`，跳过 `docs/archive/`）、Mermaid `16/12` 宽度（`docs.mermaid-label-width`）、`docs/TDD.md` 漂移（遵循 `no-tdd`/既有文档豁免）及活跃 `docs/{prd,specs,todo}/` YAML Frontmatter、`-issue<N>-` 与 `related_*` 互链。
 - **结构腐化与跨层边界**：拦截墓碑注释（`hygiene.tombstone-comment`）、压制标记（`hygiene.excuse-suppression`）、连续注释死代码（`deadcode.commented-block`）、`>800`/`>1500` 行大文件（`hygiene.god-file`）与 `arch-rules:` 跨层违规（`hygiene.arch-boundary`）。
 - **测试覆盖与 CI 对齐**：聚合多生态脚本、`Dev Profile` 及 CI 配置（`.github/workflows/`、`.circleci/config.yml`、`azure-pipelines.yml`、`Jenkinsfile` 等）产出 `testInventory`，识别零断言、全跳过与孤儿测试套件（`tests.orphan-suite`）。
+- **常青文档、功能地图与架构图对齐**：`reconcile` 保持严格只读（不改盘），校验 `docs/feature-map.json` v2 拓扑完整性与无环约束，核查 `docs/architecture-map.html` 首行 `feature-map-sha256` 指纹漂移并在漂移时提示运行 `verify-tools.mjs render` 同步。
 - **Worktree 四态与清单卫生**：在 worktree 内同以 `<mainRoot>/.worktrees/` 为基准，结合 `git cherry`/`git patch-id` 判 `merged`、`squash_or_rebase_merged`、`no_own_commits`（仅报告并请人核对未提交改动，绝不误删）与 `unmerged`；校验 `.agents/skills/.pf-manifest.json`（兼容 v1/v2/v3）、明文凭据、`>1MB` 大文件、macOS 元数据与未忽略输出目录。
 
 ## 测试分层、控频与质量治理

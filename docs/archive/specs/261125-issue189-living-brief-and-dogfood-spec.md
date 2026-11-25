@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: "Living Visual Brief Engine, Host-Neutral Prototype Mounting and Self-Dogfooding"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-25
 updated: 2026-11-25
-issue: null
-pr: null
-branch: feat/visual-arch-plan
+issue: 189
+pr: 190
+branch: feat/living-brief-and-dogfood
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r3, round=3, sha=254bd4bd7aa8, summary=Round 3 PASS: Verified --open-browser rename eliminates doc-plan.mjs:153 multiFlags collision, all brief/prototype flags registered+declared in printHelp()+read in doc-plan-brief.mjs (cli-parity scope + DARK_BASELINE), doc-plan.mjs <790L extraction, and doc/skill byte budgets.)"
 related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
-related_todo: ../todo/261125-living-brief-and-dogfood-todo.md
+related_todo: ../todo/261125-issue189-living-brief-and-dogfood-todo.md
 high_risk_paths: [kit/, templates/, SKILL.md, AGENTS.md]
 task_id: living-brief-and-dogfood
 depends_on: [visual-engine-arch-map]
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（仓外活需求简报状态机、宿主中立原型挂载、预算内文档同步与本仓自举；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-25` / `2026-11-25` |
-| 分支 / Issue / PR | `feat/visual-arch-plan` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/living-brief-and-dogfood` / #189 / #190 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界、预算与自举标准已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261125-visual-arch-brief-prd-prd.md` / `../todo/261125-living-brief-and-dogfood-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261125-visual-arch-brief-prd-prd.md` / `docs/archive/todo/261125-issue189-living-brief-and-dogfood-todo.md` |
 
 - **变更一句话**：落地仓外单源实时投影的 Living Visual Brief 引擎与宿主中立 UI 原型挂载，强制瘦身 `doc-plan.mjs`（`796 -> < 790` 行）并严守预算同步契约、技能、TDD 与双语 README，完成 `project-forge` 自身 v2 架构图升级与真实浏览器视觉实证。
 
@@ -133,10 +133,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C9: 新增 `kit/skills/lib/visual-brief.mjs` (new) 与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` (new)，实现仓外 `<gitCommonDir>/project-forge-flow/briefs/<briefKey>.{json,html}` 与 `-prototypes/` Single-Truth 实时投影（`workRoot` `feature-map.json` 优先于 `mainRoot`，使用 `buildSliceGraph`/`evaluateSliceGraph`）、1:N `topicId -> taskId` 迁移与 `slice --prd` 确定性派生 `parentBriefKey`、确认后修改置 `confirmedState: stale`、原型暂存（拒绝 `> 512 KB` 文件及非 `http`/`https`/`file` URI）及 `pruneStaleBriefs`，经 `scripts/dev/fixtures-living-brief.mjs` (new) 正反与负向用例验证通过。
-- [ ] C10: 将 `doc-plan.mjs` 处理器抽入 `doc-plan-brief.mjs` (new)/`doc-plan-ops.mjs` 使其 `< 790` 行且全 `.mjs <= 800` 行，完成 `session-state.mjs`、`doc-plan.mjs`（Case 3/4 自动刷新、`brief` 使用 `--open-browser` 避免与 `multiFlags` `--open` 冲突、将 `--prototype`/`--select-prototype`/`--confirm`/`--open-browser`/`--source-skill`/`--verdict`/`--affected-feature`/`--flow-delta` 全部写入 `printHelp()` 并于 `doc-plan-brief.mjs` (new) 读取、完成 4 处对拍与 `cli-parity.mjs` `DARK_BASELINE` 同步）、`doc-plan-ops.mjs`、`doc-plan-clarify.mjs`、`doc-locate.mjs`（默认零写入，仅显式 `--topic` 时刷新）、`repo-map.mjs --topic`、`plan-next.mjs`、`flow-next.mjs` 与 `handoff-package.mjs` 接入（全阶段 `visualBrief` 与 `buildPlanHandoff` 确认快照），经 `preflight.mjs` 与 `fixtures.mjs` 验证通过。
-- [ ] C11: 在严守预算下完成文档与技能同步：`templates/agents-project.md` 增量 `<= +500 B` 且 `AGENTS.md < 24576 B`、根 `SKILL.md` 增量 `<= +400 B` 且 `< 16384 B`、`kit/skills/dev-plan/SKILL.md`（含宿主中立 UI 原型挂载指引）及 `kit/skills/dev-verify-tools/SKILL.md` / `kit/skills/dev-explore/SKILL.md` / `kit/skills/dev-govern/SKILL.md` 均 `< 14336 B` 且 `<= 180` 行、`references/survey.md` 与 `references/collaboration.md`、`docs/TDD.md`、双语 `README.md`+`README.en.md` 同步且通过 `sync-toc.mjs --check` 与 `compose-agents.mjs . --check`。
-- [ ] C12: 将本仓 `docs/feature-map.json` 升级为完整 v2 并渲染提交 `docs/architecture-map.html` (new)，运行 `equip.mjs .`，全绿通过 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs`、`review.mjs .` 与 `govern-audit.mjs audit . --strict`，并在真实浏览器完成浅深色主题交互渲染实证（附 `--artifact` 截图）。
+- [x] C9: 新增 `kit/skills/lib/visual-brief.mjs` (new) 与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` (new)，实现仓外 `<gitCommonDir>/project-forge-flow/briefs/<briefKey>.{json,html}` 与 `-prototypes/` Single-Truth 实时投影（`workRoot` `feature-map.json` 优先于 `mainRoot`，使用 `buildSliceGraph`/`evaluateSliceGraph`）、1:N `topicId -> taskId` 迁移与 `slice --prd` 确定性派生 `parentBriefKey`、确认后修改置 `confirmedState: stale`、原型暂存（拒绝 `> 512 KB` 文件及非 `http`/`https`/`file` URI）及 `pruneStaleBriefs`，经 `scripts/dev/fixtures-living-brief.mjs` (new) 正反与负向用例验证通过。
+- [x] C10: 将 `doc-plan.mjs` 处理器抽入 `doc-plan-brief.mjs` (new)/`doc-plan-ops.mjs` 使其 `< 790` 行且全 `.mjs <= 800` 行，完成 `session-state.mjs`、`doc-plan.mjs`（Case 3/4 自动刷新、`brief` 使用 `--open-browser` 避免与 `multiFlags` `--open` 冲突、将 `--prototype`/`--select-prototype`/`--confirm`/`--open-browser`/`--source-skill`/`--verdict`/`--affected-feature`/`--flow-delta` 全部写入 `printHelp()` 并于 `doc-plan-brief.mjs` (new) 读取、完成 4 处对拍与 `cli-parity.mjs` `DARK_BASELINE` 同步）、`doc-plan-ops.mjs`、`doc-plan-clarify.mjs`、`doc-locate.mjs`（默认零写入，仅显式 `--topic` 时刷新）、`repo-map.mjs --topic`、`plan-next.mjs`、`flow-next.mjs` 与 `handoff-package.mjs` 接入（全阶段 `visualBrief` 与 `buildPlanHandoff` 确认快照），经 `preflight.mjs` 与 `fixtures.mjs` 验证通过。
+- [x] C11: 在严守预算下完成文档与技能同步：`templates/agents-project.md` 增量 `<= +500 B` 且 `AGENTS.md < 24576 B`、根 `SKILL.md` 增量 `<= +400 B` 且 `< 16384 B`、`kit/skills/dev-plan/SKILL.md`（含宿主中立 UI 原型挂载指引）及 `kit/skills/dev-verify-tools/SKILL.md` / `kit/skills/dev-explore/SKILL.md` / `kit/skills/dev-govern/SKILL.md` 均 `< 14336 B` 且 `<= 180` 行、`references/survey.md` 与 `references/collaboration.md`、`docs/TDD.md`、双语 `README.md`+`README.en.md` 同步且通过 `sync-toc.mjs --check` 与 `compose-agents.mjs . --check`。
+- [x] C12: 将本仓 `docs/feature-map.json` 升级为完整 v2 并渲染提交 `docs/architecture-map.html` (new)，运行 `equip.mjs .`，全绿通过 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs`、`review.mjs .` 与 `govern-audit.mjs audit . --strict`，并在真实浏览器完成浅深色主题交互渲染实证（附 `--artifact` 截图）。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -155,6 +155,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：新增 `kit/skills/lib/visual-brief.mjs`（698 L）与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs`（314 L），将 `doc-plan.mjs` 瘦身至 699 L 并完成全部 9 处薄接线与 4 处子命令/CLI 对拍；同步预算内契约、技能、`references/`、`docs/TDD.md` 与双语 `README`；升级本仓 `docs/feature-map.json` 至 v2（5 域、22 个 feature、4 条端到端流）并生成提交 `docs/architecture-map.html`，新增 `scripts/dev/fixtures-living-brief.mjs` 双向及负向断言并完成无头浏览器浅深色渲染实证。
+- **与草案的差异**：在 `kit/skills/lib/exit-codes.mjs` 登记原型校验退出码（`BLOCKED_UNSAFE_PROTOTYPE_URI`/`INVALID_PROTOTYPE`/`PROTOTYPE_NOT_FOUND`/`PROTOTYPE_ID_NOT_FOUND` 与 `BLOCKED_PROTOTYPE_TOO_LARGE`）并在 `kit/skills/dev-flow/scripts/flow-cleanup.mjs` 挂载 `pruneStaleBriefs`；`docs/architecture-map.html` 包含本仓 22 个 feature、5 个域、4 条流及完整内联视图与脚本，实测约 108 KB（远低于 256 KB 扫描上限）。
+- **关联同步文件**：`.agents/skills/`（`equip.mjs .`）、`AGENTS.md`（`compose-agents.mjs .`）、`README.md`/`README.en.md`（`sync-toc.mjs`）、`docs/architecture-map.html`（`verify-tools.mjs render`）。

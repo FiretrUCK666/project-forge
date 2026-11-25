@@ -56,7 +56,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 ## 上下文阅读护栏
 
 - **按序按需定位**：`AGENTS.md` -> `docs/TDD.md`（若存在）-> {{SUBDIR_AGENTS_POINTER}} -> 用 `doc-locate.mjs` / `repo-map.mjs` 定位切片，再跑 `flow.mjs inspect` 查状态。
-- **演进跳读**：`docs/TDD.md`（若存在）新会话先看目录再按节跳读；`docs/feature-map.json`（若存在）按变更切片查询。
+- **演进跳读**：`docs/TDD.md`（若存在）新会话先看目录再按节跳读；`docs/feature-map.json`（若存在，v1/v2 拓扑）按变更切片查询，并派生离线 `docs/architecture-map.html`（可选，`no-architecture-html` 可豁免）；Case 3/4 规划自动维护仓外 Living Visual Brief（`doc-plan.mjs brief`）。
 - **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建缓存（`do-not-edit` 仅禁手改历史归档，允许 `finalize`/`archive` 归档）。
 <!-- project-forge: end 上下文阅读护栏 -->
 <!-- project-forge: if has-exploration-strategy -->

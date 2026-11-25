@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-25T10:01:39.321Z",
+  "installedAt": "2026-11-25T13:32:10.326Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
@@ -10,16 +10,16 @@
       "sha256": "fa33779be7c30fa3d3bc9ae5afbb472b8704d43fb62ae10b79668a4ebaaf8fcc"
     },
     "dev-explore/SKILL.md": {
-      "sha256": "b42f616ee63a8569ce576ac0c6c4c68da1c1d1d2ab623b25d5c07a2eb29acb3d"
+      "sha256": "2214403720df7eb05c072b465a73520379a0632eee878641e0938f44f3f39ff3"
     },
     "dev-explore/scripts/doc-locate.mjs": {
-      "sha256": "5344da0ef7682466577fffc0890203edefaf4549f3e6c56dcdc4944195dd21bc"
+      "sha256": "c2894951df52683ecbb5e0381a40f97c4bbe16937457c2636c477a75b8d5ae5c"
     },
     "dev-explore/scripts/repo-map-helpers.mjs": {
       "sha256": "34d113184fff9d822be3ab0b3f411db564576f49256905cc4fbec300988fbb33"
     },
     "dev-explore/scripts/repo-map.mjs": {
-      "sha256": "5af7c6fe7587d2af1eb37c8efa9fae918d6fcea561fad6934ed28c357ce8d90e"
+      "sha256": "999867938593c719194411fb35c7224cdd6a4b4b298ed40539407694e6598551"
     },
     "dev-flow/SKILL.md": {
       "sha256": "b1ccdb4ed9f115ada91279440d8aee4d4bde51bc9ef8422f6aac992d20c4f6ae"
@@ -28,7 +28,7 @@
       "sha256": "a94e0bacc3043e18d917112cc8ebd56dd9a8c9e0282efefee1e41a4ff1b81ec3"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
-      "sha256": "bb66d78f642a7a73d4db80d36fbd1fa62fd7b5f331d592beebf71f7be6b6da6a"
+      "sha256": "46f8b089c9d73b0cc0cdee51b5e8518642df2cb8b640327ea0efb5c3a050a72b"
     },
     "dev-flow/scripts/flow-context.mjs": {
       "sha256": "e0813fa252a8c620488fa8e0493dc841558bd326ca42503abeaf3aaa22fd0c83"
@@ -64,7 +64,7 @@
       "sha256": "651d16acf7e083372b0f84bbf6d86cf49878a215a10a9ccdefae129c924a78d3"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "9c5c1ad720e13757eadf425f8778e9167ba632886263ce2d8b9a17835edb4995"
+      "sha256": "468a51417c25421aa7d7b145c3a2dc2b1923300096aa4a690f560c077972b1aa"
     },
     "dev-flow/scripts/flow-start-helpers.mjs": {
       "sha256": "fadb93a8cdeb538e27d4a34f1e7e5b900ab152f82bef86a6b392626e00fa2290"
@@ -85,7 +85,7 @@
       "sha256": "95ea7a98109e91d4629650385170e2633c606969eb91e8e90e8a863c94359748"
     },
     "dev-govern/SKILL.md": {
-      "sha256": "e2c30a0d131947a6ee2ede009bbb24c21e583bff9bfd2fce17a2bcc15e231a7e"
+      "sha256": "fbaa2b38a60fc1512862a90a1e8e879ebbf124221fa930f6fbc0c5a5a4f128d4"
     },
     "dev-govern/scripts/govern-audit.mjs": {
       "sha256": "3a2416b8b9dc746aa588f922387ca8ae2dee6813e689952aafae992a2c4997b6"
@@ -130,7 +130,7 @@
       "sha256": "eac3982d1c2f99933aca994b317083dca76bf5327105a8abbd91cbfce03d8101"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "6649cacf6c82cbe7fdb730385ba40293d9a35658fc3a1f6f1e9c70cb8f51eedc"
+      "sha256": "598333b2d16aa19deda3f996addc362fa524d41edb4bbcbc894220a3ce119e4f"
     },
     "dev-plan/scripts/doc-audit-helpers.mjs": {
       "sha256": "d4514cf3145c95924bb519494a1615c48e338129ef616d8fcf6af6669e944431"
@@ -141,11 +141,14 @@
     "dev-plan/scripts/doc-audit.mjs": {
       "sha256": "8267d1bba25afd7f3c540318478226551a0d5d46140d2c7e8e70f70a38056378"
     },
+    "dev-plan/scripts/doc-plan-brief.mjs": {
+      "sha256": "14424af02626f8ef62c0759de19f241c45b8918ba3ed034bc1f0db515d9abd40"
+    },
     "dev-plan/scripts/doc-plan-ops.mjs": {
-      "sha256": "74229c380d697b33bb5c9c8b7de4e5afefa6152c249a714dd97da113cfe323b9"
+      "sha256": "b5ee8aa7e2d117e1074a4df00ea09c97529f903b47abc5db6f461740f174a572"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "a76a22adf2a9220eb0241380f29686b766cfc4c88f21efb6a6ec992d8d471444"
+      "sha256": "ba261c75817e26d39bba83bc915cd201477f945fc7a5362343f0a7a4d8f2301c"
     },
     "dev-plan/scripts/triage-rules.mjs": {
       "sha256": "59ff211d06e2e18b349fd34197434835b6216b7d5cb69c06cf7e24fe5b9b933b"
@@ -184,7 +187,7 @@
       "sha256": "bfe5ac80ed4fcd2834e552dc4b65bd02924159ea39c1929c68bb0502df9f6b06"
     },
     "dev-verify-tools/SKILL.md": {
-      "sha256": "f55330cb6a59018681c38febeb1487c5f8c52881eccb85ed0122a99d5484d3b7"
+      "sha256": "174939a73c178bc04396f16026728e1b700ca11833fd468c0f58e00001f53418"
     },
     "dev-verify-tools/scripts/verify-tools-audit.mjs": {
       "sha256": "00c371e6f34afe16565febff9031c007ec3846f262f30406b8f840aced40bab0"
@@ -238,7 +241,7 @@
       "sha256": "f8d1ec5d9f81a9a7b43d819e8e3c37b007b2bbfcba8bdbf947bade449ef0ef0f"
     },
     "lib/doc-plan-clarify.mjs": {
-      "sha256": "80e99c10d129875c08efe8fced31cd2c25348f53f1331de7416b4375272d10e9"
+      "sha256": "5a021447afdd5d78eddbae43fba683e3ffdc56fc6654c52d965ebe817754d398"
     },
     "lib/doc-renumber.mjs": {
       "sha256": "8da93fdb1a5c194218fc5520a063cb662debc3f971ec6bdac0ce02d1a467b068"
@@ -283,7 +286,7 @@
       "sha256": "67ad14f3f08c7d9c8928a60c0ac8c62f411d9ea3bcefb9fb2bffc84e7a1d57ed"
     },
     "lib/exit-codes.mjs": {
-      "sha256": "fff32d9c4bf5188501ab53a093c133c9ae939b7a61fac9a49c307c95353588da"
+      "sha256": "866abfb25dd627bf2f512a12404f7539979477b40329067d9627421eaed62ca6"
     },
     "lib/feature-map-graph.mjs": {
       "sha256": "2ab39c3efdc1d6ee53b21592d538b881570b4fda232ba9acc22ceef6a845a387"
@@ -328,7 +331,7 @@
       "sha256": "32d156afb06cdd48dd9dfd2b4d0f4cc424790a8fceee7edc25800df6a2c95f1c"
     },
     "lib/handoff-package.mjs": {
-      "sha256": "8f07395996207ba2246b7cb044874848e99ad6742afb4a5a1e4e50b7561af8f6"
+      "sha256": "832edea56a69341f0e0a8418cc227f7ecea9b6208164977034df2cab3610fda0"
     },
     "lib/harness-context.mjs": {
       "sha256": "9097bb684bc6272b59061dc623495c165b2efd0755f52c67a8c1e0d3815cbf46"
@@ -370,7 +373,7 @@
       "sha256": "437877c28ef47256128e1f2fac6cd32620d3fc60b4542980ea39c0cd57893ba2"
     },
     "lib/plan-next.mjs": {
-      "sha256": "afa80b921d2ec625c00ee48ca32986e7f35aa5ac832c599f33498b34730d3302"
+      "sha256": "7de14afc6bdc3e31994b774f33bbad683d1629b65eda3ed9a7a643e2a68eee0b"
     },
     "lib/plan-sync.mjs": {
       "sha256": "3a4641d7eb723c51e76f98563aafb4994a757d955ab98f4b219a54e6e260c700"
@@ -403,7 +406,7 @@
       "sha256": "477ad72ff05044e790c0583785840bea3203d1a1e1bf429e28e5f2634d813674"
     },
     "lib/session-state.mjs": {
-      "sha256": "14004aaae2ac9fe2d1364551b0ad5bc7e4d69f526c22a7981befcb06862c5ca2"
+      "sha256": "89baa17fbe671737c231db870ca5b488c41038e0c5ae58b6eb9aa50e2c34bcaf"
     },
     "lib/shared.mjs": {
       "sha256": "0cbeeee917e4bbed3cb01c2031507dd6a672e33d4ae26164d48dd0cd7f55d26b"
@@ -427,7 +430,7 @@
       "sha256": "9debf7c71f64f4540ab61156e48f33ae5ceadf26e5891d4e8a0188822eee2461"
     },
     "lib/subcommand-meta.mjs": {
-      "sha256": "d619691cade5e151a5155779cb5b942365c5b77da07d0702ece363e376a4e8d8"
+      "sha256": "e70ea88e0ac31ca86519fa1db52f8f9f73c55f0b13236ed3cdf31f42af7e2a13"
     },
     "lib/symbol-index.mjs": {
       "sha256": "dbb78f4195f8d0d1507fed07d75f8cf3cedb362ba11841bc9e471e69bcb0bb71"
@@ -468,11 +471,14 @@
     "lib/verify-state.mjs": {
       "sha256": "178613e253190a209b38ea41d3608150bedfd65d2bea21e8740e1efc88553fb0"
     },
+    "lib/visual-brief.mjs": {
+      "sha256": "b82a70c98b99919ad0377c2ac04d6918a073046f31d05116c8f6f2d18cf8c46b"
+    },
     "lib/visual-layout.mjs": {
-      "sha256": "35c7d49d7b5821f543059140445efe76dbf24b642b272b18d9001095300fd2a7"
+      "sha256": "9225b7d4ac74140032659ecaf0196fbfe4d1c9e8d6ada69c8fbd3d157d6fe671"
     },
     "lib/visual-render.mjs": {
-      "sha256": "567a3a4ec252e78c0c937d1318c87aa8364bf7569ebb3034c60f0b2b370d2f0f"
+      "sha256": "d20b32c92d8a339a962702d02332c3598175e127b34e3e5332e3e588ea9b7899"
     },
     "lib/workflow-helpers.mjs": {
       "sha256": "85b90f25b2b0df8a8aad37ee813b46ea5efa3d1a8e187ce751a2fc974bff1b40"
@@ -514,7 +520,7 @@
       "sha256": "1ba8ca6aa3082f3e00e0d7e3af9835387400a12430f2bb90d3cd95ffc75ceb2b"
     },
     "上下文阅读护栏": {
-      "sha256": "cd1c949d4ead24d7f642bcaf9dd72b906b2d053da9dec741c00f2845b0e78f17"
+      "sha256": "23e88fcced0a7002084d9951594ff123e9f53dcff4ff478447f0fc05068eea13"
     },
     "探索策略": {
       "sha256": "7bf55b89a2c61988899e64419ef5bfc4b2066cf29139beb2a1c8205debecfa91"

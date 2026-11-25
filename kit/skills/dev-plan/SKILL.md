@@ -55,15 +55,17 @@ metadata:
 
 - **不可自审与全历史换人**：禁用 `owner: null`（`INVALID_OWNER`），禁跨轮把 `triage` 高档降回低档（`BLOCKED_TRIAGE_DOWNGRADE`）；`interactive` 模式 `clarify` 须带 `--by user` 消解全部待决小节。`critique-pass`/`critique-reject` 写入 `ledger.planCritique`，拒 `SELF_CRITIQUE_REJECTED`（同 `owner`）、`BLOCKED_CRITIQUE_SAME_REVIEWER`（R2+ 复用审稿人）、`BLOCKED_CRITIQUE_ROUND_GAP`（跳轮）与 `BLOCKED_CRITIQUE_SAME_SHA`（未改稿）。
 - **严重度分层与 R2+ 收敛**：仅 `[minor]` 禁 `critique-reject`（`BLOCKED_NON_BLOCKING_REJECT`），改走 `critique-pass --should-fix`；R2+ 新增阻塞须命中未闭环项（可配 `--resolved`/`--rebut-accepted`）或落入改动行/章节内（越界报 `BLOCKED_OUT_OF_SCOPE_CRITIQUE`）；连轮同阻或第 3 轮退回触发 `STOP_LOSS_ESCALATE`（`4`），仅人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后由维护者 `approve`（`--host-mode single-session --human-approved` 配 `--skip-critique-reason` 仅限无子代理宿主且经人授权，多代理宿主严禁借此绕过；`link --approve` 报 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY`），支持 `--multi-spec` 与活跃 SPEC 反查总控 PRD。
-- **抗压缩恢复、隔离与 Repo-Path Grounding**：随时可跑 `doc-plan.mjs next --handoff` 无损恢复 `1:N` 总控 PRD/切片、`findings`、半成品工作树归属与三态拍板出口（含 `--plan-only`）。`commits > 0` 默认分支 `init` 自动建 `.worktrees/impl-<taskId>/`（若先 `flow.mjs start --planning --task <id>` 则复用同树）；`planner` 返工优先续聊原写手，只读探索不建树；**允许在澄清/选型/用户要求时用 `webfetch`/`websearch` 做外部调研（注明来源），但写入文档的仓内路径、符号与命令必经 `doc-locate`/`repo-map`/`verifyDocClaims` 在本仓验真**。
+- **抗压缩恢复、隔离与 Repo-Path Grounding**：随时可跑 `doc-plan.mjs next --handoff` 无损恢复 `1:N` 总控 PRD/切片、`findings`、半成品工作树归属、Living Visual Brief 与三态拍板出口（含 `--plan-only`）。`commits > 0` 默认分支 `init` 自动建 `.worktrees/impl-<taskId>/`（若先 `flow.mjs start --planning --task <id>` 则复用同树）；`planner` 返工优先续聊原写手，只读探索不建树；**允许在澄清/选型/用户要求时用 `webfetch`/`websearch` 做外部调研（注明来源），但写入文档的仓内路径、符号与命令必经 `doc-locate`/`repo-map`/`verifyDocClaims` 在本仓验真**。
+- **Living Visual Brief 与宿主中立 UI 原型挂载**：Case 3/4 `triage` 与多轮 `note` 自动在仓外 `<gitCommonDir>/project-forge-flow/briefs/` 实时投影交互式 HTML 简报（`workRoot` 的 `docs/feature-map.json` 优先，单源聚合 1:N 切片与待拍板状态，不污染 `git status`）。涉及界面或交互原型时，先调用当前环境可用的前端/UI 原型能力产出静态单文件原型（`<= 512 KB`）或安全链接（仅 `http:`/`https:`/`file:`），通过 `doc-plan.mjs brief --prototype "<标题>=<路径或URL>" --source-skill "<名称>"` 挂载对比并用 `--select-prototype <id>` 选定方向；确认简报快照（`brief --confirm`）后再派发规划或实现，确认后若经 `note`/`clarify` 发生改动则自动降级为 `confirmedState: stale` 提醒重核。`init` 自动迁移 `topic -> task` 或 `1:N master-prd`（子切片确定性记录 `parentBriefKey` 且不覆写总控 PRD 简报）。
 - **波次移交 `dev-flow`**：单任务 `audit`/`approve` 后按 `[NEXT STEP]`（`--json` 输出 `nextSteps`）移交 `flow.mjs start`；多切片配合 `flow.mjs start --after <parent>` 或 `flow.mjs batch plan`，未装配兄弟技能退化原生 Git 指引。
 
 ## 标准命令流
 
 ```sh
-# 0. 单源抗压缩恢复、init 前讨论缓冲（note）与规划下一步指引（1:N 切片与 Plan-Only 团队交付路由）
+# 0. 单源抗压缩恢复、init 前讨论缓冲（note）、活需求视觉简报（brief）与规划下一步指引
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" next [--file "<docPath>"] [--task "<taskId>"] [--plan-only] [--handoff] [--json]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" note [--topic "<主题>"] [--decision "<结论>"] [--exclude "<不做项>..."] [--anchor "<锚点>..."] [--open "<问题>..."] [--json]
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" brief [--topic "<主题>"] [--task "<taskId>"] [--title "<标题>"] [--verdict "<结论>"] [--affected-feature "<id>..."] [--flow-delta "<变化>..."] [--prototype "<标题>=<路径或URL>..."] [--select-prototype "<id>"] [--source-skill "<名称>"] [--confirm] [--open-browser] [--json]
 
 # 1. 五档分流 + 门型判断 + 改哪看哪联动预警（结论含建议规划态 planMode）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--plan-mode interactive | autonomous]

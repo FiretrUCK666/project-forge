@@ -18,7 +18,7 @@ metadata:
 
 ## 硬性纪律
 
-1. **严格只读（零写入红线）**：只读不写，严禁修改、创建或删除任何文件（含不建临时索引文件、不改写原 Markdown/源码行），严禁切换分支。
+1. **严格只读（零写入红线）**：默认只读不写，严禁修改、创建或删除任何仓内文件（仅显式传 `--topic <id>` 时向仓外 Working Brief 写入已验真锚点并刷新仓外 Living Visual Brief，或显式 `repo-map.mjs --write-feature-map` 时增量更新 `docs/feature-map.json` v2 拓扑与 `docs/architecture-map.html`），严禁切换分支。
 2. **先定位再通读**：查特定文档章节、规划契约或源码符号时，**优先运行 `doc-locate.mjs`** 获取绝对路径、`startLine..endLine` 与受预算控制的切片，不把长文档整篇灌入上下文。
 3. **全深度无盲区枚举**：Git 仓库默认使用 `git ls-files -z` + 4KB NUL 探测（无深度限制，自动忽略 macOS 元数据），通过包清单与带 `working-directory` 的 CI 步骤识别前后端分离、CLI 与多生态入口；同步识别 `ARCHITECTURE.md`、子目录 `*/AGENTS.md` 与无头/非 Frontmatter 文档（首段非空摘要）。
 4. **先查复用再造轮子**：结尾必须输出**可复用现成模块清单**（`reusableModules`、既有脚本、校验器与公共工具），供 `dev-plan` 方案选型与实施复用。

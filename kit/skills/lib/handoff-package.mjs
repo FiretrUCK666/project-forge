@@ -304,15 +304,17 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     parseDocFrontmatter(specText || todoText || prdText)?.data?.title,
     ...criteria.slice(0, 6).map((c) => c.text),
   ].filter(Boolean)
+  const role = String(explicitRole ?? ownerRole ?? ledger?.ownerRole ?? ledger?.role ?? 'implementer')
   const contextBrief = buildContextBrief(locateRoot, {
     paths,
     keywords,
     excludeFiles: [specRel, todoRel, prdRel, 'AGENTS.md'].filter(Boolean),
     limit: 3,
     budgetLines: 48,
+    role,
   })
-  const role = String(explicitRole ?? ownerRole ?? ledger?.ownerRole ?? ledger?.role ?? 'implementer')
   const isExploreOrCritic = role === 'explore' || role === 'critic' || role === 'critique'
+  const isArchRole = isExploreOrCritic || role === 'plan'
   const evergreenToc = contextBrief.evergreenToc
   const otherEvergreenDocs = contextBrief.otherEvergreenDocs
   const totalEvergreenDocs = contextBrief.totalEvergreenDocs
@@ -325,6 +327,10 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     businessFlows: contextBrief.featureMap.businessFlows,
     verificationTools: contextBrief.featureMap.verificationTools.map((t) => ({ id: t.id, kind: t.kind, command: t.command, riskLevel: t.riskLevel })),
     testRefs: contextBrief.featureMap.testRefs,
+    domainSummary: contextBrief.featureMap.domainSummary ?? [],
+    upstream: contextBrief.featureMap.upstream ?? [],
+    downstream: contextBrief.featureMap.downstream ?? [],
+    matchedFlows: contextBrief.featureMap.matchedFlows ?? [],
   }
 
   // 验收命令从 AGENTS.md 的 Dev Profile 读，不在这里编。
@@ -463,9 +469,25 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     lines.push('')
   }
 
-  if (featureMapContext.businessFlows.length > 0 || featureMapContext.verificationTools.length > 0) {
+  const hasTopoSection = featureMapContext.domainSummary.length > 0
+    || featureMapContext.upstream.length > 0
+    || featureMapContext.downstream.length > 0
+    || featureMapContext.matchedFlows.length > 0
+  if (featureMapContext.businessFlows.length > 0 || featureMapContext.verificationTools.length > 0 || hasTopoSection) {
     lines.push('## 受波及业务流与验证工具（来自 docs/feature-map.json）')
     lines.push('')
+    if (isArchRole && featureMapContext.domainSummary.length > 0) {
+      lines.push(`- 域总览：${featureMapContext.domainSummary.slice(0, 6).map((d) => `${d.id}(${d.featureCount})`).join('、')}`)
+    }
+    if (featureMapContext.downstream.length > 0) {
+      lines.push(`- 下游波及（1-hop）：${featureMapContext.downstream.slice(0, 6).map((n) => `\`${n.id}\`(${n.entrypoint ?? n.domain ?? '-'})`).join('、')}`)
+    }
+    if (featureMapContext.upstream.length > 0) {
+      lines.push(`- 上游依赖（1-hop）：${featureMapContext.upstream.slice(0, 6).map((n) => `\`${n.id}\`(${n.entrypoint ?? n.domain ?? '-'})`).join('、')}`)
+    }
+    if (featureMapContext.matchedFlows.length > 0) {
+      for (const mf of featureMapContext.matchedFlows.slice(0, 6)) lines.push(`- 跨模块流：${mf.summary}`)
+    }
     if (featureMapContext.businessFlows.length > 0) {
       for (const bf of featureMapContext.businessFlows.slice(0, 6)) lines.push(`- 业务流：${bf}`)
     }

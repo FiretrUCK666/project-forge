@@ -593,6 +593,7 @@
         "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
         "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs",
         "kit/skills/lib/feature-map.mjs",
+        "kit/skills/lib/feature-map-graph.mjs",
         "kit/skills/lib/verify-state.mjs",
         "kit/skills/dev-verify-tools/SKILL.md"
       ],
@@ -626,7 +627,8 @@
         "scripts/dev/fixtures-issue-quality.mjs",
         "scripts/dev/injections-data-issue-quality.mjs",
         "scripts/dev/fixtures-health-sweep.mjs",
-        "scripts/dev/injections-data-health-sweep.mjs"
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-feature-map-v2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全",
@@ -776,6 +778,7 @@
       ],
       "modules": [
         "kit/skills/dev-iterate/scripts/iterate.mjs",
+        "kit/skills/dev-iterate/scripts/iterate-plan.mjs",
         "kit/skills/dev-iterate/scripts/iterate-cycle.mjs",
         "kit/skills/lib/test-inventory.mjs",
         "kit/skills/dev-iterate/SKILL.md"
@@ -811,7 +814,8 @@
         "scripts/dev/fixtures-r6c-gates.mjs",
         "scripts/dev/injections-data-r6c.mjs",
         "scripts/dev/fixtures-health-sweep.mjs",
-        "scripts/dev/injections-data-health-sweep.mjs"
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-feature-map-v2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"

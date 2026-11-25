@@ -12,7 +12,7 @@ import { isInsideDir } from '../../lib/git.mjs'
 import {
   FEATURE_MAP_REL, destroyTaskScratchDir, detectScratchSolidificationHints,
   evaluateToolStaleness, listTaskScratchDirs, readFeatureMap, readFeatureMapRaw,
-  readFeatureMapStatus, validateFeatureMap, writeFeatureMap,
+  readFeatureMapStatus, validateFeatureMap, validateFeatureMapTopology, writeFeatureMap,
 } from '../../lib/feature-map.mjs'
 import { listTaskLedgers, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { CODE_EXT_RE, isTestOrFixtureFile } from '../../lib/static-gates.mjs'
@@ -46,6 +46,9 @@ export async function handleAudit(opts, roots) {
     : (st.corrupt
         ? { ok: false, errors: [st.error], warnings: [] }
         : validateFeatureMap(raw))
+  const topology = (!exists || st.corrupt)
+    ? { ok: true, errors: [], warnings: [], cycles: [] }
+    : validateFeatureMapTopology(raw)
   const map = exists && !st.corrupt ? (readFeatureMap(workRoot) ?? { version: 1, features: [] }) : { version: 1, features: [] }
 
   const zombies = []
@@ -115,9 +118,9 @@ export async function handleAudit(opts, roots) {
   const scratchDirs = listTaskScratchDirs(roots.gitDir, roots.mainRoot)
   const orphanScratchDirs = scratchDirs.filter((d) => !activeTaskIds.has(d.taskId))
 
-  const hasHardIssues = !schema.ok || zombies.length > 0 || staleTools.some((s) => s.riskLevel === 'high')
+  const hasHardIssues = !schema.ok || !topology.ok || zombies.length > 0 || staleTools.some((s) => s.riskLevel === 'high')
   const toolCount = map.features.reduce((acc, f) => acc + (f.verificationTools?.length ?? 0), 0)
-  const isEmptyFeatureMap = exists && !st.corrupt && schema.ok && map.features.length === 0 && toolCount === 0
+  const isEmptyFeatureMap = exists && !st.corrupt && schema.ok && topology.ok && map.features.length === 0 && toolCount === 0
   const status = isEmptyFeatureMap ? 'NOT_APPLICABLE' : (hasHardIssues ? 'FAILED' : 'OK')
   const payload = {
     ok: !hasHardIssues,
@@ -127,7 +130,8 @@ export async function handleAudit(opts, roots) {
     path: FEATURE_MAP_REL,
     featureCount: map.features.length,
     toolCount,
-    schema, zombies, staleTools, duplicateFlows, blindSpots, solidificationHints, scratchDirs, orphanScratchDirs,
+    schema, topologyErrors: topology.errors, topologyCycles: topology.cycles,
+    zombies, staleTools, duplicateFlows, blindSpots, solidificationHints, scratchDirs, orphanScratchDirs,
   }
   const lines = [
     `=== VERIFY-TOOLS AUDIT (${FEATURE_MAP_REL}) ===`,
@@ -175,7 +179,7 @@ export async function handleClean(opts, roots) {
       })
       cleanedFeatures.push({ ...f, entrypoints: keepEp, modules: keepMod, testRefs: keepTest, verificationTools: keepTools })
     }
-    nextMap = { version: 1, features: cleanedFeatures }
+    nextMap = { ...map, features: cleanedFeatures }
   }
 
   const activeTaskIds = new Set(listTaskLedgers(roots.mainRoot, { includeTerminal: false }).map((l) => sanitizeTaskId(l.taskId)))

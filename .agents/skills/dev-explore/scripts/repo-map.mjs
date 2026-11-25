@@ -24,7 +24,7 @@ import { extractSymbols, summarizeSymbolCoverage } from '../../lib/symbol-index.
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 import {
   buildBusinessFlows, buildFeatureMap, buildPreferredVerifyCommands,
-  extractCiRunSteps, extractTaskRunners, formatRepoMapText,
+  extractCiRunSteps, extractTaskRunners, formatRepoMapText, inferLayer1Topology,
 } from './repo-map-helpers.mjs'
 
 const CODE_RE = /\.(?:js|mjs|cjs|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|scala|groovy|rb|php|cs|fs|vb|c|cc|cpp|cxx|h|hpp|m|mm|swift|dart|ex|exs|erl|sh|bash|zsh|ps1|sql|lua|r|zig|nim|hs)$/i
@@ -340,17 +340,35 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus, writeF
     docLocateHints: contextDocs.docLocateHints,
     hotspots,
   }
-  const fmSync = prefillFeatureMapFromRepoMap(root, map, { write: Boolean(writeFeatureMap) })
+  const featureTopology = inferLayer1Topology(root, scan.files, featureMap, businessFlows.flows, discovery.packages)
+  Object.defineProperty(map, 'featureTopology', {
+    value: featureTopology,
+    enumerable: false,
+    configurable: true,
+  })
+  const fmSync = prefillFeatureMapFromRepoMap(root, map, { write: Boolean(writeFeatureMap), topology: featureTopology })
   const result = {
     ...map,
     featureMapPath: FEATURE_MAP_REL,
     featureMapExists: existsSync(join(root, FEATURE_MAP_REL)),
     featureMapWritten: fmSync.written,
   }
-  Object.defineProperty(result, 'featureMapIndex', {
-    value: fmSync.featureMap,
-    enumerable: false,
-    configurable: true,
+  Object.defineProperties(result, {
+    featureMapIndex: {
+      value: fmSync.featureMap,
+      enumerable: false,
+      configurable: true,
+    },
+    featureMapSync: {
+      value: fmSync,
+      enumerable: false,
+      configurable: true,
+    },
+    featureTopology: {
+      value: featureTopology,
+      enumerable: false,
+      configurable: true,
+    },
   })
   return result
 }

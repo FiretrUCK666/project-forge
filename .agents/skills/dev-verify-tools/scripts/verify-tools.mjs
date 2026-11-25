@@ -161,7 +161,7 @@ export async function handleSync(opts, roots) {
     if (!guard.ok) return { exitCode: guard.exitCode, ok: false, code: 'BLOCKED_CORRUPT_FEATURE_MAP' }
   }
   const map = await generateRepoMap(workRoot, { writeFeatureMap: !opts['dry-run'] })
-  const res = prefillFeatureMapFromRepoMap(workRoot, map, { write: !opts['dry-run'] })
+  const res = map.featureMapSync ?? prefillFeatureMapFromRepoMap(workRoot, map, { write: !opts['dry-run'] })
   const payload = {
     ok: true,
     action: opts['dry-run'] ? 'sync-dry-run' : 'synced',
@@ -350,6 +350,9 @@ export async function handleCreate(opts, roots) {
     businessFlows: [...f.businessFlows],
     verificationTools: f.verificationTools.map((t) => ({ ...t })),
     testRefs: [...f.testRefs],
+    ...(Array.isArray(f.docAnchors) ? { docAnchors: [...f.docAnchors] } : {}),
+    ...(Array.isArray(f.dependsOn) ? { dependsOn: [...f.dependsOn] } : {}),
+    ...(Array.isArray(f.actors) ? { actors: [...f.actors] } : {}),
   }))
   let feat = nextFeatures.find((f) => f.id === featureId)
   if (!feat) {
@@ -373,7 +376,7 @@ export async function handleCreate(opts, roots) {
     else feat.verificationTools.push(toolDef)
   }
 
-  writeFeatureMap(workRoot, { version: 1, features: nextFeatures })
+  writeFeatureMap(workRoot, { ...existing, features: nextFeatures })
   const headSha = await resolveCurrentHead(workRoot)
   const fp = await computeFeatureFingerprint(workRoot, feat, { tool: toolDef })
   const cacheRes = writeVerifyCacheEntry(roots.gitDir, roots.mainRoot, toolDef.id, {

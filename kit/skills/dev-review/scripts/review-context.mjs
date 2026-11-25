@@ -334,6 +334,7 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
     paths: changedFiles,
     keywords: [],
     excludeFiles: [task?.specFile, task?.todoFile, task?.prdFile].filter(Boolean),
+    role: 'reviewer',
     profile: effectiveProfile,
   })
 
@@ -402,9 +403,22 @@ export function formatReviewContextLines(rc) {
   for (const item of rc.empiricalTaskOrder.actionItems) lines.push(`  * ${item}`)
   for (const h of rc.solidificationHints ?? []) lines.push(`  - [${h.code}] ${h.suggestion}`)
   const brief = rc.contextBrief ?? rc.evergreenContext
+  const topoFm = brief?.featureMap
+  if (topoFm && !topoFm.corrupt && (rc.affectedBusinessFlows?.length ?? 0) > 0) {
+    if ((topoFm.downstream?.length ?? 0) > 0) {
+      lines.push(`  1-Hop Downstream Impact: ${topoFm.downstream.slice(0, 6).map((n) => `${n.id}[${n.entrypoint ?? '-'}]`).join(', ')}`)
+    }
+    if ((topoFm.upstream?.length ?? 0) > 0) {
+      lines.push(`  1-Hop Upstream Deps: ${topoFm.upstream.slice(0, 6).map((n) => `${n.id}[${n.entrypoint ?? '-'}]`).join(', ')}`)
+    }
+    if ((topoFm.matchedFlows?.length ?? 0) > 0) {
+      lines.push(`  Topology Flows: ${topoFm.matchedFlows.slice(0, 4).map((f) => f.summary).join(' | ')}`)
+    }
+  }
   if (brief) {
     lines.push(...formatContextBriefLines(brief, {
       title: '  Evergreen Docs & Context Brief:',
+      role: 'reviewer',
       includeFeatureMap: (rc.affectedBusinessFlows?.length ?? 0) === 0,
     }))
   }

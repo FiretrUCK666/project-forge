@@ -5,10 +5,11 @@
  */
 
 import { existsSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import { isNonFeatureArtifactPath, matchTestsForSourceFile } from '../../lib/feature-map.mjs'
-import { readJsonSafe, readTextSafe } from '../../lib/git.mjs'
+import { isNonFeatureArtifactPath, matchTestsForSourceFile, slugifyFeatureId } from '../../lib/feature-map.mjs'
+import { normRelPath } from '../../lib/feature-map-graph.mjs'
+import { posixPath, readJsonSafe, readTextSafe } from '../../lib/git.mjs'
 import { isProfileExplicitNone } from '../../lib/profile.mjs'
 import { isTestOrFixtureFile } from '../../lib/static-gates.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
@@ -312,6 +313,142 @@ export function buildBusinessFlows(root, files, entrypoints, cliEntrypoints) {
     flows: flows.slice(0, 25),
     docCodeGaps: docCodeGaps.slice(0, 15),
   }
+}
+
+const TOPO_IMPORT_RE = /(?:^\s*(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/gm
+const TOPO_PY_FROM_RE = /^\s*from\s+(\.+[A-Za-z0-9_.]*|[A-Za-z0-9_.]+)\s+import\b/gm
+
+function resolveTopoImport(root, fromRel, spec, fileSet) {
+  if (!spec.startsWith('./') && !spec.startsWith('../')) return null
+  const rawAbs = resolve(dirname(join(root, fromRel)), spec)
+  const relFromRoot = relative(resolve(root), rawAbs)
+  if (!relFromRoot || relFromRoot.startsWith('..') || isAbsolute(relFromRoot)) return null
+  const relBase = posixPath(relFromRoot).replace(/^\/+/, '')
+  const cands = [
+    relBase,
+    `${relBase}.mjs`, `${relBase}.js`, `${relBase}.ts`, `${relBase}.tsx`, `${relBase}.cjs`, `${relBase}.py`,
+    `${relBase}/index.mjs`, `${relBase}/index.js`, `${relBase}/index.ts`,
+  ]
+  return cands.find((c) => fileSet.has(c)) ?? null
+}
+
+function resolveFeatureDomainMeta(primaryPath, packages = []) {
+  const norm = normRelPath(primaryPath)
+  const sortedPkgs = [...(Array.isArray(packages) ? packages : [])]
+    .filter((p) => p?.dirRel)
+    .sort((a, b) => b.dirRel.length - a.dirRel.length)
+  const hitPkg = sortedPkgs.find((p) => norm === p.dirRel || norm.startsWith(`${p.dirRel}/`))
+  if (hitPkg) {
+    return { id: slugifyFeatureId(hitPkg.dirRel), name: hitPkg.name || hitPkg.dirRel }
+  }
+  const segs = norm.split('/').filter(Boolean)
+  if (segs[0] === 'kit' && segs[1] === 'skills' && segs[2]) {
+    const label = segs[2] === 'lib' ? 'kit-lib' : segs[2]
+    return { id: slugifyFeatureId(label), name: label }
+  }
+  if (segs.length <= 1) return { id: 'core', name: 'core' }
+  return { id: slugifyFeatureId(segs[0]), name: segs[0] }
+}
+
+/** Layer-1 确定性推导 `domains[]` 与基于跨模块引用的无环 `dependsOn[]`。 */
+export function inferLayer1Topology(root, files = [], featureEntries = [], flowEntries = [], packages = []) {
+  const fileSet = new Set((files ?? []).map((f) => posixPath(f.rel ?? f)))
+  const featFiles = new Map()
+  const fileOwner = new Map()
+  const domainMap = new Map()
+  const domainByFeatureId = {}
+  const dependsOnByFeatureId = {}
+
+  const registerFeature = (fid, paths) => {
+    if (!fid || featFiles.has(fid)) return
+    const valid = paths.map((p) => normRelPath(p)).filter(Boolean)
+    if (valid.length === 0) return
+    featFiles.set(fid, valid)
+    for (const p of valid) {
+      if (!fileOwner.has(p)) fileOwner.set(p, fid)
+    }
+    const dom = resolveFeatureDomainMeta(valid[0], packages)
+    domainByFeatureId[fid] = dom.id
+    if (!domainMap.has(dom.id)) {
+      domainMap.set(dom.id, { id: dom.id, name: dom.name, entrypoints: [] })
+    }
+    const dEntry = domainMap.get(dom.id)
+    if (!dEntry.entrypoints.includes(valid[0])) dEntry.entrypoints.push(valid[0])
+    dependsOnByFeatureId[fid] = []
+  }
+
+  for (const fm of Array.isArray(featureEntries) ? featureEntries : []) {
+    const src = normRelPath(String(fm?.source ?? '').trim())
+    if (!src || isNonFeatureArtifactPath(src)) continue
+    const extra = Array.isArray(fm?.sources) ? fm.sources.map((p) => normRelPath(p)).filter((p) => p && !isNonFeatureArtifactPath(p)) : []
+    const fid = slugifyFeatureId(basename(src).replace(/\.[^.]+$/, ''))
+    registerFeature(fid, [src, ...extra])
+  }
+  for (const fl of Array.isArray(flowEntries) ? flowEntries : []) {
+    const ep = normRelPath(fl?.entry)
+    if (!ep || isNonFeatureArtifactPath(ep)) continue
+    const fid = slugifyFeatureId(basename(ep).replace(/\.[^.]+$/, ''))
+    registerFeature(fid, [ep])
+  }
+
+  const edgeWeights = new Map()
+  for (const [fid, paths] of featFiles.entries()) {
+    for (const rel of paths) {
+      const txt = readTextSafe(join(root, rel), 256 * 1024)
+      if (!txt) continue
+      const targets = new Set()
+      for (const m of txt.matchAll(TOPO_IMPORT_RE)) {
+        const resolved = resolveTopoImport(root, rel, m[1].trim(), fileSet)
+        if (resolved) targets.add(resolved)
+      }
+      if (rel.endsWith('.py')) {
+        for (const m of txt.matchAll(TOPO_PY_FROM_RE)) {
+          const mod = m[1].replace(/^\.+/, '').replace(/\./g, '/')
+          if (!mod) continue
+          const dir = posixPath(dirname(rel))
+          const hit = [`${mod}.py`, `${dir}/${mod}.py`, `src/${mod}.py`].find((c) => fileSet.has(c))
+          if (hit) targets.add(hit)
+        }
+      }
+      for (const tgt of targets) {
+        const targetFid = fileOwner.get(tgt)
+        if (!targetFid || targetFid === fid) continue
+        const key = `${fid}=>${targetFid}`
+        edgeWeights.set(key, (edgeWeights.get(key) ?? 0) + 1)
+      }
+    }
+  }
+
+  const sortedEdges = [...edgeWeights.entries()]
+    .map(([key, weight]) => {
+      const [from, to] = key.split('=>')
+      return { from, to, weight }
+    })
+    .sort((a, b) => (b.weight - a.weight) || a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
+
+  const dagAdj = new Map()
+  const canReach = (start, goal) => {
+    const visited = new Set([start])
+    const stack = [start]
+    while (stack.length > 0) {
+      const cur = stack.pop()
+      if (cur === goal) return true
+      for (const nxt of dagAdj.get(cur) ?? []) {
+        if (!visited.has(nxt)) { visited.add(nxt); stack.push(nxt) }
+      }
+    }
+    return false
+  }
+  for (const edge of sortedEdges) {
+    if (canReach(edge.to, edge.from)) continue
+    if (!dagAdj.has(edge.from)) dagAdj.set(edge.from, [])
+    dagAdj.get(edge.from).push(edge.to)
+    dependsOnByFeatureId[edge.from].push(edge.to)
+  }
+  for (const deps of Object.values(dependsOnByFeatureId)) deps.sort()
+
+  const domains = [...domainMap.values()].sort((a, b) => a.id.localeCompare(b.id))
+  return { domains, domainByFeatureId, dependsOnByFeatureId }
 }
 
 export function formatRepoMapText(map) {

@@ -11,7 +11,7 @@ import { basename, join } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { discoverContextDocs, locateTopSlicesForPaths } from './doc-locator.mjs'
-import { matchFeatureMapForPaths, readFeatureMapStatus } from './feature-map.mjs'
+import { matchFeatureMapForPaths, readFeatureMapStatus, sliceFeatureMapContext } from './feature-map.mjs'
 import { canonicalPath, posixPath, readTextSafe } from './git.mjs'
 import { indexMarkdownSections } from './markdown-scan.mjs'
 import { discoverEvergreenDocs, resolveAuthoritativeTddPath } from './profile.mjs'
@@ -119,6 +119,10 @@ function emptyBrief(warning = null) {
       verificationTools: [],
       testRefs: [],
       featureOverview: [],
+      domainSummary: [],
+      upstream: [],
+      downstream: [],
+      matchedFlows: [],
     },
   }
 }
@@ -170,6 +174,10 @@ export function buildContextBrief(repoRoot, {
   budgetLines = 48,
   maxEvergreenDocs = 4,
   maxHeadings = 10,
+  maxDomains = 6,
+  maxNeighbors = 6,
+  maxFlows = 6,
+  role = 'implementer',
   profile = null,
 } = {}) {
   if (!repoRoot) return emptyBrief()
@@ -284,11 +292,22 @@ export function buildContextBrief(repoRoot, {
     const matchedFeatures = (fm.matchedFeatures ?? []).map((f) => ({
       id: f.id,
       name: f.name,
+      ...(f.domain ? { domain: f.domain } : {}),
       matchedBy: f.matchedBy ?? [],
       matchedFiles: f.matchedFiles ?? [],
       businessFlows: f.businessFlows ?? [],
       testRefs: f.testRefs ?? [],
     }))
+    const topoSlice = fm.exists && !fm.corrupt && status?.featureMap
+      ? sliceFeatureMapContext(status.featureMap, {
+          matchedFeatureIds: matchedFeatures.map((f) => f.id),
+          keywords: cleanKeywords,
+          role,
+          maxDomains,
+          maxNeighbors,
+          maxFlows,
+        })
+      : { domainSummary: [], upstream: [], downstream: [], matchedFlows: [] }
     const featureOverview = fm.exists && !fm.corrupt && matchedFeatures.length === 0 && allFeatures.length > 0
       ? allFeatures.slice(0, 8).map((f) => ({
           id: f.id,
@@ -315,6 +334,10 @@ export function buildContextBrief(repoRoot, {
       })),
       testRefs: fm.testRefs ?? [],
       featureOverview,
+      domainSummary: topoSlice.domainSummary,
+      upstream: topoSlice.upstream,
+      downstream: topoSlice.downstream,
+      matchedFlows: topoSlice.matchedFlows,
     }
   } catch {
     featureMap = emptyBrief().featureMap
@@ -335,6 +358,9 @@ export function formatContextBriefLines(brief, {
   maxSlices = 3,
   maxFlows = 6,
   maxTools = 4,
+  maxDomains = 6,
+  maxNeighbors = 6,
+  role = 'implementer',
   includeFeatureMap = true,
 } = {}) {
   if (!brief || typeof brief !== 'object') return []
@@ -371,15 +397,53 @@ export function formatContextBriefLines(brief, {
     if (fm.corrupt) {
       lines.push(`  Feature Map: CORRUPT (${fm.warning ?? 'invalid JSON'})`)
     } else {
+      const domains = (fm.domainSummary ?? []).slice(0, Math.max(0, maxDomains))
+      const upstream = (fm.upstream ?? []).slice(0, Math.max(0, maxNeighbors))
+      const downstream = (fm.downstream ?? []).slice(0, Math.max(0, maxNeighbors))
+      const topoFlows = (fm.matchedFlows ?? []).slice(0, Math.min(6, Math.max(0, maxFlows)))
       const flows = (fm.businessFlows ?? []).slice(0, Math.max(0, maxFlows))
       const tools = (fm.verificationTools ?? []).slice(0, Math.max(0, maxTools))
-      if (flows.length > 0) {
-        lines.push(`  Business Flows (${fm.businessFlows.length}):`)
-        for (const bf of flows) lines.push(`    - ${bf}`)
+      const archFocused = role === 'explore' || role === 'plan' || role === 'critique' || role === 'critic'
+
+      const emitDomains = () => {
+        if (domains.length === 0) return
+        lines.push(`  Domains (${domains.length}): ${domains.map((d) => `${d.id}(${d.featureCount}${d.matchedCount ? `/${d.matchedCount}*` : ''})`).join(', ')}`)
       }
-      if (tools.length > 0) {
-        lines.push(`  Verification Tools (${fm.verificationTools.length}):`)
-        for (const vt of tools) lines.push(`    - [${vt.id}] (${vt.riskLevel ?? 'medium'}) ${vt.command || vt.scriptPath || '(no cmd)'}`)
+      const emitNeighbors = () => {
+        if (upstream.length === 0 && downstream.length === 0) return
+        if (upstream.length > 0) {
+          lines.push(`  Upstream (${upstream.length}): ${upstream.map((n) => `${n.id}${n.entrypoint ? `[${n.entrypoint}]` : ''}`).join(', ')}`)
+        }
+        if (downstream.length > 0) {
+          lines.push(`  Downstream (${downstream.length}): ${downstream.map((n) => `${n.id}${n.entrypoint ? `[${n.entrypoint}]` : ''}`).join(', ')}`)
+        }
+      }
+      const emitTopoFlows = () => {
+        if (topoFlows.length === 0) return
+        lines.push(`  Topology Flows (${topoFlows.length}):`)
+        for (const mf of topoFlows) lines.push(`    - ${mf.summary}`)
+      }
+      const emitFlowsAndTools = () => {
+        if (flows.length > 0) {
+          lines.push(`  Business Flows (${fm.businessFlows.length}):`)
+          for (const bf of flows) lines.push(`    - ${bf}`)
+        }
+        if (tools.length > 0) {
+          lines.push(`  Verification Tools (${fm.verificationTools.length}):`)
+          for (const vt of tools) lines.push(`    - [${vt.id}] (${vt.riskLevel ?? 'medium'}) ${vt.command || vt.scriptPath || '(no cmd)'}`)
+        }
+      }
+
+      if (archFocused) {
+        emitDomains()
+        emitTopoFlows()
+        emitNeighbors()
+        emitFlowsAndTools()
+      } else {
+        emitNeighbors()
+        emitFlowsAndTools()
+        emitTopoFlows()
+        emitDomains()
       }
       if ((fm.matchedFeatures?.length ?? 0) === 0 && (fm.featureOverview?.length ?? 0) > 0) {
         lines.push(`  Feature Map Overview (${fm.totalFeaturesCount ?? fm.featureOverview.length} features, no exact path match):`)

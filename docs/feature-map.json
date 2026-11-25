@@ -763,6 +763,7 @@
         "kit/skills/lib/feature-map.mjs",
         "kit/skills/lib/feature-map-graph.mjs",
         "kit/skills/lib/visual-layout.mjs",
+        "kit/skills/lib/visual-render-panels.mjs",
         "kit/skills/lib/visual-render.mjs",
         "kit/skills/lib/visual-render-assets.mjs",
         "kit/skills/lib/architecture-map.mjs",

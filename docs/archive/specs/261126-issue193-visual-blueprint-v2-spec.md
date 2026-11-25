@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Universal Layered Visual Architecture and 4-State Change Blueprint
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-26
 updated: 2026-11-26
@@ -11,7 +11,7 @@ branch: feat/visual-blueprint-v2
 owner: planner-blueprint
 plan_mode: autonomous
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-bp-r3, round=3, sha=b85f85744e18, summary=Round 3 独立终审通过：核实 Round 2 全量防线均已精准落盘（addedNodes 合成独立新域、domain.id 哈希固定 palette、多源 BFS impactReasons、cli-parity.mjs:554 围栏字面箭头规避、compactClientModel 透传字段与既有交互锚点、<=800L/25-60KB/<14KB 预算），doc-plan audit 与 edit-gate --changed 均 0 错误 0 警告。)"
 related_prd: null
 related_todo: ../todo/261126-issue193-visual-blueprint-v2-todo.md
@@ -24,13 +24,13 @@ high_risk_paths: [kit/skills/lib/, kit/skills/dev-plan/]
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
 | 分支 / Issue / PR | `feat/visual-blueprint-v2` / #193 / 未关联 |
 | 负责人 / 内审状态 | planner-blueprint / `passed` |
 | 规划态 | `autonomous`（按仓内既有最佳模式推进，单向门与验收边界冻结后交独立 Critique 审查） |
-| 关联 PRD / Todo | 无 / `docs/todo/261126-issue193-visual-blueprint-v2-todo.md` |
+| 关联 PRD / Todo | 无 / `docs/archive/todo/261126-issue193-visual-blueprint-v2-todo.md` |
 
 - **变更一句话**：升级视觉拓扑布局与单文件 HTML 渲染引擎，支持任意规模仓的拓扑分层排布、四态变更蓝图（新增/修改/拟移除/受波及含改前改后与级联原因）、单行精简顶栏与无文本墙可扫读详情面板。
 

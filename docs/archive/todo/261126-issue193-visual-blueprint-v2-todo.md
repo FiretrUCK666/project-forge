@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: Universal Layered Visual Architecture and 4-State Change Blueprint
-status: active
+status: done
 created: 2026-11-26
 updated: 2026-11-26
 issue: 193
@@ -10,7 +10,7 @@ branch: feat/visual-blueprint-v2
 owner: planner-blueprint
 plan_mode: autonomous
 approved: false
-done_at: null
+done_at: 2026-11-26
 task_id: visual-blueprint-v2
 planned_at: 09aa4a80e1c0a00d9c7f9e31c129e4efb9af33d7
 related_prd: null
@@ -23,15 +23,15 @@ related_spec: ../specs/261126-issue193-visual-blueprint-v2-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-26` / `2026-11-26` |
 | 分支 / 基线 | `feat/visual-blueprint-v2` @ `09aa4a8` |
 | 任务编号 | `visual-blueprint-v2` |
 | 负责人 / 审批 | planner-blueprint / `false` |
 | 规划态 | `autonomous`（按仓内既有最佳模式推进，经独立 Critique 过审并批准后交实施子代理执行） |
-| 关联 Issue / PR / SPEC | #193 / 未关联 / `docs/specs/261126-issue193-visual-blueprint-v2-spec.md` |
+| 关联 Issue / PR / SPEC | #193 / 未关联 / `docs/archive/specs/261126-issue193-visual-blueprint-v2-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261126-issue193-visual-blueprint-v2-spec.md` 最新内容。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261126-issue193-visual-blueprint-v2-spec.md` 最新内容。
 
 ## 任务范围与验证基准
 
@@ -76,7 +76,7 @@ related_spec: ../specs/261126-issue193-visual-blueprint-v2-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（规划文本已完备，待 Round 2 独立 Critique 审查与批准后由独立实施者 `!== planner-blueprint` 执行 `flow.mjs start` 绑定真实 GitHub Issue 并转入实施）
+- **当前状态**：`已完成 (done)`（规划文本已完备，待 Round 2 独立 Critique 审查与批准后由独立实施者 `!== planner-blueprint` 执行 `flow.mjs start` 绑定真实 GitHub Issue 并转入实施）
 - **待拍板事项**：无
 - **下一步第一件事**：派发独立只读 Critic（非 `critic-bp-r1`）运行 Round 2 `doc-plan.mjs critique-scope` 与 `critique-pass`，通过后由维护者 `approve`，再由独立实施者通过 `flow.mjs start --task visual-blueprint-v2 --agent <implId>` 退出 `--planning` 并绑定 Issue 启动实施。
 

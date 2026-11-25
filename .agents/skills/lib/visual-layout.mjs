@@ -79,10 +79,27 @@ function normRelArray(list) {
   return normArray(list).map(toRelPath).filter(Boolean)
 }
 
-function truncateLabel(text, maxChars = 28) {
+const FULLWIDTH_CHAR_RE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/
+
+function charDisplayWidth(ch) {
+  return FULLWIDTH_CHAR_RE.test(ch) ? 2 : 1
+}
+
+function truncateLabel(text, maxWidth = 28) {
   const s = String(text ?? '').trim()
-  if (s.length <= maxChars) return s
-  return `${s.slice(0, Math.max(4, maxChars - 3))}...`
+  let total = 0
+  for (const ch of s) total += charDisplayWidth(ch)
+  if (total <= maxWidth) return s
+  const budget = Math.max(4, maxWidth - 3)
+  let acc = 0
+  let out = ''
+  for (const ch of s) {
+    const w = charDisplayWidth(ch)
+    if (acc + w > budget) break
+    out += ch
+    acc += w
+  }
+  return `${out}...`
 }
 
 function normalizeFeatures(featureMap) {

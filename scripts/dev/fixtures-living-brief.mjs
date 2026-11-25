@@ -5,6 +5,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { Script } from 'node:vm'
+
+import { renderArchitectureMapFromRepo } from '../../kit/skills/lib/architecture-map.mjs'
 
 import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { gitRun } from '../../kit/skills/lib/git.mjs'
@@ -258,6 +261,51 @@ export function registerLivingBriefCases(cases) {
       const fnJson = JSON.parse(flowNext.stdout)
       if (!fnJson.visualBrief || fnJson.visualBrief.briefKey !== 'map-topic') {
         return `flow next 未暴露 visualBrief：${JSON.stringify(fnJson.visualBrief)}`
+      }
+
+      // 校验生成的 Living Visual Brief 与 Architecture Map 内联 <script> 均为合法 JS，且长中文标题按视觉宽度截断
+      const assertScriptsParse = (htmlText, label) => {
+        const blocks = [...htmlText.matchAll(/<script(?:\s+[^>]*)?>([\s\S]*?)<\/script>/gi)]
+        let jsCount = 0
+        for (const m of blocks) {
+          if (/type=["']application\/json["']/i.test(m[0])) continue
+          jsCount += 1
+          try {
+            new Script(m[1])
+          } catch (err) {
+            return `${label} 内联 <script> 语法错误：${err.message}`
+          }
+        }
+        return jsCount > 0 ? null : `${label} 缺少可执行 <script> 块`
+      }
+      const briefHtml = readFileSync(resolveBriefPaths(dir, 'map-topic').htmlPath, 'utf8')
+      const briefErr = assertScriptsParse(briefHtml, 'living-brief')
+      if (briefErr) return briefErr
+
+      writeFileSync(join(dir, 'docs', 'feature-map.json'), JSON.stringify({
+        version: 2,
+        domains: [{ id: 'cjk', name: '中文长标题视觉宽度测试域' }],
+        features: [{
+          id: 'cjk-long',
+          name: '参数注册表帮助声明与读取点三重对拍超长中文标题截断验证',
+          domain: 'cjk',
+          entrypoints: ['src/auth.mjs'],
+          modules: ['src/auth.mjs'],
+          tests: [],
+        }],
+      }, null, 2), 'utf8')
+      const archRes = renderArchitectureMapFromRepo(dir)
+      const archHtml = readFileSync(archRes.absPath, 'utf8')
+      const archErr = assertScriptsParse(archHtml, 'architecture-map')
+      if (archErr) return archErr
+      if (archHtml.includes('参数注册表帮助声明与读取点三重对拍...')) {
+        return '长中文标题未按视觉宽度（全角=2）截断，会导致 SVG 卡片溢出'
+      }
+      // 同步校验真实仓库已提交的 docs/architecture-map.html 内联脚本合法性
+      const repoArchPath = join(process.cwd(), 'docs', 'architecture-map.html')
+      if (existsSync(repoArchPath)) {
+        const repoArchErr = assertScriptsParse(readFileSync(repoArchPath, 'utf8'), 'repo docs/architecture-map.html')
+        if (repoArchErr) return repoArchErr
       }
       return true
     } finally {

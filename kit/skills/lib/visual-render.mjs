@@ -582,7 +582,7 @@ function buildClientScript() {
       excerpt ? ('Selection: ' + excerpt) : '',
       'Follow-up request: Inspect this boundary, verify dependencies, and outline any needed changes.',
     ].filter(Boolean);
-    dialogArea.value = lines.join('\n');
+    dialogArea.value = lines.join('\\n');
     var fb = document.getElementById('clipboard-fallback');
     if (fb) fb.hidden = true;
     dialog.hidden = false;

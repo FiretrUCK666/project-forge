@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-25T13:10:53.604Z",
+  "installedAt": "2026-11-25T13:32:10.326Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
@@ -475,10 +475,10 @@
       "sha256": "b82a70c98b99919ad0377c2ac04d6918a073046f31d05116c8f6f2d18cf8c46b"
     },
     "lib/visual-layout.mjs": {
-      "sha256": "35c7d49d7b5821f543059140445efe76dbf24b642b272b18d9001095300fd2a7"
+      "sha256": "9225b7d4ac74140032659ecaf0196fbfe4d1c9e8d6ada69c8fbd3d157d6fe671"
     },
     "lib/visual-render.mjs": {
-      "sha256": "567a3a4ec252e78c0c937d1318c87aa8364bf7569ebb3034c60f0b2b370d2f0f"
+      "sha256": "d20b32c92d8a339a962702d02332c3598175e127b34e3e5332e3e588ea9b7899"
     },
     "lib/workflow-helpers.mjs": {
       "sha256": "85b90f25b2b0df8a8aad37ee813b46ea5efa3d1a8e187ce751a2fc974bff1b40"

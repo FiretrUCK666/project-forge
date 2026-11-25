@@ -110,7 +110,7 @@ export function registerVisualEngineCases(cases) {
       return '渲染产物缺少 ArrowRight 步进或 localStorage 主题切换'
     }
     if (r1.html.includes('href="javascript:alert(1)"')) return 'Prototype URL 未阻断 javascript: 协议'
-    if (!r1.html.includes('exceeds 512 KB cap') || !r1.html.includes('sandbox="allow-scripts"')) {
+    if (!r1.html.includes('原型内容超出 512 KB 上限，已阻止内联渲染') || !r1.html.includes('sandbox="allow-scripts"')) {
       return 'Prototype slot 未正确执行 srcdoc 512KB 上限或 sandbox 隔离'
     }
     if (!r1.html.includes('https://example.com/spec')) return '合法 https 原型链接被误杀'

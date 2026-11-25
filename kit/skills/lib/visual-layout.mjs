@@ -4,12 +4,12 @@ import { buildFallbackDomains } from './feature-map-graph.mjs'
 export const DIFF_STATES = Object.freeze(['added', 'modified', 'impacted', 'context'])
 
 const DOMAIN_PALETTES = Object.freeze([
-  { id: 'indigo', stroke: '#4f46e5', fill: 'rgba(79,70,229,0.08)', badge: '#4f46e5' },
-  { id: 'teal', stroke: '#0d9488', fill: 'rgba(13,148,136,0.08)', badge: '#0d9488' },
-  { id: 'amber', stroke: '#d97706', fill: 'rgba(217,119,6,0.08)', badge: '#d97706' },
-  { id: 'rose', stroke: '#e11d48', fill: 'rgba(225,29,72,0.08)', badge: '#e11d48' },
-  { id: 'sky', stroke: '#0284c7', fill: 'rgba(2,132,199,0.08)', badge: '#0284c7' },
-  { id: 'emerald', stroke: '#059669', fill: 'rgba(5,150,105,0.08)', badge: '#059669' },
+  { id: 'teal', stroke: '#1b5e6b', fill: 'rgba(27,94,107,0.045)', badge: '#1b5e6b' },
+  { id: 'moss', stroke: '#3f6a4f', fill: 'rgba(63,106,79,0.045)', badge: '#3f6a4f' },
+  { id: 'ochre', stroke: '#8c6239', fill: 'rgba(140,98,57,0.045)', badge: '#8c6239' },
+  { id: 'steel', stroke: '#355c7d', fill: 'rgba(53,92,125,0.045)', badge: '#355c7d' },
+  { id: 'plum', stroke: '#6b4c5b', fill: 'rgba(107,76,91,0.045)', badge: '#6b4c5b' },
+  { id: 'sage', stroke: '#4b5c58', fill: 'rgba(75,92,88,0.045)', badge: '#4b5c58' },
 ])
 
 export function escapeHtml(value) {
@@ -85,7 +85,7 @@ function charDisplayWidth(ch) {
   return FULLWIDTH_CHAR_RE.test(ch) ? 2 : 1
 }
 
-function truncateLabel(text, maxWidth = 28) {
+export function truncateLabel(text, maxWidth = 28) {
   const s = String(text ?? '').trim()
   let total = 0
   for (const ch of s) total += charDisplayWidth(ch)
@@ -102,24 +102,43 @@ function truncateLabel(text, maxWidth = 28) {
   return `${out}...`
 }
 
+function normalizeVerifyTools(rawTools) {
+  if (!Array.isArray(rawTools)) return []
+  return rawTools
+    .map((t) => {
+      if (typeof t === 'string') return t.trim()
+      if (t && typeof t === 'object') {
+        const id = String(t.id || t.name || '').trim()
+        const cmd = String(t.command || t.scriptPath || '').trim()
+        return id && cmd ? `${id}: ${cmd}` : (id || cmd)
+      }
+      return ''
+    })
+    .filter(Boolean)
+}
+
 function normalizeFeatures(featureMap) {
   const rawList = Array.isArray(featureMap?.features) ? featureMap.features : []
   return rawList
     .filter((f) => f && typeof f === 'object')
     .map((f, idx) => {
       const id = String(f.id || `feature-${idx + 1}`).trim()
+      const businessFlows = normArray(f.businessFlows)
+      const description = String(f.description || f.summary || businessFlows[0] || '').trim()
       return {
         id,
         title: String(f.title || f.name || id).trim(),
-        description: String(f.description || f.summary || '').trim(),
+        description,
+        businessFlows,
         domain: String(f.domain || '').trim(),
         risk: String(f.risk || 'medium').trim().toLowerCase(),
         status: String(f.status || 'active').trim().toLowerCase(),
         entrypoints: normRelArray(f.entrypoints),
         modules: normRelArray(f.modules || f.files),
-        tests: normRelArray(f.tests),
+        tests: normRelArray(Array.isArray(f.tests) && f.tests.length > 0 ? f.tests : f.testRefs),
         symbols: normArray(f.symbols),
-        verifyTools: normArray(f.verifyTools),
+        verifyTools: normalizeVerifyTools(Array.isArray(f.verificationTools) && f.verificationTools.length > 0 ? f.verificationTools : f.verifyTools),
+        docAnchors: normArray(f.docAnchors),
         dependsOn: normArray(f.dependsOn),
         actors: normArray(f.actors),
         anchorLine: Number.isFinite(Number(f.anchorLine)) ? Number(f.anchorLine) : 1,
@@ -249,16 +268,16 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
   const featureById = new Map(features.map((f) => [f.id, f]))
   const stateMap = overlay?.states instanceof Map ? overlay.states : new Map()
 
-  const cardW = 240
+  const cardW = 264
   const cardH = 104
-  const cardGapX = 20
-  const cardGapY = 18
-  const domPadX = 22
-  const domHeaderH = 48
-  const domPadBottom = 22
-  const domGapX = 32
-  const domGapY = 32
-  const canvasPad = 28
+  const cardGapX = 22
+  const cardGapY = 20
+  const domPadX = 24
+  const domHeaderH = 50
+  const domPadBottom = 24
+  const domGapX = 34
+  const domGapY = 34
+  const canvasPad = 32
 
   const domCols = domains.length <= 1 ? 1 : domains.length <= 4 ? 2 : 3
   const domainBoxes = []
@@ -328,9 +347,13 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
       const fy = y + domHeaderH + fRow * (cardH + cardGapY)
       const diffState = stateMap.get(feat.id) || 'context'
       const primaryAnchor = feat.entrypoints[0] || feat.modules[0] || feat.tests[0] || ''
+      const summarySrc = feat.description || feat.businessFlows[0] || toRelPath(primaryAnchor) || feat.id
       const box = {
         ...feat,
-        shortTitle: truncateLabel(feat.title, 26),
+        shortTitle: truncateLabel(feat.title, diffState !== 'context' ? 22 : 28),
+        shortSummary: truncateLabel(summarySrc, 32),
+        shortAnchor: truncateLabel(toRelPath(primaryAnchor) || feat.id, 32),
+        domainTitle: pd.dom.title,
         x: fx,
         y: fy,
         w: cardW,
@@ -432,12 +455,22 @@ export function layoutFlowDag(featureMap, overlay, _opts = {}) {
       const flowId = String(fl.id || `flow-${flowSummaries.length + 1}`).trim()
       const flowTitle = String(fl.title || fl.name || flowId).trim()
       const steps = Array.isArray(fl.steps) ? fl.steps : []
+      const cleanSteps = steps
+        .map((step, sIdx) => ({
+          stepIndex: sIdx + 1,
+          feature: String(step?.feature || '').trim(),
+          actor: String(step?.actor || step?.lane || 'system').trim(),
+          action: String(step?.action || '').trim(),
+        }))
+        .filter((s) => s.feature)
       flowSummaries.push({
         id: flowId,
         title: flowTitle,
         description: String(fl.description || '').trim(),
-        stepCount: steps.length,
+        stepCount: cleanSteps.length,
         actors: normArray(fl.actors),
+        featureIds: normArray(fl.features),
+        steps: cleanSteps,
       })
       for (const step of steps) {
         const actor = String(step?.actor || step?.lane || 'system').trim()
@@ -574,62 +607,62 @@ export function buildVisualModel({
   const overlay = computeDiffOverlay(featureMap, diffOverlay)
   const tree = layoutDomainTree(featureMap, overlay)
   const flow = layoutFlowDag(featureMap, overlay)
-  const repoName = String(featureMap?.repoName || featureMap?.project || briefSpec?.repoName || 'Repository').trim()
+  const repoName = String(featureMap?.repoName || featureMap?.project || briefSpec?.repoName || '项目仓库').trim()
   const resolvedMode = mode === 'visual-brief' ? 'visual-brief' : 'architecture-map'
   const resolvedTitle = String(
     title
     || briefSpec?.title
-    || (resolvedMode === 'visual-brief' ? `${repoName} Visual Brief` : `${repoName} Architecture Map`)
+    || (resolvedMode === 'visual-brief' ? `${repoName} — 实时规划简报` : `${repoName} — 架构全景图`)
   ).trim()
 
   const verdict = briefSpec?.verdict || {
-    status: overlay.hasActiveDiff ? 'CHANGED' : 'SYNCED',
+    status: overlay.hasActiveDiff ? '有变更' : '已同步',
     tone: overlay.hasActiveDiff ? 'warn' : 'pass',
     summary: overlay.hasActiveDiff
-      ? `${overlay.counts.added} added, ${overlay.counts.modified} modified, ${overlay.counts.impacted} impacted features.`
-      : `All ${tree.nodes.length} mapped features across ${tree.domains.length} domains are synchronized.`,
+      ? `新增 ${overlay.counts.added}、修改 ${overlay.counts.modified}、受波及 ${overlay.counts.impacted} 个模块。`
+      : `共 ${tree.domains.length} 个域、${tree.nodes.length} 个模块，全部已同步。`,
   }
 
   const scopeChips = normArray(briefSpec?.scopeChips).length > 0
     ? normArray(briefSpec.scopeChips)
     : [
         `schema:${featureMap?.version >= 2 ? 'v2' : 'v1-compat'}`,
-        `domains:${tree.domains.length}`,
-        `features:${tree.nodes.length}`,
-        `edges:${tree.edges.length}`,
+        `域:${tree.domains.length}`,
+        `模块:${tree.nodes.length}`,
+        `依赖:${tree.edges.length}`,
       ]
 
   const metrics = Array.isArray(briefSpec?.metrics) && briefSpec.metrics.length > 0
     ? briefSpec.metrics
     : [
-        { label: 'Domains', value: String(tree.domains.length) },
-        { label: 'Features', value: String(tree.nodes.length) },
-        { label: 'Dependencies', value: String(tree.edges.length) },
-        { label: 'Added', value: String(overlay.counts.added) },
-        { label: 'Modified', value: String(overlay.counts.modified) },
-        { label: 'Impacted', value: String(overlay.counts.impacted) },
+        { label: '域', value: String(tree.domains.length) },
+        { label: '模块', value: String(tree.nodes.length) },
+        { label: '依赖', value: String(tree.edges.length) },
+        { label: '新增', value: String(overlay.counts.added) },
+        { label: '修改', value: String(overlay.counts.modified) },
+        { label: '受波及', value: String(overlay.counts.impacted) },
       ]
 
   const walkthrough = Array.isArray(briefSpec?.walkthrough) && briefSpec.walkthrough.length > 0
     ? briefSpec.walkthrough.map((step, idx) => ({
         index: idx,
         targetId: String(step.targetId || tree.nodes[idx]?.id || '').trim(),
-        title: String(step.title || `Step ${idx + 1}`).trim(),
+        title: String(step.title || `步骤 ${idx + 1}`).trim(),
         detail: String(step.detail || '').trim(),
       }))
     : tree.nodes.map((n, idx) => ({
         index: idx,
         targetId: n.id,
         title: n.title,
-        detail: n.description || `${n.domain} feature (${n.modules.length} modules, ${n.tests.length} tests)`,
+        detail: n.description || `${n.domainTitle || n.domain}（${n.modules.length} 个模块，${n.tests.length} 个测试）`,
       }))
 
   const prototypes = Array.isArray(briefSpec?.prototypes) ? briefSpec.prototypes : []
   const panels = [
-    { id: 'panel-tree', title: 'Domain Feature Tree', promptHint: 'Review domain boundaries and module ownership.' },
-    { id: 'panel-flow', title: 'Cross-Feature Swimlane DAG', promptHint: 'Inspect cross-feature dependencies and actor swimlanes.' },
-    { id: 'panel-diff', title: 'Diff Impact Overlay', promptHint: 'Verify added, modified, and downstream impacted features.' },
-    { id: 'panel-prototypes', title: 'Interactive Prototypes & Links', promptHint: 'Inspect sandboxed prototype previews and documentation links.' },
+    { id: 'panel-tree', title: '架构总览', promptHint: '核查领域边界与模块归属。' },
+    { id: 'panel-flow', title: '业务流转', promptHint: '核查跨模块依赖关系与角色泳道。' },
+    { id: 'panel-diff', title: '变更影响', promptHint: '核查新增、修改及下游受波及模块。' },
+    { id: 'panel-prototypes', title: '方案原型', promptHint: '核查沙盒原型预览与外部设计参考链接。' },
   ]
 
   return {
@@ -646,6 +679,7 @@ export function buildVisualModel({
     flow,
     walkthrough,
     prototypes,
+    briefData: briefSpec?.briefData || null,
     panels,
   }
 }

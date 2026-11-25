@@ -3,8 +3,8 @@
   "domains": [
     {
       "id": "entry-governance",
-      "name": "Entry & Governance Contracts",
-      "description": "Skill router, AGENTS.md contract composition, delivery review, and handoff",
+      "name": "入口契约与交付治理",
+      "description": "SKILL.md 总入口路由、AGENTS.md 受管契约渲染、交付体检与交棒扫描",
       "entrypoints": [
         "SKILL.md",
         "scripts/compose-agents.mjs",
@@ -16,8 +16,8 @@
     },
     {
       "id": "onboarding-engine",
-      "name": "Onboarding & Packaging Engine (S1-S4)",
-      "description": "Read-only survey, pre-write external snapshots, and v3 manifest skill equipping",
+      "name": "接入勘察与技能装配 (S1-S4)",
+      "description": "只读环境勘察、写前仓外 zip 快照备份与 v3 账本技能装配",
       "entrypoints": [
         "scripts/survey.mjs",
         "scripts/equip.mjs",
@@ -29,8 +29,8 @@
     },
     {
       "id": "kit-skills-core",
-      "name": "Kit Skills: Explore, Plan, Edit & Flow",
-      "description": "On-demand exploration, living brief planning, lexical edit gates, and worktree lifecycle",
+      "name": "核心研发流技能 (探索/规划/改码/流转)",
+      "description": "按需只读定位、动态视觉简报规划、词法改码门禁与隔离工作树流转",
       "entrypoints": [
         "kit/skills/dev-explore/scripts/repo-map.mjs",
         "kit/skills/dev-plan/scripts/doc-plan.mjs",
@@ -43,8 +43,8 @@
     },
     {
       "id": "kit-skills-quality",
-      "name": "Kit Skills: Verify, Review, Govern & Iterate",
-      "description": "Feature map visual projection, independent dual-gate review, static governance, and test iteration",
+      "name": "质量闭环技能 (验证/审查/治理/迭代)",
+      "description": "功能地图视觉投影、双门独立审查、静态体检治理与测试覆盖迭代",
       "entrypoints": [
         "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
         "kit/skills/dev-review/scripts/review-pack.mjs",
@@ -57,8 +57,8 @@
     },
     {
       "id": "dev-verification",
-      "name": "Self-Hosting Gates, Parity & CI",
-      "description": "Preflight checks, CLI/exit-code parity, merge-gate truth, and GitHub workflows",
+      "name": "自举门禁、契约对拍与 CI",
+      "description": "全仓结构预检、CLI 参数三重对拍、合入门禁真源与 GitHub 工作流",
       "entrypoints": [
         "scripts/dev/preflight.mjs",
         "scripts/dev/merge-gate.mjs",
@@ -158,7 +158,8 @@
       "docAnchors": [
         "docs/TDD.md#3-外部项目治理与跨代升级s1-s4",
         "docs/TDD.md#4-身份判定平台注册表与传输通道"
-      ]
+      ],
+      "description": "只读扫描目标仓生态、Git 拓扑与双轴五态身份，输出结构化缺口与 13 项行动方案。"
     },
     {
       "id": "equip",
@@ -227,7 +228,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#v3-账本三方融合abi-回滚与跨代自更新"
-      ]
+      ],
+      "description": "将 8 套内置技能幂等装配到 .agents/skills/，执行 v3 三方融合与语法/ABI 异常回滚。"
     },
     {
       "id": "compose-agents",
@@ -279,7 +281,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全"
-      ]
+      ],
+      "description": "从模板渲染 AGENTS.md 受管工程契约并保留手写段落，严守 30 KB 预算与零残留。"
     },
     {
       "id": "delivery-review-handoff",
@@ -359,7 +362,8 @@
       "docAnchors": [
         "docs/TDD.md#模块与目录职责",
         "docs/TDD.md#7-三层常青文档与工作区安全"
-      ]
+      ],
+      "description": "执行交付完整性体检、文档声明回查、双语目录同步与交棒净度扫描。"
     },
     {
       "id": "dev-explore",
@@ -424,7 +428,8 @@
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
         "docs/TDD.md#八个技能分工与确定性阻断点"
-      ]
+      ],
+      "description": "只读探测多生态包清单与 CI 步骤，按需按节区与符号行号切片定位源码与文档。"
     },
     {
       "id": "dev-plan",
@@ -542,7 +547,8 @@
       "docAnchors": [
         "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
         "docs/TDD.md#7-三层常青文档与工作区安全"
-      ]
+      ],
+      "description": "按 Case 1-5 分流生成 PRD/SPEC/Todo 与冻结 C1..Cn，并投射仓外实时规划简报。"
     },
     {
       "id": "dev-edit",
@@ -596,7 +602,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#八个技能分工与确定性阻断点"
-      ]
+      ],
+      "description": "改前核对禁改区与复用模块，改后剥离注释/字面量拦截压制注释、死代码与反作弊。"
     },
     {
       "id": "dev-flow",
@@ -730,7 +737,8 @@
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
         "docs/TDD.md#worktree-隔离per-slot-状态隔离与七步收尾"
-      ]
+      ],
+      "description": "驱动隔离工作树启动、Issue 绑定认领、finalize 归档、verify 实证、提审与七步清理。"
     },
     {
       "id": "dev-verify-tools",
@@ -756,6 +764,7 @@
         "kit/skills/lib/feature-map-graph.mjs",
         "kit/skills/lib/visual-layout.mjs",
         "kit/skills/lib/visual-render.mjs",
+        "kit/skills/lib/visual-render-assets.mjs",
         "kit/skills/lib/architecture-map.mjs",
         "kit/skills/lib/verify-state.mjs",
         "kit/skills/dev-verify-tools/SKILL.md"
@@ -798,7 +807,8 @@
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全",
         "docs/TDD.md#worktree-隔离per-slot-状态隔离与七步收尾"
-      ]
+      ],
+      "description": "管理验证探针试制沉淀、免手工日期过时校验与架构全景图离线确定性渲染。"
     },
     {
       "id": "dev-review",
@@ -883,7 +893,8 @@
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
         "docs/TDD.md#支柱二工具无关结构化实证与界面防敷衍"
-      ]
+      ],
+      "description": "先业务流实证与故障注入再审 Diff，执行不可自审、全历史换人与三轮停损六锁门禁。"
     },
     {
       "id": "dev-govern",
@@ -957,7 +968,8 @@
       "docAnchors": [
         "docs/TDD.md#支柱三先最小运行复现poc-first与整类根治tier-1--tier-2",
         "docs/TDD.md#7-三层常青文档与工作区安全"
-      ]
+      ],
+      "description": "执行代码卫生增量审计、常青文档与功能地图校准，以及基于信号复发的倒金字塔复盘。"
     },
     {
       "id": "dev-iterate",
@@ -1021,7 +1033,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"
-      ]
+      ],
+      "description": "识别功能与流转盲区、定向生成原生测试并并发分片实跑，异常自动建单转入修复流。"
     },
     {
       "id": "preflight-gate",
@@ -1096,7 +1109,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
-      ]
+      ],
+      "description": "校验全仓零第三方依赖、单向架构边界、孤儿脚本、契约对拍与端到端冒烟。"
     },
     {
       "id": "flow-truth-gate",
@@ -1140,7 +1154,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#关键不变量"
-      ]
+      ],
+      "description": "直接从 CI 流水线结构派生合入门禁清单并逐块实跑，输出四档互斥结论。"
     },
     {
       "id": "flow-truth-exit",
@@ -1183,7 +1198,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#关键不变量"
-      ]
+      ],
+      "description": "单源统一 0/1/2/3/4 四档退出码语义及 109 个阻断码映射，禁止脚本硬编码。"
     },
     {
       "id": "flow-truth-evidence",
@@ -1229,7 +1245,8 @@
       "docAnchors": [
         "docs/TDD.md#关键不变量",
         "docs/TDD.md#支柱二工具无关结构化实证与界面防敷衍"
-      ]
+      ],
+      "description": "校验实证观察文本实质性及门禁绕过放行理由，拦截空洞占位词与敷衍勾选。"
     },
     {
       "id": "flow-truth-cli-parity",
@@ -1284,7 +1301,8 @@
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
-      ]
+      ],
+      "description": "三重对拍 CLI 参数注册表、帮助声明与脚本读取点，消除漂移与隐式参数。"
     },
     {
       "id": "backup",
@@ -1321,11 +1339,12 @@
       ],
       "docAnchors": [
         "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"
-      ]
+      ],
+      "description": "写操作前生成仓外 .zip 增量快照并支持按 treeSha256 校验恢复或回滚。"
     },
     {
       "id": "skill",
-      "name": "SKILL",
+      "name": "SKILL 总入口与调度契约",
       "domain": "entry-governance",
       "dependsOn": [],
       "actors": [
@@ -1363,11 +1382,12 @@
       ],
       "docAnchors": [
         "docs/TDD.md#2-系统架构全景与模块边界"
-      ]
+      ],
+      "description": "提供顶层路由入口、四步调度流程、核心脚本清单与全局红线门控表。"
     },
     {
       "id": "cli",
-      "name": "cli",
+      "name": "CLI 标准参数解析与下一跳",
       "domain": "kit-skills-core",
       "dependsOn": [
         "flow-truth-exit"
@@ -1405,11 +1425,12 @@
       ],
       "docAnchors": [
         "docs/TDD.md#2-系统架构全景与模块边界"
-      ]
+      ],
+      "description": "提供零依赖标准参数解析、--agent/--mode 规范化与单源 nextSteps 输出格式。"
     },
     {
       "id": "check",
-      "name": "check.yml",
+      "name": "CI 持续验证流水线 (check.yml)",
       "domain": "dev-verification",
       "dependsOn": [
         "preflight-gate",
@@ -1449,11 +1470,12 @@
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
-      ]
+      ],
+      "description": "在 GitHub Actions 跑通预检、缺口覆盖、全量夹具、真包 E2E、注入与包清单校验。"
     },
     {
       "id": "release",
-      "name": "release.yml",
+      "name": "标签发版流水线 (release.yml)",
       "domain": "dev-verification",
       "dependsOn": [
         "check",
@@ -1493,13 +1515,14 @@
       ],
       "docAnchors": [
         "docs/TDD.md#8-核心不变量安全红线与门禁体系"
-      ]
+      ],
+      "description": "校验版本发布说明与打包产物边界，执行人工明令后的标签发版流水线。"
     }
   ],
   "flows": [
     {
       "id": "s1-s4-onboarding-flow",
-      "name": "S1-S4 Onboarding Flow",
+      "name": "S1-S4 接入与装配主流程",
       "actors": [
         "maintainer",
         "explore",
@@ -1518,37 +1541,37 @@
         {
           "feature": "skill",
           "actor": "maintainer",
-          "action": "Load root routing and gate contracts"
+          "action": "加载根入口路由与全局门控契约"
         },
         {
           "feature": "survey",
           "actor": "explore",
-          "action": "Run read-only survey and build artifactPlan"
+          "action": "执行只读勘察并生成 13 项行动计划"
         },
         {
           "feature": "backup",
           "actor": "maintainer",
-          "action": "Create external pre-forge zip snapshot"
+          "action": "创建仓外写前 .zip 增量快照备份"
         },
         {
           "feature": "equip",
           "actor": "maintainer",
-          "action": "Install or upgrade unified kit skills with v3 manifest"
+          "action": "按 v3 账本装配或升级内置研发技能集"
         },
         {
           "feature": "compose-agents",
           "actor": "maintainer",
-          "action": "Render managed AGENTS.md sections within budget"
+          "action": "在预算内渲染 AGENTS.md 受管契约区"
         },
         {
           "feature": "dev-verify-tools",
           "actor": "maintainer",
-          "action": "Sync feature-map v2 and render docs/architecture-map.html"
+          "action": "同步 feature-map v2 并渲染离线架构图"
         },
         {
           "feature": "delivery-review-handoff",
           "actor": "maintainer",
-          "action": "Verify delivery alignment and run handoff scan"
+          "action": "核对交付体检对齐度并执行交棒净度扫描"
         }
       ],
       "docAnchors": [
@@ -1557,7 +1580,7 @@
     },
     {
       "id": "brainstorm-to-plan-flow",
-      "name": "Dynamic Brainstorm-to-Plan Flow",
+      "name": "澄清探索到定案规划流程",
       "actors": [
         "explore",
         "planner",
@@ -1574,22 +1597,22 @@
         {
           "feature": "dev-explore",
           "actor": "explore",
-          "action": "Locate verified paths and reusable modules read-only"
+          "action": "只读定位已核实路径与可复用模块"
         },
         {
           "feature": "dev-plan",
           "actor": "planner",
-          "action": "Triage Case 3/4, project Living Visual Brief, stage prototypes, and confirm"
+          "action": "分流 Case 3/4、投影实时规划简报并挂载原型"
         },
         {
           "feature": "dev-plan",
           "actor": "critic",
-          "action": "Audit docs, run independent critique rounds, and approve frozen C1..Cn"
+          "action": "执行文档内审与独立 Critique 并批准冻结 C1..Cn"
         },
         {
           "feature": "dev-flow",
           "actor": "coordinator",
-          "action": "Dispatch approved slices into isolated worktrees by wave"
+          "action": "按切片依赖波次派发隔离工作树实施任务"
         }
       ],
       "docAnchors": [
@@ -1598,7 +1621,7 @@
     },
     {
       "id": "worktree-impl-review-merge-flow",
-      "name": "Worktree Impl-Review-Merge Flow",
+      "name": "隔离实现、双门审查与合并流程",
       "actors": [
         "coordinator",
         "implementer",
@@ -1615,32 +1638,32 @@
         {
           "feature": "dev-flow",
           "actor": "implementer",
-          "action": "Start isolated impl worktree and claim bound issue"
+          "action": "启动隔离 impl 工作树并认领绑定 Issue"
         },
         {
           "feature": "dev-edit",
           "actor": "implementer",
-          "action": "Pass pre-edit and lexical static edit-gate checks"
+          "action": "通过改前边界核对与词法静态 edit-gate 检查"
         },
         {
           "feature": "dev-verify-tools",
           "actor": "implementer",
-          "action": "Run affected verification probes and keep architecture-map synced"
+          "action": "运行受波及验证探针并保持架构图实时同步"
         },
         {
           "feature": "flow-truth-gate",
           "actor": "implementer",
-          "action": "Execute single-source merge-gate checks for verify"
+          "action": "执行合入门禁真源检查锁定 verifiedHead"
         },
         {
           "feature": "dev-review",
           "actor": "reviewer",
-          "action": "Run empirical checks, fault injection, and dual-gate pass"
+          "action": "执行独立实证复核、故障注入与双门审查"
         },
         {
           "feature": "dev-flow",
           "actor": "reviewer",
-          "action": "Merge verified PR and run human-confirmed 7-step cleanup"
+          "action": "合并已验证 PR 并执行人工确认七步收尾清理"
         }
       ],
       "docAnchors": [
@@ -1649,7 +1672,7 @@
     },
     {
       "id": "govern-and-iterate-flow",
-      "name": "Govern & Iterate Flow",
+      "name": "代码体检治理与测试迭代流程",
       "actors": [
         "maintainer",
         "coordinator",
@@ -1666,27 +1689,27 @@
         {
           "feature": "dev-govern",
           "actor": "maintainer",
-          "action": "Run read-only audit, reconcile, and signal retro"
+          "action": "运行只读体检审计、长青校准与信号复盘"
         },
         {
           "feature": "dev-verify-tools",
           "actor": "maintainer",
-          "action": "Audit feature-map topology and check architecture-map drift"
+          "action": "审计功能地图拓扑完整性与架构图同步状态"
         },
         {
           "feature": "dev-iterate",
           "actor": "implementer",
-          "action": "Detect flow blind spots, generate native tests, and run bounded cycle"
+          "action": "识别业务流盲区、补全原生测试并分片实跑"
         },
         {
           "feature": "dev-plan",
           "actor": "planner",
-          "action": "Escalate reproduced gaps into formal planned slices"
+          "action": "将稳定复现的缺口建单升格为正式规划切片"
         },
         {
           "feature": "preflight-gate",
           "actor": "maintainer",
-          "action": "Verify full structural, parity, and smoke gates"
+          "action": "执行全仓结构预检、参数对拍与端到端冒烟"
         }
       ],
       "docAnchors": [

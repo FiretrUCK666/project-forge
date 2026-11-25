@@ -51,7 +51,7 @@ function printHelp() {
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--skip-govern] [--json]',
     '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-evidence <text>] [--artifact <path>] [--visual-checked] [--visual-blocked-reason <text>] [--human-approved] [--skip-edit-gate] [--skip-govern] [--json]',
     '  submit    [--task <id>] [--agent <id>] [--host-mode <multi-agent|single-session>] [--single-session] [--human-approved] [--draft] [--new-pr] [--offline] [--reset-review-slot] [--json]',
-    '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
+    '  rework    [--task <id>] [--reopen --reason "<原因>"] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
     '  merge     [--task <id>] [--reviewer-id <id>] [--method merge|squash|rebase] [--human-approved] [--reason <text>] [--skip-govern] [--json]',
     '  cleanup   [--task <id>] [--preview-hash <hash>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--allow-outbound <路径>] [--skip-govern] [--json]',
@@ -75,7 +75,7 @@ async function main(argv) {
         'create-issue', 'no-issue', 'takeover', 'reset-review-slot',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd', 'offline',
         'ack-no-issue-context', 'apply', 'dry-run', 'skip-edit-gate', 'skip-govern', 'strict-lifecycle', 'run-govern-hook',
-        'allow-plan-bootstrap', 'planning', 'all', 'single-session',
+        'allow-plan-bootstrap', 'planning', 'all', 'single-session', 'reopen',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',

@@ -455,9 +455,9 @@ export function registerDocDepthCases(cases) {
         '- [ ] C3: `src/core.mjs` 第三切片能力就位',
       ].join('\n'),
       'docs/specs/261118-issue91-slice-a-spec.md': [
-        '---', 'kind: spec', 'title: "Slice A"', 'status: approved', 'tier: L3',
+        '---', 'kind: spec', 'title: "Slice A"', 'status: draft', 'tier: L3',
         'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 91', 'pr: null',
-        'branch: feat/slice-a', 'owner: planner', 'approved: true', 'implemented: false',
+        'branch: feat/slice-a', 'owner: planner', 'approved: false', 'implemented: false',
         'plan_critique: passed', 'related_prd: ../prd/261117-master-prd.md', 'related_todo: null',
         '---', '', '# Slice A', '',
         '## 一、背景与边界声明',

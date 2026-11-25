@@ -9,13 +9,17 @@ import { existsSync, rmSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import {
+  DOC_FRONTMATTER_KEY_ORDER, docIsoDate, isSharedMasterPrd,
+  parseDocFrontmatter, serializeDocFrontmatter, syncPlanDocBodyMeta, updateDocFrontmatter,
+} from '../../lib/docs.mjs'
 import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from '../../lib/doc-slice-graph.mjs'
 import { destroyTaskScratchDir, findAffectedFeatures, readFeatureMap } from '../../lib/feature-map.mjs'
 import { computeCleanupPreviewHash, isSafeBranchDelete, verifyCleanupPreviewHash } from '../../lib/gate-enforcement.mjs'
 import { reclaimVerifySlotCache } from '../../lib/verify-state.mjs'
 import {
   canonicalPath, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
-  parseWorktreeListPorcelain, posixPath, resolveDefaultBranch, samePath,
+  parseWorktreeListPorcelain, posixPath, readTextSafe, resolveDefaultBranch, samePath, writeAtomic,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { collectTaskLivenessBuckets, resolveTaskContext, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
@@ -533,6 +537,40 @@ export async function handleAbort(opts, roots) {
   ].filter(Boolean))
   for (const pd of privDirs) cleanFileOrDir(pd, 'private-docs')
 
+  const dropToday = docIsoDate()
+  const dropReason = String(opts.reason ?? '').trim() || 'flow abort'
+  const droppedDocs = []
+  const candidateDocRels = [
+    ledger.todoFile,
+    ledger.specFile,
+    ...(ledger.prdFile && !isSharedMasterPrd(roots.mainRoot, ledger.prdFile, ledger.specFile) ? [ledger.prdFile] : []),
+  ].filter(Boolean)
+  for (const relDoc of [...new Set(candidateDocRels)]) {
+    const absDoc = resolve(roots.mainRoot, relDoc)
+    if (!existsSync(absDoc)) continue
+    const rawDoc = readTextSafe(absDoc)
+    if (!rawDoc) continue
+    const fmDoc = parseDocFrontmatter(rawDoc)
+    if (!fmDoc.hasFrontmatter) continue
+    const curSt = String(fmDoc.data?.status ?? '').toLowerCase()
+    if (['done', 'implemented', 'archived', 'superseded', 'dropped'].includes(curSt)) continue
+    const dKind = String(fmDoc.data?.kind ?? 'spec').toLowerCase()
+    const patch = {
+      status: 'dropped',
+      updated: dropToday,
+      dropped_at: dropToday,
+      dropped_reason: dropReason,
+      ...(dKind === 'spec' || dKind === 'todo' ? { approved: false } : {}),
+      ...(dKind === 'spec' ? { implemented: false } : {}),
+    }
+    updateDocFrontmatter(absDoc, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[dKind] ?? [] })
+    const afterDoc = parseDocFrontmatter(readTextSafe(absDoc) ?? rawDoc)
+    const syncedBody = syncPlanDocBodyMeta(afterDoc.body.replace(/^\n+/, ''), afterDoc.data, { status: 'dropped', today: dropToday })
+    const keyOrder = [...(DOC_FRONTMATTER_KEY_ORDER[dKind] ?? []), ...afterDoc.keyOrder, ...Object.keys(afterDoc.data)]
+    writeAtomic(absDoc, `${serializeDocFrontmatter(afterDoc.data, keyOrder)}\n${syncedBody.endsWith('\n') ? syncedBody : `${syncedBody}\n`}`)
+    droppedDocs.push(relDoc)
+  }
+
   const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
@@ -541,10 +579,10 @@ export async function handleAbort(opts, roots) {
   ledger.abortedAt = new Date().toISOString()
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
-  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees, verifyScratchCleanup, removedArtifacts }, null, 2)}\n`)
+  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', droppedDocs, removedWorktrees, verifyScratchCleanup, removedArtifacts }, null, 2)}\n`)
   else {
-    process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
+    process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${droppedDocs.length ? `（已标记 ${droppedDocs.join(', ')} 为 dropped）` : ''}${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
     printUnmountedLinksText(removedWorktrees)
   }
-  return { exitCode: EXIT.OK, removedWorktrees, verifyScratchCleanup, removedArtifacts }
+  return { exitCode: EXIT.OK, droppedDocs, removedWorktrees, verifyScratchCleanup, removedArtifacts }
 }

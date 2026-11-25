@@ -74,7 +74,7 @@ export const INJECTIONS_PARALLEL_DISPATCH = [
     id: 'I358',
     what: 'doc-slice-graph 对写域重叠仍误抛 BLOCKED_SLICE_OVERLAP 而非 serial-by-overlap',
     file: 'kit/skills/lib/doc-slice-graph.mjs',
-    from: '  const warnings = checkWaveScopeOverlap(repoRoot, g)\n  return { ok: errors.length === 0, errors, warnings,',
+    from: '  const warnings = [\n    ...checkWaveScopeOverlap(repoRoot, g),\n    ...(closing ? [] : collectStagedMasterCoverageWarnings(repoRoot, g)),\n  ]\n  return { ok: errors.length === 0, errors, warnings,',
     to: "  const warnings = checkWaveScopeOverlap(repoRoot, g)\n  errors.push(...warnings.map((w) => ({ ...w, code: 'BLOCKED_SLICE_OVERLAP' })))\n  return { ok: errors.length === 0, errors, warnings: [],",
     expect: 'C6：doc-slice-graph 单源调度禁止未就绪 draft 前置进 Wave 1',
   },

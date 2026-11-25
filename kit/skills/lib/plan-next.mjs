@@ -19,6 +19,7 @@ import { collectExcludedReviewers, critiqueTextFingerprint, parseCritiqueRounds,
 import { parseDocFrontmatter } from './docs.mjs'
 import { gitStatusPorcelainZ, posixPath, readTextSafe } from './git.mjs'
 import { readTaskLedger, sanitizeTaskId } from './ledger.mjs'
+import { evaluateMutability } from './mutability.mjs'
 import { analyzePendingDecisions, normalizePlanMode } from './pending-decisions.mjs'
 import { resolveCritiqueReadiness } from './plan-exit-gate.mjs'
 import { indexPlanDocs, inferPlanDocKind, isPlanDocApproved, resolveLinkedPlanGraph } from './plan-index.mjs'
@@ -61,14 +62,16 @@ function selectTargetPlanningDoc({ explicitDoc, taskId, ledger, allDocs, prdDocs
       return Boolean(taskId && d.data?.task_id && sanitizeTaskId(d.data.task_id) === sanitizeTaskId(taskId))
     })
     if (taskMatches.length > 0) {
-      const hit = taskMatches.find((d) => d.kind === 'spec')
+      const hit = taskMatches.find((d) => d.kind === 'prd' && !isPlanDocApproved(d))
+        ?? taskMatches.find((d) => d.kind === 'spec' && !isPlanDocApproved(d))
         ?? taskMatches.find((d) => d.kind === 'prd')
+        ?? taskMatches.find((d) => d.kind === 'spec')
         ?? taskMatches[0]
       return { selectedDoc: hit, masterPrd: null, childSlices: [] }
     }
   }
 
-  // 1:N 总控 PRD 优先：未就绪先收口总控 PRD；总控已就绪再挑下一片未过审切片，避免弱模型混改
+  // 1:N 总控 PRD 优先：未就绪先收口总控 PRD；总控已就绪再挑下一片未过审切片，并防止次级活跃规划饿死
   const activePrds = prdDocs.filter((d) => !TERMINAL_PLAN_STATUSES.has(d.status) && !d.rel.startsWith('docs/archive/'))
   const masterPrd = activePrds.find((p) => p.data?.multi_spec === true) ?? activePrds[0] ?? null
   const activeSpecs = specDocs.filter((d) => !TERMINAL_PLAN_STATUSES.has(d.status) && !d.rel.startsWith('docs/archive/'))
@@ -81,7 +84,11 @@ function selectTargetPlanningDoc({ explicitDoc, taskId, ledger, allDocs, prdDocs
   if (masterPrd && !isPlanDocApproved(masterPrd)) {
     return { selectedDoc: masterPrd, masterPrd, childSlices }
   }
-  const nextSlice = (childSlices.length > 0 ? childSlices : activeSpecs).find((s) => !isPlanDocApproved(s))
+  const unapprovedSecondaryPrd = activePrds.find((p) => p.rel !== masterPrd?.rel && !isPlanDocApproved(p))
+  const nextSlice = childSlices.find((s) => !isPlanDocApproved(s))
+    ?? activeSpecs.find((s) => !isPlanDocApproved(s))
+    ?? unapprovedSecondaryPrd
+    ?? activeTodos.find((t) => !isPlanDocApproved(t))
     ?? activeSpecs[0]
     ?? activeTodos[0]
     ?? masterPrd
@@ -364,16 +371,24 @@ export async function evaluatePlanNextState({
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${effTask ?? 'task'} --case ${selectedDoc.kind === 'todo' ? 3 : 4}${selectedDoc.kind === 'spec' ? ` --spec "${relDoc}"` : ''}`
   }
 
+  const docMut = evaluateMutability({
+    kind: selectedDoc.kind,
+    status: selectedDoc.status,
+    approved: isPlanDocApproved(selectedDoc),
+    file: relDoc,
+  })
   return {
     ok: true,
     phase,
     ownerRole,
+    mutability: docMut.mutability,
     deliveryMode: planOnly ? 'plan-only' : 'impl',
     doc: {
       file: relDoc,
       kind: selectedDoc.kind,
       status: selectedDoc.status,
       approved: isPlanDocApproved(selectedDoc),
+      mutability: docMut.mutability,
       root: selectedDoc.root,
       locationType: selectedDoc.locationType,
       sha: currentSha,

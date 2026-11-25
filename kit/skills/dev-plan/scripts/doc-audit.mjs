@@ -40,7 +40,7 @@ export { collectMarkdownFiles, listDocs, stripCritiqueMeta }
 
 export const VALID_STATUS_BY_TYPE = Object.freeze({
   prd: new Set(['draft', 'active', 'in_review', 'done', 'superseded', 'dropped']),
-  spec: new Set(['draft', 'approved', 'implementing', 'in_review', 'implemented', 'superseded']),
+  spec: new Set(['draft', 'approved', 'implementing', 'in_review', 'implemented', 'superseded', 'dropped']),
   todo: new Set(['draft', 'active', 'pending', 'in_review', 'done', 'archived', 'dropped']),
 })
 
@@ -700,11 +700,44 @@ export function checkMasterPrdCoverage(repoRoot, { prdRel = null } = {}) {
  * 反向条件写清楚：一份 SPEC 或零份 SPEC 时不报——**一份 SPEC 自己就是完整单位，
  * 不需要上层容器。**
  */
+function normalizeScopeEntry(raw) {
+  return posixPath(String(raw ?? '').trim()).replace(/^\.\//, '').replace(/\/\*\*?$/, '').replace(/\/+$/, '')
+}
+
+function areSpecsExplicitlyIndependent(items) {
+  const entries = items.map((item) => {
+    const fm = parseDocFrontmatter(readTextSafe(item.abs) ?? '')
+    const scopes = Array.isArray(fm.data?.scope_files) ? fm.data.scope_files.map(normalizeScopeEntry).filter(Boolean) : []
+    const deps = Array.isArray(fm.data?.depends_on) ? fm.data.depends_on.map((d) => String(d ?? '').trim().toLowerCase()).filter(Boolean) : []
+    const taskId = String(fm.data?.task_id ?? '').trim().toLowerCase()
+    const slug = String(parseDocFilename(item.rel)?.slug ?? '').toLowerCase()
+    return { rel: item.rel.toLowerCase(), scopes, deps, taskId, slug }
+  })
+  if (entries.some((e) => e.scopes.length === 0)) return false
+  for (let i = 0; i < entries.length; i += 1) {
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const a = entries[i]
+      const b = entries[j]
+      const coupledByDep = a.deps.some((d) => d === b.taskId || d === b.slug || b.rel.includes(d))
+        || b.deps.some((d) => d === a.taskId || d === a.slug || a.rel.includes(d))
+      if (coupledByDep) return false
+      const overlap = a.scopes.some((sa) => b.scopes.some((sb) => sa === sb || sa.startsWith(`${sb}/`) || sb.startsWith(`${sa}/`)))
+      if (overlap) return false
+    }
+  }
+  return true
+}
+
 export function checkOrphanSlices(repoRoot) {
   const specDir = join(repoRoot, 'docs', 'specs')
   if (!existsSync(specDir)) return []
   const specs = collectMarkdownFiles(specDir, repoRoot)
-    .filter((item) => isManagedPlanDoc(item.rel, readTextSafe(item.abs) ?? ''))
+    .filter((item) => {
+      const txt = readTextSafe(item.abs) ?? ''
+      if (!isManagedPlanDoc(item.rel, txt)) return false
+      const st = String(parseDocFrontmatter(txt).data?.status ?? '').trim().toLowerCase()
+      return !['superseded', 'dropped'].includes(st)
+    })
   if (specs.length < 2) return []
 
   // 每份 SPEC 指向哪个 PRD（空 = 没指）。解析不出来的按「没指」算，宁可多报一次。
@@ -725,6 +758,7 @@ export function checkOrphanSlices(repoRoot) {
     counts.set(target, (counts.get(target) ?? 0) + 1)
   }
   if ([...counts.values()].some((n) => n >= 2)) return []
+  if (areSpecsExplicitlyIndependent(specs)) return []
 
   return [{
     code: 'ORPHAN_SLICES_NO_MASTER_PRD',

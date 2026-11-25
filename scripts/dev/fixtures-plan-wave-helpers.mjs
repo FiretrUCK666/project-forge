@@ -50,11 +50,11 @@ function makeDoc({ kind, title = 'T', status, extra = [], body = [] }) {
   ].join('\n')
 }
 
-function makeMaster({ criteria = ['C1', 'C2'], extra = [] } = {}) {
+function makeMaster({ criteria = ['C1', 'C2'], status = 'active', extra = [] } = {}) {
   return makeDoc({
     kind: 'prd',
     title: 'Master',
-    status: 'active',
+    status,
     extra: ['owner: p', 'multi_spec: true', 'plan_critique: passed', 'related_spec: null', 'related_todo: null', ...extra],
     body: ['## 五、验收标准', ...criteria.map((c) => `- [ ] ${c}: 切片 ${c}`)],
   })

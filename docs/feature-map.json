@@ -269,6 +269,7 @@
         "kit/skills/lib/doc-locator.mjs",
         "kit/skills/lib/markdown-scan.mjs",
         "kit/skills/lib/session-orient.mjs",
+        "kit/skills/lib/session-state.mjs",
         "kit/skills/lib/shared.mjs",
         "kit/skills/lib/symbol-index.mjs",
         "kit/skills/dev-explore/SKILL.md"
@@ -301,7 +302,9 @@
         "scripts/dev/fixtures-issue-quality.mjs",
         "scripts/dev/injections-data-issue-quality.mjs",
         "scripts/dev/fixtures-issue-binding.mjs",
-        "scripts/dev/injections-data-issue-binding.mjs"
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -350,6 +353,8 @@
         "kit/skills/lib/harness-context.mjs",
         "kit/skills/lib/session-state.mjs",
         "kit/skills/lib/doc-approval.mjs",
+        "kit/skills/lib/mutability.mjs",
+        "kit/skills/lib/doc-plan-clarify.mjs",
         "kit/skills/templates/docs-prd.md",
         "kit/skills/templates/docs-spec.md",
         "kit/skills/templates/docs-tdd.md",
@@ -393,7 +398,9 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-r6b-plan.mjs",
-        "scripts/dev/injections-data-r6b.mjs"
+        "scripts/dev/injections-data-r6b.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
@@ -494,7 +501,8 @@
         "kit/skills/dev-flow/scripts/flow-start-helpers.mjs",
         "kit/skills/lib/harness-context.mjs",
         "kit/skills/lib/session-state.mjs",
-        "kit/skills/lib/gate-enforcement.mjs"
+        "kit/skills/lib/gate-enforcement.mjs",
+        "kit/skills/lib/mutability.mjs"
       ],
       "businessFlows": [
         "双轴身份探测、全局 intake 分诊与 Worktree 隔离启动",
@@ -551,7 +559,9 @@
         "scripts/dev/fixtures-issue-quality.mjs",
         "scripts/dev/injections-data-issue-quality.mjs",
         "scripts/dev/fixtures-issue-binding.mjs",
-        "scripts/dev/injections-data-issue-binding.mjs"
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -665,7 +675,9 @@
         "scripts/dev/fixtures-issue-quality.mjs",
         "scripts/dev/injections-data-issue-quality.mjs",
         "scripts/dev/fixtures-issue-binding.mjs",
-        "scripts/dev/injections-data-issue-binding.mjs"
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",

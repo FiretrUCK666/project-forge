@@ -330,7 +330,16 @@ export function extractDocSnapshot(rawText) {
     }
   }
 
-  // 合并验收条目 C* 编号与其中技术锚点，拦截静默删除 C* 条目的退化
+  // 合并验收条目 C* 编号与其中技术锚点，拦截静默删除 C* 条目的退化（允许 --drop-criterion 显式授权裁剪）
+  const fmSnap = parseDocFrontmatter(norm)
+  const droppedCriteriaSet = new Set(
+    (Array.isArray(fmSnap.data?.dropped_criteria) ? fmSnap.data.dropped_criteria : [])
+      .map((x) => String(x ?? '').trim().toUpperCase())
+      .filter((x) => /^C\d+$/.test(x)),
+  )
+  for (const dm of body.matchAll(/^-\s+已作废条款（[^）]+）：(C\d+)\b/gm)) {
+    droppedCriteriaSet.add(dm[1].toUpperCase())
+  }
   let criteriaCount = 0
   let inFence = false
   for (const line of body.split('\n')) {
@@ -363,6 +372,7 @@ export function extractDocSnapshot(rawText) {
     pendingResolved: decidedCount,
     pendingUnresolved: pending.unresolved.length,
     criteriaCount,
+    droppedCriteria: [...droppedCriteriaSet].sort(),
   }
 }
 
@@ -379,6 +389,7 @@ export function parseCritiqueAnchors(rawVal) {
       pendingResolved: Number(obj.pendingResolved ?? 0) || 0,
       pendingUnresolved: Number(obj.pendingUnresolved ?? 0) || 0,
       criteriaCount: Number(obj.criteriaCount ?? 0) || 0,
+      droppedCriteria: Array.isArray(obj.droppedCriteria) ? obj.droppedCriteria : [],
     }
   } catch {
     return null
@@ -442,13 +453,16 @@ export function checkDocRegression(baselineSnap, currentSnap, baselineSource = n
 
   const baseCriteria = Number(baselineSnap.criteriaCount ?? 0) || 0
   const curCriteria = Number(currentSnap?.criteriaCount ?? 0) || 0
-  if (baseCriteria > 0 && curCriteria < baseCriteria) {
+  const baseDropped = new Set(Array.isArray(baselineSnap?.droppedCriteria) ? baselineSnap.droppedCriteria : [])
+  const newlyDroppedCount = (Array.isArray(currentSnap?.droppedCriteria) ? currentSnap.droppedCriteria : [])
+    .filter((id) => !baseDropped.has(id)).length
+  if (baseCriteria > 0 && (curCriteria + newlyDroppedCount) < baseCriteria) {
     errors.push({
       code: 'DOC_REGRESSION_CRITERIA_DROPPED',
       line: 1,
       section: 'acceptance',
       message: `跨轮退化：基线冻结的验收标准从 ${baseCriteria} 条缩水至 ${curCriteria} 条（禁止静默删减 C* 条目）`,
-      fixHint: '恢复被删减的 C* 验收条目；若确需变更范围请在澄清记录说明或拆单。',
+      fixHint: '恢复被删减的 C* 验收条目；若确需变更范围请运行 `doc-plan clarify --drop-criterion C<N> --reason "..." --by user`。',
     })
   }
 

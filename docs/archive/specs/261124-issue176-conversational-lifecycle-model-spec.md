@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: 对话记忆、全周期两态状态机与受控重开
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-24
-updated: 2026-11-24
-issue: null
+updated: 2026-11-25
+issue: 176
 pr: null
-branch: feat/conv-arch-plan
+branch: feat/conversational-lifecycle-model
 owner: planner-conv-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-conv-arch, round=1, sha=98678a7a3107, summary=切片 2 SPEC v2 多主题记忆与 OPEN/LOCKED 两态模型边界清晰，新模块 mutability.mjs (<=200L) 与 C5-C8 断言完整可测)"
-related_prd: ../prd/261124-conversational-state-machine-prd.md
-related_todo: ../todo/261124-conversational-lifecycle-model-todo.md
+related_prd: ../../prd/261124-conversational-state-machine-prd.md
+related_todo: ../todo/261124-issue176-conversational-lifecycle-model-todo.md
 high_risk_paths: [kit/]
 task_id: conversational-lifecycle-model
 depends_on: [core-state-integrity]
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/session-state.mjs, kit/skills/lib/session-orient.mj
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（Schema v2 迁移、跨技能两态状态机与受控重开；未 `approved` 前不编码） |
-| 创建 / 更新 | `2026-11-24` / `2026-11-24` |
-| 分支 / Issue / PR | `feat/conv-arch-plan` / `#169` / 未关联 |
+| 创建 / 更新 | `2026-11-24` / `2026-11-25` |
+| 分支 / Issue / PR | `feat/conversational-lifecycle-model` / #176 / 未关联 |
 | 负责人 / 内审状态 | planner-conv-arch / `passed` |
 | 规划态 | `interactive`（关键设计与 5 项决策已确认，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261124-conversational-state-machine-prd.md` / `../todo/261124-conversational-lifecycle-model-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261124-conversational-state-machine-prd.md` / `docs/archive/todo/261124-issue176-conversational-lifecycle-model-todo.md` |
 
 - **变更一句话**：升级 `session-state.mjs` 至 v2 多主题对话记忆并落地单源 `OPEN` / `LOCKED` 两态状态机、`dropped` 终态与 `flow rework --reopen` 守卫。
 
@@ -126,10 +126,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C5: `kit/skills/lib/session-state.mjs` 升级至 `schemaVersion: 2` 且兼容读 v1，`topics[topicId]` 最多 5 活跃主题、每主题 <= 6144 B、支持覆写 `facts` 与 `--resolve` 关闭 `open`、超限先删可重建 `anchors` 且永不静默 FIFO 删 `facts`，`markTriageConsumed` / `resolveInheritedTriagePlanMode` 严格按 topic/task/slug 隔离；`session-orient.mjs` 完整输出活跃 `facts` 与 `open`（无 `.slice(-4)`）且 `includeWorktrees: true` 按新鲜度去重，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
-- [ ] C6: `doc-plan.mjs` / `doc-plan-ops.mjs` 支持 `note` 的 `--topic`、`--fact k=v`、`--resolve`、`--drop`、`--reset`；`triage` 绑定 `topic` 且省去 `--paths` 时不自动吸入脏 `git status` 文件；`init` 遇 `open.length > 0` 报 `BLOCKED_OPEN_QUESTIONS_UNRESOLVED`（除非 `--allow-open-draft` 仅写入主文档并只消费目标主题）；`init --kind prd --multi-spec` 不掉入无账本 worktree 陷阱；`doc-locate.mjs` 与 `repo-map.mjs` 默认零写入且仅显式 `--topic` 时写 `topics[topicId].anchors`，由 `node scripts/dev/fixtures.mjs` 断言通过。
-- [ ] C7: 新建 `kit/skills/lib/mutability.mjs` (new)（<= 200 行）导出 `evaluateMutability` 并接入 `doc-plan next`、`clarify`、`flow next`、`flow rework`；`clarifyDoc` 对 `LOCKED` 报 `BLOCKED_DOC_FROZEN` 附 3 出口，支持 `--drop-criterion C<N> --reason --by user` 且 `checkDocRegression` 放行授权删除同时拦截静默删除；`VALID_STATUS_BY_TYPE`、`doc-plan archive --drop --reason` 与 `flow abort` 落地 `dropped` 终态；`checkOrphanSlices` 放行互不关联独立 SPEC，`checkMasterCriteriaCoverage` 在 `active` 期允许分阶段切片、收口时强制 100% 覆盖，`plan-next` 同命中 PRD/SPEC 优先 PRD 且不饿死次要活跃计划，由 `node scripts/dev/fixtures.mjs` 断言通过。
-- [ ] C8: `flow-lifecycle-helpers.mjs` / `workflow-policy-next.mjs` / `flow-next.mjs` 强制 `flow rework` 默认仅在 `changes` 或 `queueConflict` 放行，`LOCKED` 缺 `--reopen --reason` 报 `BLOCKED_REWORK_REQUIRES_REOPEN`，带 `--reopen --reason` 时原子吊销未消费 `reviewTokens`、清空 `reviewPassed*` 并退回 `OPEN`；`ambiguous` 暴露 per-task `phase` 与 `mutability` 并仅把就绪/实施任务送入 `batch plan`，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
+- [x] C5: `kit/skills/lib/session-state.mjs` 升级至 `schemaVersion: 2` 且兼容读 v1，`topics[topicId]` 最多 5 活跃主题、每主题 <= 6144 B、支持覆写 `facts` 与 `--resolve` 关闭 `open`、超限先删可重建 `anchors` 且永不静默 FIFO 删 `facts`，`markTriageConsumed` / `resolveInheritedTriagePlanMode` 严格按 topic/task/slug 隔离；`session-orient.mjs` 完整输出活跃 `facts` 与 `open`（无 `.slice(-4)`）且 `includeWorktrees: true` 按新鲜度去重，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
+- [x] C6: `doc-plan.mjs` / `doc-plan-ops.mjs` 支持 `note` 的 `--topic`、`--fact k=v`、`--resolve`、`--drop`、`--reset`；`triage` 绑定 `topic` 且省去 `--paths` 时不自动吸入脏 `git status` 文件；`init` 遇 `open.length > 0` 报 `BLOCKED_OPEN_QUESTIONS_UNRESOLVED`（除非 `--allow-open-draft` 仅写入主文档并只消费目标主题）；`init --kind prd --multi-spec` 不掉入无账本 worktree 陷阱；`doc-locate.mjs` 与 `repo-map.mjs` 默认零写入且仅显式 `--topic` 时写 `topics[topicId].anchors`，由 `node scripts/dev/fixtures.mjs` 断言通过。
+- [x] C7: 新建 `kit/skills/lib/mutability.mjs` (new)（<= 200 行）导出 `evaluateMutability` 并接入 `doc-plan next`、`clarify`、`flow next`、`flow rework`；`clarifyDoc` 对 `LOCKED` 报 `BLOCKED_DOC_FROZEN` 附 3 出口，支持 `--drop-criterion C<N> --reason --by user` 且 `checkDocRegression` 放行授权删除同时拦截静默删除；`VALID_STATUS_BY_TYPE`、`doc-plan archive --drop --reason` 与 `flow abort` 落地 `dropped` 终态；`checkOrphanSlices` 放行互不关联独立 SPEC，`checkMasterCriteriaCoverage` 在 `active` 期允许分阶段切片、收口时强制 100% 覆盖，`plan-next` 同命中 PRD/SPEC 优先 PRD 且不饿死次要活跃计划，由 `node scripts/dev/fixtures.mjs` 断言通过。
+- [x] C8: `flow-lifecycle-helpers.mjs` / `workflow-policy-next.mjs` / `flow-next.mjs` 强制 `flow rework` 默认仅在 `changes` 或 `queueConflict` 放行，`LOCKED` 缺 `--reopen --reason` 报 `BLOCKED_REWORK_REQUIRES_REOPEN`，带 `--reopen --reason` 时原子吊销未消费 `reviewTokens`、清空 `reviewPassed*` 并退回 `OPEN`；`ambiguous` 暴露 per-task `phase` 与 `mutability` 并仅把就绪/实施任务送入 `batch plan`，由 `node scripts/dev/fixtures.mjs` 正反用例断言通过。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -148,6 +148,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：升级 `kit/skills/lib/session-state.mjs` 至 v2（`topics[topicId]`、6144 B/主题、`facts` 保护与 v1 无损迁移）及 `session-orient.mjs` / `plan-index.mjs` 完整渲染去重；新建 `kit/skills/lib/mutability.mjs` 与 `kit/skills/lib/doc-plan-clarify.mjs`，完成 `doc-plan` (`note`/`triage`/`init`/`slice`/`clarify`/`archive --drop`)、`doc-locate`/`repo-map --topic`、`flow rework --reopen`、`flow abort` 标 `dropped` 与 `ambiguous` 精确 `phase`/`mutability` 调度。
+- **与草案的差异**：为守住单文件 800 行上线，将 `clarifyDoc` 与 `applyPreInitToDocContent` 拆入 `kit/skills/lib/doc-plan-clarify.mjs`（由 `doc-plan-ops.mjs` 重导出兼容），并在 `kit/skills/lib/ledger.mjs` 抽出 `revokeUnconsumedReviewTokens`。
+- **关联同步文件**：`docs/TDD.md`、`docs/feature-map.json`、`kit/skills/lib/exit-codes.mjs`、`kit/skills/lib/subcommand-meta.mjs`、`.agents/skills/`（`equip.mjs .`）、`scripts/dev/fixtures-conv-s2.mjs`、`scripts/dev/injections-data-conv-s2.mjs`。

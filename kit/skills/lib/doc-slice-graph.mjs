@@ -217,11 +217,14 @@ export function buildSliceGraph(repoRoot) {
   return { docs, prds, masters, slices }
 }
 
-/** 检查一：总控 PRD 的每个 `C*` 都必须被某个子切片认领。 */
-export function checkMasterCriteriaCoverage(repoRoot, graph = null) {
+/** 检查一：总控 PRD 的每个 `C*` 都必须被某个子切片认领（`active` 分阶段允许暂缓，闭环阶段强制 100%）。 */
+export function checkMasterCriteriaCoverage(repoRoot, graph = null, { closing = true } = {}) {
   const g = graph ?? buildSliceGraph(repoRoot)
   const out = []
   for (const master of g.masters) {
+    const masterStatus = String(master.data?.status ?? master.status ?? 'draft').toLowerCase()
+    const isClosing = Boolean(closing) || ['in_review', 'done', 'implemented', 'archived'].includes(masterStatus)
+    if (!isClosing) continue
     const ids = extractMasterCriteria(master.text)
     if (ids.length === 0) continue
     const children = g.slices.filter((s) => s.kind === 'spec' && s.masterRel === master.rel)
@@ -234,6 +237,29 @@ export function checkMasterCriteriaCoverage(repoRoot, graph = null) {
         missing,
         message: `${master.rel} 里有 ${missing.length} 条验收标准没有任何子切片 SPEC 认领：${missing.join('、')}`
           + '——它们不会进实现也不会进审查，最后以「好像做过」的样子消失',
+      })
+    }
+  }
+  return out
+}
+
+function collectStagedMasterCoverageWarnings(repoRoot, graph) {
+  const out = []
+  for (const master of graph.masters) {
+    const masterStatus = String(master.data?.status ?? master.status ?? 'draft').toLowerCase()
+    if (['in_review', 'done', 'implemented', 'archived'].includes(masterStatus)) continue
+    const ids = extractMasterCriteria(master.text)
+    if (ids.length === 0) continue
+    const children = graph.slices.filter((s) => s.kind === 'spec' && s.masterRel === master.rel)
+    const claimed = new Set(children.flatMap((s) => extractClaimedCriteria(s.text)))
+    const missing = ids.filter((id) => !claimed.has(id))
+    if (missing.length > 0) {
+      out.push({
+        code: SLICE_GRAPH_CODES.uncovered,
+        severity: 'warning',
+        file: master.rel,
+        missing,
+        message: `${master.rel} 当前处于 ${masterStatus} 分阶段推进中，仍有 ${missing.length} 条标准待后续切片认领：${missing.join('、')}`,
       })
     }
   }
@@ -443,15 +469,18 @@ export function checkWaveScopeOverlap(repoRoot, graph = null) {
  * 前三条是硬错（漏认领、缺元数据、有环/悬空）；写域重叠可由调度器按 `serial-by-overlap`
  * 自动拆波串行，记入 `warnings` 而不作为阻塞错误。
  */
-export function evaluateSliceGraph(repoRoot, { graph = null } = {}) {
+export function evaluateSliceGraph(repoRoot, { graph = null, closing = false } = {}) {
   if (!repoRoot) return { ok: true, errors: [], warnings: [], checked: 0 }
   const g = graph ?? buildSliceGraph(repoRoot)
   const errors = [
-    ...checkMasterCriteriaCoverage(repoRoot, g),
+    ...checkMasterCriteriaCoverage(repoRoot, g, { closing }),
     ...checkSliceMetadata(g),
     ...checkSliceGraphCycles(repoRoot, g),
   ]
-  const warnings = checkWaveScopeOverlap(repoRoot, g)
+  const warnings = [
+    ...checkWaveScopeOverlap(repoRoot, g),
+    ...(closing ? [] : collectStagedMasterCoverageWarnings(repoRoot, g)),
+  ]
   return { ok: errors.length === 0, errors, warnings, checked: g.slices.length, masters: g.masters.map((m) => m.rel) }
 }
 

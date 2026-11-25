@@ -440,7 +440,9 @@ export async function handleNext(opts, roots) {
       }
     }
     if (payload.candidates?.length > 0) {
-      for (const c of payload.candidates) process.stdout.write(`  * --task ${c.taskId} (status=${c.status}, branch=${c.branch ?? '-'})\n`)
+      for (const c of payload.candidates) {
+        process.stdout.write(`  * --task ${c.taskId} (status=${c.status}, phase=${c.phase ?? '-'}, mutability=${c.mutability ?? '-'}, branch=${c.branch ?? '-'})\n`)
+      }
     }
     if (payload.handoffPrompt) {
       process.stdout.write('\n--- 交接包（可直接粘给子代理）---\n\n')

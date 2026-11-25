@@ -116,7 +116,7 @@ export function ensureReviewToken(mainRoot, ledger, round, { reviewerId = null, 
   const wantReviewer = reviewerId ? String(reviewerId).trim().toLowerCase() : null
   const wantHead = headSha ? String(headSha).trim() : null
   const existing = list.find((t) => {
-    if (!t || Number(t.round) !== Number(round) || t.consumedAt) return false
+    if (!t || Number(t.round) !== Number(round) || t.consumedAt || t.revokedAt) return false
     if (t.headSha && wantHead && t.headSha !== wantHead) return false
     if (t.reviewerId && wantReviewer && String(t.reviewerId).trim().toLowerCase() !== wantReviewer) return false
     return true
@@ -144,6 +144,7 @@ export function consumeReviewToken(ledger, token, round, { reviewerId = null, he
   const hit = list.find((t) => t && t.token === value)
   if (!hit) return { ok: false, reason: 'UNKNOWN_REVIEW_TOKEN' }
   if (hit.consumedAt) return { ok: false, reason: 'REVIEW_TOKEN_ALREADY_CONSUMED' }
+  if (hit.revokedAt) return { ok: false, reason: `REVIEW_TOKEN_REVOKED: 令牌已因 reopen 撤销（${hit.revokedReason || hit.revokedAt}），请重跑 flow.mjs next 获取新令牌` }
   if (Number(hit.round) !== Number(round)) {
     return { ok: false, reason: `REVIEW_TOKEN_ROUND_MISMATCH: 令牌是 Round ${hit.round} 的，当前记 Round ${round}` }
   }
@@ -165,6 +166,28 @@ export function consumeReviewToken(ledger, token, round, { reviewerId = null, he
   }
   hit.consumedAt = new Date().toISOString()
   return { ok: true, entry: hit }
+}
+
+/** `flow rework --reopen` 时原子撤销未消费审查令牌并重置已提交/通过状态。 */
+export function revokeUnconsumedReviewTokens(ledger, reason = 'manual reopen') {
+  const reopenAt = new Date().toISOString()
+  const cleanReason = String(reason ?? '').trim() || 'manual reopen'
+  let revokedCount = 0
+  if (Array.isArray(ledger.reviewTokens)) {
+    ledger.reviewTokens = ledger.reviewTokens.map((tok) => {
+      if (!tok || tok.consumedAt || tok.revokedAt) return tok
+      revokedCount += 1
+      return { ...tok, revokedAt: reopenAt, revokedReason: cleanReason }
+    })
+  }
+  ledger.reviewPassed = false
+  ledger.reviewPassedHead = null
+  ledger.submitted = false
+  ledger.localReady = false
+  ledger.reopenedAt = reopenAt
+  ledger.reopenReason = cleanReason
+  ledger.reopenHistory = [...(Array.isArray(ledger.reopenHistory) ? ledger.reopenHistory : []), { at: reopenAt, reason: cleanReason, revokedTokensCount: revokedCount }]
+  return revokedCount
 }
 
 /** 校验并清洗 taskId，兼容 ASCII 与中文字符，防止路径穿越。 */

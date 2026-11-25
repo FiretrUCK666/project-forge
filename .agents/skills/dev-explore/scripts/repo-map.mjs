@@ -18,6 +18,7 @@ import {
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { createExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { discoverWorkspacePackages, parseAgentsProfile } from '../../lib/profile.mjs'
+import { recordTopicAnchors } from '../../lib/session-state.mjs'
 import { TEST_FILE_RE, isTestOrFixtureFile } from '../../lib/static-gates.mjs'
 import { extractSymbols, summarizeSymbolCoverage } from '../../lib/symbol-index.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
@@ -364,6 +365,7 @@ function printHelp() {
     '  --task <id>            将探索证据写入对应任务账本',
     '  --tier <tier>          覆盖探索层级（direct-read | single-subagent | parallel-subagents）',
     '  --by <actor>           记录探索执行者标识',
+    '  --topic <id>           可选：将探索命中的真实路径写入仓外 Working Brief 锚点（默认不写）',
     '  --write-feature-map    按探测结果增量预填 docs/feature-map.json',
     '  --json                 输出结构化 JSON',
     '  --help                 显示帮助',
@@ -379,7 +381,7 @@ async function main(argv) {
     cli = parseStandardCli(argv, {
       positionalDir: 'first',
       booleanFlags: ['write-feature-map'],
-      valueFlags: ['focus', 'task', 'tier', 'by'],
+      valueFlags: ['focus', 'task', 'tier', 'by', 'topic'],
       usageHint: 'node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--task <id>] [--write-feature-map] [--json]',
     })
   } catch (err) {
@@ -405,6 +407,17 @@ async function main(argv) {
         source: 'repo-map',
       })
       await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), explored: ledger.explored }), { createIfMissing: true })
+    }
+    if (cli.opts.topic) {
+      const roots = await resolveRepoRoots(cli.targetDir)
+      const candidates = [
+        ...(map.focusFiles ?? []).slice(0, 6),
+        ...(map.entrypoints ?? []).map((e) => (typeof e === 'string' ? e : e?.file ?? e?.path)).filter(Boolean),
+        ...(map.cliEntrypoints ?? []).map((e) => (typeof e === 'string' ? e : e?.file ?? e?.path)).filter(Boolean),
+        ...(map.hotspots ?? []).map((h) => (typeof h === 'string' ? h : h?.file ?? h?.path)).filter(Boolean),
+      ].map((p) => posixPath(String(p)))
+      const verifiedAnchors = [...new Set(candidates)].filter((p) => existsSync(join(map.root, p))).slice(0, 12)
+      if (verifiedAnchors.length > 0) recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors: verifiedAnchors })
     }
     if (cli.json) {
       process.stdout.write(`${JSON.stringify(map, null, 2)}\n`)

@@ -15,7 +15,7 @@ import {
   renderStandardDocTemplate, resolveRepoCustomDocTemplate, serializeDocFrontmatter,
   slugify, syncDocsLifecycle, syncPlanDocBodyMeta, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
-import { DECIDED_RE, RISK_NON_DECISION_HEADING_RE } from '../../lib/pending-decisions.mjs'
+import { applyPreInitToDocContent, clarifyDoc } from '../../lib/doc-plan-clarify.mjs'
 import { resolveApprovalBasis } from '../../lib/plan-exit-gate.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { canonicalPath, ensureWorktreesIgnored, gitRun, isDefaultBranch, posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
@@ -259,207 +259,7 @@ export function supersedeSpec({ repoRoot, oldSpecPath, newSpecPath }) {
   return { oldSpec: posixPath(relative(repoRoot, oldAbs)), newSpec: posixPath(relative(repoRoot, newAbs)), status: 'superseded', supersededBy: relOldToNew }
 }
 
-const CLARIFY_PENDING_HEADING_RE = /^#{2,4}\s*(?:[一二三四五六七八九十百]+[、.]\s*)?([^\n]*)$/
-const CLARIFY_PENDING_WORDS_RE = /(?:待拍板|未决问题|待确认|待决定|开放问题|待定事项|仍待.*?拍板|open\s+questions?|pending\s+decisions?)/i
-const CLARIFY_EMPTY_ITEM_RE = /^(?:\s*(?:[-*]\s*)?(?:待确认|待拍板|未决)\s*[:：]\s*)?(?:无|没有|暂无|无待拍板(?:事项|问题)?|无待定(?:事项|问题)?|无未决(?:事项|问题)?|none|n\/a)(?:$|[。.,，；;：:\s])/i
-const CLARIFY_INLINE_UNRESOLVED_RE = /(?:仍待定|（待拍板[^）]*）|\(待拍板[^)]*\)|（待定[^）]*）|\(待定[^)]*\)|待拍板\s*[:：]\s*(?!(?:无|没有|暂无)(?=$|[\s，,。.；;）)])|none\b)|待确认\s*[:：]\s*(?!(?:无|没有|暂无)(?=$|[\s，,。.；;）)])|none\b)|\bTBD\b)/i
-
-function normPendingMatchText(s) {
-  return String(s ?? '')
-    .replace(/^(?:[-*]|\d+[.、)])\s+/, '')
-    .replace(/^(?:待确认|待拍板|未决|待决定|Q\d+)\s*[:：]\s*/i, '')
-    .replace(/(?:（|\()待(?:拍板|定)[^）)]*(?:）|\))/g, '')
-    .replace(/\bTBD\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-}
-
-function scrubUnresolvedMarkers(line) {
-  return String(line ?? '')
-    .replace(/(?:待确认|待拍板|未决|待决定)\s*[:：]\s*/gi, '已确认：')
-    .replace(/(?:（|\()待(?:拍板|定)[^）)]*(?:）|\))/g, '')
-    .replace(/仍待定/g, '已定')
-    .replace(/\bTBD\b/gi, '已定')
-}
-
-function resolvePendingSectionItems(lines, { question, decision, today, byNote }) {
-  const cleanDecision = String(decision ?? '').trim()
-  const qNorm = normPendingMatchText(question)
-  const blocks = []
-  const covered = new Set()
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const h = CLARIFY_PENDING_HEADING_RE.exec(lines[i])
-    if (!h || !CLARIFY_PENDING_WORDS_RE.test(h[1])) continue
-    if (RISK_NON_DECISION_HEADING_RE.test(h[1]) && !/(?:待拍板|待确认|待决定|未决问题|pending\s+decisions?)/i.test(h[1])) continue
-    const startLevel = (lines[i].match(/^#+/) ?? ['##'])[0].length
-    let endIdx = lines.length
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const m = /^(#+)\s/.exec(lines[j])
-      if (m && m[1].length <= startLevel) { endIdx = j; break }
-    }
-    for (let k = i; k < endIdx; k += 1) covered.add(k)
-    const body = lines.slice(i + 1, endIdx)
-    const hasList = body.some((l) => /^(?:[-*]|\d+[.、)])\s+/.test(l))
-    let cur = null
-    for (let off = 0; off < body.length; off += 1) {
-      const l = body[off]
-      const absIdx = i + 1 + off
-      if (/^\s*(?:>|<!--)/.test(l)) continue
-      if (/^(?:[-*]|\d+[.、)])\s+/.test(l)) {
-        if (cur) blocks.push(cur)
-        cur = { start: absIdx, end: absIdx + 1, head: l.replace(/^(?:[-*]|\d+[.、)])\s+/, ''), text: l }
-        continue
-      }
-      if (cur) { cur.end = absIdx + 1; cur.text += `\n${l}` }
-      else if (!hasList && l.trim()) {
-        cur = { start: absIdx, end: absIdx + 1, head: l.trim(), text: l }
-      }
-    }
-    if (cur) blocks.push(cur)
-  }
-
-  const unresolvedBlocks = blocks.filter((b) => {
-    const cleanHead = b.head.replace(/^[-*]\s*/, '')
-    if (CLARIFY_EMPTY_ITEM_RE.test(cleanHead) && !CLARIFY_INLINE_UNRESOLVED_RE.test(b.text)) return false
-    if (DECIDED_RE.test(b.text) && !CLARIFY_INLINE_UNRESOLVED_RE.test(b.text)) return false
-    return true
-  })
-
-  const matchesQ = (candText) => {
-    if (!qNorm) return false
-    const cNorm = normPendingMatchText(candText)
-    if (!cNorm) return false
-    if (cNorm === qNorm || cNorm.includes(qNorm) || (cNorm.length >= 3 && qNorm.includes(cNorm))) return true
-    const qTokens = qNorm.split(/[\s、，,。；;：:（）()[\]/]+/).filter((t) => t.length >= 2)
-    return qTokens.length > 0 && qTokens.filter((t) => cNorm.includes(t)).length >= Math.ceil(qTokens.length * 0.6)
-  }
-
-  let matchedBlocks = qNorm
-    ? unresolvedBlocks.filter((b) => matchesQ(b.head) || matchesQ(b.text))
-    : (unresolvedBlocks.length === 1 ? [unresolvedBlocks[0]] : [])
-
-  let resolvedCount = 0
-  for (const b of matchedBlocks) {
-    for (let k = b.start; k < b.end; k += 1) {
-      lines[k] = scrubUnresolvedMarkers(lines[k])
-    }
-    const first = lines[b.start]
-    const prefixM = /^(\s*(?:[-*]|\d+[.、)])\s+)/.exec(first)
-    const rest = prefixM ? first.slice(prefixM[1].length) : first.trimStart()
-    const cleanRest = rest.replace(/^已确认\s*[:：]\s*/i, '').trim()
-    const hasDecision = cleanDecision && cleanRest.includes(cleanDecision)
-    const suffix = hasDecision ? `（${today}${byNote}）` : `（已定：${cleanDecision}，${today}${byNote}）`
-    lines[b.start] = `${prefixM ? prefixM[1] : ''}已确认：${cleanRest}${suffix}`
-    resolvedCount += 1
-  }
-
-  if (resolvedCount === 0) {
-    const inlineIdx = []
-    let inFence = false
-    for (let i = 0; i < lines.length; i += 1) {
-      if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
-      if (inFence || covered.has(i)) continue
-      const trimmed = lines[i].trim()
-      if (!trimmed || /^\s*(?:>|<!--)/.test(trimmed) || /^---+$/.test(trimmed)) continue
-      if (DECIDED_RE.test(trimmed) && !CLARIFY_INLINE_UNRESOLVED_RE.test(trimmed)) continue
-      if (CLARIFY_INLINE_UNRESOLVED_RE.test(trimmed)) inlineIdx.push(i)
-    }
-    const targets = qNorm ? inlineIdx.filter((idx) => matchesQ(lines[idx])) : (inlineIdx.length === 1 ? inlineIdx : [])
-    for (const idx of targets) {
-      const scrubbed = scrubUnresolvedMarkers(lines[idx])
-      lines[idx] = DECIDED_RE.test(scrubbed)
-        ? `${scrubbed.trimEnd()}（已定：${cleanDecision}）`
-        : `${scrubbed.trimEnd()}（已确认：${cleanDecision}）`
-      resolvedCount += 1
-    }
-  }
-  return resolvedCount
-}
-
-/** 向规划文档追加已拍板澄清记录（可选同时新增 `C<N>` 验收条款）。 */
-export function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user', explicitBy = undefined, criterion = '' }) {
-  if (!file || !decision || !String(decision).trim()) {
-    throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"')
-  }
-  const abs = resolve(repoRoot, file)
-  if (!existsSync(abs)) throw new Error(`找不到文档：${file}`)
-  const raw = readTextSafe(abs)
-  if (raw === undefined) throw new Error(`无法读取文本文件：${file}`)
-
-  const norm = raw.replace(/\r\n/g, '\n')
-  const fmCheck = parseDocFrontmatter(norm)
-  if (String(fmCheck.data?.plan_mode ?? '').trim().toLowerCase() === 'interactive') {
-    const actor = String(explicitBy ?? '').trim().toLowerCase()
-    if (actor !== 'user') {
-      throw Object.assign(
-        new Error('BLOCKED_INTERACTIVE_CLARIFY_USER_REQUIRED: plan_mode=interactive 的澄清确认必须显式传入 --by user，禁止代理自答。'),
-        { code: 'BLOCKED_INTERACTIVE_CLARIFY_USER_REQUIRED', exitCode: EXIT.USAGE },
-      )
-    }
-  }
-  const today = docIsoDate()
-  const byNote = by && String(by).trim() ? ` · ${String(by).trim()}` : ''
-  const qText = question && String(question).trim() ? `${String(question).trim()} -> ` : ''
-  const entry = `- 已确认（${today}${byNote}）：${qText}${String(decision).trim()}`
-
-  const lines = norm.split('\n')
-  const resolvedPendingCount = resolvePendingSectionItems(lines, {
-    question, decision, today, byNote,
-  })
-  const secIdx = lines.findIndex((l) => /^##\s+澄清与补充记录(?:\s|$)/.test(l))
-  if (secIdx >= 0) {
-    let endIdx = lines.length
-    for (let i = secIdx + 1; i < lines.length; i += 1) {
-      if (/^##\s+/.test(lines[i])) { endIdx = i; break }
-    }
-    const existingBody = lines.slice(secIdx + 1, endIdx)
-      .filter((l) => !/^\s*-\s*（本轮无额外澄清补充/.test(l))
-    while (existingBody.length > 0 && !existingBody[existingBody.length - 1].trim()) existingBody.pop()
-    while (existingBody.length > 0 && !existingBody[0].trim()) existingBody.shift()
-    const nextBody = existingBody.length > 0 ? ['', ...existingBody, entry, ''] : ['', entry, '']
-    lines.splice(secIdx + 1, endIdx - secIdx - 1, ...nextBody)
-  } else {
-    const anchorIdx = lines.findIndex((l) => /^##\s+(?:实现说明|完成后的记录|待拍板问题)/.test(l))
-    const insertBlock = ['## 澄清与补充记录', '', entry, '']
-    if (anchorIdx >= 0) lines.splice(anchorIdx, 0, ...insertBlock)
-    else {
-      while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop()
-      lines.push('', ...insertBlock)
-    }
-  }
-  let updatedText = lines.join('\n')
-  if (!updatedText.endsWith('\n')) updatedText += '\n'
-
-  let addedCriterion = null
-  if (criterion && String(criterion).trim()) {
-    let maxN = 0
-    for (const cm of updatedText.matchAll(/^- \[[ xX]\] C(\d+)\b/gm)) {
-      const n = Number(cm[1])
-      if (n > maxN) maxN = n
-    }
-    const nextId = `C${maxN + 1}`
-    const critLine = `- [ ] ${nextId}: ${String(criterion).trim()}`
-    addedCriterion = { id: nextId, line: critLine }
-    const cLines = updatedText.split('\n')
-    let lastCritIdx = -1
-    for (let i = 0; i < cLines.length; i += 1) {
-      if (/^- \[[ xX]\] C\d+\b/.test(cLines[i])) lastCritIdx = i
-    }
-    if (lastCritIdx >= 0) cLines.splice(lastCritIdx + 1, 0, critLine)
-    else cLines.push(critLine)
-    updatedText = cLines.join('\n')
-  }
-
-  writeAtomic(abs, updatedText)
-  const fm = parseDocFrontmatter(updatedText)
-  if (fm.hasFrontmatter) {
-    const docType = detectDocType(posixPath(relative(repoRoot, abs)), updatedText)
-    updateDocFrontmatter(abs, { updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
-  }
-  return { file: posixPath(relative(repoRoot, abs)), entry, addedCriterion, resolvedPendingCount, updated: today }
-}
+export { applyPreInitToDocContent, clarifyDoc }
 
 function parseInitIssueArg(rawIssue) {
   if (rawIssue === undefined || rawIssue === null || rawIssue === '') return null
@@ -468,91 +268,31 @@ function parseInitIssueArg(rawIssue) {
   return nums[0]
 }
 
-function applyPreInitToDocContent(content, preInit, kind, today) {
-  if (!preInit || kind === 'tdd') return content
-  let text = String(content ?? '').replace(/\r\n/g, '\n')
-
-  if (Array.isArray(preInit.decisions) && preInit.decisions.length > 0) {
-    const entries = preInit.decisions.map((d) => `- 已确认（${today} · pre-init）：${d}`)
-    const lines = text.split('\n')
-    const secIdx = lines.findIndex((l) => /^##\s+澄清与补充记录(?:\s|$)/.test(l))
-    if (secIdx >= 0) {
-      let endIdx = lines.length
-      for (let i = secIdx + 1; i < lines.length; i += 1) {
-        if (/^##\s+/.test(lines[i])) { endIdx = i; break }
-      }
-      const existing = lines.slice(secIdx + 1, endIdx).filter((l) => !/^\s*-\s*（本轮无额外澄清补充/.test(l))
-      while (existing.length > 0 && !existing[0].trim()) existing.shift()
-      while (existing.length > 0 && !existing[existing.length - 1].trim()) existing.pop()
-      lines.splice(secIdx + 1, endIdx - secIdx - 1, '', ...existing, ...entries, '')
-      text = lines.join('\n')
-    }
-  }
-
-  if (Array.isArray(preInit.exclusions) && preInit.exclusions.length > 0) {
-    const joined = preInit.exclusions.join('；')
-    if (/^- \*\*(?:本期不做|明确不做|非目标)\*\*\s*[:：]/m.test(text)) {
-      text = text.replace(/^(- \*\*(?:本期不做|明确不做|非目标)\*\*\s*[:：]\s*)(.*)$/m, (_, p, cur) => {
-        const cleanCur = cur.trim()
-        const isPlaceholder = !cleanCur || /^(?:<[^>]+>|<!--[\s\S]*?-->|无|none)$/i.test(cleanCur)
-        return `${p}${isPlaceholder ? joined : `${cleanCur}；${joined}`}`
-      })
-    } else if (/^###\s*明确不做（Non-Goals）/m.test(text)) {
-      text = text.replace(/(^###\s*明确不做（Non-Goals）[^\n]*\n+)([\s\S]*?)(?=^#{2,3}\s|<!-- \/section|$)/m, (_, hdr, body) => {
-        const cleanBody = body.replace(/^-\s*<[^>]+>\s*\n?/gm, '').trim()
-        const bullets = preInit.exclusions.map((e) => `- ${e}`).join('\n')
-        return `${hdr}${cleanBody ? `${cleanBody}\n${bullets}` : bullets}\n\n`
-      })
-    }
-  }
-
-  if (Array.isArray(preInit.anchors) && preInit.anchors.length > 0) {
-    const formatted = preInit.anchors.map((a) => (a.includes('`') ? a : `\`${a}\``)).join('、')
-    if (/^- \*\*(?:影响路径|要改什么)\*\*\s*[:：]/m.test(text)) {
-      text = text.replace(/^(- \*\*(?:影响路径|要改什么)\*\*\s*[:：]\s*)(.*)$/m, (_, p, cur) => {
-        const cleanCur = cur.trim()
-        const isPlaceholder = !cleanCur || /^(?:<[^>]+>|<!--[\s\S]*?-->|待补齐)$/i.test(cleanCur)
-        return `${p}${isPlaceholder ? formatted : `${cleanCur}、${formatted}`}`
-      })
-    } else if (/^###\s*本次要做（In Scope）/m.test(text)) {
-      text = text.replace(/(^###\s*本次要做（In Scope）[^\n]*\n+)([\s\S]*?)(?=^#{2,3}\s|<!-- \/section|$)/m, (_, hdr, body) => {
-        const cleanBody = body.trim()
-        return `${hdr}${cleanBody ? `${cleanBody}\n` : ''}- 讨论锚点：${formatted}\n\n`
-      })
-    }
-  }
-
-  if (Array.isArray(preInit.openQuestions) && preInit.openQuestions.length > 0) {
-    const qLines = preInit.openQuestions.map((q) => `- 待确认：${q}`).join('\n')
-    if (/^##\s+(?:[一二三四五六七八九十\d]+[、.]\s*)?待拍板问题/m.test(text)) {
-      text = text.replace(/(^##\s+(?:[一二三四五六七八九十\d]+[、.]\s*)?待拍板问题[^\n]*\n+)([\s\S]*?)(?=^##\s|<!-- \/section|$)/m, (_, hdr, body) => {
-        const cleaned = body.replace(/^\s*-\s*待确认\s*[:：]\s*无\s*\n?/gm, '').trimEnd()
-        return `${hdr}${cleaned ? `${cleaned}\n` : ''}${qLines}\n\n`
-      })
-    } else if (/^-\s*\*\*待拍板事项\*\*\s*[:：]/m.test(text)) {
-      text = text.replace(/^-\s*\*\*待拍板事项\*\*\s*[:：]\s*无\s*$/m, `- **待拍板事项**：\n${qLines}`)
-    } else if (/^##\s+澄清与补充记录/m.test(text)) {
-      text = text.replace(/^##\s+澄清与补充记录/m, `## 待拍板问题\n\n${qLines}\n\n## 澄清与补充记录`)
-    }
-  }
-
-  return text.endsWith('\n') ? text : `${text}\n`
-}
-
 export async function initDoc({
-  repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
+  repoRoot, mainRoot, gitDir, isGit, type, kind, slug, specSlug = null, title,
   taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
   planMode = null, worktree = false, inPlace = false, multiSpec = false, caseType = null,
+  topic = null, allowOpenDraft = false, scopePaths = [], criteria = [], dependsOn = [],
 }) {
   const effectiveKind = kind ?? type
   if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
     throw new Error(`--kind / --type 必须是 prd、spec、todo、tdd、pair 或 all，收到：${effectiveKind}`)
   }
-  const safeSlug = slugify(slug)
+  const safeSlug = slugify(specSlug || slug)
   const issueNum = parseInitIssueArg(issue)
   const dateTag = docDateTag()
   const today = docIsoDate()
   const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
+
+  const pendingPreInit = effectiveKind !== 'tdd' ? readPreInitState(mainRoot, { topic: topic ?? null }) : null
+  const unresolvedOpen = pendingPreInit?.unresolvedOpen
+    ?? (pendingPreInit?.openQuestions ?? []).map((text, idx) => ({ id: `Q${idx + 1}`, text, status: 'open' }))
+  if (unresolvedOpen.length > 0 && !allowOpenDraft) {
+    throw Object.assign(
+      new Error(`BLOCKED_OPEN_QUESTIONS_UNRESOLVED: 主题 "${pendingPreInit.topicId}" 仍有 ${unresolvedOpen.length} 条未决待拍板问题（${unresolvedOpen.map((o) => `${o.id}: ${o.text}`).join('；')}）。请先通过 doc-plan note --topic "${pendingPreInit.topicId}" --resolve <id> 解决，或显式传入 --allow-open-draft 继续生成草稿。`),
+      { code: 'BLOCKED_OPEN_QUESTIONS_UNRESOLVED', exitCode: EXIT.FACT, details: { topicId: pendingPreInit.topicId, open: unresolvedOpen } },
+    )
+  }
 
   if (effectiveKind !== 'tdd' && !force) {
     const duplicates = findDuplicatePlanDocs(repoRoot, {
@@ -577,7 +317,7 @@ export async function initDoc({
     }
   }
   let effWorktree = Boolean(worktree)
-  if (!effWorktree && !inPlace && isGit && effectiveKind !== 'tdd' && canonicalPath(writeRoot) === canonicalPath(mainRoot)) {
+  if (!effWorktree && !inPlace && !(effectiveKind === 'prd' && multiSpec) && isGit && effectiveKind !== 'tdd' && canonicalPath(writeRoot) === canonicalPath(mainRoot)) {
     const curHead = readHeadFast(resolveGitDirFast(mainRoot), gitDir)
     let curBranch = curHead?.branch ?? null
     if (!curBranch) {
@@ -655,9 +395,9 @@ export async function initDoc({
     planned.push({ kind: k, file: relFile, absFile })
   }
 
-  planMode = planMode ?? resolveInheritedTriagePlanMode(mainRoot, { taskId: effTaskId, slug: safeSlug })
-  const pendingPreInit = effectiveKind !== 'tdd' ? readPreInitState(mainRoot) : null
+  planMode = planMode ?? resolveInheritedTriagePlanMode(mainRoot, { taskId: effTaskId, slug: safeSlug, topic: topic ?? null })
 
+  const openOwnerKind = planned.find((p) => p.kind === 'spec')?.kind ?? planned[0]?.kind ?? null
   const customTemplates = []
   for (const item of planned) {
     const relatedSpecRel = item.kind === 'todo' && relatedSpec
@@ -683,6 +423,7 @@ export async function initDoc({
       content = renderStandardDocTemplate({
         kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
         taskId, issueNum, owner, quickCmd, relatedPrdRel, relatedSpecRel,
+        scopePaths, criteria, dependsOn,
         pruneUnfilled: false, noPrune: Boolean(noPrune), docShape, planMode,
         multiSpec: Boolean(multiSpec && item.kind === 'prd'),
         caseType: Number.isInteger(caseType)
@@ -690,7 +431,7 @@ export async function initDoc({
           : (item.kind === 'todo' && (effectiveKind === 'pair' || effectiveKind === 'all' || Boolean(relatedSpec)) ? 4 : null),
       })
       if (pendingPreInit) {
-        content = applyPreInitToDocContent(content, pendingPreInit, item.kind, today)
+        content = applyPreInitToDocContent(content, pendingPreInit, item.kind, today, { includeOpen: item.kind === openOwnerKind })
       }
     }
     mkdirSync(dirname(item.absFile), { recursive: true })
@@ -698,7 +439,7 @@ export async function initDoc({
   }
 
   const absorbedPreInit = pendingPreInit
-    ? consumePreInitNotes(mainRoot, { taskId: effTaskId ?? safeSlug, slug: safeSlug })
+    ? consumePreInitNotes(mainRoot, { taskId: effTaskId ?? safeSlug, slug: safeSlug, topic: topic ?? pendingPreInit?.topicId ?? null })
     : null
 
   if (planned.length > 1 || relatedSpec || relatedPrd) {
@@ -723,7 +464,7 @@ export async function initDoc({
       if (item.kind !== 'tdd') updateDocFrontmatter(item.absFile, { milestone }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? [] })
     }
   }
-  if (effTaskId && !(effectiveKind === 'prd' && multiSpec)) {
+  if (effTaskId && (effWorktree || !(effectiveKind === 'prd' && multiSpec))) {
     if (isGit) await ensureWorktreesIgnored(mainRoot, gitDir)
     await updateTaskLedger(mainRoot, effTaskId, (cur) => {
       const next = { ...cur }
@@ -765,7 +506,7 @@ export async function initDoc({
     recordPlanningProvenance(mainRoot, {
       docRoot: writeRoot,
       docRels: planned.filter((p) => p.kind !== 'tdd').map((p) => p.file),
-      taskId: effTaskId && !(effectiveKind === 'prd' && multiSpec) ? effTaskId : null,
+      taskId: effTaskId && (effWorktree || !(effectiveKind === 'prd' && multiSpec)) ? effTaskId : null,
     })
   }
   return {
@@ -776,4 +517,23 @@ export async function initDoc({
     planMode: planMode ?? null,
     absorbedPreInit,
   }
+}
+
+/** 按 1:N 切片从已有总控 PRD 拆出独立 SPEC（可选连带 Todo）。 */
+export async function sliceSpec(opts = {}) {
+  const { repoRoot, relatedPrd, specSlug, slug, title } = opts
+  const effectiveSlug = specSlug || slug
+  if (!relatedPrd || !effectiveSlug || !title) {
+    throw new Error('slice 需要 --prd <prdPath>、--spec-slug <slug> 与 --title "<标题>"')
+  }
+  const prdAbs = resolve(repoRoot, relatedPrd)
+  if (!existsSync(prdAbs)) throw new Error(`找不到父 PRD：${relatedPrd}`)
+  const effKind = opts.kind === 'pair' ? 'pair' : 'spec'
+  return initDoc({
+    ...opts,
+    kind: effKind,
+    slug: effectiveSlug,
+    specSlug: effectiveSlug,
+    relatedPrd,
+  })
 }

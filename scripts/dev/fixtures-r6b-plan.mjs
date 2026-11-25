@@ -455,7 +455,7 @@ export function registerR6bPlanCases(cases) {
       }
 
       const initRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
-        'init', '--kind', 'pair', '--slug', 'pre-abs', '--title', 'PreAbsorb', '--owner', 'plan-a', '--in-place', '--json',
+        'init', '--kind', 'pair', '--slug', 'pre-abs', '--title', 'PreAbsorb', '--owner', 'plan-a', '--in-place', '--allow-open-draft', '--json',
       ], { cwd: dir })
       if (initRes.status !== 0) return `init 失败：${initRes.stderr}`
       const initJson = JSON.parse(initRes.stdout)
@@ -466,8 +466,8 @@ export function registerR6bPlanCases(cases) {
       if (!createdSpec.includes('幂等键保留') || !createdSpec.includes('不改老表') || !createdSpec.includes('重试几次?')) {
         return `SPEC 正文未写入 absorbed preInit 内容：\n${createdSpec}`
       }
-      if (readPreInitState(dir) !== null) {
-        return 'initDoc 吸收后未清空 preInit 缓冲'
+      if (readPreInitState(dir, { topic: '对账重构' }) !== null) {
+        return 'initDoc 吸收后未清空目标 topic preInit 缓冲'
       }
 
       // 3. audit 草稿 SPEC 后提示 critique-scope

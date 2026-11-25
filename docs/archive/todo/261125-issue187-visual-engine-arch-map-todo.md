@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: "Zero-Dependency Visual Projection Engine, Architecture Map and S1-S4 Auto-Sync"
-status: active
+status: done
 created: 2026-11-25
 updated: 2026-11-25
 issue: 187
@@ -10,10 +10,10 @@ branch: feat/visual-engine-arch-map
 owner: planner-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-25
 task_id: visual-engine-arch-map
 planned_at: 887adcbe69441de8649d7e3facede8199c3bc2ea
-related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
+related_prd: ../../prd/261125-visual-arch-brief-prd-prd.md
 related_spec: ../specs/261125-issue187-visual-engine-arch-map-spec.md
 depends_on: [feature-map-v2-topology]
 scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs, kit/skills/lib/architecture-map.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/shared.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/lib/exit-codes.mjs, kit/skills/lib/subcommand-meta.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-edit/scripts/edit-gate.mjs, docs/architecture-map.html, scripts/lib/artifact-executors.mjs, scripts/lib/survey-gap-rules.mjs, scripts/survey.mjs, scripts/equip.mjs, scripts/lib/equip-bootstrap.mjs, scripts/review.mjs, scripts/dev/gap-coverage.mjs, .gitattributes, references/survey.md, scripts/dev/injections-data-repo-alignment.mjs, scripts/dev/fixtures-equip.mjs, scripts/dev/fixtures-doc-closure.mjs, scripts/dev/fixtures-visual-engine.mjs, .agents/skills/]
@@ -25,15 +25,15 @@ scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-25` / `2026-11-25` |
 | 分支 / 基线 | `feat/visual-engine-arch-map` @ `887adcb` |
 | 任务编号 | `visual-engine-arch-map` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与策略已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #187 / 未关联 / `docs/specs/261125-issue187-visual-engine-arch-map-spec.md` |
+| 关联 Issue / PR / SPEC | #187 / 未关联 / `docs/archive/specs/261125-issue187-visual-engine-arch-map-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261125-issue187-visual-engine-arch-map-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261125-issue187-visual-engine-arch-map-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -82,9 +82,9 @@ scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（等待本 SPEC 独立 Critique 与 `approve`）
+- **当前状态**：`已完成 (done)`（等待本 SPEC 独立 Critique 与 `approve`）
 - **待拍板事项**：无
-- **下一步第一件事**：切片 1 合并后，对 `docs/specs/261125-issue187-visual-engine-arch-map-spec.md` 完成 Critique 与 `approve` 并启动 `impl`。
+- **下一步第一件事**：切片 1 合并后，对 `docs/archive/specs/261125-issue187-visual-engine-arch-map-spec.md` 完成 Critique 与 `approve` 并启动 `impl`。
 
 ## 澄清与补充记录
 

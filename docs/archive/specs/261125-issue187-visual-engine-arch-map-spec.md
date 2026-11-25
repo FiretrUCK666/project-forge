@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Zero-Dependency Visual Projection Engine, Architecture Map and S1-S4 Auto-Sync"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-25
 updated: 2026-11-25
@@ -11,9 +11,9 @@ branch: feat/visual-engine-arch-map
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r3, round=3, sha=fec91f2550d5, summary=Round 3 PASS: Verified review-pack.mjs (L379,L501) and review-empirical.mjs (L55) in scope_files/C6/Todo, verify-tools.mjs:45 usage line update for render, 6-site UI_VISUAL_EXT_RE parity, review-gates/flow-lifecycle-helpers <=798L headroom, and DAG/subcommand-meta/exit-codes contracts.)"
-related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
+related_prd: ../../prd/261125-visual-arch-brief-prd-prd.md
 related_todo: ../todo/261125-issue187-visual-engine-arch-map-todo.md
 high_risk_paths: [kit/, templates/, .gitattributes]
 task_id: visual-engine-arch-map
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（零依赖视觉引擎、`isUiVisualFile` 策略统一与 S1-S4 接入；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-25` / `2026-11-25` |
 | 分支 / Issue / PR | `feat/visual-engine-arch-map` / #187 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界与策略已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261125-visual-arch-brief-prd-prd.md` / `docs/todo/261125-issue187-visual-engine-arch-map-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261125-visual-arch-brief-prd-prd.md` / `docs/archive/todo/261125-issue187-visual-engine-arch-map-todo.md` |
 
 - **变更一句话**：新增零依赖视觉布局与单文件 HTML 渲染引擎，落地 `docs/architecture-map.html` (new) 读写分离自动同步、`isUiVisualFile`（`static-gates.mjs` + `shared.mjs` 重导出）全仓 6 处统一策略及 `S1-S4` 治理接入。
 

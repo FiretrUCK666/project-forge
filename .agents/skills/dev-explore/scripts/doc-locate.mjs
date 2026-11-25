@@ -110,10 +110,8 @@ export async function runCli(argv = []) {
           ...((result.slices ?? []).map((s) => s?.relPath ?? s?.file).filter(Boolean)),
           ...((result.matches ?? []).map((m) => m?.relPath ?? m?.file).filter(Boolean)),
         ].map((p) => posixPath(p)))]
-        if (anchors.length > 0) {
-          recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors })
-          refreshVisualBriefForTopic({ mainRoot: roots.mainRoot, workRoot: roots.workTreeRoot ?? repoRoot, topicId: cli.opts.topic, anchors })
-        }
+        if (anchors.length > 0) recordTopicAnchors(roots.mainRoot, { topic: cli.opts.topic, anchors })
+        if (anchors.length > 0) refreshVisualBriefForTopic({ mainRoot: roots.mainRoot, workRoot: roots.workTreeRoot ?? repoRoot, topicId: cli.opts.topic, anchors })
       } catch { /* non-fatal on read-only repo */ }
     }
 

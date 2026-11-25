@@ -30,9 +30,9 @@ export const INJECTIONS_CONV_S3 = [
   {
     id: 'I934',
     what: 'doc-plan triage 生成的 SPEC+Todo [NEXT STEP] 漏带 --agent <id>',
-    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
-    from: "                : '创建 SPEC+Todo: node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" init --kind pair --slug <slug> --title \"<标题>\" --agent <id>',",
-    to: "                : '创建 SPEC+Todo: node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" init --kind pair --slug <slug> --title \"<标题>\"',",
+    file: 'kit/skills/dev-plan/scripts/doc-plan-brief.mjs',
+    from: "            : '创建 SPEC+Todo: node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" init --kind pair --slug <slug> --title \"<标题>\" --agent <id>',",
+    to: "            : '创建 SPEC+Todo: node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" init --kind pair --slug <slug> --title \"<标题>\"',",
     expect: 'Conv-S3 C9',
   },
   {

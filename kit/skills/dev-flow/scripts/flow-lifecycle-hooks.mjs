@@ -9,7 +9,8 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
-import { execSafe, execShellCommand, gitDiffNameStatusZ, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { ARCHITECTURE_MAP_REL, isArchitectureMapOptedOut, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
+import { execSafe, execShellCommand, gitDiffNameStatusZ, gitStatusPorcelainZ, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { enforceSlotBoundary, resolveHostMode, resolveNonEmptyActor } from '../../lib/harness-context.mjs'
 import { hasExploredEvidence, rememberPreviousImplementer, verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import {
@@ -414,12 +415,49 @@ export async function runPreVerifyEditGateHook({ mainRoot, implRoot, taskId, led
  * 支持 `--skip-govern` 记账，在 `finalize` 同步核对 `docs/feature-map.json`，
  * 并按 `.agents/forge-hooks.json` 触发声明式自定义钩子或轻量治理检查/复盘。
  */
+export async function checkArchitectureMapSyncOnVerify({ implRoot, mainRoot, ledger, changedFiles = null } = {}) {
+  const root = implRoot || mainRoot
+  if (!root || !existsSync(join(root, FEATURE_MAP_REL))) return { ok: true, skipped: true, reason: 'feature-map-absent' }
+  if (isArchitectureMapOptedOut(root)) return { ok: true, skipped: true, reason: 'opted-out' }
+  let touched = Array.isArray(changedFiles) ? changedFiles.map((f) => posixPath(f).replace(/^\.\//, '')) : null
+  if (!touched) {
+    const baseRef = ledger?.baseSha || ledger?.baseBranch || 'HEAD~1'
+    const diffRes = await gitDiffNameStatusZ(root, [baseRef, 'HEAD'])
+    const statusEntries = (await gitStatusPorcelainZ(root))?.entries ?? []
+    touched = [
+      ...(diffRes?.ok ? (diffRes.entries ?? []).map((e) => posixPath(e.file)) : []),
+      ...statusEntries.map((e) => posixPath(e.file)),
+    ]
+  }
+  const hasHtml = existsSync(join(root, ARCHITECTURE_MAP_REL))
+  const touchesMapFiles = touched.includes(FEATURE_MAP_REL) || touched.includes(ARCHITECTURE_MAP_REL)
+  if (!hasHtml && !touchesMapFiles) {
+    return { ok: true, skipped: true, reason: 'architecture-map-not-activated' }
+  }
+  const syncRes = verifyArchitectureMapSync(root)
+  if (!syncRes.ok) {
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_ARCHITECTURE_MAP_DRIFT',
+      exitCode: EXIT.FACT,
+      message: `${syncRes.message}. Run \`node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render\` to regenerate ${ARCHITECTURE_MAP_REL}.`,
+      relPath: ARCHITECTURE_MAP_REL,
+    }
+  }
+  return { ok: true, skipped: false, relPath: ARCHITECTURE_MAP_REL }
+}
+
 export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId, ledger, opts = {} } = {}) {
   const now = new Date().toISOString()
   if (stage === 'finalize') {
     const fmCheck = await checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger, opts })
     if (!fmCheck.ok) return fmCheck
     if (fmCheck.warning && !opts.json) process.stderr.write(`${fmCheck.warning}\n`)
+  }
+  if (stage === 'verify') {
+    const archCheck = await checkArchitectureMapSyncOnVerify({ implRoot, mainRoot, ledger })
+    if (!archCheck.ok) return archCheck
   }
   const hookCfg = readForgeHooksConfig(mainRoot, implRoot)
   const customCommands = hookCfg ? resolveStageHookCommands(hookCfg.config, stage) : []

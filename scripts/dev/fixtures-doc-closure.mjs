@@ -309,6 +309,7 @@ export function registerIssue50Cases(cases) {
         '- [ ] C2: 完成 `kit-skills` 装配与 `agents-contract` 契约生成',
         '- [ ] C3: 完成 `docs-tdd` 架构文档与 `readme`、`license` 补齐',
         '- [ ] C4: 完成 `ci-check` 最小检查流配置',
+        '- [ ] C5: 完成 `feature-map`（`docs/feature-map.json`）与 `architecture-map`（`docs/architecture-map.html`）索引渲染',
         '',
         '## 背景与非目标', '- 治理项目基线，非目标为重写业务源码。',
         '## 验证与回归范围', '- 运行 `node scripts/review.mjs .` 校验全绿。',

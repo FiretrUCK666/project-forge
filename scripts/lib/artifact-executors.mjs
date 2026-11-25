@@ -93,6 +93,16 @@ export const ARTIFACT_EXECUTORS = Object.freeze({
     command: 'node scripts/equip.mjs <目录> --with-hooks',
     how: '从 templates/githooks-pre-push.sh 写入 .githooks/pre-push（+x）并配局部 core.hooksPath；遇既有 Hook 时 preserve 共存',
   },
+  'feature-map': {
+    mode: 'auto',
+    command: 'node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs sync <目录>',
+    how: '从源码入口与模块边界索引生成 docs/feature-map.json（空白仓或纯文档仓跳过）',
+  },
+  'architecture-map': {
+    mode: 'auto',
+    command: 'node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render <目录>',
+    how: '从 docs/feature-map.json 渲染离线单文件交互式 docs/architecture-map.html（可在 AGENTS.md「取舍」写 no-architecture-html 跳过）',
+  },
 })
 
 /** 不生成新文件的动作：仅 `create` 需要登记执行入口，其余八档明确跳过。 */

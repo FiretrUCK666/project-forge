@@ -116,6 +116,7 @@ export {
   hasBehavioralAssertion,
   isRustLifetimeAt,
   isTestOrFixtureFile,
+  isUiVisualFile,
   LOCKFILE_NAMES,
   matchGlob,
   PACKAGE_LOCKFILES,

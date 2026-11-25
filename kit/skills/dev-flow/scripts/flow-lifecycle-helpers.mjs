@@ -39,7 +39,7 @@ import {
 } from '../../lib/workflow-policy.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
-import { detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { detectGateWeakening, gitDiffRawEntriesAndText, isUiVisualFile, matchGlob } from '../../lib/static-gates.mjs'
 import * as workflowPolicy from '../../lib/workflow-policy.mjs'
 import { getChangedFiles } from './flow-inspect.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
@@ -689,10 +689,11 @@ export async function collectTaskRuntimeSnapshot({
       ])
     : [{ inProgress: false, op: null }, [], []]
   const ownArchived = [ledger?.archivedTodoFile, ledger?.archivedSpecFile, ledger?.archivedPrdFile].filter(Boolean)
+  const policyRoot = exists ? implRoot : mainRoot
   const policy = determineWorkflowPolicy({
     changedFiles, ownArchived, caseType: ledger?.caseType, highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
-    gateWeakeningHits: gateHits, hasRemote: ledger?.role !== 'local-only', hasCiWorkflow: hasRepoCiWorkflow(exists ? implRoot : mainRoot),
-    visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview: effectiveHasDevReview,
+    gateWeakeningHits: gateHits, hasRemote: ledger?.role !== 'local-only', hasCiWorkflow: hasRepoCiWorkflow(policyRoot),
+    visualFilesChanged: changedFiles.filter((f) => isUiVisualFile(f, { repoRoot: policyRoot })), profile, hasDevReview: effectiveHasDevReview, repoRoot: policyRoot,
   })
   const evidence = readVerificationEvidence(effectiveGitDir, ledger?.taskId)
   const evidenceValidation = validateVerificationEvidence({ policy, evidence, headSha, profile })

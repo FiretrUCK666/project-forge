@@ -87,6 +87,7 @@ export const SUBCOMMAND_META = Object.freeze({
       entry('run', true),
       entry('audit', false),
       entry('clean', true),
+      entry('render', true),
     ]),
   }),
   iterate: Object.freeze({

@@ -426,11 +426,15 @@ async function finishAudit({
       || emptyToolDomains.length > 0
       || emptyTestRefDomains.length > 0
       || hotDocSkewModules.length > 0
+      || (verifyToolsAudit?.architectureMap && !verifyToolsAudit.architectureMap.ok && !verifyToolsAudit.architectureMap.optedOut)
     const nextCommands = docGapOrDrift
       ? [
           'node ".agents/skills/dev-explore/scripts/repo-map.mjs"',
           ...((verifyToolsAudit?.zombies?.length || verifyToolsAudit?.staleTools?.length || verifyToolsAudit?.schemaOk === false)
             ? ['node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" audit']
+            : []),
+          ...((verifyToolsAudit?.architectureMap && !verifyToolsAudit.architectureMap.ok && !verifyToolsAudit.architectureMap.optedOut)
+            ? ['node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" render']
             : []),
           ...evDiscovery.markdownDocs.slice(0, 6).map((d) => `node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --file "${d.path}"`),
         ]

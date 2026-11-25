@@ -10,6 +10,7 @@ import { join, posix as pathPosix, resolve } from 'node:path'
 
 import { CODE_EXT_RE, matchGlob } from './git-core.mjs'
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
+import { verifyArchitectureMapHeader } from './feature-map-graph.mjs'
 import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
 import {
   classifyDeclarativeDataFile, classifyOversizedFile, isGeneratedSourceHeader, isGitAttributesGenerated,
@@ -81,10 +82,14 @@ export function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived 
   return false
 }
 
-export function isUiVisualFile(fileRel) {
+export function isUiVisualFile(fileRel, { repoRoot = null } = {}) {
   const p = posixPath(String(fileRel ?? '')).replace(/^\.\//, '')
   if (!p || isTestOrFixtureFile(p)) return false
-  return /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i.test(p)
+  if (p === 'docs/architecture-map.html' && repoRoot) {
+    const check = verifyArchitectureMapHeader(repoRoot, p)
+    if (check.ok) return false
+  }
+  return UI_VISUAL_EXT_RE.test(p)
 }
 
 export function isMetaTestHarness(fileRel, text = '') {

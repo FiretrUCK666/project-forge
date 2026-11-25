@@ -405,7 +405,7 @@ export function verifyArchitectureMapHeader(repoRoot, fileRel = 'docs/architectu
   if (!existsSync(htmlAbs)) {
     return { ok: false, expectedSha, actualSha: null, reason: 'missing-html-file' }
   }
-  const headText = readTextSafe(htmlAbs, 8192) ?? ''
+  const headText = readTextSafe(htmlAbs, 4 * 1024 * 1024) ?? ''
   const firstLine = headText.split('\n')[0]?.trim() ?? ''
   const match = ARCH_HEADER_SHA_RE.exec(firstLine)
   if (!match) {

@@ -18,6 +18,7 @@ import {
 import { readDecisions } from '../../lib/profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
+import { validateFeatureMapTopology } from '../../lib/feature-map-graph.mjs'
 import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 
@@ -227,6 +228,20 @@ export async function checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger
     })
     .filter(isCoreSource)
 
+  if (featureMapUpdated || addedCoreModules.length > 0 || removedCoreModules.length > 0) {
+    const topo = validateFeatureMapTopology(fm.data)
+    if (!topo.ok) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_FEATURE_MAP_TOPOLOGY',
+        exitCode: EXIT.FACT,
+        topologyErrors: topo.errors,
+        cycles: topo.cycles,
+        message: `BLOCKED_FEATURE_MAP_TOPOLOGY: ${FEATURE_MAP_REL} 拓扑校验失败：${topo.errors.slice(0, 3).join('；')}`,
+      }
+    }
+  }
   if ((addedCoreModules.length === 0 && removedCoreModules.length === 0) || featureMapUpdated) {
     return { ok: true, featureMapUpdated, addedCoreModules, removedCoreModules, uncovered: [], staleEntries: [] }
   }
@@ -300,7 +315,30 @@ export async function checkCase2StructuralDriftOnVerify({
     if (!(st.startsWith('A') || st.startsWith('D') || st.startsWith('R') || st === '??')) return false
     return isCoreSource(e.file) || isCoreSource(e.oldFile)
   })
-  if (!hasStructuralCoreChange) return { ok: true, skipped: true, reason: 'no-core-structural-change' }
+  const touchedFeatureMap = [
+    ...committed,
+    ...(Array.isArray(statusEntries) ? statusEntries : []),
+    ...(Array.isArray(changedFiles) ? changedFiles.map((f) => ({ file: f })) : []),
+  ].some((e) => posixPath(e.file ?? '').replace(/^\.\//, '') === FEATURE_MAP_REL)
+  if (!hasStructuralCoreChange && !touchedFeatureMap) return { ok: true, skipped: true, reason: 'no-core-structural-change' }
+  if (!hasStructuralCoreChange && touchedFeatureMap) {
+    const fm = readFeatureMapSafe(root)
+    if (fm.present && fm.valid) {
+      const topo = validateFeatureMapTopology(fm.data)
+      if (!topo.ok) {
+        return {
+          ok: false,
+          blocked: true,
+          code: 'BLOCKED_FEATURE_MAP_TOPOLOGY',
+          exitCode: EXIT.FACT,
+          topologyErrors: topo.errors,
+          cycles: topo.cycles,
+          message: `BLOCKED_FEATURE_MAP_TOPOLOGY: ${FEATURE_MAP_REL} 拓扑校验失败：${topo.errors.slice(0, 3).join('；')}`,
+        }
+      }
+    }
+    return { ok: true, skipped: true, reason: 'feature-map-topology-ok' }
+  }
 
   const fmCheck = await checkFeatureMapSyncOnFinalize({ implRoot: root, mainRoot, ledger, opts, changedEntries: allEntries })
   if (!fmCheck.ok) return fmCheck

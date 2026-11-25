@@ -5,11 +5,12 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
   FEATURE_MAP_REL, detectScratchSolidificationHints, evaluateToolStaleness,
   readFeatureMap, readFeatureMapRaw, readFeatureMapStatus, validateFeatureMap,
+  validateFeatureMapTopology,
 } from '../../lib/feature-map.mjs'
 import {
   COMMON_OUTPUT_DIRS, canonicalPath, gitRun, gitRunBuffer, inspectBranchMergeState,
@@ -264,14 +265,57 @@ export async function auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findin
   }
 }
 
-/** 联动核查 docs/feature-map.json Schema、僵尸脚本与工具过时漂移，供 `govern-audit reconcile` 调用。 */
+const SUGGEST_IMPORT_RE = /(?:^\s*(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?|import\s*\(\s*|require\s*\(\s*)['"](\.\.?\/[^'"]+)['"]/gm
+
+function detectSuggestedCrossFeatureDeps(workRoot, features = []) {
+  const fileOwner = new Map()
+  const declaredDeps = new Map()
+  for (const f of features) {
+    if (!f?.id) continue
+    declaredDeps.set(f.id, new Set(Array.isArray(f.dependsOn) ? f.dependsOn : []))
+    for (const p of [...(f.entrypoints ?? []), ...(f.modules ?? [])]) {
+      const norm = posixPath(p).replace(/^\.\//, '')
+      if (norm && !norm.endsWith('/') && !fileOwner.has(norm)) fileOwner.set(norm, f.id)
+    }
+  }
+  const suggestions = new Map()
+  for (const f of features) {
+    if (!f?.id) continue
+    const decl = declaredDeps.get(f.id)
+    for (const rel of [...(f.entrypoints ?? []), ...(f.modules ?? [])]) {
+      const norm = posixPath(rel).replace(/^\.\//, '')
+      if (!norm || norm.endsWith('/')) continue
+      const txt = readTextSafe(join(workRoot, norm), 128 * 1024)
+      if (!txt) continue
+      for (const m of txt.matchAll(SUGGEST_IMPORT_RE)) {
+        const rawAbs = resolve(dirname(join(workRoot, norm)), m[1].trim())
+        const relFromRoot = relative(resolve(workRoot), rawAbs)
+        if (!relFromRoot || relFromRoot.startsWith('..') || isAbsolute(relFromRoot)) continue
+        const base = posixPath(relFromRoot).replace(/^\/+/, '')
+        const hit = [base, `${base}.mjs`, `${base}.js`, `${base}.ts`, `${base}.tsx`, `${base}/index.mjs`, `${base}/index.js`]
+          .find((c) => fileOwner.has(c))
+        const targetId = hit ? fileOwner.get(hit) : null
+        if (!targetId || targetId === f.id || decl.has(targetId)) continue
+        const key = `${f.id}=>${targetId}`
+        if (!suggestions.has(key)) suggestions.set(key, { from: f.id, to: targetId, evidence: `${norm} -> ${hit}` })
+      }
+    }
+  }
+  return [...suggestions.values()].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
+}
+
+/** 联动核查 docs/feature-map.json Schema、拓扑一致性、僵尸脚本与工具过时漂移，供 `govern-audit reconcile` 调用。 */
 export async function runReconcileVerifyToolsAudit(workRoot, mainRoot, gitDir, findings, addFinding) {
   const st = readFeatureMapStatus(workRoot)
   if (!st.exists) {
-    return { present: false, status: 'missing', schemaOk: true, zombies: [], staleTools: [], solidificationHints: [] }
+    return {
+      present: false, status: 'missing', schemaOk: true, topologyOk: true,
+      topologyErrors: [], suggestedCrossFeatureDeps: [], zombies: [], staleTools: [], solidificationHints: [],
+    }
   }
   const raw = readFeatureMapRaw(workRoot)
   const schema = st.corrupt ? { ok: false, errors: [st.error], warnings: [] } : validateFeatureMap(raw)
+  const topology = !st.corrupt ? validateFeatureMapTopology(raw) : { ok: true, errors: [], warnings: [], cycles: [] }
   const map = !st.corrupt ? (readFeatureMap(workRoot) ?? { version: 1, features: [] }) : { version: 1, features: [] }
 
   if (!schema.ok) {
@@ -282,6 +326,17 @@ export async function runReconcileVerifyToolsAudit(workRoot, mainRoot, gitDir, f
       file: FEATURE_MAP_REL,
       title: `feature-map.json schema error: ${schema.errors[0] ?? 'invalid schema'}`,
       action: 'Run `verify-tools.mjs audit` and fix schema errors in docs/feature-map.json.',
+    })
+  }
+  const suggestedCrossFeatureDeps = !st.corrupt ? detectSuggestedCrossFeatureDeps(workRoot, map.features) : []
+  if (suggestedCrossFeatureDeps.length > 0) {
+    addFinding(findings, {
+      id: 'docs.feature-map-suggested-deps',
+      category: 'docs',
+      severity: 'low',
+      file: FEATURE_MAP_REL,
+      title: `Detected ${suggestedCrossFeatureDeps.length} undeclared cross-feature import(s): ${suggestedCrossFeatureDeps.slice(0, 3).map((d) => `${d.from}->${d.to}`).join(', ')}`,
+      action: 'Consider recording confirmed dependencies in feature-map dependsOn[] (advisory, non-blocking).',
     })
   }
 
@@ -337,12 +392,15 @@ export async function runReconcileVerifyToolsAudit(workRoot, mainRoot, gitDir, f
   }
 
   const solidificationHints = detectScratchSolidificationHints({ gitCommonDir: gitDir, mainRoot })
-  const hasHardIssues = !schema.ok || zombies.length > 0 || staleTools.some((s) => s.riskLevel === 'high')
+  const hasHardIssues = !schema.ok || !topology.ok || zombies.length > 0 || staleTools.some((s) => s.riskLevel === 'high')
   return {
     present: true,
     status: hasHardIssues ? 'FAILED' : (staleTools.length > 0 ? 'WARN' : 'OK'),
     schemaOk: schema.ok,
     schemaErrors: schema.errors,
+    topologyOk: topology.ok,
+    topologyErrors: topology.errors,
+    suggestedCrossFeatureDeps,
     zombies,
     staleTools,
     solidificationHints,

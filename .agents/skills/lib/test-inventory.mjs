@@ -4,18 +4,18 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-govern/govern-tests.mjs 与 dev-iterate/iterate.mjs 共用。
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
-import { basename, dirname, extname, join, posix } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { basename, extname, join, posix } from 'node:path'
 
 import { resolveExecutable } from './exec.mjs'
-import { FEATURE_MAP_REL } from './feature-map.mjs'
-import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
+import { FEATURE_MAP_REL, readFeatureMapSafe, updateFeatureMapTestRefs } from './feature-map.mjs'
+import { posixPath, readJsonSafe, readTextSafe } from './git.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
   checkProcessArtifactFilename, hasBehavioralAssertion, scanStructuralHygiene, stripCodeCommentsLines,
 } from './static-gates.mjs'
 
-export { FEATURE_MAP_REL }
+export { FEATURE_MAP_REL, readFeatureMapSafe, updateFeatureMapTestRefs }
 
 const PRIORITY_SCRIPT_HINTS = ['test', 'spec', 'e2e', 'lint', 'check', 'type', 'build', 'verify', 'ci']
 const JUST_RECIPE_RE = /^@?([A-Za-z_][A-Za-z0-9_-]*)(?:\s+[^:\n]*)?:(?!=)/gm
@@ -275,89 +275,6 @@ export function collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConf
     ciConfigFiles: ciConfigFiles ?? [],
     hasCiConfig: (ciSteps ?? []).length > 0 || (ciConfigFiles ?? []).length > 0,
   }
-}
-
-/** 按标准 JSON Schema 读取 `docs/feature-map.json`，缺失或格式异常时优雅降级不抛错。 */
-export function readFeatureMapSafe(repoRoot) {
-  const abs = join(repoRoot, FEATURE_MAP_REL)
-  if (!existsSync(abs)) {
-    return { present: false, valid: false, path: FEATURE_MAP_REL, data: null, features: [], businessFlows: [] }
-  }
-  const parsed = readJsonSafe(abs)
-  if (!parsed || typeof parsed !== 'object') {
-    return { present: true, valid: false, path: FEATURE_MAP_REL, data: null, features: [], businessFlows: [] }
-  }
-  const features = Array.isArray(parsed.features)
-    ? parsed.features.filter((f) => f && typeof f === 'object')
-    : (Array.isArray(parsed) ? parsed.filter((f) => f && typeof f === 'object') : [])
-  const topFlows = Array.isArray(parsed.businessFlows) ? parsed.businessFlows : []
-  const nestedFlows = features.flatMap((f) => (Array.isArray(f.businessFlows) ? f.businessFlows : []))
-  const businessFlows = [...new Set([...topFlows, ...nestedFlows].filter(Boolean))]
-  return {
-    present: true,
-    valid: true,
-    path: FEATURE_MAP_REL,
-    data: parsed,
-    features,
-    businessFlows,
-  }
-}
-
-/** 将新生成测试路径增量挂回 `docs/feature-map.json` 对应 feature 的 `testRefs`（保留全部既有字段）。 */
-export function updateFeatureMapTestRefs(repoRoot, { featureIds = [], modulePaths = [], testPaths = [] } = {}) {
-  const cleanTests = [...new Set((testPaths ?? []).map((p) => posixPath(p).replace(/^\.\//, '')).filter(Boolean))]
-  if (cleanTests.length === 0) return { updated: false, reason: 'no-test-paths', matchedFeatures: [], addedRefs: [] }
-  const loaded = readFeatureMapSafe(repoRoot)
-  if (!loaded.present) return { updated: false, reason: 'feature-map-absent', matchedFeatures: [], addedRefs: [] }
-  if (!loaded.valid || !loaded.data || !Array.isArray(loaded.data.features)) {
-    return { updated: false, reason: 'feature-map-invalid', matchedFeatures: [], addedRefs: [] }
-  }
-
-  const wantedIds = new Set((featureIds ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))
-  const normMods = (modulePaths ?? []).map((p) => posixPath(p).replace(/^\.\//, '').toLowerCase()).filter(Boolean)
-  const matchedFeatures = []
-  const addedRefs = []
-
-  for (const feat of loaded.data.features) {
-    const fId = String(feat.id ?? feat.name ?? '').trim().toLowerCase()
-    const fFiles = [
-      ...(Array.isArray(feat.entrypoints) ? feat.entrypoints : []),
-      ...(Array.isArray(feat.modules) ? feat.modules : []),
-      ...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []),
-      ...(Array.isArray(feat.files) ? feat.files : []),
-      ...(Array.isArray(feat.paths) ? feat.paths : []),
-      ...(feat.entry ? [feat.entry] : []),
-    ].map((p) => posixPath(p).replace(/^\.\//, '').toLowerCase())
-
-    const byId = fId && wantedIds.has(fId)
-    const byPath = normMods.some((mp) => fFiles.some((ff) => ff === mp || ff.startsWith(`${mp}/`) || mp.startsWith(`${ff}/`) || posix.dirname(ff) === posix.dirname(mp)))
-    if (!byId && !byPath) continue
-
-    const curRefs = Array.isArray(feat.testRefs) ? feat.testRefs.map((r) => posixPath(r)) : []
-    const refSet = new Set(curRefs)
-    let featChanged = false
-    for (const tp of cleanTests) {
-      if (!refSet.has(tp)) {
-        curRefs.push(tp)
-        refSet.add(tp)
-        addedRefs.push(tp)
-        featChanged = true
-      }
-    }
-    if (featChanged) {
-      feat.testRefs = curRefs
-      matchedFeatures.push(feat.id ?? feat.name ?? 'unnamed')
-    }
-  }
-
-  if (matchedFeatures.length === 0) {
-    return { updated: false, reason: 'no-matching-feature-or-already-linked', matchedFeatures: [], addedRefs: [] }
-  }
-
-  const abs = join(repoRoot, FEATURE_MAP_REL)
-  mkdirSync(dirname(abs), { recursive: true })
-  writeJsonAtomic(abs, loaded.data)
-  return { updated: true, path: FEATURE_MAP_REL, matchedFeatures, addedRefs: [...new Set(addedRefs)] }
 }
 
 /** 判定候选测试路径是否会落入 `quick-test` 窄单测范围（用于避免重型/回归测试污染极速迭代）。 */

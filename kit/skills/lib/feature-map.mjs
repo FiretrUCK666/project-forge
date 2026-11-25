@@ -5,9 +5,27 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-explore、dev-verify-tools、dev-review、dev-flow、dev-plan 共用。
  */
 
-import { existsSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { existsSync, mkdirSync } from 'node:fs'
+import { basename, dirname, join, posix } from 'node:path'
 
+import {
+  FORBIDDEN_TRACKED_KEYS,
+  SUPPORTED_FEATURE_MAP_VERSIONS,
+  buildFallbackDomains,
+  computeFeatureMapCanonicalSha256,
+  computeFeatureMapFingerprint,
+  hasFeatureMapV2Signals,
+  isValidFeaturePath,
+  normRelPath,
+  sanitizeDomainEntry,
+  sanitizeFlowEntry,
+  sliceFeatureMapContext,
+  slugifyFeatureId,
+  uniqPaths,
+  uniqStrings,
+  validateFeatureMapTopology,
+  verifyArchitectureMapHeader,
+} from './feature-map-graph.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { isTestOrFixtureFile } from './static-gates.mjs'
 import {
@@ -54,62 +72,27 @@ export {
   writeVerifyCacheEntry,
 }
 
+export {
+  FORBIDDEN_TRACKED_KEYS,
+  SUPPORTED_FEATURE_MAP_VERSIONS,
+  buildFallbackDomains,
+  computeFeatureMapCanonicalSha256,
+  computeFeatureMapFingerprint,
+  sanitizeDomainEntry,
+  sanitizeFlowEntry,
+  sliceFeatureMapContext,
+  slugifyFeatureId,
+  validateFeatureMapTopology,
+  verifyArchitectureMapHeader,
+}
 export const FEATURE_MAP_REL = 'docs/feature-map.json'
 export const FEATURE_MAP_VERSION = 1
 export const VALID_TOOL_KINDS = Object.freeze(['script', 'command', 'e2e', 'smoke', 'probe'])
-export const FORBIDDEN_TRACKED_KEYS = Object.freeze([
-  'symbolHash', 'moduleTreeHash', 'verifiedSha', 'passedAtCommit',
-  'lastVerifiedDate', 'verifiedAt', 'contentHash', 'treeHash', 'symbolsByFile',
+
+const CORE_FEATURE_KEYS = new Set([
+  'id', 'name', 'entrypoints', 'modules', 'businessFlows', 'verificationTools', 'testRefs',
+  'docAnchors', 'domain', 'dependsOn', 'actors', ...FORBIDDEN_TRACKED_KEYS,
 ])
-
-const PATH_WITH_SYMBOL_RE = /^([^\s'"`()<>]+(?:\.[A-Za-z0-9]{1,12}|\/))['"`]?(?:\s+.*|\s*\([^)]*\).*)$/
-
-function normRelPath(p) {
-  let s = posixPath(String(p ?? '').trim()).replace(/^['"`]+/, '')
-  const m = PATH_WITH_SYMBOL_RE.exec(s)
-  if (m && (m[1].includes('/') || /\.[A-Za-z0-9]{1,12}$/.test(m[1]))) {
-    s = m[1]
-  } else {
-    s = s.replace(/['"`]+$/, '')
-  }
-  return s.replace(/^\.\//, '').replace(/^\/+/, '')
-}
-
-function isValidFeaturePath(normPath) {
-  if (!normPath || /\s/.test(normPath)) return false
-  return !normPath.includes('..') && !/[<>*?`'"|]/.test(normPath)
-}
-
-function uniqStrings(arr) {
-  const out = []
-  const seen = new Set()
-  for (const item of Array.isArray(arr) ? arr : []) {
-    const s = String(item ?? '').trim()
-    if (s && !seen.has(s)) { seen.add(s); out.push(s) }
-  }
-  return out
-}
-
-function uniqPaths(arr, { strictFeaturePath = false } = {}) {
-  const out = []
-  const seen = new Set()
-  for (const item of Array.isArray(arr) ? arr : []) {
-    const s = normRelPath(item)
-    if (!s) continue
-    if (strictFeaturePath && !isValidFeaturePath(s)) continue
-    if (!seen.has(s)) { seen.add(s); out.push(s) }
-  }
-  return out
-}
-
-export function slugifyFeatureId(raw) {
-  return String(raw ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64) || 'feature'
-}
 
 export function sanitizeVerificationTool(tool) {
   const id = slugifyFeatureId(tool?.id ?? tool?.scriptPath ?? tool?.command ?? 'tool')
@@ -138,7 +121,18 @@ export function sanitizeFeatureEntry(entry) {
     verificationTools.push(clean)
   }
   const testRefs = uniqPaths(entry?.testRefs, { strictFeaturePath: true })
-  return { id, name, entrypoints, modules, businessFlows, verificationTools, testRefs }
+  const out = { id, name, entrypoints, modules, businessFlows, verificationTools, testRefs }
+  if (Array.isArray(entry?.docAnchors)) out.docAnchors = uniqStrings(entry.docAnchors)
+  if (typeof entry?.domain === 'string' && entry.domain.trim()) out.domain = entry.domain.trim()
+  if (Array.isArray(entry?.dependsOn)) out.dependsOn = uniqStrings(entry.dependsOn)
+  if (Array.isArray(entry?.actors)) out.actors = uniqStrings(entry.actors)
+  if (entry && typeof entry === 'object') {
+    for (const [k, v] of Object.entries(entry)) {
+      if (CORE_FEATURE_KEYS.has(k) || v === undefined) continue
+      out[k] = v
+    }
+  }
+  return out
 }
 
 /** 净化功能地图结构，确保受跟踪 JSON 永不包含局部哈希或手工日期字段。 */
@@ -151,7 +145,30 @@ export function sanitizeFeatureMap(raw) {
     seenIds.add(clean.id)
     features.push(clean)
   }
-  return { version: FEATURE_MAP_VERSION, features }
+  const domains = []
+  const seenDomIds = new Set()
+  for (const item of Array.isArray(raw?.domains) ? raw.domains : []) {
+    const clean = sanitizeDomainEntry(item)
+    if (seenDomIds.has(clean.id)) continue
+    seenDomIds.add(clean.id)
+    domains.push(clean)
+  }
+  const flows = []
+  const seenFlowIds = new Set()
+  for (const item of Array.isArray(raw?.flows) ? raw.flows : []) {
+    const clean = sanitizeFlowEntry(item)
+    if (seenFlowIds.has(clean.id)) continue
+    seenFlowIds.add(clean.id)
+    flows.push(clean)
+  }
+  const isV2 = hasFeatureMapV2Signals({ ...raw, features, domains, flows })
+  if (!isV2) return { version: FEATURE_MAP_VERSION, features }
+  return {
+    version: 2,
+    ...(domains.length > 0 || Array.isArray(raw?.domains) ? { domains } : {}),
+    features,
+    ...(flows.length > 0 || Array.isArray(raw?.flows) ? { flows } : {}),
+  }
 }
 
 /** 严格校验 `docs/feature-map.json` 结构，拦截受跟踪文件内的易变哈希或手工日期字段。 */
@@ -161,8 +178,8 @@ export function validateFeatureMap(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return { ok: false, errors: ['feature-map 根节点必须为 JSON 对象'], warnings }
   }
-  if (raw.version !== FEATURE_MAP_VERSION) {
-    errors.push(`feature-map version 必须为 ${FEATURE_MAP_VERSION}，收到：${String(raw.version)}`)
+  if (!SUPPORTED_FEATURE_MAP_VERSIONS.includes(raw.version)) {
+    errors.push(`feature-map version 必须为 ${SUPPORTED_FEATURE_MAP_VERSIONS.join(' 或 ')}，收到：${String(raw.version)}`)
   }
   for (const key of FORBIDDEN_TRACKED_KEYS) {
     if (Object.prototype.hasOwnProperty.call(raw, key)) {
@@ -217,6 +234,13 @@ export function validateFeatureMap(raw) {
       }
     }
     if (!Array.isArray(f.testRefs)) warnings.push(`feature "${fid || i}" 缺少 testRefs 数组`)
+  }
+  const topo = validateFeatureMapTopology(raw)
+  for (const err of topo.errors) {
+    if (!errors.includes(err)) errors.push(err)
+  }
+  for (const w of topo.warnings) {
+    if (!warnings.includes(w)) warnings.push(w)
   }
   return { ok: errors.length === 0, errors, warnings }
 }
@@ -275,6 +299,9 @@ export function mergeFeatureMapIncremental(existing, discovered) {
     businessFlows: [...f.businessFlows],
     verificationTools: f.verificationTools.map((t) => ({ ...t, triggerHints: [...t.triggerHints] })),
     testRefs: [...f.testRefs],
+    ...(Array.isArray(f.docAnchors) ? { docAnchors: [...f.docAnchors] } : {}),
+    ...(Array.isArray(f.dependsOn) ? { dependsOn: [...f.dependsOn] } : {}),
+    ...(Array.isArray(f.actors) ? { actors: [...f.actors] } : {}),
   }))
 
   let addedFeatures = 0
@@ -295,9 +322,35 @@ export function mergeFeatureMapIncremental(existing, discovered) {
         if (!match.verificationTools.some((x) => x.id === t.id)) { match.verificationTools.push(t); changed = true }
       }
     }
+    if (!match.domain && cand.domain) { match.domain = cand.domain; changed = true }
+    if ((!Array.isArray(match.dependsOn) || match.dependsOn.length === 0) && Array.isArray(cand.dependsOn) && cand.dependsOn.length > 0) {
+      match.dependsOn = [...cand.dependsOn]; changed = true
+    }
+    if ((!Array.isArray(match.actors) || match.actors.length === 0) && Array.isArray(cand.actors) && cand.actors.length > 0) {
+      match.actors = [...cand.actors]; changed = true
+    }
+    if ((!Array.isArray(match.docAnchors) || match.docAnchors.length === 0) && Array.isArray(cand.docAnchors) && cand.docAnchors.length > 0) {
+      match.docAnchors = [...cand.docAnchors]; changed = true
+    }
     if (changed) updatedFeatures += 1
   }
-  return { featureMap: sanitizeFeatureMap({ version: FEATURE_MAP_VERSION, features: merged }), addedFeatures, updatedFeatures }
+
+  const mergedDomains = Array.isArray(base.domains) ? base.domains.map((d) => ({ ...d })) : []
+  for (const dom of Array.isArray(incoming.domains) ? incoming.domains : []) {
+    if (!mergedDomains.some((cur) => cur.id === dom.id)) mergedDomains.push(dom)
+  }
+  const mergedFlows = Array.isArray(base.flows) ? base.flows.map((fl) => ({ ...fl })) : []
+  for (const fl of Array.isArray(incoming.flows) ? incoming.flows : []) {
+    if (!mergedFlows.some((cur) => cur.id === fl.id)) mergedFlows.push(fl)
+  }
+  const hasV2 = base.version === 2 || incoming.version === 2 || mergedDomains.length > 0 || mergedFlows.length > 0
+  const rawMerged = {
+    version: hasV2 ? 2 : FEATURE_MAP_VERSION,
+    ...(hasV2 ? { domains: mergedDomains } : {}),
+    features: merged,
+    ...(hasV2 ? { flows: mergedFlows } : {}),
+  }
+  return { featureMap: sanitizeFeatureMap(rawMerged), addedFeatures, updatedFeatures }
 }
 
 const ECO_BY_EXT = new Map([
@@ -366,13 +419,17 @@ function isRunnableVerifyCommand(cmd) {
 }
 
 /** 从 repo-map 产出增量预填 `docs/feature-map.json`（默认只读，传 `{ write: true }` 才落盘）。 */
-export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false } = {}) {
+export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false, topology = null } = {}) {
   const discovered = []
   const seen = new Set()
   const testFiles = Array.isArray(repoMap?.testFiles) ? repoMap.testFiles : []
   const highRiskGlobs = repoMap?.devProfile?.highRisk ?? []
   const smokeCmd = repoMap?.devProfile?.smokeVerify ?? null
   const flowsList = Array.isArray(repoMap?.businessFlows?.flows) ? repoMap.businessFlows.flows : []
+  const topo = topology ?? repoMap?.featureTopology ?? null
+  const domainByFeature = topo?.domainByFeatureId ?? {}
+  const dependsOnByFeature = topo?.dependsOnByFeatureId ?? {}
+  const discoveredDomains = Array.isArray(topo?.domains) ? topo.domains : []
 
   const addCandidate = ({ id, name, entrypoints, modules, businessFlows, command, testRefs }) => {
     const cleanId = slugifyFeatureId(id)
@@ -387,9 +444,13 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false 
           scriptPath: null, riskLevel: isHigh ? 'high' : 'medium', triggerHints: [cleanId, name].filter(Boolean),
         })]
       : []
+    const domId = domainByFeature[cleanId] ?? null
+    const deps = Array.isArray(dependsOnByFeature[cleanId]) ? dependsOnByFeature[cleanId] : null
     discovered.push(sanitizeFeatureEntry({
       id: cleanId, name: name || cleanId, entrypoints: epList, modules: modList,
       businessFlows: uniqStrings(businessFlows), verificationTools, testRefs: uniqPaths(testRefs),
+      ...(domId ? { domain: domId } : {}),
+      ...(deps ? { dependsOn: deps } : {}),
     }))
   }
 
@@ -435,8 +496,27 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false 
     })
   }
 
+  const finalDomains = discoveredDomains.length > 0
+    ? discoveredDomains
+    : (discovered.length > 0 && (Array.isArray(repoMap?.packages) || Array.isArray(repoMap?.topDirectories))
+        ? buildFallbackDomains(discovered).map((d) => ({ id: d.id, name: d.name }))
+        : [])
+  if (finalDomains.length > 0 && discoveredDomains.length === 0) {
+    const domByFeat = new Map()
+    for (const fd of buildFallbackDomains(discovered)) {
+      for (const fid of fd.featureIds) domByFeat.set(fid, fd.id)
+    }
+    for (const f of discovered) {
+      if (!f.domain && domByFeat.has(f.id)) f.domain = domByFeat.get(f.id)
+    }
+  }
+  const hasV2 = finalDomains.length > 0 || discovered.some((f) => Boolean(f.domain) || (f.dependsOn?.length ?? 0) > 0)
+  const incomingDoc = hasV2
+    ? { version: 2, domains: finalDomains, features: discovered, flows: [] }
+    : { version: FEATURE_MAP_VERSION, features: discovered }
+
   const existing = readFeatureMap(repoRoot)
-  const merged = mergeFeatureMapIncremental(existing, { version: FEATURE_MAP_VERSION, features: discovered })
+  const merged = mergeFeatureMapIncremental(existing, incomingDoc)
   let written = false
   if (write) { writeFeatureMap(repoRoot, merged.featureMap); written = true }
   return { ...merged, existed: Boolean(existing), written, path: FEATURE_MAP_REL }
@@ -540,4 +620,106 @@ export function matchFeatureMapForPaths(repoRoot, paths = [], keywords = []) {
     }
   }
   return { exists: true, corrupt: false, warning: null, matchedFeatures, businessFlows, verificationTools, testRefs }
+}
+
+/**
+ * 按标准 JSON Schema（兼容 v1/v2）无损读取 `docs/feature-map.json`，
+ * 缺失或格式异常时优雅降级不抛错，供 flow/govern/iterate 共用。
+ */
+export function readFeatureMapSafe(repoRoot) {
+  const abs = join(repoRoot, FEATURE_MAP_REL)
+  if (!existsSync(abs)) {
+    return {
+      present: false, valid: false, path: FEATURE_MAP_REL, data: null,
+      version: null, domains: [], features: [], flows: [], businessFlows: [],
+    }
+  }
+  const parsed = readJsonSafe(abs, 4 * 1024 * 1024)
+  if (!parsed || typeof parsed !== 'object') {
+    return {
+      present: true, valid: false, path: FEATURE_MAP_REL, data: null,
+      version: null, domains: [], features: [], flows: [], businessFlows: [],
+    }
+  }
+  const features = Array.isArray(parsed.features)
+    ? parsed.features.filter((f) => f && typeof f === 'object')
+    : (Array.isArray(parsed) ? parsed.filter((f) => f && typeof f === 'object') : [])
+  const domains = Array.isArray(parsed.domains)
+    ? parsed.domains.filter((d) => d && typeof d === 'object')
+    : []
+  const flows = Array.isArray(parsed.flows)
+    ? parsed.flows.filter((fl) => fl && typeof fl === 'object')
+    : []
+  const topFlows = Array.isArray(parsed.businessFlows) ? parsed.businessFlows : []
+  const nestedFlows = features.flatMap((f) => (Array.isArray(f.businessFlows) ? f.businessFlows : []))
+  const businessFlows = [...new Set([...topFlows, ...nestedFlows].filter(Boolean))]
+  const version = parsed.version ?? parsed.schemaVersion ?? (hasFeatureMapV2Signals(parsed) ? 2 : 1)
+  return {
+    present: true,
+    valid: true,
+    path: FEATURE_MAP_REL,
+    data: parsed,
+    version,
+    domains,
+    features,
+    flows,
+    businessFlows,
+  }
+}
+
+/** 将新生成测试路径增量挂回 `docs/feature-map.json` 对应 feature 的 `testRefs`（无损保留 v1/v2 全部既有字段）。 */
+export function updateFeatureMapTestRefs(repoRoot, { featureIds = [], modulePaths = [], testPaths = [] } = {}) {
+  const cleanTests = [...new Set((testPaths ?? []).map((p) => posixPath(p).replace(/^\.\//, '')).filter(Boolean))]
+  if (cleanTests.length === 0) return { updated: false, reason: 'no-test-paths', matchedFeatures: [], addedRefs: [] }
+  const loaded = readFeatureMapSafe(repoRoot)
+  if (!loaded.present) return { updated: false, reason: 'feature-map-absent', matchedFeatures: [], addedRefs: [] }
+  if (!loaded.valid || !loaded.data || !Array.isArray(loaded.data.features)) {
+    return { updated: false, reason: 'feature-map-invalid', matchedFeatures: [], addedRefs: [] }
+  }
+
+  const wantedIds = new Set((featureIds ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))
+  const normMods = (modulePaths ?? []).map((p) => posixPath(p).replace(/^\.\//, '').toLowerCase()).filter(Boolean)
+  const matchedFeatures = []
+  const addedRefs = []
+
+  for (const feat of loaded.data.features) {
+    const fId = String(feat.id ?? feat.name ?? '').trim().toLowerCase()
+    const fFiles = [
+      ...(Array.isArray(feat.entrypoints) ? feat.entrypoints : []),
+      ...(Array.isArray(feat.modules) ? feat.modules : []),
+      ...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []),
+      ...(Array.isArray(feat.files) ? feat.files : []),
+      ...(Array.isArray(feat.paths) ? feat.paths : []),
+      ...(feat.entry ? [feat.entry] : []),
+    ].map((p) => posixPath(p).replace(/^\.\//, '').toLowerCase())
+
+    const byId = fId && wantedIds.has(fId)
+    const byPath = normMods.some((mp) => fFiles.some((ff) => ff === mp || ff.startsWith(`${mp}/`) || mp.startsWith(`${ff}/`) || posix.dirname(ff) === posix.dirname(mp)))
+    if (!byId && !byPath) continue
+
+    const curRefs = Array.isArray(feat.testRefs) ? feat.testRefs.map((r) => posixPath(r)) : []
+    const refSet = new Set(curRefs)
+    let featChanged = false
+    for (const tp of cleanTests) {
+      if (!refSet.has(tp)) {
+        curRefs.push(tp)
+        refSet.add(tp)
+        addedRefs.push(tp)
+        featChanged = true
+      }
+    }
+    if (featChanged) {
+      feat.testRefs = curRefs
+      matchedFeatures.push(feat.id ?? feat.name ?? 'unnamed')
+    }
+  }
+
+  if (matchedFeatures.length === 0) {
+    return { updated: false, reason: 'no-matching-feature-or-already-linked', matchedFeatures: [], addedRefs: [] }
+  }
+
+  const abs = join(repoRoot, FEATURE_MAP_REL)
+  mkdirSync(dirname(abs), { recursive: true })
+  writeJsonAtomic(abs, loaded.data)
+  return { updated: true, path: FEATURE_MAP_REL, matchedFeatures, addedRefs: [...new Set(addedRefs)] }
 }

@@ -117,6 +117,36 @@ export const INJECTIONS_VERIFY_TOOLS = [
     to: '  if (true || !st.corrupt) return { ok: true, status: st }',
     expect: 'StageC C9',
   },
+  {
+    id: 'I208',
+    what: 'FMv2 C1 validateFeatureMapTopology 跳过 dependsOn 环路检测放行循环依赖',
+    file: 'kit/skills/lib/feature-map-graph.mjs',
+    alsoDropIn: ['.agents/skills/lib/feature-map-graph.mjs'],
+    from: '      if (st === 1) {\n        const idx = stack.indexOf(v)',
+    to: '      if (false && st === 1) {\n        const idx = stack.indexOf(v)',
+    expect: 'FMv2 C1',
+    standaloneFixture: 'fixtures-feature-map-v2.mjs',
+  },
+  {
+    id: 'I209',
+    what: 'FMv2 C1 validateFeatureMapTopology 跳过 flows[] FORBIDDEN_TRACKED_KEYS 易变字段扫描',
+    file: 'kit/skills/lib/feature-map-graph.mjs',
+    alsoDropIn: ['.agents/skills/lib/feature-map-graph.mjs'],
+    from: '        scanForbiddenKeysOnObject(fl, `flow "${flId || i}"`, errors)',
+    to: '        if (false) scanForbiddenKeysOnObject(fl, `flow "${flId || i}"`, errors)',
+    expect: 'FMv2 C1',
+    standaloneFixture: 'fixtures-feature-map-v2.mjs',
+  },
+  {
+    id: 'I222',
+    what: 'FMv2 C4 checkFeatureMapSyncOnFinalize 绕过 BLOCKED_FEATURE_MAP_TOPOLOGY 拓扑门禁',
+    file: 'kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs'],
+    from: '  if (featureMapUpdated || addedCoreModules.length > 0 || removedCoreModules.length > 0) {\n    const topo = validateFeatureMapTopology(fm.data)',
+    to: '  if (false && (featureMapUpdated || addedCoreModules.length > 0 || removedCoreModules.length > 0)) {\n    const topo = validateFeatureMapTopology(fm.data)',
+    expect: 'FMv2 C4',
+    standaloneFixture: 'fixtures-feature-map-v2.mjs',
+  },
 ]
 
 function copyRepoForSandbox(srcRoot, dstRoot) {
@@ -150,7 +180,8 @@ if (isMainModule(import.meta.url, process.argv[1])) {
         for (const b of backups) writeFileSync(b.abs, b.orig, 'utf8')
         continue
       }
-      const res = spawnSync(process.execPath, [join(sandbox, 'scripts', 'dev', 'fixtures-verify-tools.mjs')], {
+      const targetFixture = inj.standaloneFixture || 'fixtures-verify-tools.mjs'
+      const res = spawnSync(process.execPath, [join(sandbox, 'scripts', 'dev', targetFixture)], {
         cwd: sandbox,
         encoding: 'utf8',
         timeout: 60000,

@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: "Hierarchical feature-map v2 Topology, Schema Validation and Context Slicing"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-25
 updated: 2026-11-25
-issue: null
+issue: 185
 pr: null
-branch: feat/visual-arch-plan
+branch: feat/feature-map-v2-topology
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r2, round=2, sha=6f2a2a22945a, summary=Round 2 PASS: Verified test-inventory.mjs (791L) extraction into feature-map.mjs, formatContextBriefLines explicit caps distinct from budgetLines=48, verify-tools-audit.mjs:178 handleClean fix, BLOCKED_FEATURE_MAP_TOPOLOGY single-tier EXIT.FACT(3), and C1-C4 alignment.)"
-related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
-related_todo: ../todo/261125-feature-map-v2-topology-todo.md
+related_prd: ../../prd/261125-visual-arch-brief-prd-prd.md
+related_todo: ../todo/261125-issue185-feature-map-v2-topology-todo.md
 high_risk_paths: [kit/]
 task_id: feature-map-v2-topology
 depends_on: []
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/feature-map-graph.mjs, kit/skills/lib/feature-map.m
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（Schema v2 扩展、拓扑校验门禁与跨技能上下文切片；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-25` / `2026-11-25` |
-| 分支 / Issue / PR | `feat/visual-arch-plan` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/feature-map-v2-topology` / #185 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界与契约已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261125-visual-arch-brief-prd-prd.md` / `../todo/261125-feature-map-v2-topology-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261125-visual-arch-brief-prd-prd.md` / `docs/archive/todo/261125-issue185-feature-map-v2-topology-todo.md` |
 
 - **变更一句话**：将 `docs/feature-map.json` 升级至向后兼容的层次拓扑 v2（`domains[]`/`domain`/`dependsOn[]`/`actors[]`/`flows[]`），修复 `docAnchors[]` 清洗丢失、`verify-tools` 重复预填与 `handleClean` 剥除扩展字段缺陷，并将 `test-inventory.mjs`（792 行）读写逻辑迁入单源核心。
 
@@ -133,10 +133,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `kit/skills/lib/feature-map-graph.mjs` (new)（叶子模块，仅依赖 `node:*` 与 `kit/skills/lib/git-core.mjs`）与 `kit/skills/lib/feature-map.mjs` 支持 `[1, 2]` 版本、`domains[]`/`domain`/`dependsOn[]`/`actors[]`/`docAnchors[]`/`flows[]`、DFS 无环与悬空引用校验、三层与 `domains`/`flows` 的 `FORBIDDEN_TRACKED_KEYS` 扫描（保留 `feature-map.mjs` L203-204 字面量）、`computeFeatureMapCanonicalSha256`、`buildFallbackDomains`、`sliceFeatureMapContext`，修复 `sanitizeFeatureEntry` 丢失 `docAnchors[]` 缺陷，并将 `test-inventory.mjs` 的 `readFeatureMapSafe`/`updateFeatureMapTestRefs` 迁入 `feature-map.mjs` 仅留薄重导出（`test-inventory.mjs <= 798` 行），经 `node scripts/dev/fixtures.mjs` 验证通过。
-- [ ] C2: `kit/skills/dev-explore/scripts/repo-map.mjs` 与 `repo-map-helpers.mjs` 确定性推断 Layer-1 `domains[]` 与无环 `dependsOn[]`（不覆盖已有手工值）；`kit/skills/dev-verify-tools/scripts/verify-tools.mjs` 修复 L163-164 重复调用 `prefillFeatureMapFromRepoMap`，`verify-tools-audit.mjs` 修复 L178 `handleClean` 丢弃 `domains[]`/`flows[]`/`version` 缺陷并报错拓扑缺陷，经 `node scripts/dev/fixtures.mjs` 验证通过。
-- [ ] C3: `kit/skills/lib/context-brief.mjs`、`kit/skills/lib/handoff-package.mjs` 与 `kit/skills/dev-review/scripts/review-context.mjs` 保持 `locateTopSlicesForPaths` `budgetLines = 48`（L170），并在 `formatContextBriefLines`（L333）使用 `maxDomains`/`maxNeighbors`/`maxFlows` 上限及全局单一 `"contextBrief"` 契约按角色权重注入渲染 `domainSummary`、1-hop 紧凑上下游与 `matchedFlows`，经 `node scripts/dev/fixtures.mjs` 验证通过。
-- [ ] C4: `kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs`（含 `exit-codes.mjs` 单一 `EXIT.FACT` 档位 `BLOCKED_FEATURE_MAP_TOPOLOGY`，满足 `exit-code-parity.mjs`）、`kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs`（拓扑对拍 + 非阻断 `suggestedCrossFeatureDeps`）与 `kit/skills/dev-iterate/scripts/iterate.mjs`（抽离 `iterate-plan.mjs` (new) 保持 `<= 790` 行，跨 feature `flows[]` 盲区）完成集成并执行 `node scripts/equip.mjs .`；`scripts/dev/fixtures-feature-map-v2.mjs` (new)、`scripts/dev/injections-data-verify-tools.mjs`、`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全量通过。
+- [x] C1: `kit/skills/lib/feature-map-graph.mjs` (new)（叶子模块，仅依赖 `node:*` 与 `kit/skills/lib/git-core.mjs`）与 `kit/skills/lib/feature-map.mjs` 支持 `[1, 2]` 版本、`domains[]`/`domain`/`dependsOn[]`/`actors[]`/`docAnchors[]`/`flows[]`、DFS 无环与悬空引用校验、三层与 `domains`/`flows` 的 `FORBIDDEN_TRACKED_KEYS` 扫描（保留 `feature-map.mjs` L203-204 字面量）、`computeFeatureMapCanonicalSha256`、`buildFallbackDomains`、`sliceFeatureMapContext`，修复 `sanitizeFeatureEntry` 丢失 `docAnchors[]` 缺陷，并将 `test-inventory.mjs` 的 `readFeatureMapSafe`/`updateFeatureMapTestRefs` 迁入 `feature-map.mjs` 仅留薄重导出（`test-inventory.mjs <= 798` 行），经 `node scripts/dev/fixtures.mjs` 验证通过。
+- [x] C2: `kit/skills/dev-explore/scripts/repo-map.mjs` 与 `repo-map-helpers.mjs` 确定性推断 Layer-1 `domains[]` 与无环 `dependsOn[]`（不覆盖已有手工值）；`kit/skills/dev-verify-tools/scripts/verify-tools.mjs` 修复 L163-164 重复调用 `prefillFeatureMapFromRepoMap`，`verify-tools-audit.mjs` 修复 L178 `handleClean` 丢弃 `domains[]`/`flows[]`/`version` 缺陷并报错拓扑缺陷，经 `node scripts/dev/fixtures.mjs` 验证通过。
+- [x] C3: `kit/skills/lib/context-brief.mjs`、`kit/skills/lib/handoff-package.mjs` 与 `kit/skills/dev-review/scripts/review-context.mjs` 保持 `locateTopSlicesForPaths` `budgetLines = 48`（L170），并在 `formatContextBriefLines`（L333）使用 `maxDomains`/`maxNeighbors`/`maxFlows` 上限及全局单一 `"contextBrief"` 契约按角色权重注入渲染 `domainSummary`、1-hop 紧凑上下游与 `matchedFlows`，经 `node scripts/dev/fixtures.mjs` 验证通过。
+- [x] C4: `kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs`（含 `exit-codes.mjs` 单一 `EXIT.FACT` 档位 `BLOCKED_FEATURE_MAP_TOPOLOGY`，满足 `exit-code-parity.mjs`）、`kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs`（拓扑对拍 + 非阻断 `suggestedCrossFeatureDeps`）与 `kit/skills/dev-iterate/scripts/iterate.mjs`（抽离 `iterate-plan.mjs` (new) 保持 `<= 790` 行，跨 feature `flows[]` 盲区）完成集成并执行 `node scripts/equip.mjs .`；`scripts/dev/fixtures-feature-map-v2.mjs` (new)、`scripts/dev/injections-data-verify-tools.mjs`、`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全量通过。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -155,6 +155,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：新增纯叶子图模块 `kit/skills/lib/feature-map-graph.mjs`（仅依赖 `node:*` 与 `git-core.mjs`），升级 `feature-map.mjs` 支持 `[1, 2]` 版本、保留 `docAnchors[]` 与 L203-204 注入锚点并承接 `test-inventory.mjs` 的 `readFeatureMapSafe`/`updateFeatureMapTestRefs`（`test-inventory.mjs` 降至 708 行）；`repo-map*.mjs` 与 `verify-tools*.mjs` 完成 Layer-1 拓扑推导、去重 `prefillFeatureMapFromRepoMap` 与 `handleClean` 无损保 v2；`context-brief.mjs`/`handoff-package.mjs`/`review-context.mjs` 接入角色加权分层切片；`flow-lifecycle-hooks.mjs`/`exit-codes.mjs`/`govern-checks-hygiene.mjs`/`iterate.mjs`+`iterate-plan.mjs` 完成门禁、建议依赖与跨流盲区集成。
+- **与草案的差异**：同步将新增核心模块 `kit/skills/lib/feature-map-graph.mjs`、`kit/skills/dev-iterate/scripts/iterate-plan.mjs` 及 `scripts/dev/fixtures-feature-map-v2.mjs` 登记入本仓 `docs/feature-map.json`（保持 `version: 1`），满足 `checkFeatureMapSyncOnFinalize` 覆盖门禁。
+- **关联同步文件**：`.agents/skills/`（含 `.pf-manifest.json`）、`docs/feature-map.json`、`scripts/dev/fixtures-feature-map-v2.mjs`、`scripts/dev/injections-data-verify-tools.mjs`。

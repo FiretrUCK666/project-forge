@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Hierarchical feature-map v2 Topology, Schema Validation and Context Slicing"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-25
 updated: 2026-11-25
@@ -11,9 +11,9 @@ branch: feat/feature-map-v2-topology
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r2, round=2, sha=6f2a2a22945a, summary=Round 2 PASS: Verified test-inventory.mjs (791L) extraction into feature-map.mjs, formatContextBriefLines explicit caps distinct from budgetLines=48, verify-tools-audit.mjs:178 handleClean fix, BLOCKED_FEATURE_MAP_TOPOLOGY single-tier EXIT.FACT(3), and C1-C4 alignment.)"
-related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
+related_prd: ../../prd/261125-visual-arch-brief-prd-prd.md
 related_todo: ../todo/261125-issue185-feature-map-v2-topology-todo.md
 high_risk_paths: [kit/]
 task_id: feature-map-v2-topology
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/feature-map-graph.mjs, kit/skills/lib/feature-map.m
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（Schema v2 扩展、拓扑校验门禁与跨技能上下文切片；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-25` / `2026-11-25` |
 | 分支 / Issue / PR | `feat/feature-map-v2-topology` / #185 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界与契约已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261125-visual-arch-brief-prd-prd.md` / `docs/todo/261125-issue185-feature-map-v2-topology-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261125-visual-arch-brief-prd-prd.md` / `docs/archive/todo/261125-issue185-feature-map-v2-topology-todo.md` |
 
 - **变更一句话**：将 `docs/feature-map.json` 升级至向后兼容的层次拓扑 v2（`domains[]`/`domain`/`dependsOn[]`/`actors[]`/`flows[]`），修复 `docAnchors[]` 清洗丢失、`verify-tools` 重复预填与 `handleClean` 剥除扩展字段缺陷，并将 `test-inventory.mjs`（792 行）读写逻辑迁入单源核心。
 

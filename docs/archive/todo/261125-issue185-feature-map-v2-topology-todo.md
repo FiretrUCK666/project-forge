@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: "Hierarchical feature-map v2 Topology, Schema Validation and Context Slicing"
-status: active
+status: done
 created: 2026-11-25
 updated: 2026-11-25
 issue: 185
@@ -10,10 +10,10 @@ branch: feat/feature-map-v2-topology
 owner: planner-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-25
 task_id: feature-map-v2-topology
 planned_at: 887adcbe69441de8649d7e3facede8199c3bc2ea
-related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
+related_prd: ../../prd/261125-visual-arch-brief-prd-prd.md
 related_spec: ../specs/261125-issue185-feature-map-v2-topology-spec.md
 depends_on: []
 scope_files: [kit/skills/lib/feature-map-graph.mjs, kit/skills/lib/feature-map.mjs, kit/skills/lib/test-inventory.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-explore/scripts/repo-map-helpers.mjs, kit/skills/lib/context-brief.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/dev-review/scripts/review-context.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs, kit/skills/dev-iterate/scripts/iterate.mjs, kit/skills/dev-iterate/scripts/iterate-plan.mjs, kit/skills/lib/exit-codes.mjs, .agents/skills/, scripts/dev/fixtures-feature-map-v2.mjs, scripts/dev/injections-data-verify-tools.mjs]
@@ -25,15 +25,15 @@ scope_files: [kit/skills/lib/feature-map-graph.mjs, kit/skills/lib/feature-map.m
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-25` / `2026-11-25` |
 | 分支 / 基线 | `feat/feature-map-v2-topology` @ `887adcb` |
 | 任务编号 | `feature-map-v2-topology` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与契约已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #185 / 未关联 / `docs/specs/261125-issue185-feature-map-v2-topology-spec.md` |
+| 关联 Issue / PR / SPEC | #185 / 未关联 / `docs/archive/specs/261125-issue185-feature-map-v2-topology-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261125-issue185-feature-map-v2-topology-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261125-issue185-feature-map-v2-topology-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -81,7 +81,7 @@ scope_files: [kit/skills/lib/feature-map-graph.mjs, kit/skills/lib/feature-map.m
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（等待总控 PRD 与本 SPEC 独立 Critique 及 `approve`）
+- **当前状态**：`已完成 (done)`（等待总控 PRD 与本 SPEC 独立 Critique 及 `approve`）
 - **待拍板事项**：无
 - **下一步第一件事**：完成总控 PRD 与本切片独立 Critique 后运行 `doc-plan.mjs approve` 再建 `impl` 任务启动编码。
 

@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: "Living Visual Brief Engine, Host-Neutral Prototype Mounting and Self-Dogfooding"
-status: active
+status: done
 created: 2026-11-25
 updated: 2026-11-25
 issue: 189
@@ -10,7 +10,7 @@ branch: feat/living-brief-and-dogfood
 owner: planner-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-25
 task_id: living-brief-and-dogfood
 planned_at: 887adcbe69441de8649d7e3facede8199c3bc2ea
 related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
@@ -25,15 +25,15 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-25` / `2026-11-25` |
 | 分支 / 基线 | `feat/living-brief-and-dogfood` @ `887adcb` |
 | 任务编号 | `living-brief-and-dogfood` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与预算已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #189 / 未关联 / `docs/specs/261125-issue189-living-brief-and-dogfood-spec.md` |
+| 关联 Issue / PR / SPEC | #189 / 未关联 / `docs/archive/specs/261125-issue189-living-brief-and-dogfood-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261125-issue189-living-brief-and-dogfood-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261125-issue189-living-brief-and-dogfood-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -81,7 +81,7 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，无遗留`
+- **当前状态**：`已完成 (done)`
 - **待拍板事项**：无
 - **下一步第一件事**：归档并提交 PR，移交独立审查。
 

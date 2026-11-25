@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: "Hierarchical feature-map v2, Visual Engine and Living Brief"
-status: active
+status: done
 created: 2026-11-25
 updated: 2026-11-25
 issue: null
@@ -20,7 +20,7 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-25` / `2026-11-25` |
 | 关联 Issue / PR | 未关联 / 未关联 |
 | 提出方 / 负责人 | planner-arch |

@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Living Visual Brief Engine, Host-Neutral Prototype Mounting and Self-Dogfooding"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-25
 updated: 2026-11-25
@@ -11,7 +11,7 @@ branch: feat/living-brief-and-dogfood
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-r3, round=3, sha=254bd4bd7aa8, summary=Round 3 PASS: Verified --open-browser rename eliminates doc-plan.mjs:153 multiFlags collision, all brief/prototype flags registered+declared in printHelp()+read in doc-plan-brief.mjs (cli-parity scope + DARK_BASELINE), doc-plan.mjs <790L extraction, and doc/skill byte budgets.)"
 related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
 related_todo: ../todo/261125-issue189-living-brief-and-dogfood-todo.md
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/visual-brief.mjs, kit/skills/dev-plan/scripts/doc-p
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（仓外活需求简报状态机、宿主中立原型挂载、预算内文档同步与本仓自举；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-25` / `2026-11-25` |
 | 分支 / Issue / PR | `feat/living-brief-and-dogfood` / #189 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界、预算与自举标准已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261125-visual-arch-brief-prd-prd.md` / `docs/todo/261125-issue189-living-brief-and-dogfood-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261125-visual-arch-brief-prd-prd.md` / `docs/archive/todo/261125-issue189-living-brief-and-dogfood-todo.md` |
 
 - **变更一句话**：落地仓外单源实时投影的 Living Visual Brief 引擎与宿主中立 UI 原型挂载，强制瘦身 `doc-plan.mjs`（`796 -> < 790` 行）并严守预算同步契约、技能、TDD 与双语 README，完成 `project-forge` 自身 v2 架构图升级与真实浏览器视觉实证。
 

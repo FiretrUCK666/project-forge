@@ -103,6 +103,8 @@ const BASE_GITATTRIBUTES = [
   '*.cmd text eol=crlf',
   '*.ps1 text eol=crlf',
   '',
+  'docs/architecture-map.html linguist-generated=true',
+  '',
   '*.png binary',
   '*.jpg binary',
   '*.jpeg binary',

@@ -15,7 +15,7 @@ import { validateE2eEvidenceText } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, unescapeGitPath, writeJsonAtomic } from './git.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, resolveTierCommand } from './profile.mjs'
-import { GATE_WORKFLOW_FILE_RE, CODE_EXT_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
+import { GATE_WORKFLOW_FILE_RE, CODE_EXT_RE, LOCKFILE_NAMES, TEST_FILE_RE, isUiVisualFile, matchGlob } from './static-gates.mjs'
 import {
   evaluateNextState,
   isEquivalentConcurrentCommand,
@@ -163,6 +163,7 @@ export function determineWorkflowPolicy({
   diffBytes = 0,
   profile = null,
   hasDevReview = true,
+  repoRoot = null,
 } = {}) {
   const files = [...new Set((Array.isArray(changedFiles) ? changedFiles : []).map(normRel).filter(Boolean))].sort()
   const ownSet = new Set([...(ownArchived ?? [])].map(normRel).filter(Boolean))
@@ -171,7 +172,7 @@ export function determineWorkflowPolicy({
   const gwHits = Array.isArray(gateWeakeningHits) ? gateWeakeningHits : []
   const visualSet = new Set([
     ...(Array.isArray(visualFilesChanged) ? visualFilesChanged : []).map(normRel).filter(Boolean),
-    ...files.filter((f) => UI_VISUAL_EXT_RE.test(f)),
+    ...files.filter((f) => isUiVisualFile(f, { repoRoot })),
   ])
   const effectiveVisual = [...visualSet].sort()
 

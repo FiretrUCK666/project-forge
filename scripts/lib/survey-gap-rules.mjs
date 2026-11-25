@@ -169,5 +169,14 @@ export const GAP_RULES = [
     text: '受管 .agents/skills/ 清单损坏或存在未登记墓碑的缺失文件 —— 运行 equip.mjs 将登记 v3 删除墓碑（不写回用户删掉的文件）；清单损坏需修复，未经人点头严禁自动执行 --restore',
     review: 'kit.drifted',
   },
+  {
+    id: 'docs.architecture-map-drift',
+    when: (f) => Boolean(f.docs?.featureMap)
+      && !(f.decisions && 'no-architecture-html' in f.decisions)
+      && Boolean(f.docs?.architectureMap)
+      && f.docs?.architectureMapSync?.ok === false,
+    text: '`docs/architecture-map.html` 与 `docs/feature-map.json` 存在漂移或签名不匹配 —— 运行 `verify-tools.mjs render` 重新生成（或在「取舍」写 `no-architecture-html`）',
+    review: 'docs.architecture-map',
+  },
 ]
 

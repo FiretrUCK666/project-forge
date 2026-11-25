@@ -6,10 +6,11 @@
  *   - `sync`：基于 repo-map 增量预填/刷新 `docs/feature-map.json`（保留用户手写条目）；
  *   - `create`：仓外 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 试制，经 `edit-gate` 与实跑通过后沉淀登记地图与基线；
  *   - `run`：按变更文件/功能/工具 ID 反查，执行免手工日期过时校验与低/中/高三级风险分派，透传任务参数实跑并刷新基线；
- *   - `audit` / `clean`：校验 Schema、僵尸脚本/模块、符号漂移、核心盲区、跨 >=2 PR 固化提示及安全销毁过期 `scratch/` 残留。
+ *   - `audit` / `clean`：校验 Schema、僵尸脚本/模块、符号漂移、核心盲区、跨 >=2 PR 固化提示及安全销毁过期 `scratch/` 残留；
+ *   - `render`：基于 `docs/feature-map.json` 生成或校验（`--check`）离线交互式 `docs/architecture-map.html`。
  *
  * 子命令：
- *   sync | create | run | audit | clean
+ *   sync | create | run | audit | clean | render
  */
 
 import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -17,6 +18,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
+import {
+  ARCHITECTURE_MAP_REL, renderArchitectureMapFromRepo, verifyArchitectureMapSync,
+} from '../../lib/architecture-map.mjs'
 import {
   FEATURE_MAP_REL, VALID_RISK_LEVELS, VALID_TOOL_KINDS,
   computeFeatureFingerprint, ensureTaskScratchDir, evaluateToolStaleness,
@@ -42,7 +46,7 @@ const SUBCOMMANDS = subcommandNamesFor('verify-tools')
 
 function printHelp() {
   process.stdout.write([
-    '用法：node verify-tools.mjs <sync|create|run|audit|clean> [dir] [options]',
+    '用法：node verify-tools.mjs <sync|create|run|audit|clean|render> [dir] [options]',
     '',
     'Subcommands:',
     '  sync    Incrementally prefill/refresh docs/feature-map.json from repo-map (preserves custom entries)',
@@ -50,6 +54,7 @@ function printHelp() {
     '  run     Reverse-lookup tools for changed files/feature, run date-free stale check, execute & update cache',
     '  audit   Check schema, zombie refs, stale drift, blind spots, >=2 PR scratch hints & orphan scratch dirs',
     '  clean   Preview or (--confirm) remove zombie feature-map refs and closed-task scratch dirs',
+    '  render  Render self-contained docs/architecture-map.html from docs/feature-map.json (--check verifies sync)',
     '',
     'Options:',
     '  --dir <path>                 Repository directory',
@@ -85,6 +90,8 @@ function printHelp() {
     '  --confirm                    Confirm destructive cleanup',
     '  --prune-zombies              Remove zombie feature-map refs during clean',
     '  --prune-scratch              Remove closed-task scratch dirs during clean',
+    '  --check                      Verify docs/architecture-map.html matches docs/feature-map.json without writing',
+    '  --out <path>                 Custom relative output path for render (default docs/architecture-map.html)',
     '  --json                       Emit machine-readable JSON',
     '  --help                       Show help',
     '',
@@ -162,6 +169,7 @@ export async function handleSync(opts, roots) {
   }
   const map = await generateRepoMap(workRoot, { writeFeatureMap: !opts['dry-run'] })
   const res = map.featureMapSync ?? prefillFeatureMapFromRepoMap(workRoot, map, { write: !opts['dry-run'] })
+  const archRes = !opts['dry-run'] ? renderArchitectureMapFromRepo(workRoot) : null
   const payload = {
     ok: true,
     action: opts['dry-run'] ? 'sync-dry-run' : 'synced',
@@ -172,6 +180,7 @@ export async function handleSync(opts, roots) {
     addedFeatures: res.addedFeatures,
     updatedFeatures: res.updatedFeatures,
     featureMap: res.featureMap,
+    ...(archRes ? { architectureMap: { relPath: archRes.relPath, written: archRes.written, optedOut: Boolean(archRes.optedOut), bytes: archRes.bytes ?? 0 } } : {}),
   }
   emitOut(opts, payload, [
     `[verify-tools sync] ${FEATURE_MAP_REL}: features=${payload.featureCount} (added=${res.addedFeatures}, updated=${res.updatedFeatures}, written=${res.written})`,
@@ -377,6 +386,7 @@ export async function handleCreate(opts, roots) {
   }
 
   writeFeatureMap(workRoot, { ...existing, features: nextFeatures })
+  const archRes = renderArchitectureMapFromRepo(workRoot)
   const headSha = await resolveCurrentHead(workRoot)
   const fp = await computeFeatureFingerprint(workRoot, feat, { tool: toolDef })
   const cacheRes = writeVerifyCacheEntry(roots.gitDir, roots.mainRoot, toolDef.id, {
@@ -398,6 +408,7 @@ export async function handleCreate(opts, roots) {
     editGatePassed: editGateRes ? editGateRes.ok : null,
     runOutcome,
     featureMapPath: FEATURE_MAP_REL,
+    architectureMap: { relPath: archRes.relPath, written: Boolean(archRes.written), optedOut: Boolean(archRes.optedOut) },
     cachePath: cacheRes.path,
     baseline: cacheRes.entry,
   }
@@ -680,6 +691,27 @@ export async function handleRun(opts, roots) {
   return { exitCode, ...payload }
 }
 
+export async function handleRender(opts, roots) {
+  const workRoot = roots.workTreeRoot
+  const outRel = typeof opts.out === 'string' && opts.out.trim() ? opts.out.trim() : ARCHITECTURE_MAP_REL
+  if (opts.check) {
+    const checkRes = verifyArchitectureMapSync(workRoot, { outRel })
+    emitOut(opts, checkRes, [
+      checkRes.ok
+        ? `[verify-tools render --check] OK (${checkRes.reason}): ${checkRes.relPath}`
+        : `[verify-tools render --check] DRIFT (${checkRes.code}): ${checkRes.message}`,
+    ])
+    return { exitCode: checkRes.ok ? EXIT.OK : (checkRes.exitCode ?? EXIT.FACT), ...checkRes }
+  }
+  const res = renderArchitectureMapFromRepo(workRoot, { outRel, write: true })
+  emitOut(opts, res, [
+    res.ok
+      ? `[verify-tools render] ${res.optedOut ? 'opted-out (no-architecture-html)' : `${res.relPath} (${res.bytes} bytes, written=${res.written})`}`
+      : `[verify-tools render] FAILED: ${res.message}`,
+  ])
+  return { exitCode: res.ok ? EXIT.OK : (res.exitCode ?? EXIT.FACT), ...res }
+}
+
 async function main(argv = process.argv.slice(2)) {
   if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
     printHelp()
@@ -691,11 +723,11 @@ async function main(argv = process.argv.slice(2)) {
       subcommands: SUBCOMMANDS,
       positionalDir: 'auto',
       booleanFlags: [
-        'dry-run', 'draft-only', 'promote', 'apply', 'skip-run',
+        'dry-run', 'draft-only', 'promote', 'apply', 'skip-run', 'check',
         'changed', 'stale', 'refresh-baseline', 'allow-medium-fallback', 'confirm', 'prune-zombies', 'prune-scratch',
       ],
       valueFlags: [
-        'feature', 'name', 'tool', 'tool-id', 'kind', 'command', 'script',
+        'feature', 'name', 'tool', 'tool-id', 'kind', 'command', 'script', 'out',
         'from-scratch', 'draft-file', 'draft-content', 'task', 'risk', 'entrypoints',
         'modules', 'flows', 'test-refs', 'hints', 'files', 'base', 'live-e2e-cmd',
       ],
@@ -717,6 +749,7 @@ async function main(argv = process.argv.slice(2)) {
     else if (cli.sub === 'run') res = await handleRun(cli.opts, roots)
     else if (cli.sub === 'audit') res = await handleAudit(cli.opts, roots)
     else if (cli.sub === 'clean') res = await handleClean(cli.opts, roots)
+    else if (cli.sub === 'render') res = await handleRender(cli.opts, roots)
     if (!cli.opts.json && res?.exitCode === EXIT.OK && res?.nextSteps?.length) {
       printNextStep(res.nextSteps, { repoRoot: roots.mainRoot })
     }

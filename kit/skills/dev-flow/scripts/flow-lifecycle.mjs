@@ -20,7 +20,7 @@ import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile, resolveTierCommand, TIER_PROFILE_KEYS } from '../../lib/profile.mjs'
-import { detectGateWeakening, gitDiffRawEntriesAndText, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { detectGateWeakening, gitDiffRawEntriesAndText, isUiVisualFile } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
 import {
@@ -238,6 +238,15 @@ export async function handleVerify(opts, roots) {
       ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
     }
     ledger.status = allOk ? 'verified' : 'verify-failed'
+    const governRes = await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+    if (!governRes.ok) {
+      ledger.verifiedHead = null
+      ledger.status = 'verify-failed'
+      await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+      if (opts.json) process.stdout.write(`${JSON.stringify(governRes, null, 2)}\n`)
+      process.stderr.write(`${governRes.message}\n`)
+      return { exitCode: governRes.exitCode ?? EXIT.FACT }
+    }
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     await emitFlowSignal(roots, { category: allOk ? 'tests' : 'docs', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.doc-static-fail`, severity: docOk ? 'info' : 'medium', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? '', taskId, message: allOk ? `verify (${mode}) explicit-none pass` : `verify (${mode}) explicit-none failed` })
     if (!docOk) {
@@ -389,7 +398,15 @@ export async function handleVerify(opts, roots) {
     ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
-  await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+  const governRes = await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+  if (!governRes.ok) {
+    ledger.verifiedHead = null
+    ledger.status = 'verify-failed'
+    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+    if (opts.json) process.stdout.write(`${JSON.stringify(governRes, null, 2)}\n`)
+    process.stderr.write(`${governRes.message}\n`)
+    return { exitCode: governRes.exitCode ?? EXIT.FACT }
+  }
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? pickSignalBlameFile(changedFiles, ''), taskId, message: `verify (${mode}) exit=${finalExit}: ${redactDiagnosticText(cmd, 240)}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
   emitVerifyOutcomeOutput({
@@ -478,7 +495,7 @@ export async function handleSubmit(opts, roots) {
     highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
     gateWeakeningHits: gateFindings, hasRemote: ledger.role !== 'local-only',
     hasCiWorkflow: hasRepoCiWorkflow(implRoot),
-    visualFilesChanged: changedForVisual.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
+    visualFilesChanged: changedForVisual.filter((f) => isUiVisualFile(f, { repoRoot: implRoot })), profile, hasDevReview, repoRoot: implRoot,
   })
   if (ledger.planning === true || ledger.status === 'planning') {
     const unlockCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${taskId}`

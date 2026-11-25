@@ -61,6 +61,7 @@ export function computeEmpiricalRequirements({
     gateWeakeningHits: gateWeakenedHits,
     visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
     diffBytes: diff?.bytes ?? 0,
+    repoRoot,
     hasCiWorkflow: repoRoot ? hasRepoCiWorkflow(repoRoot) : false,
     profile: {
       smokeVerify: effectiveProfile?.['smoke-verify']?.[0],

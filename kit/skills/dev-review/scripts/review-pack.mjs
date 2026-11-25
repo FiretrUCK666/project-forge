@@ -386,6 +386,7 @@ async function main(argv = process.argv.slice(2)) {
         untrustedAdvisories: [],
         evidence,
         receipt,
+        reviewRoot: ctx.reviewRoot,
       })
       const reviewContext = await assembleReviewContext({
         reviewRoot: ctx.reviewRoot, mainRoot, gitDir: roots.gitDir, diff: ctx.diff,
@@ -499,7 +500,7 @@ async function main(argv = process.argv.slice(2)) {
     const evidence = task?.taskId ? readVerificationEvidence(roots.gitDir, task.taskId) : null
     const receipt = readReceipt(resolveEmpiricalReceiptPath({ gitDir: roots.gitDir, mode, task, prNo, reviewRoot, baseRef }))
     const behavioralGate = assessBehavioralGate({
-      diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories, evidence, receipt,
+      diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories, evidence, receipt, reviewRoot,
     })
     const structuralGate = assessStructuralGate({ reviewRoot, mainRoot, diff, devProfile: effectiveProfile, parity })
     const doorAssessment = assessDoor({

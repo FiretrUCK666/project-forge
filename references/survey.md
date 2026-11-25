@@ -35,7 +35,7 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 | `docs` | `readmes`（含双语及 `.rst`/无后缀 README）、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警）、`tdd`、`existingDesignDocs`（配合单源 `discoverEvergreenDocs` 支持可选 `evergreen-docs:`、Frontmatter `evergreen: true` 与入口链接三层纳管常青文档，避免双轨）、`nonStandardDocs`、`preservedForeignPlanDocs`（原样保留目标仓原生 `docs/{specs,todo}/*`）、`workflowFacts`（含 `.github/workflows` 与中立 CI `neutralCiConfigs`，明确拆分 `checkWorkflows` 与 `releaseWorkflows`）、`contributing`、`releasing`、`license` |
 | `kit` | 扫描非隐藏 `skills/*`（含嵌套 `*/skills/*`）与任意隐藏/项目技能容器 `<dir>/skills/<name>/SKILL.md`（无特定宿主路径硬编码，自动区分宿主镜像副本 `mirrorCopies` 不双计不误删），读取 `.agents/skills/.pf-manifest.json`（兼容 v1/v2/v3，保留 `disabledSkills`、`removedFiles`、`customizedFiles`） |
 | `explorationStrategy` | 依据 `effectiveFiles`、多包/多生态与重入状态输出 `{ tier, reason, shards }`：`tier` 取 `none`（0 业务文件，转空目录起步）、`single-pass`（中小仓单路通读）、`parallel-subagents`（大型或重入仓，附 2–5 个不重叠 `shards` 分片，含 `business-flows` 核心业务流分片） |
-| `artifactPlan` | 由 `computeArtifactPlan` 产出的 13 项治理产物确定性处置列表（含拆分的 `ci-check`/`ci-release` 与 `branch-protection`/`git-hooks`），直接指明 `snapshot` / `preserve` / `calibrate` / `create` / `equip` / `upgrade` / `ask-human` / `optional` / `skip` |
+| `artifactPlan` | 由 `computeArtifactPlan` 产出的 13 项治理产物确定性处置列表（含拆分的 `ci-check`/`ci-release` 与 `branch-protection`/`git-hooks`），并按条件附加 `feature-map`/`architecture-map`，直接指明 `snapshot` / `preserve` / `calibrate` / `create` / `equip` / `upgrade` / `ask-human` / `optional` / `skip` |
 | `reentry` | 仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入（不误判存量手写 `AGENTS.md`）；输出 `staleAgentPaths`、`staleAgentScripts`（按 `commandsByEcosystem` 逐栈校验）、`staleTddPaths` 与 `unregisteredTopDirs` |
 | `ecosystem` / `workspace` | 识别 Node、Python、Rust、Go、Java、Swift/Apple（`Package.swift` / `*.xcodeproj` / `*.xcworkspace`）等生态、入口清单与多包布局 |
 | `risks` / `gaps` / `questions` / `navigation` | 凭据/路径/大文件风险、结构缺口、待拍板问题（含无远端建仓 3 路决策与 5 选 1 发版策略）及必读参考列表 |
@@ -72,6 +72,8 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 | `ci-release` | `preserve` / `ask-human` / `skip` | 已有发布工作流或工具链保留；待配发版通道时走 5 选 1 决策，默认零额外 Secret 路线 |
 | `branch-protection` | `preserve` / `create` / `ask-human` / `skip` | 有能力后端按开关 A（`equip-ci.mjs --protect-branch`）设分支保护（`require_approvals=0`）；无权限/403 降级为 `git-hooks`；`generic-git` 输出手工清单 |
 | `git-hooks` | `preserve` / `create` / `skip` | 冲突 `.husky/`/`lefthook*` 一律 `preserve`；无冲突且未写 `no-git-hooks` 时通过 `equip.mjs --with-hooks` 装配 `.githooks/pre-push` |
+| `feature-map` | `preserve` / `create` / `skip` | 空白仓或纯文档仓跳过；存量代码仓缺失时运行 `verify-tools.mjs sync` 自动索引生成 `docs/feature-map.json` |
+| `architecture-map` | `preserve` / `calibrate` / `create` / `skip` | 空白仓、纯文档仓或写了 `no-architecture-html` 时跳过；存在代码时运行 `verify-tools.mjs render` 生成或刷新离线交互式 `docs/architecture-map.html` |
 
 ## 事实来源
 

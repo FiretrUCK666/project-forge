@@ -35,6 +35,8 @@ import {
 } from '../../lib/static-gates-comment-hygiene.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
+import { ARCHITECTURE_MAP_REL, isArchitectureMapOptedOut, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
+import { FEATURE_MAP_REL } from '../../lib/feature-map.mjs'
 
 export { EXIT }
 const VALID_MODES = new Set(['verify', 'pre-edit', 'standalone'])
@@ -591,6 +593,27 @@ export async function runEditGate(opts = {}) {
   const archRes = evaluateArchRules(workTreeRoot, codeRelList, archRules)
   for (const v of archRes.violations) {
     blockers.push({ ruleId: 'edit.arch-boundary', defectClass: 'arch-boundary', severity: 'high', file: v.file, line: v.line, rule: v.rule, specifier: v.specifier, message: v.message, fixHint: v.fixHint })
+  }
+
+  if (opts.final && mode !== 'pre-edit' && existsSync(join(workTreeRoot, FEATURE_MAP_REL)) && !isArchitectureMapOptedOut(workTreeRoot)) {
+    const touchedFiles = new Set([...checkedFiles, ...deletedFiles])
+    const archActive = existsSync(join(workTreeRoot, ARCHITECTURE_MAP_REL))
+      || touchedFiles.has(FEATURE_MAP_REL)
+      || touchedFiles.has(ARCHITECTURE_MAP_REL)
+    if (archActive) {
+      const syncRes = verifyArchitectureMapSync(workTreeRoot)
+      if (!syncRes.ok) {
+        blockers.push({
+          ruleId: 'BLOCKED_ARCHITECTURE_MAP_DRIFT',
+          defectClass: 'doc-code-drift',
+          severity: 'high',
+          file: ARCHITECTURE_MAP_REL,
+          line: 1,
+          message: syncRes.message,
+          fixHint: `Run \`node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render\` to regenerate ${ARCHITECTURE_MAP_REL}.`,
+        })
+      }
+    }
   }
 
   let nativeRun = null

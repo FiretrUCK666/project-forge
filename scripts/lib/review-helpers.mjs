@@ -140,6 +140,8 @@ const ARTIFACT_COVERAGE_TOKENS = Object.freeze({
   'ci-check': ['ci-check', 'check.yml', '检查流', '检查工作流', 'ci 检查'],
   'ci-release': ['ci-release', 'release.yml', '发布流', '发布工作流', '发版策略', '发布流水线'],
   'branch-protection': ['branch-protection', '分支保护', '--protect-branch'],
+  'feature-map': ['feature-map', 'docs/feature-map.json', 'feature-map.json', '功能地图'],
+  'architecture-map': ['architecture-map', 'docs/architecture-map.html', 'architecture-map.html', '架构图'],
 })
 
 function isGovernancePrd(rel, fm, text) {

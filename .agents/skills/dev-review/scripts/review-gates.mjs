@@ -15,8 +15,8 @@ import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
-  CODE_EXT_RE, GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE,
-  classifyDoorType, countTextLines, detectGateWeakeningInEntry, evaluateArchRules, isLegalArchiveMove, isTestOrFixtureFile, matchGlob,
+  CODE_EXT_RE, GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, TEST_FILE_RE,
+  classifyDoorType, countTextLines, detectGateWeakeningInEntry, evaluateArchRules, isLegalArchiveMove, isTestOrFixtureFile, isUiVisualFile, matchGlob,
   scanStructuralHygiene, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 import { resolveOversizedExemption } from '../../lib/static-gates-comment-hygiene.mjs'
@@ -298,13 +298,13 @@ export function collectGateWeakeningHits(reviewRoot, diff) {
 }
 
 export function assessBehavioralGate({
-  diff, devProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories = [], evidence = null, receipt = null,
+  diff, devProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories = [], evidence = null, receipt = null, reviewRoot = null,
 }) {
   const runtimeFilesTouched = [...diff.files.map((f) => f.file), ...diff.untracked]
     .filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f))
   const visualFilesChanged = [...new Set([...diff.files.map((f) => f.file), ...diff.untracked])]
     .map((f) => posixPath(f))
-    .filter((f) => UI_VISUAL_EXT_RE.test(f))
+    .filter((f) => isUiVisualFile(f, { repoRoot: reviewRoot }))
     .sort()
   const empiricalVisualCheckRequired = visualFilesChanged.length > 0
   const smokeCommands = devProfile['smoke-verify'] ?? []

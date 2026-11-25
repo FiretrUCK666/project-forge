@@ -19,6 +19,7 @@ import {
 } from '../../lib/git.mjs'
 import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import { isAllowedExtensionPath } from '../../lib/overlay.mjs'
+import { ARCHITECTURE_MAP_REL, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
 
 const OUTPUT_DIRS = [...COMMON_OUTPUT_DIRS, '.worktrees']
 
@@ -392,10 +393,22 @@ export async function runReconcileVerifyToolsAudit(workRoot, mainRoot, gitDir, f
   }
 
   const solidificationHints = detectScratchSolidificationHints({ gitCommonDir: gitDir, mainRoot })
+  const hasArchHtml = existsSync(join(workRoot, ARCHITECTURE_MAP_REL))
+  const archMapCheck = !st.corrupt ? verifyArchitectureMapSync(workRoot) : { ok: true, skipped: true }
+  if (!archMapCheck.ok && !archMapCheck.optedOut) {
+    addFinding(findings, {
+      id: 'docs.architecture-map-drift',
+      category: 'docs',
+      severity: hasArchHtml ? 'medium' : 'low',
+      file: ARCHITECTURE_MAP_REL,
+      title: `architecture-map.html is missing or out of sync with ${FEATURE_MAP_REL} (${archMapCheck.reason || 'drift'})`,
+      action: 'Run `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render` to refresh docs/architecture-map.html.',
+    })
+  }
   const hasHardIssues = !schema.ok || !topology.ok || zombies.length > 0 || staleTools.some((s) => s.riskLevel === 'high')
   return {
     present: true,
-    status: hasHardIssues ? 'FAILED' : (staleTools.length > 0 ? 'WARN' : 'OK'),
+    status: hasHardIssues ? 'FAILED' : (staleTools.length > 0 || (hasArchHtml && !archMapCheck.ok && !archMapCheck.optedOut) ? 'WARN' : 'OK'),
     schemaOk: schema.ok,
     schemaErrors: schema.errors,
     topologyOk: topology.ok,
@@ -404,5 +417,11 @@ export async function runReconcileVerifyToolsAudit(workRoot, mainRoot, gitDir, f
     zombies,
     staleTools,
     solidificationHints,
+    architectureMap: {
+      relPath: ARCHITECTURE_MAP_REL,
+      ok: Boolean(archMapCheck.ok),
+      optedOut: Boolean(archMapCheck.optedOut),
+      reason: archMapCheck.reason || null,
+    },
   }
 }

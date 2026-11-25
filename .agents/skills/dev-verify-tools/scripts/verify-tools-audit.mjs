@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { isInsideDir } from '../../lib/git.mjs'
+import { renderArchitectureMapFromRepo } from '../../lib/architecture-map.mjs'
 
 import {
   FEATURE_MAP_REL, destroyTaskScratchDir, detectScratchSolidificationHints,
@@ -202,9 +203,11 @@ export async function handleClean(opts, roots) {
   }
 
   let mapUpdated = false
+  let architectureMap = null
   if (nextMap && (removedZombiePaths.length > 0 || removedZombieTools.length > 0)) {
     writeFeatureMap(workRoot, nextMap)
     mapUpdated = true
+    architectureMap = renderArchitectureMapFromRepo(workRoot)
   }
   const destroyedScratch = []
   for (const s of scratchTargets) {
@@ -214,7 +217,7 @@ export async function handleClean(opts, roots) {
     }))
   }
 
-  const payload = { ok: true, dryRun: false, mapUpdated, removedZombiePaths, removedZombieTools, destroyedScratch }
+  const payload = { ok: true, dryRun: false, mapUpdated, architectureMap, removedZombiePaths, removedZombieTools, destroyedScratch }
   emitOut(opts, payload, [
     `[verify-tools clean] 已清理僵尸路径 ${removedZombiePaths.length} 处、僵尸工具 ${removedZombieTools.length} 项、销毁仓外 scratch ${destroyedScratch.filter((d) => d.destroyed).length} 个。`,
   ])

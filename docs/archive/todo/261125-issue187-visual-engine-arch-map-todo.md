@@ -1,20 +1,20 @@
 ---
 kind: todo
 title: "Zero-Dependency Visual Projection Engine, Architecture Map and S1-S4 Auto-Sync"
-status: active
+status: done
 created: 2026-11-25
 updated: 2026-11-25
-issue: null
+issue: 187
 pr: null
-branch: feat/visual-arch-plan
+branch: feat/visual-engine-arch-map
 owner: planner-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-25
 task_id: visual-engine-arch-map
 planned_at: 887adcbe69441de8649d7e3facede8199c3bc2ea
-related_prd: ../prd/261125-visual-arch-brief-prd-prd.md
-related_spec: ../specs/261125-visual-engine-arch-map-spec.md
+related_prd: ../../prd/261125-visual-arch-brief-prd-prd.md
+related_spec: ../specs/261125-issue187-visual-engine-arch-map-spec.md
 depends_on: [feature-map-v2-topology]
 scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs, kit/skills/lib/architecture-map.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/shared.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/lib/exit-codes.mjs, kit/skills/lib/subcommand-meta.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-explore/scripts/repo-map.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-edit/scripts/edit-gate.mjs, docs/architecture-map.html, scripts/lib/artifact-executors.mjs, scripts/lib/survey-gap-rules.mjs, scripts/survey.mjs, scripts/equip.mjs, scripts/lib/equip-bootstrap.mjs, scripts/review.mjs, scripts/dev/gap-coverage.mjs, .gitattributes, references/survey.md, scripts/dev/injections-data-repo-alignment.mjs, scripts/dev/fixtures-equip.mjs, scripts/dev/fixtures-doc-closure.mjs, scripts/dev/fixtures-visual-engine.mjs, .agents/skills/]
 ---
@@ -25,15 +25,15 @@ scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-25` / `2026-11-25` |
-| 分支 / 基线 | `feat/visual-arch-plan` @ `887adcb` |
+| 分支 / 基线 | `feat/visual-engine-arch-map` @ `887adcb` |
 | 任务编号 | `visual-engine-arch-map` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与策略已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261125-visual-engine-arch-map-spec.md` |
+| 关联 Issue / PR / SPEC | #187 / 未关联 / `docs/archive/specs/261125-issue187-visual-engine-arch-map-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261125-visual-engine-arch-map-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261125-issue187-visual-engine-arch-map-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -45,10 +45,10 @@ scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs
 
 ## 验收标准与执行清单
 
-- [ ] C5: 新增 `kit/skills/lib/visual-layout.mjs` (new)、`kit/skills/lib/visual-render.mjs` (new) 与 `kit/skills/lib/architecture-map.mjs` (new)（`ARCHITECTURE_MAP_REL = 'docs/architecture-map.html'`、支持 `no-architecture-html`），渲染 `25-60 KB` 自包含零依赖 HTML（首行 `@generated ... feature-map-sha256=<sha256>`、树+泳道/DAG+Diff、`walk-bar`、源码卡、3 级 `file://` 剪贴板相对路径追问、`try/catch` `localStorage`、沙盒原型预览且零 `homedir()`），通过 `scripts/dev/fixtures-visual-engine.mjs` (new)。
-- [ ] C6: 升级 `kit/skills/lib/static-gates.mjs:84` `isUiVisualFile(f, { repoRoot })`（仅调叶子模块 `feature-map-graph.mjs` (new) 无环校验，由 `kit/skills/lib/shared.mjs` 重导出）及 `review-pack.mjs`（L379、L501 `assessBehavioralGate` 传 `reviewRoot`）、`review-empirical.mjs`（L55 `determineWorkflowPolicy` 传 `repoRoot`）、`workflow-policy.mjs`/`review-gates.mjs`（`<= 798` 行）透传工作树优先根目录，替换全仓全部 6 处 `UI_VISUAL_EXT_RE`（`flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs`、`review-gates.mjs`、`review-locks.mjs` 两处、`workflow-policy.mjs`），仅豁免与 `docs/feature-map.json` SHA256 一致的 `docs/architecture-map.html` (new)。
-- [ ] C7: 实现自动同步读写分离：`flow-lifecycle-finalize.mjs` `handleFinalize` 在 `git add`（L221）前渲染并暂存 `docs/architecture-map.html` (new)，`verify-tools create/sync/render` 与 `repo-map --write-feature-map` 自动渲染；`govern reconcile` 保持 `mutating: false` 只读提示；`verify` 与 `edit-gate --final` 纯只读拦截 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`EXIT.FACT` 单一档位）；新增 `verify-tools render [--check] [--out]`（含 `verify-tools.mjs:45` `printHelp()` 用法行加入 `render` 至 `sync/create/run/audit/clean/render`）直接读取 `opts.check`/`opts.out` 并对齐 4 处 `subcommand-parity` 与 `cli-parity`。
-- [ ] C8: 完成 `S1-S4` 接入（`artifact-executors.mjs`、`survey-gap-rules.mjs`、`survey.mjs`、`equip.mjs`、`equip-bootstrap.mjs`、`review.mjs`、`gap-coverage.mjs`、`.gitattributes`、`references/survey.md`、`injections-data-repo-alignment.mjs`），同步 `node scripts/equip.mjs .` 并通过 `fixtures-equip.mjs`、`fixtures-doc-closure.mjs`、`fixtures-visual-engine.mjs` (new)、`gap-coverage.mjs`、`preflight.mjs` 与 `verify-injections.mjs`。
+- [x] C5: 新增 `kit/skills/lib/visual-layout.mjs` (new)、`kit/skills/lib/visual-render.mjs` (new) 与 `kit/skills/lib/architecture-map.mjs` (new)（`ARCHITECTURE_MAP_REL = 'docs/architecture-map.html'`、支持 `no-architecture-html`），渲染 `25-60 KB` 自包含零依赖 HTML（首行 `@generated ... feature-map-sha256=<sha256>`、树+泳道/DAG+Diff、`walk-bar`、源码卡、3 级 `file://` 剪贴板相对路径追问、`try/catch` `localStorage`、沙盒原型预览且零 `homedir()`），通过 `scripts/dev/fixtures-visual-engine.mjs` (new)。
+- [x] C6: 升级 `kit/skills/lib/static-gates.mjs:84` `isUiVisualFile(f, { repoRoot })`（仅调叶子模块 `feature-map-graph.mjs` (new) 无环校验，由 `kit/skills/lib/shared.mjs` 重导出）及 `review-pack.mjs`（L379、L501 `assessBehavioralGate` 传 `reviewRoot`）、`review-empirical.mjs`（L55 `determineWorkflowPolicy` 传 `repoRoot`）、`workflow-policy.mjs`/`review-gates.mjs`（`<= 798` 行）透传工作树优先根目录，替换全仓全部 6 处 `UI_VISUAL_EXT_RE`（`flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs`、`review-gates.mjs`、`review-locks.mjs` 两处、`workflow-policy.mjs`），仅豁免与 `docs/feature-map.json` SHA256 一致的 `docs/architecture-map.html` (new)。
+- [x] C7: 实现自动同步读写分离：`flow-lifecycle-finalize.mjs` `handleFinalize` 在 `git add`（L221）前渲染并暂存 `docs/architecture-map.html` (new)，`verify-tools create/sync/render` 与 `repo-map --write-feature-map` 自动渲染；`govern reconcile` 保持 `mutating: false` 只读提示；`verify` 与 `edit-gate --final` 纯只读拦截 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`EXIT.FACT` 单一档位）；新增 `verify-tools render [--check] [--out]`（含 `verify-tools.mjs:45` `printHelp()` 用法行加入 `render` 至 `sync/create/run/audit/clean/render`）直接读取 `opts.check`/`opts.out` 并对齐 4 处 `subcommand-parity` 与 `cli-parity`。
+- [x] C8: 完成 `S1-S4` 接入（`artifact-executors.mjs`、`survey-gap-rules.mjs`、`survey.mjs`、`equip.mjs`、`equip-bootstrap.mjs`、`review.mjs`、`gap-coverage.mjs`、`.gitattributes`、`references/survey.md`、`injections-data-repo-alignment.mjs`），同步 `node scripts/equip.mjs .` 并通过 `fixtures-equip.mjs`、`fixtures-doc-closure.mjs`、`fixtures-visual-engine.mjs` (new)、`gap-coverage.mjs`、`preflight.mjs` 与 `verify-injections.mjs`。
 
 ## 执行步骤
 
@@ -82,9 +82,9 @@ scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（等待本 SPEC 独立 Critique 与 `approve`）
+- **当前状态**：`已完成 (done)`（等待本 SPEC 独立 Critique 与 `approve`）
 - **待拍板事项**：无
-- **下一步第一件事**：切片 1 合并后，对 `docs/specs/261125-visual-engine-arch-map-spec.md` 完成 Critique 与 `approve` 并启动 `impl`。
+- **下一步第一件事**：切片 1 合并后，对 `docs/archive/specs/261125-issue187-visual-engine-arch-map-spec.md` 完成 Critique 与 `approve` 并启动 `impl`。
 
 ## 澄清与补充记录
 
@@ -94,6 +94,6 @@ scope_files: [kit/skills/lib/visual-layout.mjs, kit/skills/lib/visual-render.mjs
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`node scripts/equip.mjs . --check` 通过；`node scripts/compose-agents.mjs . --check` 通过；`node scripts/dev/preflight.mjs` 通过（41/41）；`node scripts/dev/gap-coverage.mjs` 通过（22/22）；`node scripts/dev/fixtures.mjs --jobs 6` 通过（552/552）；`node scripts/dev/verify-injections.mjs --jobs 4` 通过（467/467，含 `I961`-`I964`）；`node scripts/dev/e2e-zip-harness.mjs` 通过（247 条包条目）；`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .` 0 critical / 0 high。
+- **文档同步检查**：已同步 `.agents/skills/`（`node scripts/equip.mjs .`）、`.gitattributes`、`scripts/lib/equip-bootstrap.mjs`（`BASE_GITATTRIBUTES`）、`references/survey.md`（保留 L38 `I396` 前缀并增补 `feature-map`/`architecture-map` 行）、`scripts/dev/fixtures-doc-closure.mjs` 与 `scripts/dev/fixtures-equip.mjs`。
+- **遗留问题**：按本期「不做」范围，本仓自身 `docs/feature-map.json` 升级与 `docs/architecture-map.html` 落盘留待切片 3 推进。

@@ -230,7 +230,13 @@ cases.push(['equip.mjs + survey.mjs：通用空目录基线、已有 README/LICE
     dirs.push(blankDir)
     const sBlank = await survey(blankDir)
     const blankPlan = Object.fromEntries((sBlank.artifactPlan ?? []).map((x) => [x.id, x]))
-    if (blankPlan['pre-backup']?.action !== 'skip' || blankPlan['docs-tdd']?.action !== 'skip' || blankPlan['agents-contract']?.action !== 'skip') {
+    if (
+      blankPlan['pre-backup']?.action !== 'skip'
+      || blankPlan['docs-tdd']?.action !== 'skip'
+      || blankPlan['agents-contract']?.action !== 'skip'
+      || blankPlan['feature-map']?.action !== 'skip'
+      || blankPlan['architecture-map']?.action !== 'skip'
+    ) {
       return `空白仓 artifactPlan 不符：${JSON.stringify(sBlank.artifactPlan)}`
     }
 
@@ -262,6 +268,9 @@ cases.push(['equip.mjs + survey.mjs：通用空目录基线、已有 README/LICE
     }
     if (planMap['kit-skills']?.action !== 'equip' || !planMap['kit-skills'].detail.includes('custom-ops')) {
       return `kit-skills 处置计划未提示保留自有技能：${JSON.stringify(planMap['kit-skills'])}`
+    }
+    if (planMap['feature-map']?.action !== 'create' || planMap['architecture-map']?.action !== 'create') {
+      return `异构代码仓未计划生成 feature-map / architecture-map：${JSON.stringify([planMap['feature-map'], planMap['architecture-map']])}`
     }
     const purePlan = computeArtifactPlan(sHetero)
     if ((purePlan?.length ?? 0) < 10) return 'computeArtifactPlan 导出项数不足 10 项'

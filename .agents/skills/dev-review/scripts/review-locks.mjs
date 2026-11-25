@@ -22,7 +22,7 @@ import {
 import { resolveHostMode } from '../../lib/harness-context.mjs'
 import { verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
-import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, isUiVisualFile, splitDiffByFile } from '../../lib/static-gates.mjs'
 import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence, resolveEffectiveBaseSha, runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
 import { EXIT, hasCommits } from './review-diff.mjs'
 
@@ -45,9 +45,10 @@ export async function isOptionalLowRiskReview({ mainRoot, targetRoot, baseLedger
     gateWeakeningHits: gwHits,
     hasRemote: baseLedger.role !== 'local-only',
     hasCiWorkflow: hasRepoCiWorkflow(targetRoot),
-    visualFilesChanged: chg.filter((f) => UI_VISUAL_EXT_RE.test(f)),
+    visualFilesChanged: chg.filter((f) => isUiVisualFile(f, { repoRoot: targetRoot })),
     profile,
     hasDevReview: hasSkillSupport(mainRoot, 'dev-review'),
+    repoRoot: targetRoot,
   })
   return pol.riskTier === 'low' && !pol.independentReviewRequired
 }
@@ -539,9 +540,10 @@ export async function evaluatePassBlockers({
         caseType: ledger?.caseType ?? 3,
         highRiskGlobs: profile?.highRisk ?? [],
         doNotEditGlobs: profile?.doNotEdit ?? [],
-        visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)),
+        visualFilesChanged: changedFiles.filter((f) => isUiVisualFile(f, { repoRoot: targetRoot ?? mainRoot })),
         profile,
         hasCiWorkflow: hasRepoCiWorkflow(targetRoot ?? mainRoot),
+        repoRoot: targetRoot ?? mainRoot,
       })
     : null
 

@@ -312,6 +312,40 @@ export function computeArtifactPlan(facts) {
     items.push({ id: 'git-hooks', artifact: '.githooks/pre-push', status: '未配置（opt-in，S3 自动推荐）', action: 'optional', detail: '运行 equip.mjs --with-hooks 写入 .githooks/pre-push（+x）并配局部 core.hooksPath' })
   }
 
+  // 14 & 15. 功能地图（docs/feature-map.json）与离线交互式架构图（docs/architecture-map.html）
+  const isEmptyCodeRepo = facts.maturity === 'empty' || (facts.scale?.codeFiles ?? 0) === 0
+  if (isEmptyCodeRepo || isDocsOnly) {
+    items.push({
+      id: 'feature-map',
+      artifact: 'docs/feature-map.json',
+      status: isDocsOnly ? '纯文档项目' : '空白/零源码目录',
+      action: 'skip',
+      detail: '零源码或纯文档目录不预先生成 docs/feature-map.json，待首次业务代码落地后再同步',
+    })
+    items.push({
+      id: 'architecture-map',
+      artifact: 'docs/architecture-map.html',
+      status: isDocsOnly ? '纯文档项目' : '空白/零源码目录',
+      action: 'skip',
+      detail: '零源码或纯文档目录不预先生成 docs/architecture-map.html',
+    })
+  } else {
+    if (docs.featureMap) {
+      items.push({ id: 'feature-map', artifact: 'docs/feature-map.json', status: `已有（${docs.featureMap}）`, action: 'preserve', detail: '已有功能地图，后续随研发验证增量校准' })
+    } else {
+      items.push({ id: 'feature-map', artifact: 'docs/feature-map.json', status: '尚未生成', action: 'create', detail: '运行 verify-tools.mjs sync 从仓库入口与模块结构索引生成 docs/feature-map.json' })
+    }
+    if (hasDecision(facts, 'no-architecture-html')) {
+      items.push({ id: 'architecture-map', artifact: 'docs/architecture-map.html', status: '已在取舍中豁免（no-architecture-html）', action: 'skip', detail: 'AGENTS.md「取舍」已声明不生成离线架构图 HTML' })
+    } else if (docs.architectureMap && docs.architectureMapSync?.ok) {
+      items.push({ id: 'architecture-map', artifact: 'docs/architecture-map.html', status: '已有且与 feature-map 同步', action: 'preserve', detail: '保留既有离线交互式架构图，后续变更由 verify-tools render / flow finalize 自动刷新' })
+    } else if (docs.architectureMap && docs.architectureMapSync && !docs.architectureMapSync.ok) {
+      items.push({ id: 'architecture-map', artifact: 'docs/architecture-map.html', status: `与 feature-map 存在漂移（${docs.architectureMapSync.reason || 'drift'}）`, action: 'calibrate', detail: '运行 verify-tools.mjs render 重新渲染同步 docs/architecture-map.html' })
+    } else {
+      items.push({ id: 'architecture-map', artifact: 'docs/architecture-map.html', status: '尚未生成', action: 'create', detail: '运行 verify-tools.mjs render 生成离线单文件交互式 docs/architecture-map.html' })
+    }
+  }
+
   return items
 }
 

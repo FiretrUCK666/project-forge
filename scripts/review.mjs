@@ -429,6 +429,21 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
           decision: 'no-tdd',
         }))
     }
+    if (facts.docs.featureMap && !decisions.has('no-architecture-html')) {
+      if (facts.docs.architectureMap && facts.docs.architectureMapSync && !facts.docs.architectureMapSync.ok) {
+        add(finding('missing', 'docs', 'docs.architecture-map',
+          `\`docs/architecture-map.html\` 与 \`docs/feature-map.json\` 存在漂移（${facts.docs.architectureMapSync.reason || 'drift'}）—— 请运行 \`node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render\` 刷新`, {
+            decision: 'no-architecture-html',
+          }))
+      } else if (!facts.docs.architectureMap) {
+        add(finding('notice', 'docs', 'docs.architecture-map',
+          '已存在 `docs/feature-map.json`，可运行 `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render` 生成离线交互式 `docs/architecture-map.html`（若无需生成可在「取舍」写 `no-architecture-html`）', {
+            decision: 'no-architecture-html',
+          }))
+      } else {
+        add(finding('ok', 'docs', 'docs.architecture-map', '离线架构图 `docs/architecture-map.html` 已与 `docs/feature-map.json` 同步'))
+      }
+    }
   }
 
   // ── 工程套件（.agents/skills/，兼容 v1/v2 manifest）─────────────────

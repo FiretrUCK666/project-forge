@@ -8,6 +8,8 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
+import { ARCHITECTURE_MAP_REL, renderArchitectureMapFromRepo } from '../../lib/architecture-map.mjs'
+import { FEATURE_MAP_REL } from '../../lib/feature-map.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { parseDocFrontmatter } from '../../lib/doc-frontmatter.mjs'
 import { archiveCompletedDocsGroup, docIsoDate, syncPlanDocBodyMeta } from '../../lib/docs.mjs'
@@ -217,8 +219,31 @@ export async function handleFinalize(opts, roots) {
       archivedGroup.byKind.spec,
       archivedGroup.byKind.todo,
     ].filter(Boolean)
+    if (existsSync(join(implRoot, FEATURE_MAP_REL))) {
+      const statusEntries = roots.isGit ? ((await gitStatusPorcelainZ(implRoot))?.entries ?? []) : []
+      const diffEntries = roots.isGit && ledger?.baseSha ? ((await gitDiffRawEntriesAndText(implRoot, ledger.baseSha))?.entries ?? []) : []
+      const fmChanged = existsSync(join(implRoot, ARCHITECTURE_MAP_REL))
+        || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
+        || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
+      if (fmChanged) {
+        const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: preCheck.changedFiles })
+        if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)
+      }
+    }
     if (pathsToStage.length > 0 && roots.isGit) {
       await gitRun(implRoot, ['add', '-A', '--', ...new Set(pathsToStage)])
+    }
+  } else if (!isPlanBootstrapDocs && existsSync(join(implRoot, FEATURE_MAP_REL))) {
+    const statusEntries = roots.isGit ? ((await gitStatusPorcelainZ(implRoot))?.entries ?? []) : []
+    const diffEntries = roots.isGit && ledger?.baseSha ? ((await gitDiffRawEntriesAndText(implRoot, ledger.baseSha))?.entries ?? []) : []
+    const fmChanged = existsSync(join(implRoot, ARCHITECTURE_MAP_REL))
+      || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
+      || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
+    if (fmChanged) {
+      const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: preCheck.changedFiles })
+      if (archRes.ok && !archRes.optedOut && !archRes.skipped && roots.isGit) {
+        await gitRun(implRoot, ['add', '-A', '--', ARCHITECTURE_MAP_REL])
+      }
     }
   }
 

@@ -10,6 +10,8 @@ import * as protocol from './protocol.mjs'
 import { isMacMetadataName, readJsonSafe, readTextSafe } from './text.mjs'
 import { scanNeutralCiSteps } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { isManagedPlanDoc } from '../../kit/skills/lib/doc-frontmatter.mjs'
+import { ARCHITECTURE_MAP_REL, verifyArchitectureMapSync } from '../../kit/skills/lib/architecture-map.mjs'
+import { FEATURE_MAP_REL } from '../../kit/skills/lib/feature-map.mjs'
 
 const { LIKELY_DEFAULT_BRANCHES } = protocol
 const parseMarkers = protocol.parseMarkers
@@ -528,9 +530,10 @@ function partitionPlanDir(root, dirRel) {
   const prdDirContent = prdPart.content
   const preservedForeignPlanDocs = [...new Set([...specsPart.foreign, ...todoPart.foreign, ...prdPart.foreign])].sort()
   let agentsBytes = 0
-  if (agents) {
-    try { agentsBytes = statSync(join(root, agents)).size } catch { agentsBytes = 0 }
-  }
+  if (agents) { try { agentsBytes = statSync(join(root, agents)).size } catch { agentsBytes = 0 } }
+  const featureMap = existsSync(join(root, FEATURE_MAP_REL)) ? FEATURE_MAP_REL : undefined
+  const architectureMap = existsSync(join(root, ARCHITECTURE_MAP_REL)) ? ARCHITECTURE_MAP_REL : undefined
+  const architectureMapSync = featureMap ? verifyArchitectureMapSync(root) : { ok: true, skipped: true, reason: 'feature-map-absent', relPath: ARCHITECTURE_MAP_REL }
 
   return {
     readmes,
@@ -552,6 +555,9 @@ function partitionPlanDir(root, dirRel) {
     changelog,
     license,
     tdd,
+    featureMap,
+    architectureMap,
+    architectureMapSync,
     existingDesignDocs,
     specsDir,
     todoDir,
@@ -577,14 +583,7 @@ const WORK_DIR_CANDIDATES = ['docs/todo', 'docs/work', 'docs/tasks', 'todo', 'wo
 
 export const FORGE_HOOK_MARKER = '# project-forge: githooks-pre-push'
 
-const LEFTHOOK_FILES = [
-  'lefthook.yml',
-  'lefthook.yaml',
-  '.lefthook.yml',
-  '.lefthook.yaml',
-  'lefthook-local.yml',
-  'lefthook-local.yaml',
-]
+const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml', 'lefthook-local.yml', 'lefthook-local.yaml']
 
 function normalizeHooksPath(raw) {
   const s = String(raw ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')

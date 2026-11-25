@@ -12,6 +12,7 @@ import { basename, join, posix } from 'node:path'
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { discoverContextDocs } from '../../lib/doc-locator.mjs'
 import { FEATURE_MAP_REL, isNonFeatureArtifactPath, prefillFeatureMapFromRepoMap } from '../../lib/feature-map.mjs'
+import { renderArchitectureMapFromRepo } from '../../lib/architecture-map.mjs'
 import {
   gitLsFilesTextAndCode, gitRun, isMainModule, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots,
 } from '../../lib/git.mjs'
@@ -347,11 +348,13 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus, writeF
     configurable: true,
   })
   const fmSync = prefillFeatureMapFromRepoMap(root, map, { write: Boolean(writeFeatureMap), topology: featureTopology })
+  const archSync = writeFeatureMap ? renderArchitectureMapFromRepo(root) : null
   const result = {
     ...map,
     featureMapPath: FEATURE_MAP_REL,
     featureMapExists: existsSync(join(root, FEATURE_MAP_REL)),
     featureMapWritten: fmSync.written,
+    ...(archSync?.written ? { architectureMapPath: archSync.relPath, architectureMapWritten: true } : {}),
   }
   Object.defineProperties(result, {
     featureMapIndex: {

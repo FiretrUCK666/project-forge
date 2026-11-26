@@ -321,7 +321,6 @@ export function registerDocGraphCases(cases) {
       'docs/guide.md': '# Guide\n\n## Overview\n\nMain module: `src/app.mjs`.\n',
       'src/app.mjs': 'export const run = () => 1\n',
       'tests/app.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(1, 1)\n',
-      'scripts/verify-app.mjs': 'console.log("ok")\n',
       'docs/feature-map.json': JSON.stringify({
         version: 2,
         domains: [{ id: 'core', name: 'Core', docAnchors: ['docs/guide.md#overview'] }],
@@ -329,9 +328,17 @@ export function registerDocGraphCases(cases) {
           id: 'app',
           name: 'App',
           domain: 'core',
-          sourceModules: ['src/app.mjs'],
+          entrypoints: ['src/app.mjs'],
+          modules: ['src/app.mjs'],
+          businessFlows: ['run app'],
           docAnchors: ['docs/guide.md#overview'],
-          verificationTools: ['scripts/verify-app.mjs'],
+          verificationTools: [{
+            id: 'verify-app',
+            kind: 'command',
+            command: 'node --test',
+            scriptPath: null,
+            riskLevel: 'low',
+          }],
           testRefs: ['tests/app.test.mjs'],
         }],
       }, null, 2),
@@ -345,8 +352,20 @@ export function registerDocGraphCases(cases) {
       }
       const parsed = JSON.parse(rec.stdout || '{}')
       const summary = parsed.reconcileSummary
-      if (!summary || !summary.docGraph || summary.docGraph.unaccountedCount !== 0) {
-        return `reconcileSummary.docGraph 异常：${JSON.stringify(summary)}`
+      if (!Array.isArray(parsed.findings) || parsed.findings.length !== 0) {
+        return `洁净仓库应无 findings（避免 docGapOrDrift 短路）：${JSON.stringify(parsed.findings)}`
+      }
+      if (!summary || summary.verifyToolsAudit?.schemaOk !== true) {
+        return `verifyToolsAudit.schemaOk 应为 true：${JSON.stringify(summary?.verifyToolsAudit)}`
+      }
+      if (!Array.isArray(summary.featureMapDrift?.unmappedSourceModules) || summary.featureMapDrift.unmappedSourceModules.length !== 0) {
+        return `featureMapDrift.unmappedSourceModules 应为空：${JSON.stringify(summary.featureMapDrift)}`
+      }
+      if (!Array.isArray(summary.nextCommands) || summary.nextCommands.length !== 0) {
+        return `洁净仓库 nextCommands 应为空：${JSON.stringify(summary.nextCommands)}`
+      }
+      if (!summary.docGraph || summary.docGraph.unaccountedCount !== 0 || summary.docGraph.brokenAnchorsCount !== 0 || summary.docGraph.cyclesCount !== 0) {
+        return `reconcileSummary.docGraph 异常：${JSON.stringify(summary.docGraph)}`
       }
       return true
     } finally { rmTree(dir) }

@@ -748,9 +748,10 @@ export async function collectTaskRuntimeSnapshot({
  * 替换占位产物描述并保留人类手写的其余正文。
  */
 export async function syncBootstrapMasterIssueArtifacts({
-  backend, targetRepo, linkedIssues = [], ledger, changedFiles = [],
+  backend, targetRepo = null, linkedIssues = [], ledger, changedFiles = [],
 } = {}) {
-  if (!ledger?.planBootstrap || !backend || !targetRepo || linkedIssues.length === 0) return []
+  if (!ledger?.planBootstrap || !backend || (!targetRepo && backend.capabilities?.api !== false) || linkedIssues.length === 0) return []
+  const effectiveRepo = targetRepo ?? 'local'
   const docs = [...new Set([
     ledger.prdFile,
     ledger.specFile,
@@ -770,7 +771,7 @@ export async function syncBootstrapMasterIssueArtifacts({
   const out = []
   for (const iss of linkedIssues) {
     if (typeof backend.getIssue !== 'function' || typeof backend.updateIssueBody !== 'function') break
-    const got = await Promise.resolve(backend.getIssue(targetRepo, iss)).catch(() => null)
+    const got = await Promise.resolve(backend.getIssue({ repo: effectiveRepo, number: iss })).catch(() => null)
     if (!got?.ok) continue
     const curBody = String(got.body ?? '').replace(/\r\n/g, '\n')
     let nextBody = curBody
@@ -785,8 +786,8 @@ export async function syncBootstrapMasterIssueArtifacts({
       nextBody = curBody.trim() ? `${curBody.trimEnd()}\n\n${section}\n` : `${section}\n`
     }
     if (nextBody !== curBody) {
-      const up = await Promise.resolve(backend.updateIssueBody({ repo: targetRepo, number: iss, body: nextBody })).catch((err) => ({ ok: false, error: err?.message }))
-      out.push({ issue: iss, updated: Boolean(up?.ok), docs })
+      const up = await Promise.resolve(backend.updateIssueBody({ repo: effectiveRepo, number: iss, body: nextBody })).catch((err) => ({ ok: false, error: err?.message }))
+      out.push({ issue: iss, updated: up?.ok === true, docs })
     }
   }
   return out

@@ -5,8 +5,14 @@ export const MAX_PROTOTYPE_SRCDOC_BYTES = 512 * 1024
 
 const DIFF_LABELS = { added: '新增', modified: '修改', removed: '拟移除', impacted: '受波及' }
 
-function renderListItems(items) {
-  return `<ul class="pf-brief-list">${items.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`
+function renderListItems(items, foldLimit = 3) {
+  const list = Array.isArray(items) ? items : []
+  if (list.length <= foldLimit) {
+    return `<ul class="pf-brief-list">${list.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`
+  }
+  const head = list.slice(0, foldLimit)
+  const rest = list.slice(foldLimit)
+  return `<ul class="pf-brief-list">${head.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul><details class="pf-more-fold"><summary>展开其余 ${rest.length} 项</summary><ul class="pf-brief-list">${rest.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul></details>`
 }
 
 function collectDownstreamImpacted(rootId, adj, nodeById) {
@@ -70,12 +76,12 @@ function renderChangeCardHtml({ item, downstream = [] }) {
   }
   const titleCls = st === 'removed' ? ' class="pf-node-title-removed"' : ''
   const nestedHtml = downstream.length > 0
-    ? `<div class="pf-impact-nest"><span class="pf-impact-lbl">波及下游 (${downstream.length})</span><div class="pf-chip-row">${downstream.map((imp) => `<button type="button" class="pf-chip-btn" data-target-id="${escapeXml(imp.id)}">${escapeHtml(imp.title)}</button>`).join('')}</div></div>`
+    ? `<details class="pf-impact-fold"><summary>波及下游 (${downstream.length})</summary><div class="pf-chip-row">${downstream.map((imp) => `<button type="button" class="pf-chip-btn" data-target-id="${escapeXml(imp.id)}">${escapeHtml(imp.title)}</button>`).join('')}</div></details>`
     : ''
   return `<div class="pf-chg-card pf-chg-${escapeXml(st)}" data-diff-state="${escapeXml(st)}"><button type="button" class="pf-chg-main" data-target-id="${escapeXml(item.id)}"><div class="pf-chg-head"><strong${titleCls}>${escapeHtml(item.title)}</strong><span class="pf-pill pf-pill-${escapeXml(st)}">${escapeXml(label)}</span></div><span class="pf-muted-note">${escapeHtml(item.domainTitle || item.domain)}</span>${detailHtml}</button>${nestedHtml}</div>`
 }
 
-export function renderBlueprintLandingHtml(model, verdict, verdictLabel) {
+export function renderBlueprintLandingHtml(model, verdict) {
   const bd = model?.briefData
   const counts = model?.overlayCounts || { added: 0, modified: 0, removed: 0, impacted: 0 }
   const treeNodes = model?.tree?.nodes || []
@@ -87,19 +93,27 @@ export function renderBlueprintLandingHtml(model, verdict, verdictLabel) {
     entries = fallback.map((item) => ({ item, downstream: [] }))
   }
 
-  const countersHtml = [
-    ['added', '新增模块', counts.added || 0],
-    ['modified', '修改模块', counts.modified || 0],
-    ['removed', '拟移除', counts.removed || 0],
-    ['impacted', '受波及下游', counts.impacted || 0],
-  ].map(([st, lbl, num]) => `<button type="button" class="pf-stat-box pf-stat-${st}" data-diff-filter="${st}" title="点击筛选「${lbl}」，再次点击清除"><span class="pf-stat-num">${num}</span><span class="pf-stat-lbl">${lbl}</span></button>`).join('')
+  const filterBarHtml = [
+    ['added', '新增', counts.added || 0, 'var(--ad)'],
+    ['modified', '修改', counts.modified || 0, 'var(--mo)'],
+    ['removed', '拟移除', counts.removed || 0, 'var(--rm)'],
+    ['impacted', '受波及', counts.impacted || 0, 'var(--im)'],
+  ].map(([st, lbl, num, col]) => `<button type="button" class="pf-seg-btn pf-stat-${st}" data-diff-filter="${st}" title="点击筛选「${lbl}」，再次点击清除"><span class="pf-dot" style="--dc:${col}"></span><span>${lbl}</span><strong class="pf-stat-num">${num}</strong></button>`).join('')
+
+  const headline = bd?.verdict || verdict?.summary || ''
+  const heroHtml = [
+    '<div class="pf-verdict-hero">',
+    `<div class="pf-verdict-top"><p class="pf-verdict-copy">${escapeHtml(headline)}</p><button id="btn-jump-diff-tree" class="pf-btn pf-btn-sm pf-btn-primary" type="button">在全景图中高亮改动 →</button></div>`,
+    `<div class="pf-diff-seg" role="group" aria-label="按变更状态筛选">${filterBarHtml}</div>`,
+    '</div>',
+  ].join('')
 
   const changesHtml = entries.length > 0
     ? `<div class="pf-chg-grid">${entries.map(renderChangeCardHtml).join('')}</div>`
     : '<div class="pf-empty-box">当前尚未标记四态变更模块，可通过 --affected-feature / --add-feature / --remove-feature 标注。</div>'
 
   if (!bd) {
-    return `<div class="pf-scroll-panel"><div class="pf-verdict-hero"><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span><p class="pf-verdict-copy">${escapeHtml(verdict.summary || '')}</p></div><div class="pf-stat-row">${countersHtml}</div>${changesHtml}</div>`
+    return `<div class="pf-scroll-panel">${heroHtml}${changesHtml}</div>`
   }
 
   const slices = (bd.childSlices || []).map((s) => `${s.key}：${s.rel}（${s.status}${s.done ? '，已完成' : ''}）`)
@@ -107,39 +121,34 @@ export function renderBlueprintLandingHtml(model, verdict, verdictLabel) {
     ? [`总控 PRD：${bd.masterPrd.rel}（${bd.masterPrd.status}，${bd.masterPrd.approved ? '已批准' : '未批准'}）`, ...slices]
     : slices
   const wtItems = (bd.activeWorktrees || []).map((w) => `工作树 ${w.taskId} [${w.status}] ${w.branch || ''}`.trim())
-  const sliceAndWt = [...masterItems, ...wtItems]
-  const openItems = [...(bd.mergedOpen || []), ...(bd.pendingDecisions || []).map((p) => `${p.file}:${p.line} ${p.text}`)]
+  const stripItems = [...(bd.flowDeltas || []), ...masterItems, ...wtItems]
+  const stripHtml = stripItems.length > 0
+    ? `<section class="pf-brief-sec"><h3 class="pf-bp-h">流程变化与 1:N 切片</h3><div class="pf-strip-row">${stripItems.map((txt) => `<span class="pf-strip-item">${escapeHtml(txt)}</span>`).join('')}</div></section>`
+    : ''
 
-  const briefCards = []
+  const openItems = [...(bd.mergedOpen || []), ...(bd.pendingDecisions || []).map((p) => `${p.file}:${p.line} ${p.text}`)]
+  const ledgerSecs = []
   if ((bd.goals?.length || 0) > 0 || (bd.nonGoals?.length || 0) > 0) {
-    briefCards.push([
-      '<section class="pf-brief-card"><h3>核心目标与不做边界</h3>',
+    ledgerSecs.push([
+      '<section class="pf-brief-sec"><h3>核心目标与不做边界</h3>',
       bd.goals?.length > 0 ? `<span class="pf-inspector-label">目标</span>${renderListItems(bd.goals)}` : '',
       bd.nonGoals?.length > 0 ? `<span class="pf-inspector-label">不做边界</span>${renderListItems(bd.nonGoals)}` : '',
       '</section>',
     ].filter(Boolean).join(''))
   }
-  if ((bd.flowDeltas?.length || 0) > 0 || sliceAndWt.length > 0) {
-    briefCards.push([
-      '<section class="pf-brief-card"><h3>流程变化与 1:N 切片</h3>',
-      bd.flowDeltas?.length > 0 ? `<span class="pf-inspector-label">流程增量</span>${renderListItems(bd.flowDeltas)}` : '',
-      sliceAndWt.length > 0 ? `<span class="pf-inspector-label">切片与工作树</span>${renderListItems(sliceAndWt)}` : '',
-      '</section>',
-    ].filter(Boolean).join(''))
-  }
   if ((bd.mergedDecisions?.length || 0) > 0) {
-    briefCards.push(`<section class="pf-brief-card"><h3>已拍板决策</h3>${renderListItems(bd.mergedDecisions)}</section>`)
+    ledgerSecs.push(`<section class="pf-brief-sec"><h3>已拍板决策</h3>${renderListItems(bd.mergedDecisions)}</section>`)
   }
   if (openItems.length > 0) {
-    briefCards.push(`<section class="pf-brief-card"><h3>待确认问题</h3>${renderListItems(openItems)}</section>`)
+    ledgerSecs.push(`<section class="pf-brief-sec"><h3>待确认问题</h3>${renderListItems(openItems)}</section>`)
   }
 
   return [
     '<div class="pf-scroll-panel">',
-    `<div class="pf-verdict-hero"><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span><p class="pf-verdict-copy">${escapeHtml(bd.verdict || verdict.summary || '')}</p></div>`,
-    `<div class="pf-stat-row">${countersHtml}</div>`,
+    heroHtml,
     `<section class="pf-bp-sec"><h3 class="pf-bp-h">四态变更清单（点击定位模块）</h3>${changesHtml}</section>`,
-    briefCards.length > 0 ? `<div class="pf-brief-grid">${briefCards.join('')}</div>` : '',
+    stripHtml,
+    ledgerSecs.length > 0 ? `<div class="pf-brief-ledger">${ledgerSecs.join('')}</div>` : '',
     '</div>',
   ].filter(Boolean).join('\n')
 }
@@ -174,7 +183,7 @@ export function renderDiffRowsHtml(nodes, edges = []) {
 export function renderFocusCardHtml() {
   return [
     '<aside id="pf-focus-card" class="pf-focus-card" aria-live="polite" hidden>',
-    '<div class="pf-fc-head"><div class="pf-fc-meta"><span id="fc-domain" class="pf-pill"></span><span id="fc-diff" class="pf-pill" hidden></span><span id="fc-risk" class="pf-pill"></span></div><div class="pf-fc-actions"><button id="fc-detail" class="pf-btn pf-btn-primary pf-btn-sm" type="button">查看详情 (Space)</button><button id="fc-center" class="pf-btn pf-btn-sm" type="button">居中定位</button><button id="fc-ask" class="pf-btn pf-btn-sm" type="button">问 AI</button><button id="fc-close" class="pf-btn pf-btn-sm" type="button">关闭</button></div></div>',
+    '<div class="pf-fc-head"><div class="pf-fc-meta"><span id="fc-domain" class="pf-pill"></span><span id="fc-diff" class="pf-pill" hidden></span><span id="fc-risk" class="pf-pill"></span></div><div class="pf-fc-actions"><button id="fc-detail" class="pf-btn pf-btn-primary pf-btn-sm" type="button">查看详情 (Space)</button><button id="fc-center" class="pf-btn pf-btn-ghost pf-btn-sm" type="button">居中定位</button><button id="fc-ask" class="pf-btn pf-btn-ghost pf-btn-sm" type="button">问 AI</button><button id="fc-close" class="pf-btn pf-btn-ghost pf-btn-sm" type="button">关闭</button></div></div>',
     '<h3 id="fc-title" class="pf-fc-title"></h3>',
     '<div id="fc-change" class="pf-change-box" hidden></div>',
     '<div class="pf-fc-rels"><div class="pf-fc-rel"><span class="pf-inspector-label">← 上游</span><div id="fc-up" class="pf-chip-row"></div></div><div class="pf-fc-rel"><span class="pf-inspector-label">下游 →</span><div id="fc-down" class="pf-chip-row"></div></div></div>',
@@ -186,7 +195,7 @@ export function renderQuickLookModalHtml() {
   return [
     '<div id="pf-quicklook" class="pf-dialog" role="dialog" aria-modal="true" aria-labelledby="ql-title" hidden>',
     '<div class="pf-dialog-card pf-ql-card">',
-    '<div class="pf-dlg-head"><div class="pf-chip-row"><span id="ql-domain" class="pf-pill"></span><span id="ql-diff" class="pf-pill" hidden></span><span id="ql-risk" class="pf-pill"></span></div><div class="pf-chip-row"><button id="ql-center" class="pf-btn pf-btn-sm" type="button">居中定位</button><button id="ql-close" class="pf-btn pf-btn-sm" type="button">关闭 (Esc)</button></div></div>',
+    '<div class="pf-dlg-head"><div class="pf-chip-row"><span id="ql-domain" class="pf-pill"></span><span id="ql-diff" class="pf-pill" hidden></span><span id="ql-risk" class="pf-pill"></span></div><div class="pf-chip-row"><button id="ql-center" class="pf-btn pf-btn-ghost pf-btn-sm" type="button">居中定位</button><button id="ql-close" class="pf-btn pf-btn-ghost pf-btn-sm" type="button">关闭 (Esc)</button></div></div>',
     '<h3 id="ql-title" class="pf-inspector-title">模块详情</h3>',
     '<div id="ql-change" class="pf-change-box" hidden></div>',
     '<p id="ql-desc" class="pf-inspector-desc"></p>',

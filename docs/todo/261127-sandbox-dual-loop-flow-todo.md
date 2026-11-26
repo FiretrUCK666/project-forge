@@ -35,34 +35,35 @@ related_spec: ../specs/261127-sandbox-dual-loop-flow-spec.md
 
 ## 任务范围与验证基准
 
-- **影响路径**：`kit/skills/dev-flow/scripts/flow-sandbox.mjs` (new)、`kit/skills/lib/ledger.mjs`、`kit/skills/lib/harness-context.mjs`、`kit/skills/lib/mutability.mjs`、`kit/skills/lib/subcommand-meta.mjs`、`kit/skills/lib/workflow-policy-next.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-start-helpers.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs`、`kit/skills/dev-flow/scripts/flow-merge.mjs`、`scripts/dev/fixtures-sandbox-dual-loop.mjs` (new)、`scripts/dev/injections-data-sandbox-flow.mjs` (new)、`scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`
-- **复用既有模块**：`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-start-helpers.mjs`、`kit/skills/lib/ledger.mjs`、`kit/skills/lib/git.mjs`
+- **影响路径**：`kit/skills/lib/sandbox-scope.mjs` (new)、`kit/skills/dev-flow/scripts/flow-sandbox.mjs` (new)、`kit/skills/lib/ledger.mjs`、`kit/skills/lib/harness-context.mjs`、`kit/skills/lib/mutability.mjs`、`kit/skills/lib/subcommand-meta.mjs`、`kit/skills/lib/workflow-policy-next.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-start-helpers.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs`、`kit/skills/dev-flow/scripts/flow-merge.mjs`、`docs/feature-map.json`、`docs/architecture-map.html`、`scripts/dev/fixtures-sandbox-dual-loop.mjs` (new)、`scripts/dev/injections-data-sandbox-flow.mjs` (new)、`scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`
+- **复用既有模块**：`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-start-helpers.mjs`、`kit/skills/lib/ledger.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/lib/git.mjs`
 - **本期不做**：不修改 Wave 1 策略核心；不修改 Wave 3 的 `triage`、模板、文档与 `SKILL.md`。
 - **门型与回滚路径**：one-way；须独立审查与两阶段故障注入；回滚用 `git revert` 并重跑 `node scripts/equip.mjs .`。
 - **快测命令**：`node scripts/dev/preflight.mjs`
 
 ## 验收标准与执行清单
 
-- [ ] C5: `flow.mjs start --sandbox` 创建 `.worktrees/sandbox-<id>/` 隔离工作树，保护 `main` 干净（`BLOCKED_MAIN_SLOT_VIOLATION` 保持生效），豁免预建 Issue，且对未晋升沙箱执行 `finalize`/`submit` 硬拒 `BLOCKED_SANDBOX_PROMOTE_REQUIRED`（不提前 `git mv` 归档文档）。
-- [ ] C6: `ledger.mjs` 新增 `implementers[]`（支持单常驻或互不重叠 `writeScope` 多子代理并行登记，写域冲突硬拒 `BLOCKED_SANDBOX_WRITE_SCOPE_OVERLAP`），`collectImplementerHistory` 自动聚合 `implementers[]` 并在外环审查与合并强制执行 `reviewerId ∉ implementers[]`（`SELF_REVIEW_REJECTED`）与防自合（`BLOCKED_SELF_MERGE`）。
-- [ ] C7: `flow.mjs promote --task <id>` 按真实 `git diff <baseRef>...HEAD` 经单源 `determineWorkflowPolicy` 确定性路由：`Case 2/3`（含纯 UI 局部改）原地晋升并一次性补齐单一 Issue 绑定与 `C1..Cn` 收口；命中 `Case 4`（`one-way`/`high-risk`/跨多域契约）则输出 `SANDBOX_PROMOTE_NEEDS_SPEC` 标记为已验证 PoC 并引导走 `SPEC`/`1:N PRD` + 独立 Critic + `approve`。
-- [ ] C8: `workflow-policy-next.mjs` 完整支持 `sandbox-iterating`、`sandbox-ready-to-promote`、`sandbox-needs-spec` 状态路由与单一可执行命令；沙箱内 `flow verify` 自动打标 `inner: true`，晋升后无缝接入外环 `finalize -> verify -> submit -> review -> merge -> cleanup --confirm --preview-hash`。
+- [ ] C5: `flow.mjs start --sandbox`（经 `sandbox-scope.mjs` (new) 与 `flow-sandbox.mjs` (new)，当波登记 `feature-map`、重渲 `architecture-map.html` 并同步 `flow.mjs` 第 6 行子命令头与 `printHelp()`）创建 `.worktrees/sandbox-<id>/` 隔离工作树，保护 `main` 干净（`BLOCKED_MAIN_SLOT_VIOLATION` 保持生效），豁免预建 Issue，且对未晋升沙箱执行 `finalize`/`submit` 硬拒 `BLOCKED_SANDBOX_PROMOTE_REQUIRED`（不提前 `git mv` 归档文档）。
+- [ ] C6: `ledger.mjs` 新增 `implementers[]` 及沙箱三态登记入 `OPEN_TASK_STATUSES`/`PRE_SUBMIT_STATUSES`，写域校验抽入 `sandbox-scope.mjs` (new)（支持单常驻或互不重叠 `writeScope` 多子代理并行登记，写域冲突硬拒 `BLOCKED_SANDBOX_WRITE_SCOPE_OVERLAP`），`collectImplementerHistory` 自动聚合 `implementers[]` 并在外环审查与合并强制执行 `reviewerId ∉ implementers[]`（`SELF_REVIEW_REJECTED`）与防自合（`BLOCKED_SELF_MERGE`）。
+- [ ] C7: `flow.mjs promote --task <id>` 按真实 `git diff <baseRef>...HEAD` 经单源 `determineWorkflowPolicy` 与 `checkTddSyncParity` 确定性路由：`docs/TDD.md` 冲突阻断 `BLOCKED_CASE_5_TDD_CONFLICT`；`Case 2/3`（含纯 UI 局部改）原地晋升、自动衔接 `claimedAt`/`explored` 并一次性补齐单一 Issue 绑定（`Case 3` 非实施者署名 Todo 通过 `BLOCKED_AUTHOR_IS_IMPLEMENTER`）；命中 `Case 4` 输出 `SANDBOX_PROMOTE_NEEDS_SPEC` 标记为已验证 PoC 并引导走 `SPEC`/`1:N PRD` + 独立 Critic + `approve`。
+- [ ] C8: `workflow-policy-next.mjs` 完整支持 `sandbox-iterating`、`sandbox-ready-to-promote`、`sandbox-needs-spec` 状态路由与单一可执行命令；`flow-lifecycle-hooks.mjs` 对沙箱内环 `verify` 豁免外环前置认领/探索阻塞且不放宽外环校验；沙箱内 `flow verify` 自动打标 `inner: true`，晋升后无缝接入外环 `finalize -> verify -> submit -> review -> merge -> cleanup --confirm --preview-hash`。
 
 ## 执行步骤
 
 | 步骤 | 做什么 | 怎么验 | 前置依赖 |
 | --- | --- | --- | --- |
 | 1 | 编写失败的 Red-Green 测试 `scripts/dev/fixtures-sandbox-dual-loop.mjs` (new) 并注册到 `scripts/dev/fixtures.mjs` | 运行 `node scripts/dev/fixtures.mjs` 新用例必须红 | Wave 1 已合并 |
-| 2 | 改造 `ledger.mjs`、`harness-context.mjs`、`mutability.mjs`、`subcommand-meta.mjs` 与 `workflow-policy-next.mjs` | 账本多代理写域与状态机单测通过且全部文件 `<= 800L` | 步骤 1 |
-| 3 | 新增 `kit/skills/dev-flow/scripts/flow-sandbox.mjs` (new) 并薄接入 `flow.mjs`、`flow-inspect.mjs`、`flow-start-helpers.mjs`、`flow-lifecycle.mjs`、`flow-lifecycle-finalize.mjs`、`flow-merge.mjs` | `fixtures-sandbox-dual-loop.mjs` 全绿且 `flow-inspect.mjs`/`flow-lifecycle.mjs`/`flow-merge.mjs <= 800L` | 步骤 2 |
-| 4 | 新增 `scripts/dev/injections-data-sandbox-flow.mjs` (new) 并同步 `.agents/skills/`（`node scripts/equip.mjs .`） | `preflight.mjs`、`fixtures.mjs`、`equip.mjs . --check`、`verify-injections.mjs --jobs 4` 全绿 | 步骤 3 |
+| 2 | 新建 `kit/skills/lib/sandbox-scope.mjs` (new)，改造 `ledger.mjs`（`<= 785L`）、`harness-context.mjs`、`mutability.mjs`、`subcommand-meta.mjs` 与 `workflow-policy-next.mjs` | 账本多代理写域与状态机单测通过且全部文件 `<= 800L` | 步骤 1 |
+| 3 | 新建 `kit/skills/dev-flow/scripts/flow-sandbox.mjs` (new)，薄接入 `flow.mjs`（含第 6 行注释与 `printHelp()`）、`flow-inspect.mjs`（`<= 799L`）、`flow-start-helpers.mjs`、`flow-lifecycle.mjs`（`<= 795L`）、`flow-lifecycle-hooks.mjs`、`flow-lifecycle-finalize.mjs`、`flow-merge.mjs`（`<= 795L`） | `fixtures-sandbox-dual-loop.mjs` 全绿且 `subcommand-parity` / `cli-parity` 通过 | 步骤 2 |
+| 4 | 新增 `scripts/dev/injections-data-sandbox-flow.mjs` (new)，当波登记 `sandbox-scope.mjs` (new) 与 `flow-sandbox.mjs` (new) 入 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`，同步 `.agents/skills/`（`node scripts/equip.mjs .`） | `preflight.mjs`、`fixtures.mjs`、`equip.mjs . --check`、`verify-injections.mjs --jobs 4` 全部退出码 `0` | 步骤 3 |
 
 ## 风险与应对
 
 | 风险 | 触发条件 | 应对方式 |
 | --- | --- | --- |
-| `flow-inspect.mjs`（795L）或 `flow-merge.mjs`（789L）超 800 行 | 直接在原文件展开沙箱逻辑 | 所有沙箱实现放在 `flow-sandbox.mjs` (new)，原文件仅留 3-5 行委托调用 |
-| 沙箱工作树共享依赖卸载不干净导致 `cleanup` 误删主仓依赖 | `mountSharedDeps` 未登记 `mountedDepsByWorktree` | `handleSandboxStart` 强制复用 `recordMountedDepsInLedger` 并在测试中校验卸载后主仓 `node_modules` 完好 |
+| `flow-inspect.mjs`（795L）、`flow-merge.mjs`（789L）、`flow-lifecycle.mjs`（784L）或 `ledger.mjs`（756L）超 800 行 | 在原文件展开沙箱写域或晋升逻辑 | 全部核心实现放 `sandbox-scope.mjs` (new) 与 `flow-sandbox.mjs` (new)，原文件仅留薄委托 |
+| `flow.mjs` 未同步更新文件头与帮助导致 `preflight` 暗参数拦截 | 漏改 `flow.mjs` 第 6 行或 `printHelp()` | 步骤 3 显式同步并执行 `preflight.mjs` 验证 `subcommand-parity`/`cli-parity` |
+| 沙箱工作树共享依赖卸载不干净导致 `cleanup` 误删主仓依赖 | `mountSharedDeps` 未登记 `mountedDepsByWorktree` | `handleSandboxStart` 强制复用 `recordMountedDepsInLedger` 并在测试中校验卸载后主仓依赖完好 |
 
 ## 回滚预案
 
@@ -84,7 +85,7 @@ related_spec: ../specs/261127-sandbox-dual-loop-flow-spec.md
 
 ## 澄清与补充记录
 
-- 已确认：`review-ledger.mjs`（798 行）通过复用 `ledger.mjs` 的 `collectImplementerHistory` 自动获得 `reviewerId ∉ implementers[]` 保护，无需修改 `review-ledger.mjs`。
+- 已确认：`review-ledger.mjs`（798 行）通过复用 `ledger.mjs` 的 `collectImplementerHistory` 自动获得 `reviewerId ∉ implementers[]` 保护，无需修改 `review-ledger.mjs`；本波独立登记 `sandbox-scope.mjs` 与 `flow-sandbox.mjs` 至 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`。
 
 ## 完成后的记录
 

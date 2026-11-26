@@ -35,7 +35,7 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 ## 任务范围与验证基准
 
-- **影响路径**：`kit/skills/dev-plan/scripts/triage-rules.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan-brief.mjs`、`references/collaboration.md`、`templates/agents-project.md`、`AGENTS.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`kit/skills/dev-plan/SKILL.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-review/SKILL.md`、`kit/skills/dev-edit/SKILL.md`、`kit/skills/dev-iterate/SKILL.md`、`scripts/dev/preflight-contract-rules.mjs`、`scripts/dev/preflight-contracts.mjs`、`scripts/dev/preflight-suite.mjs`、`scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new)、`scripts/dev/injections-data-triage-parity.mjs` (new)、`scripts/dev/fixtures.mjs`、`scripts/dev/fixtures-doc-triage.mjs`、`scripts/dev/injections-data.mjs`、`docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md`、`README.en.md`
+- **影响路径**：`kit/skills/dev-plan/scripts/triage-rules.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan-brief.mjs`、`references/collaboration.md`、`templates/agents-project.md`、`AGENTS.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`kit/skills/dev-plan/SKILL.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-review/SKILL.md`、`kit/skills/dev-edit/SKILL.md`、`kit/skills/dev-iterate/SKILL.md`、`scripts/dev/preflight-contract-rules.mjs`、`scripts/dev/preflight-contracts.mjs`、`scripts/dev/preflight-suite.mjs`、`scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new)、`scripts/dev/injections-data-triage-parity.mjs` (new)、`scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`、`scripts/dev/fixtures-doc-triage.mjs`、`scripts/dev/fixtures-living-brief.mjs`、`scripts/dev/fixtures-r6d-contracts.mjs`、`docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md`、`README.en.md`
 - **复用既有模块**：`kit/skills/dev-plan/scripts/triage-rules.mjs`、`kit/skills/lib/static-gates.mjs`、`scripts/compose-agents.mjs`、`scripts/equip.mjs`、`scripts/sync-toc.mjs`、`scripts/review.mjs`、`scripts/dev/fixtures-helpers.mjs`
 - **本期不做**：不实施 Milestone B 的 `visual-studio-archify-v2` 画布与蓝图 UI 重构。
 - **门型与回滚路径**：one-way；须独立审查与两阶段故障注入；回滚用 `git revert` 并重跑 `compose-agents.mjs .` 与 `equip.mjs .`。
@@ -43,19 +43,19 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C9: `doc-plan.mjs triage` 确定性输出 `recommendedEntry: 'direct' | 'sandbox' | 'plan-first'` 与单一 `[NEXT STEP]`，移除 `doc-audit.mjs` 中 `fileCount >= 6 -> Case 4` 钝化悬崖，保持 `Case 5` 与 `PRD` 严格正交，且 Living Visual Brief / Prototype 改为按需触发（局部可逆默认零 Brief 开销）。
-- [ ] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份受影响 `kit/skills/*/SKILL.md` 及 `scripts/dev/preflight*` 完成同构同步，严守 `SKILL.md <= 14,336 B / <= 180 L`、`AGENTS.md <= 30 KB`、`equip.mjs . --check` 字节一致与零特定 E2E 驱动硬编码。
+- [ ] C9: `doc-plan.mjs triage` 确定性输出 `recommendedEntry: 'direct' | 'sandbox' | 'plan-first'` 与单一 `[NEXT STEP]`，仅移除 `doc-audit.mjs:165` `fileCount >= 6 -> Case 4` 钝化悬崖（保留 `:86,161,169` `fileCount >= 12` PRD 判据），保持 `Case 5` 与 `PRD` 严格正交，且统筹 `doc-plan-brief.mjs` 两处（`handleNoteSubcommand` 与 `handleTriageSubcommand`）按需触发 Living Visual Brief / Prototype（局部可逆默认零 Brief 开销，兼容多轮讨论 `fixtures-living-brief.mjs`）。
+- [ ] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份受影响 `kit/skills/*/SKILL.md` 及 `scripts/dev/preflight*`（含同步 `fixtures-r6d-contracts.mjs`）完成同构同步，严守 `SKILL.md <= 14,336 B / <= 180 L`、`AGENTS.md <= 30 KB`、`equip.mjs . --check` 字节一致与零特定 E2E 驱动硬编码。
 - [ ] C11: 新增 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 覆盖 7 类异构仿真仓库（空/极简仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、UI 前端、无清单非 JS 通用、`generic-git`），双向验证完整双环流转零项目定制补丁。
-- [ ] C12: 补齐并更新本里程碑双向故障注入样本，同步 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md` 与 `README.en.md`，运行全部 10 项全仓门禁与 `verify-injections.mjs --jobs 4` 及 `e2e-zip-harness.mjs` 全部退出码 `0`。
+- [ ] C12: 补齐并更新本里程碑全部双向故障注入样本，完成 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md` 与 `README.en.md` 最终全局对齐，运行全部 10 项全仓门禁、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs` 与 `git archive` 用户包校验全部退出码 `0`。
 
 ## 执行步骤
 
 | 步骤 | 做什么 | 怎么验 | 前置依赖 |
 | --- | --- | --- | --- |
 | 1 | 编写失败的 Red-Green 测试 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 并注册到 `scripts/dev/fixtures.mjs` | 运行 `node scripts/dev/fixtures.mjs` 新用例必须红 | Wave 1 & Wave 2 已合并 |
-| 2 | 改造 `triage-rules.mjs`、`doc-audit.mjs`、`doc-plan-brief.mjs` 并同步 `fixtures-doc-triage.mjs` | `C9` 正反双向测试变绿且 `doc-audit.mjs <= 800L` | 步骤 1 |
-| 3 | 同构更新 `references/collaboration.md`、`templates/*`、5 份 `SKILL.md`、`preflight*`，执行 `compose-agents.mjs .` 与 `equip.mjs .` | `SKILL.md <= 14,336 B / <= 180L`、`AGENTS.md <= 30 KB`、`preflight.mjs` 绿 | 步骤 2 |
-| 4 | 同步 `docs/TDD.md`、`docs/feature-map.json`、重渲 `docs/architecture-map.html`、成对更新 `README.md`/`README.en.md`、补齐 `injections-data-triage-parity.mjs` (new) 并跑通全量 10 项门禁与 `verify-injections --jobs 4`、`e2e-zip-harness.mjs`、`git archive` 包检 | 全部门禁退出码 `0`，且总控 PRD `C1..C12` 全勾闭环 | 步骤 3 |
+| 2 | 改造 `triage-rules.mjs`、`doc-audit.mjs`（`<= 785L`）、`doc-plan-brief.mjs`（统筹两处 Brief 触发），同步 `fixtures-doc-triage.mjs` 与 `fixtures-living-brief.mjs` | `C9` 正反双向测试变绿且 `doc-audit.mjs <= 785L` | 步骤 1 |
+| 3 | 同构更新 `references/collaboration.md`、`templates/*`、`.github/pull_request_template.md`、5 份 `kit/skills/*/SKILL.md`、`fixtures-r6d-contracts.mjs`、`preflight*`，执行 `compose-agents.mjs .` 与 `equip.mjs .` | `SKILL.md <= 14,336 B / <= 180L`、`AGENTS.md <= 30 KB`、`preflight-suite.mjs <= 792L`、`preflight.mjs` 绿 | 步骤 2 |
+| 4 | 同步 `docs/TDD.md`、终验 `docs/feature-map.json` 与 `docs/architecture-map.html`、成对更新 `README.md`/`README.en.md`、补齐 `injections-data-triage-parity.mjs` (new) 并跑通全量 10 项门禁与 `verify-injections --jobs 4`、`e2e-zip-harness.mjs`、`git archive` 包检 | 全部门禁退出码 `0`，且总控 PRD `C1..C12` 全勾闭环 | 步骤 3 |
 
 ## 风险与应对
 

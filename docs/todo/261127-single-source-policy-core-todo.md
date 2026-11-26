@@ -35,7 +35,7 @@ related_spec: ../specs/261127-single-source-policy-core-spec.md
 
 ## 任务范围与验证基准
 
-- **影响路径**：`kit/skills/lib/gate-receipt.mjs` (new)、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-empirical.mjs`、`kit/skills/dev-review/scripts/review-empirical-state.mjs`、`kit/skills/dev-review/scripts/review-locks.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs`、`kit/skills/dev-edit/scripts/edit-gate.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`kit/skills/dev-iterate/scripts/iterate.mjs`、`kit/skills/dev-govern/scripts/govern-checks.mjs`、`scripts/dev/fixtures-policy-axes.mjs` (new)、`scripts/dev/injections-data-policy-axes.mjs` (new)、`scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`、`scripts/dev/fixtures-r8-bugfixes.mjs`、`scripts/dev/fixtures-review-empirical.mjs`、`scripts/dev/fixtures-iterate-evolution.mjs`
+- **影响路径**：`kit/skills/lib/gate-receipt.mjs` (new)、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-empirical.mjs`、`kit/skills/dev-review/scripts/review-empirical-state.mjs`、`kit/skills/dev-review/scripts/review-locks.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs`、`kit/skills/dev-edit/scripts/edit-gate.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`kit/skills/dev-iterate/scripts/iterate.mjs`、`kit/skills/dev-govern/scripts/govern-checks.mjs`、`docs/feature-map.json`、`docs/architecture-map.html`、`scripts/dev/fixtures-policy-axes.mjs` (new)、`scripts/dev/injections-data-policy-axes.mjs` (new)、`scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`、`scripts/dev/fixtures-r6c-gates.mjs`、`scripts/dev/injections-data-r6c.mjs`、`scripts/dev/fixtures-e2e-gate.mjs`、`scripts/dev/fixtures-w4-harness.mjs`、`scripts/dev/fixtures-r8-bugfixes.mjs`、`scripts/dev/fixtures-review-empirical.mjs`、`scripts/dev/fixtures-iterate-evolution.mjs`
 - **复用既有模块**：`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/empirical-artifacts.mjs`、`kit/skills/lib/architecture-map.mjs`、`kit/skills/lib/static-gates.mjs`、`kit/skills/lib/git.mjs`
 - **本期不做**：不实现沙箱 worktree 创建/`flow promote`（归切片 2）；不改 `triage` 入口、`templates/`、`AGENTS.md` 或 `SKILL.md` 文案（归切片 3）。
 - **门型与回滚路径**：one-way；触及 `kit/` 核心门禁，须独立审查与故障注入；回滚用 `git revert` 并重跑 `node scripts/equip.mjs .`。
@@ -43,26 +43,27 @@ related_spec: ../specs/261127-single-source-policy-core-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C1: `determineWorkflowPolicy` 将 UI 视觉实证（`visualCheckRequired`）与 `riskTier='high'` 解耦，不再因仅改前端样式/组件文件而强抬为 `high`；`faultInjectionRequired` 与 `review-empirical.mjs` 的 `faultRequired` 单源统一精确绑定至 `high`/`one-way`/`Case >= 4`，经 `fixtures-policy-axes.mjs` 正反双向断言通过。
+- [ ] C1: `determineWorkflowPolicy` 将 UI 视觉实证（`visualCheckRequired`）与 `riskTier='high'` 解耦（且 `isLow` 显式要求 `effectiveVisual.length === 0`），不再因仅改前端样式/组件文件而强抬为 `high`；`faultInjectionRequired` 与 `review-empirical.mjs` 的 `faultRequired`（含 `smokeExplicitNone` 对齐 `review-locks.mjs:601`）单源统一精确绑定至 `high`/`one-way`/`Case >= 4`，经 `fixtures-policy-axes.mjs` 与更新后的既有夹具正反双向断言通过。
 - [ ] C2: 沙箱/内环快检在 `evidence.json` 记录 `inner: true`；外环 `validateVerificationEvidence` 对顶层或门禁项带 `inner === true` 的实证硬拒并返回 `BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER`（退出码 `3`），经正反双向断言通过。
-- [ ] C3: 新增 `kit/skills/lib/gate-receipt.mjs` (new) 实现 `{ headSha, diffFingerprint, profileHash }` 绑定的干净 HEAD 回执复用，使单次 `flow verify` 中 `verifyArchitectureMapSync` 仅执行 1 次并消除 `scanStructuralHygiene`/`evaluateArchRules`/`detectGateWeakening` 在 4 处的重复重算，且脏树或 HEAD 变化时立即失效重扫。
-- [ ] C4: `flow-lifecycle-helpers.mjs`、`review-empirical-state.mjs` 与 `iterate.mjs` 在探索/内环/`quick`/沙箱失败时默认仅记本地诊断包与治理信号而不向远端托管平台自动建单；仅外环阻断或显式 `--escalate` 才触发远端建单。
+- [ ] C3: 新增 `kit/skills/lib/gate-receipt.mjs` (new)（当波登记入 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`）实现 `{ repoRoot, dirty: false, headSha, baseSha, diffFingerprint, profileHash }` 绑定的干净 HEAD 回执复用（支持有 `taskId` 与 headless 无 `taskId` 场景，明确唯一生产者并保活 `I962/I963`），使单次 `flow verify` 中 `verifyArchitectureMapSync` 仅执行 1 次并消除 `scanStructuralHygiene`/`evaluateArchRules`/`detectGateWeakening` 重复重算，且脏树或配置/HEAD 变化时立即失效重扫。
+- [ ] C4: `flow-lifecycle-helpers.mjs`、`review-empirical-state.mjs` 与 `iterate.mjs`（同步更新 `printHelp()` 第 67 行说明及 `fixtures-r6c-gates.mjs`/`injections-data-r6c.mjs` `I502`）在探索/内环/`quick`/沙箱失败时默认仅记本地诊断包与治理信号而不向远端托管平台自动建单；仅外环阻断或显式 `--escalate` 才触发远端建单。
 
 ## 执行步骤
 
 | 步骤 | 做什么 | 怎么验 | 前置依赖 |
 | --- | --- | --- | --- |
 | 1 | 编写失败的 Red-Green 测试 `scripts/dev/fixtures-policy-axes.mjs` (new) 并注册到 `scripts/dev/fixtures.mjs` | 运行 `node scripts/dev/fixtures.mjs` 对应新用例必须红 | 规划获批 |
-| 2 | 新增 `kit/skills/lib/gate-receipt.mjs` (new) 并改造 `workflow-policy.mjs` 三轴解耦与 `inner: true` 拦截 | `fixtures-policy-axes.mjs` 的 C1/C2 变绿且 `workflow-policy.mjs <= 800L` | 步骤 1 |
-| 3 | 接入 `review-empirical*.mjs`、`review-locks.mjs`、`review-gates.mjs`、`edit-gate.mjs`、`flow-lifecycle-hooks.mjs`、`flow-lifecycle-helpers.mjs`、`iterate.mjs`、`govern-checks.mjs` | `fixtures-policy-axes.mjs` 全部变绿，全部改动文件 `<= 800L` | 步骤 2 |
-| 4 | 更新旧夹具断言并新增 `scripts/dev/injections-data-policy-axes.mjs` (new)，运行 `node scripts/equip.mjs .` 同步 `.agents/skills/` | `preflight.mjs`、`fixtures.mjs`、`equip.mjs . --check`、`verify-injections.mjs --jobs 4` 全绿 | 步骤 3 |
+| 2 | 新增 `kit/skills/lib/gate-receipt.mjs` (new) 并改造 `workflow-policy.mjs` 三轴解耦、`isLow` 排视觉与 `inner: true` 拦截 | `fixtures-policy-axes.mjs` 的 C1/C2 变绿且 `workflow-policy.mjs <= 780L` | 步骤 1 |
+| 3 | 接入 `review-empirical.mjs`（零净增行）、`review-empirical-state.mjs`、`review-locks.mjs`、`review-gates.mjs`、`edit-gate.mjs`（保 `I963`）、`flow-lifecycle-hooks.mjs`（保 `I962`）、`flow-lifecycle-helpers.mjs`、`iterate.mjs`（含第 67 行帮助文案）、`govern-checks.mjs` | `fixtures-policy-axes.mjs` 全绿，全部改动 `.mjs <= 800L` | 步骤 2 |
+| 4 | 当波同步更新 `fixtures-r6c-gates.mjs`、`injections-data-r6c.mjs` (`I502`)、`fixtures-e2e-gate.mjs`、`fixtures-w4-harness.mjs`、`fixtures-r8-bugfixes.mjs`、`fixtures-review-empirical.mjs`、`fixtures-iterate-evolution.mjs`（`<= 795L`），新增 `scripts/dev/injections-data-policy-axes.mjs` (new)，登记 `gate-receipt.mjs` 入 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`，同步 `.agents/skills/`（`node scripts/equip.mjs .`） | `preflight.mjs`、`fixtures.mjs`、`equip.mjs . --check`、`verify-injections.mjs --jobs 4` 全部退出码 `0` | 步骤 3 |
 
 ## 风险与应对
 
 | 风险 | 触发条件 | 应对方式 |
 | --- | --- | --- |
-| `review-empirical.mjs`（797L）超 800 行红线 | 改动时新增 4 行以上代码 | 仅原地替换第 101-102 行，额外判断全部放在 `workflow-policy.mjs` 与 `gate-receipt.mjs` (new) |
-| 旧单测仍断言 `medium` 运行时改动 `faultRequired === true` | 运行 `fixtures-r8-bugfixes.mjs` / `fixtures-review-empirical.mjs` | 同步改造对应夹具为双向断言（`high`/`one-way`/`Case>=4` 为 `true`，普通 `medium` 为 `false`） |
+| `review-empirical.mjs`（797L）或 `fixtures-iterate-evolution.mjs`（795L）超 800 行 | 直接追加多行代码或新测试用例 | `review-empirical.mjs` 仅原地替换 2 行；新增用例全部放 `fixtures-policy-axes.mjs` (new) |
+| 回执缓存意外屏蔽 `I962`/`I963` 架构图漂移拦截 | 脏树或漂移态误写/误读 `architectureMapSync` 回执 | 仅在 `syncRes.ok === true && !dirty` 时落盘，且原样保留两处 `if (!syncRes.ok)` 语句 |
+| `iterate.mjs` 静默默认打破 `fixtures-r6c-gates.mjs` 与 `I502` | 未在当波同步既有断言 | 步骤 4 当波同步升级 `fixtures-r6c-gates.mjs` 与 `injections-data-r6c.mjs` `I502` |
 
 ## 回滚预案
 
@@ -78,7 +79,7 @@ related_spec: ../specs/261127-single-source-policy-core-spec.md
 
 ## 澄清与补充记录
 
-- 已确认：本切片为 Wave 1，独占策略核心与门禁回执缓存文件，与 Wave 2 零同波冲突。
+- 已确认：本切片为 Wave 1，当波完成 `gate-receipt.mjs` (new) 的 `feature-map` 登记与受波及既有夹具/注入表更新，保证独立合入全绿。
 
 ## 完成后的记录
 

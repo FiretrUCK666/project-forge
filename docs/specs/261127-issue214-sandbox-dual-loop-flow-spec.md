@@ -5,16 +5,16 @@ status: approved
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 214
 pr: null
-branch: feat/sandbox-dual-loop-v1
+branch: feat/sandbox-dual-loop-flow
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-sandbox-r3, round=3, sha=2ebbe93e2645, summary=Round 2 F5 已完整闭环：Step A 改用 checkTddSyncParity 真实返回字段 (parity?.staleModulesInTdd?.length ?? 0) > 0（明确不误触 missingModulesInTdd）或 Boolean(opts['conflicts-tdd'])，--conflicts-tdd 已在 flow.mjs booleanFlags/printHelp() 及 SPEC/Todo 全部选项清单同步一致。)"
 related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
-related_todo: ../todo/261127-sandbox-dual-loop-flow-todo.md
+related_todo: ../todo/261127-issue214-sandbox-dual-loop-flow-todo.md
 high_risk_paths: [kit/skills/lib/sandbox-scope.mjs, kit/skills/lib/ledger.mjs, kit/skills/lib/harness-context.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/dev-flow/scripts/flow-sandbox.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs]
 depends_on: [single-source-policy-core]
 scope_files: [kit/skills/lib/sandbox-scope.mjs, kit/skills/dev-flow/scripts/flow-sandbox.mjs, kit/skills/lib/ledger.mjs, kit/skills/lib/harness-context.mjs, kit/skills/lib/mutability.mjs, kit/skills/lib/subcommand-meta.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-start-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, docs/feature-map.json, docs/architecture-map.html, scripts/dev/fixtures-sandbox-dual-loop.mjs, scripts/dev/injections-data-sandbox-flow.mjs, scripts/dev/fixtures.mjs, scripts/dev/injections-data.mjs]
@@ -29,10 +29,10 @@ scope_files: [kit/skills/lib/sandbox-scope.mjs, kit/skills/dev-flow/scripts/flow
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（新增隔离沙箱工作树生命周期、多代理登记与真实差分晋升流水线；Wave 2，依赖 `single-source-policy-core`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/sandbox-dual-loop-flow` / #214 / 未关联 |
 | 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
-| 关联 PRD / Todo | `../prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `../todo/261127-sandbox-dual-loop-flow-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-issue214-sandbox-dual-loop-flow-todo.md` |
 
 - **变更一句话**：通过新增 `sandbox-scope.mjs` (new) 与 `flow-sandbox.mjs` (new) 在 `dev-flow` 落地 `.worktrees/sandbox-<id>/` 隔离沙箱工作树、账本 `implementers[]`（支持单常驻或互不重叠 `writeScope` 并行子代理并锁死改审分离）以及基于真实 `git diff <baseRef>...HEAD` 的确定性 `flow.mjs promote` 晋升分类器。
 
@@ -168,10 +168,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C5: `flow.mjs start --sandbox --task <id> --agent impl-a` 在干净主仓创建 `.worktrees/sandbox-<id>/` 并挂载共享依赖；**双向 Issue 优先级**：显式传 `--issue <N>` 时原样保留于 `ledger.linkedIssues` 且记 `issueBinding.mode === 'reused'` 并贯穿到 `promote`，未传 Issue 时才记 `issueBinding: { mode: 'exempt', exemptKind: 'sandbox' }` 豁免预建；脏主仓启动被 `BLOCKED_DIRTY_MAIN` 拦下；未晋升前调用 `finalize` 或 `submit` 均返回 `BLOCKED_SANDBOX_PROMOTE_REQUIRED`（退出码 `3`）且零 `git mv` 副作用；`flow.mjs` 子命令头、`CONTENT_BODY_SUBCOMMANDS` 与 `printHelp()` 通过 `subcommand-parity` 与 `cli-parity` 门禁（由 `fixtures-sandbox-dual-loop.mjs` 与 `preflight.mjs` 双向实证）。
-- [ ] C6: 同一沙箱支持单常驻代理续写，也支持多个子代理以互不重叠 `--write-scope` 并行登记至 `ledger.implementers[]`（由 `sandbox-scope.mjs` (new) 校验）；重叠 `writeScope` 被 `BLOCKED_SANDBOX_WRITE_SCOPE_OVERLAP` 拦下；晋升入外环后，任一曾登记在 `implementers[]` 中的代理尝试 `review-pack record` 报 `SELF_REVIEW_REJECTED`，尝试 `flow.mjs merge` 报 `BLOCKED_SELF_MERGE`（由 `fixtures-sandbox-dual-loop.mjs` 双向实证）。
-- [ ] C7: `flow.mjs promote --task <id>`（支持 `--issue`/`--issues`/`--body`/`--body-file`/`--todo`/`--no-issue`/`--reason`/`--conflicts-tdd` 且 `resolveOrBindStartIssue` 按 `commandName: 'promote'` 输出指引）基于真实 `git diff <baseRef>...HEAD` 经 `determineWorkflowPolicy` 与 `checkTddSyncParity` 确定性分类：当 `(parity?.staleModulesInTdd?.length ?? 0) > 0` 或 `--conflicts-tdd` 命中时阻断 `BLOCKED_CASE_5_TDD_CONFLICT` 且不提前建单（纯新增 `missingModulesInTdd` 不误触发 Case 5）；局部源码/纯 UI 样式改动原地晋升为 `Case 2/3`（`sandboxMode: false`, `promotedFromSandbox: true`, 清除 `verifiedHead`, 自动衔接 `claimedAt`/`explored`）：**正反三态实证**（a）启动时带 `--issue <N>` 经 `promote` 原样复用不重复建单，（b）启动时无 Issue 且 `promote` 未传 `--body`/`--todo` 时自动从真实 `git diff` 合成通过 `buildAndValidateIssueBody` 的合规正文建单并绑定 1 个 Issue（零 `BLOCKED_MISSING_ISSUE_BINDING` 死锁，后续 `Case 3` 非实施者署名 `docs/todo/` 直接复用该单并通过 `BLOCKED_AUTHOR_IS_IMPLEMENTER`），（c）触及 `high-risk`/迁移/鉴权/CI/公共契约返回 `SANDBOX_PROMOTE_NEEDS_SPEC`、状态置为 `sandbox-needs-spec` 且**严禁提前新建 Issue**（由 `fixtures-sandbox-dual-loop.mjs` 双向实证）。
-- [ ] C8: `flow.mjs next` 对沙箱任务准确输出 `sandbox-iterating`、`sandbox-ready-to-promote`、`sandbox-needs-spec` 三态与单一可执行命令；沙箱内 `flow verify` 经 `flow-lifecycle-hooks.mjs` 内环豁免不卡死并自动打标 `inner: true`（被外环 `submit` 硬拒），晋升并重跑外环 `verify` 后完整走通 `finalize -> verify -> submit -> review -> merge -> cleanup --confirm --preview-hash`（由 `fixtures-sandbox-dual-loop.mjs` 实证）。
+- [x] C5: `flow.mjs start --sandbox --task <id> --agent impl-a` 在干净主仓创建 `.worktrees/sandbox-<id>/` 并挂载共享依赖；**双向 Issue 优先级**：显式传 `--issue <N>` 时原样保留于 `ledger.linkedIssues` 且记 `issueBinding.mode === 'reused'` 并贯穿到 `promote`，未传 Issue 时才记 `issueBinding: { mode: 'exempt', exemptKind: 'sandbox' }` 豁免预建；脏主仓启动被 `BLOCKED_DIRTY_MAIN` 拦下；未晋升前调用 `finalize` 或 `submit` 均返回 `BLOCKED_SANDBOX_PROMOTE_REQUIRED`（退出码 `3`）且零 `git mv` 副作用；`flow.mjs` 子命令头、`CONTENT_BODY_SUBCOMMANDS` 与 `printHelp()` 通过 `subcommand-parity` 与 `cli-parity` 门禁（由 `fixtures-sandbox-dual-loop.mjs` 与 `preflight.mjs` 双向实证）。
+- [x] C6: 同一沙箱支持单常驻代理续写，也支持多个子代理以互不重叠 `--write-scope` 并行登记至 `ledger.implementers[]`（由 `sandbox-scope.mjs` (new) 校验）；重叠 `writeScope` 被 `BLOCKED_SANDBOX_WRITE_SCOPE_OVERLAP` 拦下；晋升入外环后，任一曾登记在 `implementers[]` 中的代理尝试 `review-pack record` 报 `SELF_REVIEW_REJECTED`，尝试 `flow.mjs merge` 报 `BLOCKED_SELF_MERGE`（由 `fixtures-sandbox-dual-loop.mjs` 双向实证）。
+- [x] C7: `flow.mjs promote --task <id>`（支持 `--issue`/`--issues`/`--body`/`--body-file`/`--todo`/`--no-issue`/`--reason`/`--conflicts-tdd` 且 `resolveOrBindStartIssue` 按 `commandName: 'promote'` 输出指引）基于真实 `git diff <baseRef>...HEAD` 经 `determineWorkflowPolicy` 与 `checkTddSyncParity` 确定性分类：当 `(parity?.staleModulesInTdd?.length ?? 0) > 0` 或 `--conflicts-tdd` 命中时阻断 `BLOCKED_CASE_5_TDD_CONFLICT` 且不提前建单（纯新增 `missingModulesInTdd` 不误触发 Case 5）；局部源码/纯 UI 样式改动原地晋升为 `Case 2/3`（`sandboxMode: false`, `promotedFromSandbox: true`, 清除 `verifiedHead`, 自动衔接 `claimedAt`/`explored`）：**正反三态实证**（a）启动时带 `--issue <N>` 经 `promote` 原样复用不重复建单，（b）启动时无 Issue 且 `promote` 未传 `--body`/`--todo` 时自动从真实 `git diff` 合成通过 `buildAndValidateIssueBody` 的合规正文建单并绑定 1 个 Issue（零 `BLOCKED_MISSING_ISSUE_BINDING` 死锁，后续 `Case 3` 非实施者署名 `docs/todo/` 直接复用该单并通过 `BLOCKED_AUTHOR_IS_IMPLEMENTER`），（c）触及 `high-risk`/迁移/鉴权/CI/公共契约返回 `SANDBOX_PROMOTE_NEEDS_SPEC`、状态置为 `sandbox-needs-spec` 且**严禁提前新建 Issue**（由 `fixtures-sandbox-dual-loop.mjs` 双向实证）。
+- [x] C8: `flow.mjs next` 对沙箱任务准确输出 `sandbox-iterating`、`sandbox-ready-to-promote`、`sandbox-needs-spec` 三态与单一可执行命令；沙箱内 `flow verify` 经 `flow-lifecycle-hooks.mjs` 内环豁免不卡死并自动打标 `inner: true`（被外环 `submit` 硬拒），晋升并重跑外环 `verify` 后完整走通 `finalize -> verify -> submit -> review -> merge -> cleanup --confirm --preview-hash`（由 `fixtures-sandbox-dual-loop.mjs` 实证）。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -185,6 +185,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：新增 `kit/skills/lib/sandbox-scope.mjs`（237L）与 `kit/skills/dev-flow/scripts/flow-sandbox.mjs`（643L），完整实现 `.worktrees/sandbox-<id>/` 隔离沙箱工作树生命周期、单常驻/互不重叠 `--write-scope` 多子代理 `implementers[]` 登记与写域防碰撞、全员改审分离与防自合（通过 `ledger.mjs:collectImplementerHistory` 单源聚合，零改动 `review-ledger.mjs`）、内环 `flow verify --inner` 前置豁免不放宽外环、以及基于真实 `git diff <baseRef>...HEAD` 的确定性 `flow.mjs promote`（含 Case 5 TDD 冲突阻断、Case 2/3 原地晋升与真实 diff 合成合规 Issue 正文、Case 4 PoC 零预建单）。同步修复 `flow-lifecycle-finalize.mjs` 中 `renderArchitectureMapFromRepo(implRoot)` 不再传入 `{ changedFiles: changed }`，保证常青 `docs/architecture-map.html` 维持 0 个 `modified`/`impacted` 节点。
+- **与草案的差异**：补充在 `kit/skills/lib/exit-codes.mjs` 登记 5 个新增事实档阻断码（`BLOCKED_CASE_5_TDD_CONFLICT`、`BLOCKED_NOT_SANDBOX_TASK`、`BLOCKED_SANDBOX_EMPTY_DIFF`、`BLOCKED_SANDBOX_PROMOTE_REQUIRED`、`BLOCKED_SANDBOX_WRITE_SCOPE_OVERLAP`）以满足 `exit-code-parity` 门禁，并在 `flow-merge.mjs` 增加未晋升沙箱的显式前置拦截；同时在 `docs/TDD.md` 同步登记新增模块路径以满足 `checkTddSyncParity`。
+- **关联同步文件**：`kit/skills/lib/sandbox-scope.mjs`、`kit/skills/dev-flow/scripts/flow-sandbox.mjs`、`kit/skills/lib/exit-codes.mjs`、`kit/skills/lib/ledger.mjs`、`kit/skills/lib/harness-context.mjs`、`kit/skills/lib/mutability.mjs`、`kit/skills/lib/subcommand-meta.mjs`、`kit/skills/lib/workflow-policy-next.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-start-helpers.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs`、`kit/skills/dev-flow/scripts/flow-merge.mjs`、`.agents/skills/`、`docs/feature-map.json`、`docs/architecture-map.html`、`docs/TDD.md`、`scripts/dev/fixtures-sandbox-dual-loop.mjs`、`scripts/dev/injections-data-sandbox-flow.mjs`、`scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`。

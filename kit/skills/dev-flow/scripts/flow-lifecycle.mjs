@@ -30,6 +30,7 @@ import {
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { handleFinalize } from './flow-lifecycle-finalize.mjs'
+import { guardSandboxPreSubmitOrFinalize, resolveSandboxVerifyMode } from './flow-sandbox.mjs'
 import {
   assertSubmitOwnership, checkCase2StructuralDriftOnVerify, checkLifecyclePreconditions,
   checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook, runPreVerifyEditGateHook, runVerifyPrecheck,
@@ -84,12 +85,13 @@ export async function handleVerify(opts, roots) {
   const verifySlotOk = checkTaskSlotBoundaryOrEmit(roots.mainRoot, implRoot, ledger, opts)
   if (!verifySlotOk.ok) return { exitCode: verifySlotOk.exitCode }
 
-  const verifyPreCheck = checkLifecyclePreconditions(ledger, opts)
+  const verifyPreCheck = checkLifecyclePreconditions(ledger, { ...opts, _stage: 'verify' })
   if (!verifyPreCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: verifyPreCheck.code, reason: verifyPreCheck.message }, null, 2)}\n`)
     process.stderr.write(`${verifyPreCheck.message}\n`)
     return { exitCode: verifyPreCheck.exitCode ?? EXIT.FACT }
   }
+  const sbVerify = resolveSandboxVerifyMode(ledger, opts)
 
   const mode = opts.mode ?? opts.tier ?? 'quick'
   if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
@@ -219,7 +221,7 @@ export async function handleVerify(opts, roots) {
     const evRec = recordVerifyEvidenceForFlow({
       roots, implRoot, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
       cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: EXIT.OK,
-      explicitNoneSkipped: true, docStaticRes,
+      explicitNoneSkipped: true, docStaticRes, inner: sbVerify.inner,
       e2eObservationText: e2eEvidenceInput,
       artifacts: artifactsInput,
       visualCheckedRaw: visualCheckedRawInput,
@@ -242,7 +244,7 @@ export async function handleVerify(opts, roots) {
       const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
       ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
     }
-    ledger.status = allOk ? 'verified' : 'verify-failed'
+    ledger.status = sbVerify.nextStatus(allOk, dirty)
     const governRes = await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
     if (!governRes.ok) {
       ledger.verifiedHead = null
@@ -401,7 +403,7 @@ export async function handleVerify(opts, roots) {
   const evRec = recordVerifyEvidenceForFlow({
     roots, implRoot, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
     cmdStr: cmd, customCmd: reusedSmokeGate ? Boolean(reusedSmokeGate.customCmd) : Boolean(opts.cmd), exitCode: runRes.code,
-    explicitNoneSkipped: false, docStaticRes, executed: true, errorOnly: false,
+    explicitNoneSkipped: false, docStaticRes, executed: true, errorOnly: false, inner: sbVerify.inner,
     e2eObservationText: e2eEvidenceInput, durationMs: runDurationMs, smokeDurationMs,
     smokeCmd: smokeCmdUsed, smokeExitCode: smokeRunRes?.code ?? null, smokeExecuted, smokeErrorOnly: false,
     artifacts: artifactsInput,
@@ -440,7 +442,7 @@ export async function handleVerify(opts, roots) {
     const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
     ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
-  ledger.status = allOk ? 'verified' : 'verify-failed'
+  ledger.status = sbVerify.nextStatus(allOk, dirty)
   const governRes = isQuickTargetIter
     ? { ok: true, skipped: true, reason: 'quick-target-iter' }
     : await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
@@ -468,6 +470,8 @@ export async function handleSubmit(opts, roots) {
   if (!existsSync(implRoot)) throw new Error(`工作区目录不存在：${implRoot}`)
   const slotOk = checkTaskSlotBoundaryOrEmit(roots.mainRoot, implRoot, ledger, opts)
   if (!slotOk.ok) return { exitCode: slotOk.exitCode }
+  const sbGuard = guardSandboxPreSubmitOrFinalize(ledger, opts, 'submit')
+  if (!sbGuard.ok) return { exitCode: sbGuard.exitCode }
 
   const op = await detectInProgressGitOp(implRoot, { wtGitDir: resolveGitDirFast(implRoot) })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突`)

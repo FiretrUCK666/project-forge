@@ -25,8 +25,8 @@ export { readPlanningProvenanceIndex, verifyPlanningProvenance }
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
 const TERMINAL_DOC_STATUSES = new Set(['implemented', 'done', 'archived', 'superseded', 'dropped'])
-const PRE_SUBMIT_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released'])
-const OPEN_TASK_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
+const PRE_SUBMIT_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released', 'sandbox-iterating', 'sandbox-ready-to-promote', 'sandbox-needs-spec'])
+const OPEN_TASK_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released', 'sandbox-iterating', 'sandbox-ready-to-promote', 'sandbox-needs-spec', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
 
 /**
  * 单源任务活性分类：`'active' | 'terminal-pending-cleanup' | 'terminal'`。
@@ -390,6 +390,11 @@ export function createDefaultLedger(partial = {}) {
     humanApprovedReason: partial.humanApprovedReason ?? null,
     rebuts: Array.isArray(partial.rebuts) ? partial.rebuts : [],
     planning: Boolean(partial.planning),
+    sandboxMode: Boolean(partial.sandboxMode),
+    sandboxWorktreePath: partial.sandboxWorktreePath ?? null,
+    promotedFromSandbox: Boolean(partial.promotedFromSandbox),
+    promotedAt: partial.promotedAt ?? null,
+    pocStatus: partial.pocStatus ?? null,
     planSyncKeys: Array.isArray(partial.planSyncKeys) ? partial.planSyncKeys : [],
     planCritique: (partial.planCritique && typeof partial.planCritique === 'object' && !Array.isArray(partial.planCritique))
       ? partial.planCritique
@@ -400,6 +405,7 @@ export function createDefaultLedger(partial = {}) {
     explored: normalizeExploredEvidence(partial.explored),
     /** 历史实施者集合（含接管前的原认领人），供三处自审判定按「历史 ∪ 当前」比对。 */
     previousImplementers: Array.isArray(partial.previousImplementers) ? partial.previousImplementers.map(String) : [],
+    implementers: Array.isArray(partial.implementers) ? partial.implementers : [],
     /** 关联的 E2E/阻塞升级工单号（flow merge 合并后自动关闭仍 OPEN 的升级工单）。 */
     escalatedIssues: Array.isArray(partial.escalatedIssues)
       ? [...new Set(partial.escalatedIssues.map(Number).filter((n) => Number.isInteger(n) && n > 0))]
@@ -433,6 +439,7 @@ export function collectImplementerHistory(ledger) {
   push(ledger?.implementerId)
   push(ledger?.claimedBy)
   for (const p of Array.isArray(ledger?.previousImplementers) ? ledger.previousImplementers : []) push(p)
+  for (const imp of Array.isArray(ledger?.implementers) ? ledger.implementers : []) push(typeof imp === 'string' ? imp : imp?.actor)
   return out
 }
 
@@ -631,11 +638,12 @@ export async function resolveTaskContext(roots, opts = {}, { requireExisting = t
   if (roots?.isWorktree || posixPath(workRoot).includes('/.worktrees/')) {
     const wtMatch = active.find((t) =>
       (t.worktreePath && samePath(workRoot, join(mainRoot, t.worktreePath)))
+      || (t.sandboxWorktreePath && samePath(workRoot, join(mainRoot, t.sandboxWorktreePath)))
       || (t.reviewWorktreePath && samePath(workRoot, join(mainRoot, t.reviewWorktreePath))))
     if (wtMatch) {
       return { taskId: wtMatch.taskId, ledger: wtMatch, source: 'worktree', activeTasks: active }
     }
-    const baseMatch = /^(?:impl|review)-(.+)$/.exec(basename(canonicalPath(workRoot)))
+    const baseMatch = /^(?:impl|review|sandbox)-(.+)$/.exec(basename(canonicalPath(workRoot)))
     if (baseMatch) {
       const cand = readTaskLedger(mainRoot, baseMatch[1])
       if (cand) return { taskId: cand.taskId, ledger: cand, source: 'worktree-dirname', activeTasks: active }

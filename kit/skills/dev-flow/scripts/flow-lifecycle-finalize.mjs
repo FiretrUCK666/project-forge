@@ -35,6 +35,7 @@ import {
   validatePlanningReadyForFinalize,
 } from './flow-lifecycle-helpers.mjs'
 import { checkLifecyclePreconditions, checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
+import { guardSandboxPreSubmitOrFinalize } from './flow-sandbox.mjs'
 
 /**
  * 同步 SPEC 正文 `## 文档信息与变更概览` 状态表（当前状态 / 更新日期 / 内审状态 / 关联归档路径），
@@ -77,6 +78,8 @@ export async function handleFinalize(opts, roots) {
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)
   const slotOk = checkTaskSlotBoundaryOrEmit(roots.mainRoot, implRoot, ledger, opts)
   if (!slotOk.ok) return { exitCode: slotOk.exitCode }
+  const sbGuard = guardSandboxPreSubmitOrFinalize(ledger, opts, 'finalize')
+  if (!sbGuard.ok) return { exitCode: sbGuard.exitCode }
 
   const preCheck = checkLifecyclePreconditions(ledger, opts)
   if (!preCheck.ok) {
@@ -226,7 +229,7 @@ export async function handleFinalize(opts, roots) {
         || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
         || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
       if (fmChanged) {
-        const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: changed })
+        const archRes = renderArchitectureMapFromRepo(implRoot)
         if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)
       }
     }
@@ -240,7 +243,7 @@ export async function handleFinalize(opts, roots) {
       || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
       || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
     if (fmChanged) {
-      const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: changed })
+      const archRes = renderArchitectureMapFromRepo(implRoot)
       if (archRes.ok && !archRes.optedOut && !archRes.skipped && roots.isGit) {
         await gitRun(implRoot, ['add', '-A', '--', ARCHITECTURE_MAP_REL])
       }

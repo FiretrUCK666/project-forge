@@ -33,6 +33,12 @@ const OPEN_REWORK_STATUSES = new Set([
   'verify-failed',
 ])
 
+const OPEN_SANDBOX_STATUSES = new Set([
+  'sandbox-iterating',
+  'sandbox-ready-to-promote',
+  'sandbox-needs-spec',
+])
+
 function buildSafeExits({ isDoc = false, isTerminal = false, taskId = '<taskId>', file = '<docPath>' } = {}) {
   if (isTerminal) {
     return [
@@ -120,6 +126,16 @@ export function evaluateMutability({
   }
 
   if (hasRuntimeInput) {
+    if (OPEN_SANDBOX_STATUSES.has(effPhase) || OPEN_SANDBOX_STATUSES.has(ledgerStatus) || ledger?.sandboxMode === true) {
+      return {
+        state: 'open',
+        mutability: MUTABILITY.OPEN,
+        terminal: false,
+        mutable: true,
+        reason: `隔离沙箱处于可编辑态（${effPhase ?? ledgerStatus ?? 'sandbox-iterating'}）`,
+        safeExits: [],
+      }
+    }
     if (effPhase && LOCKED_RUNTIME_PHASES.has(effPhase)) {
       return {
         state: 'locked',

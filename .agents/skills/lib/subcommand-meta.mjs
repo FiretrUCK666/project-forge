@@ -16,6 +16,7 @@ export const SUBCOMMAND_META = Object.freeze({
       entry('explore', true),
       entry('intake', true),
       entry('start', true),
+      entry('promote', true),
       entry('issue', true),
       entry('close', true),
       entry('milestone', true),

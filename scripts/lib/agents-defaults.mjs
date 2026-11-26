@@ -403,7 +403,14 @@ export function buildDevProfileVars(facts, targetRoot) {
     || (typeof cmds.check === 'string' && cmds.check.trim())
     || (typeof cmds.test === 'string' && cmds.test.trim())
     || '<全量构建与测试命令>'
-  const smokeVerify = (typeof cmds.smoke === 'string' && cmds.smoke.trim()) || '<运行时端到端冒烟验证命令，或 none>'
+  const smokeScriptKey = ['smoke', 'test:smoke', 'e2e', 'test:e2e'].find((k) => pkgScripts.has(k))
+  const hasRuntimeSmokeSurface = Boolean(
+    smokeScriptKey
+    || (targetRoot && ['test/smoke.mjs', 'test/smoke.js', 'tests/smoke.mjs', 'tests/smoke.js', 'e2e', 'playwright.config.ts', 'playwright.config.mjs', 'cypress.config.js', 'cypress.config.ts', 'Dockerfile', 'docker-compose.yml', 'docker-compose.yaml'].some((rel) => existsSync(join(targetRoot, rel))))
+    || (Array.isArray(facts?.workspace?.packages) && facts.workspace.packages.some((p) => String(p?.dir ?? p ?? '') === 'e2e')),
+  )
+  const smokeVerify = (typeof cmds.smoke === 'string' && cmds.smoke.trim())
+    || (smokeScriptKey ? `${pmRun} ${smokeScriptKey}` : (hasRuntimeSmokeSurface ? '<运行时端到端冒烟验证命令，或 none>' : 'none'))
   let mergeGate = ''
   if (typeof cmds.verify === 'string' && cmds.verify.trim()) mergeGate = cmds.verify.trim()
   else if (pkgScripts.has('ci')) mergeGate = `${pmRun} ci`

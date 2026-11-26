@@ -7,6 +7,7 @@ import { extractCriteria } from './criteria-lock.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { parseDocFrontmatter } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
+import { parseAgentsProfile } from './profile.mjs'
 import { getVisualBriefSummary } from './visual-brief.mjs'
 
 /**
@@ -335,11 +336,11 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   }
 
   // 验收命令从 AGENTS.md 的 Dev Profile 读，不在这里编。
-  const agentsText = mainRoot ? (readTextSafe(join(mainRoot, 'AGENTS.md')) ?? '') : ''
-  const quick = /^\s*quick-test:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
-  const smoke = /^\s*smoke-verify:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
-  const full = /^\s*full-test:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
-  const mergeGate = /^\s*merge-gate:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
+  const devProfile = mainRoot ? parseAgentsProfile(mainRoot) : null
+  const quick = devProfile?.quickTest ?? null
+  const smoke = devProfile?.smokeVerify ?? null
+  const full = devProfile?.fullTest ?? null
+  const mergeGate = devProfile?.mergeGate ?? null
 
   const lines = []
   lines.push(`# 交接包：${ledger?.taskId ?? '(未知任务)'}`)
@@ -365,6 +366,13 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
       lines.push('')
       lines.push('```')
       lines.push(current.command)
+      lines.push('```')
+    }
+    if (current.recordCommand) {
+      lines.push('')
+      lines.push('完成检查后记录审查结论：')
+      lines.push('```')
+      lines.push(current.recordCommand)
       lines.push('```')
     }
     if ((current.blockingReasons ?? []).length > 0) {

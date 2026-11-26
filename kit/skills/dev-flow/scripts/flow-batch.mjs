@@ -418,6 +418,7 @@ async function handleMergeQueue(opts, roots) {
       } else if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git') {
         mergeRes = await backend.mergePr({
           humanApproved: Boolean(opts['human-approved']),
+          reason: opts.reason ?? '',
           ledger,
           branch: ledger.branch,
           baseBranch,

@@ -32,7 +32,7 @@ import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { handleFinalize } from './flow-lifecycle-finalize.mjs'
 import {
   assertSubmitOwnership, checkCase2StructuralDriftOnVerify, checkLifecyclePreconditions,
-  checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook, runPreVerifyEditGateHook,
+  checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook, runPreVerifyEditGateHook, runVerifyPrecheck,
 } from './flow-lifecycle-hooks.mjs'
 import {
   applySubmitPostActions,
@@ -91,7 +91,26 @@ export async function handleVerify(opts, roots) {
     return { exitCode: verifyPreCheck.exitCode ?? EXIT.FACT }
   }
 
-  const editGateRes = await runPreVerifyEditGateHook({ mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+  const mode = opts.mode ?? opts.tier ?? 'quick'
+  if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
+    await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-mode', severity: 'low', source: 'flow-verify', message: `invalid verify mode: ${mode}`, taskId })
+    process.stderr.write(`INVALID_VERIFY_MODE: --mode / --tier 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
+    return { exitCode: EXIT.ACTION }
+  }
+  let rawTarget = opts.target !== undefined ? String(opts.target).trim() : null
+  if (rawTarget !== null) {
+    if (!rawTarget || /[;&|`$><\r\n]/.test(rawTarget)) {
+      await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-target', severity: 'low', source: 'flow-verify', message: `invalid target: ${opts.target}`, taskId })
+      process.stderr.write(`INVALID_TARGET_ARG: --target 值非法或含不允许的元字符：${opts.target}\n`)
+      return { exitCode: EXIT.ACTION }
+    }
+    rawTarget = posixPath(rawTarget)
+  }
+  const isQuickTargetIter = mode === 'quick' && Boolean(rawTarget)
+
+  const editGateRes = isQuickTargetIter
+    ? { ok: true, skipped: true, reason: 'quick-target-iter' }
+    : await runPreVerifyEditGateHook({ mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
   if (!editGateRes.ok) {
     await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'verify.edit-gate.fail', severity: 'high', source: 'flow-verify', message: editGateRes.message, taskId })
     if (opts.json) process.stdout.write(`${JSON.stringify(editGateRes, null, 2)}\n`)
@@ -124,21 +143,6 @@ export async function handleVerify(opts, roots) {
   }
 
   const profile = parseAgentsProfile(implRoot)
-  const mode = opts.mode ?? opts.tier ?? 'quick'
-  if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
-    await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-mode', severity: 'low', source: 'flow-verify', message: `invalid verify mode: ${mode}`, taskId })
-    process.stderr.write(`INVALID_VERIFY_MODE: --mode / --tier 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
-    return { exitCode: EXIT.ACTION }
-  }
-  let rawTarget = opts.target !== undefined ? String(opts.target).trim() : null
-  if (rawTarget !== null) {
-    if (!rawTarget || /[;&|`$><\r\n]/.test(rawTarget)) {
-      await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-target', severity: 'low', source: 'flow-verify', message: `invalid target: ${opts.target}`, taskId })
-      process.stderr.write(`INVALID_TARGET_ARG: --target 值非法或含不允许的元字符：${opts.target}\n`)
-      return { exitCode: EXIT.ACTION }
-    }
-    rawTarget = posixPath(rawTarget)
-  }
 
   const op = await detectInProgressGitOp(implRoot, { wtGitDir: resolveGitDirFast(implRoot) })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突再执行 verify`)
@@ -213,7 +217,7 @@ export async function handleVerify(opts, roots) {
     const docStaticRes = policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles, { diffText }) : null
     const docOk = !docStaticRes || docStaticRes.ok
     const evRec = recordVerifyEvidenceForFlow({
-      roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
+      roots, implRoot, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
       cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: EXIT.OK,
       explicitNoneSkipped: true, docStaticRes,
       e2eObservationText: e2eEvidenceInput,
@@ -271,9 +275,19 @@ export async function handleVerify(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  if (!cmd) {
+  let reusedSmokeGate = null
+  let preRunSnap = null
+  if (mode === 'smoke' && !opts.cmd && !rawTarget && hasVisualCheckFlag) {
+    preRunSnap = await computeVerifyPolicy()
+    const prevEv = readVerificationEvidence(roots.gitDir, taskId)
+    if (prevEv && prevEv.headSha === preRunSnap.currentHead && !preRunSnap.dirty && !prevEv.dirty && prevEv.gates?.smoke?.exitCode === 0 && prevEv.smokeVerifiedOnHead) {
+      reusedSmokeGate = prevEv.gates.smoke
+    }
+  }
+
+  if (!cmd && !reusedSmokeGate) {
     if (mode === 'smoke' && !isExplicitNone) {
-      const { policy } = await computeVerifyPolicy()
+      const { policy } = preRunSnap ?? await computeVerifyPolicy()
       if (policy.smokeRequired) {
         await emitFlowSignal(roots, { category: 'e2e', module: 'workflow', pattern: 'verify.smoke.unconfigured', severity: 'medium', source: 'flow-verify', message: 'unconfigured smoke-verify for runtime changes', taskId })
         process.stderr.write('BLOCKED_SMOKE_VERIFY_UNCONFIGURED: 运行时改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none（Q3）；请在 AGENTS.md 补齐 smoke-verify，或通过 --cmd "<命令>" --e2e-evidence "<运行观察>" 传入。\n')
@@ -284,8 +298,9 @@ export async function handleVerify(opts, roots) {
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入（纯文档仓请配 \`${profileKey}: none\`）。\n`)
     return { exitCode: EXIT.ACTION }
   }
-  if ((mode === 'full' || mode === 'gate') && !profile.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify') && !opts.cmd && !e2eEvidenceInput) {
-    const pre = await computeVerifyPolicy()
+  if (!reusedSmokeGate && (mode === 'full' || mode === 'gate') && !profile.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify') && !opts.cmd && !e2eEvidenceInput) {
+    const pre = preRunSnap ?? await computeVerifyPolicy()
+    preRunSnap = pre
     const prevEv = readVerificationEvidence(roots.gitDir, taskId)
     const alreadySmokeOk = Boolean(prevEv && prevEv.headSha === pre.currentHead && !pre.dirty && prevEv.gates?.smoke?.exitCode === 0 && prevEv.smokeVerifiedOnHead)
     if (pre.policy.smokeRequired && !alreadySmokeOk) {
@@ -296,7 +311,9 @@ export async function handleVerify(opts, roots) {
   }
 
   let targetTip = null
-  if (cmd.includes('{target}')) {
+  if (reusedSmokeGate) {
+    cmd = reusedSmokeGate.cmd ?? (cmd || 'smoke (reused-on-head)')
+  } else if (cmd.includes('{target}')) {
     if (rawTarget) {
       const safeTarget = /\s/.test(rawTarget) ? `"${rawTarget}"` : rawTarget
       cmd = cmd.replace(/\{target\}/g, safeTarget)
@@ -326,10 +343,34 @@ export async function handleVerify(opts, roots) {
   const envForCmd = (cmdStr) => (hasSharedNodeModules && /\bpnpm\b/i.test(String(cmdStr ?? ''))
     ? { ...wtEnv, PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false' }
     : wtEnv)
+  const prePolicySnap = preRunSnap ?? await computeVerifyPolicy()
+  const preRunPrecheck = runVerifyPrecheck({
+    repoRoot: implRoot,
+    gitCommonDir: roots.gitDir,
+    headSha: prePolicySnap.currentHead,
+    policy: prePolicySnap.policy,
+    taskId,
+    dirty: prePolicySnap.dirty,
+    mode,
+    exitCode: 0,
+    artifacts: artifactsInput,
+    visualCheckedRaw: visualCheckedRawInput,
+    visualBlockedReason: visualBlockedReasonInput,
+    observationSummary: e2eEvidenceInput,
+  })
+  if (preRunPrecheck?.blocked) {
+    const preMsg = `${preRunPrecheck.code ?? 'BLOCKED_VERIFY_PRECHECK'}: ${preRunPrecheck.reason ?? preRunPrecheck.message ?? '实证前置校验未通过'}`
+    process.stderr.write(`${preMsg}\n`)
+    return handleVerifyPrecheckBlock({ opts, roots, taskId, mode, ledger, evRec: { precheck: preRunPrecheck }, finalExit: preRunPrecheck.exitCode ?? EXIT.FACT })
+  }
   const tRunStart = Date.now()
-  const runRes = await execShellCommand(cmd, implRoot, { timeout: timeoutMs, env: envForCmd(cmd) })
-  const runDurationMs = Date.now() - tRunStart
-  const { currentHead, dirty, stStdout, changedFiles, policy, diffText } = await computeVerifyPolicy()
+  const runRes = reusedSmokeGate
+    ? { ok: true, code: 0, stdout: '', stderr: '' }
+    : await execShellCommand(cmd, implRoot, { timeout: timeoutMs, env: envForCmd(cmd) })
+  const runDurationMs = reusedSmokeGate ? (reusedSmokeGate.durationMs ?? 0) : (Date.now() - tRunStart)
+  const { currentHead, dirty, stStdout, changedFiles, policy, diffText } = reusedSmokeGate
+    ? prePolicySnap
+    : await computeVerifyPolicy()
   let smokeCmdUsed = mode === 'smoke' ? cmd : null
   let smokeRunRes = mode === 'smoke' ? runRes : null
   let smokeExecuted = mode === 'smoke'
@@ -358,14 +399,15 @@ export async function handleVerify(opts, roots) {
   const execOk = runRes.ok && (!smokeRunRes || smokeRunRes.ok)
   const allOk = execOk && (!docStaticRes || docStaticRes.ok)
   const evRec = recordVerifyEvidenceForFlow({
-    roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
-    cmdStr: cmd, customCmd: Boolean(opts.cmd), exitCode: runRes.code,
+    roots, implRoot, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
+    cmdStr: cmd, customCmd: reusedSmokeGate ? Boolean(reusedSmokeGate.customCmd) : Boolean(opts.cmd), exitCode: runRes.code,
     explicitNoneSkipped: false, docStaticRes, executed: true, errorOnly: false,
     e2eObservationText: e2eEvidenceInput, durationMs: runDurationMs, smokeDurationMs,
     smokeCmd: smokeCmdUsed, smokeExitCode: smokeRunRes?.code ?? null, smokeExecuted, smokeErrorOnly: false,
     artifacts: artifactsInput,
     visualCheckedRaw: visualCheckedRawInput,
     visualBlockedReason: visualBlockedReasonInput,
+    precheckResult: preRunPrecheck,
   })
   const finalExit = !execOk && runRes.ok && smokeRunRes && !smokeRunRes.ok ? (smokeRunRes.code || 1) : evRec.overallExit
   // 前置预检拦下时，实证已经写不进去，剩下的 ledger 收尾与输出都按「未通过」走。
@@ -399,7 +441,9 @@ export async function handleVerify(opts, roots) {
     ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
-  const governRes = await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+  const governRes = isQuickTargetIter
+    ? { ok: true, skipped: true, reason: 'quick-target-iter' }
+    : await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
   if (!governRes.ok) {
     ledger.verifiedHead = null
     ledger.status = 'verify-failed'

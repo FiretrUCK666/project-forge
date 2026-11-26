@@ -22,15 +22,14 @@ import {
   ARCHITECTURE_MAP_REL, renderArchitectureMapFromRepo, verifyArchitectureMapSync,
 } from '../../lib/architecture-map.mjs'
 import {
-  FEATURE_MAP_REL, VALID_RISK_LEVELS, VALID_TOOL_KINDS,
   computeFeatureFingerprint, ensureTaskScratchDir, evaluateToolStaleness,
-  findAffectedFeatures, isSafeTaskScratchPath, prefillFeatureMapFromRepoMap,
-  readFeatureMap, resolveTaskScratchDir, sanitizeFeatureEntry, sanitizeVerificationTool,
-  slugifyFeatureId, writeFeatureMap, writeVerifyCacheEntry,
+  FEATURE_MAP_REL, findAffectedFeatures, isSafeTaskScratchPath, prefillFeatureMapFromRepoMap,
+  readFeatureMap, resolveTaskScratchDir, resolveVerifySlotKey, sanitizeFeatureEntry, sanitizeVerificationTool,
+  slugifyFeatureId, VALID_RISK_LEVELS, VALID_TOOL_KINDS, writeFeatureMap, writeVerifyCacheEntry,
 } from '../../lib/feature-map.mjs'
 import {
   computeWorktreeEnv, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ,
-  isMainModule, posixPath, resolveRepoRoots,
+  isMainModule, posixPath, resolveDefaultBranch, resolveRepoRoots,
 } from '../../lib/git.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
@@ -62,7 +61,7 @@ function printHelp() {
     '  --name <name>                Feature display name',
     '  --tool <id>                  Target tool ID',
     '  --tool-id <id>               Explicit tool ID override',
-    '  --kind <kind>                Tool kind (unit|integration|e2e|smoke|static|script)',
+    `  --kind <kind>                Tool kind (${VALID_TOOL_KINDS.join('|')})`,
     '  --command <cmd>              Command to run for tool',
     '  --script <path>              Script path for tool',
     '  --from-scratch <path>        Promote existing scratch file',
@@ -126,7 +125,7 @@ async function collectChangedFilesForRun(repoRoot, baseRef = null) {
       if (e.file && !String(e.status).includes('D')) set.add(posixPath(e.file))
     }
   }
-  const ref = baseRef || 'main'
+  const ref = baseRef || await resolveDefaultBranch(repoRoot) || 'main'
   const mb = await gitRun(repoRoot, ['merge-base', ref, 'HEAD'])
   if (mb.ok && mb.stdout.trim()) {
     const diff = await gitDiffNameStatusZ(repoRoot, [`${mb.stdout.trim()}..HEAD`])
@@ -207,6 +206,10 @@ export async function handleCreate(opts, roots) {
     return { exitCode: EXIT.USAGE }
   }
   const kindRaw = String(opts.kind ?? (opts.script ? 'script' : 'command')).trim().toLowerCase()
+  if (opts.kind !== undefined && !VALID_TOOL_KINDS.includes(kindRaw)) {
+    process.stderr.write(`Error: --kind 仅允许 ${VALID_TOOL_KINDS.join('|')}，收到：${opts.kind}\n`)
+    return { exitCode: EXIT.USAGE }
+  }
   const kind = VALID_TOOL_KINDS.includes(kindRaw) ? kindRaw : 'command'
 
   const scratchInfo = ensureTaskScratchDir(roots.gitDir, taskId, roots.mainRoot, {
@@ -389,6 +392,7 @@ export async function handleCreate(opts, roots) {
   const archRes = renderArchitectureMapFromRepo(workRoot)
   const headSha = await resolveCurrentHead(workRoot)
   const fp = await computeFeatureFingerprint(workRoot, feat, { tool: toolDef })
+  const slotKey = resolveVerifySlotKey(workRoot, roots.mainRoot)
   const cacheRes = writeVerifyCacheEntry(roots.gitDir, roots.mainRoot, toolDef.id, {
     featureId: feat.id,
     symbolHash: fp.symbolHash,
@@ -397,6 +401,7 @@ export async function handleCreate(opts, roots) {
     verifiedSha: headSha,
     passedAtCommit: headSha,
     symbolsByFile: fp.symbolsByFile,
+    slotKey,
   })
 
   const payload = {
@@ -516,7 +521,7 @@ export async function handleRun(opts, roots) {
 
   const headSha = await resolveCurrentHead(workRoot)
   const wtEnv = computeWorktreeEnv({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId })
-  const slotKey = posixPath(relative(roots.mainRoot, workRoot)) || 'main'
+  const slotKey = resolveVerifySlotKey(workRoot, roots.mainRoot)
   const candidateEntries = []
   for (const { feature, tool } of matched) {
     const staleness = await evaluateToolStaleness({
@@ -654,7 +659,7 @@ export async function handleRun(opts, roots) {
         verifiedSha: headSha,
         passedAtCommit: headSha,
         symbolsByFile: fp.symbolsByFile,
-        slotKey: posixPath(relative(roots.mainRoot, workRoot)) || 'main',
+        slotKey: resolveVerifySlotKey(workRoot, roots.mainRoot),
       })
       baselineUpdated = true
     }

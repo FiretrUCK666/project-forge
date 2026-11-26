@@ -10,7 +10,7 @@ import { join, posix as pathPosix, resolve } from 'node:path'
 
 import { CODE_EXT_RE, matchGlob } from './git-core.mjs'
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
-import { verifyArchitectureMapHeader } from './feature-map-graph.mjs'
+import { isUiVisualFileCandidate } from './empirical-artifacts.mjs'
 import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
 import {
   classifyDeclarativeDataFile, classifyOversizedFile, isGeneratedSourceHeader, isGitAttributesGenerated,
@@ -85,11 +85,7 @@ export function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived 
 export function isUiVisualFile(fileRel, { repoRoot = null } = {}) {
   const p = posixPath(String(fileRel ?? '')).replace(/^\.\//, '')
   if (!p || isTestOrFixtureFile(p)) return false
-  if (p === 'docs/architecture-map.html' && repoRoot) {
-    const check = verifyArchitectureMapHeader(repoRoot, p)
-    if (check.ok) return false
-  }
-  return UI_VISUAL_EXT_RE.test(p)
+  return isUiVisualFileCandidate(p, { repoRoot, uiExtMatch: UI_VISUAL_EXT_RE.test(p) })
 }
 
 export function isMetaTestHarness(fileRel, text = '') {
@@ -346,6 +342,7 @@ export function classifyDoorType({
   agentsText = '',
   task = null,
   diffBytes = 0,
+  untrustedSurface = false,
 } = {}) {
   const files = (Array.isArray(changedFiles) ? changedFiles : []).map((f) => posixPath(f).replace(/^\.\//, ''))
   const riskPatterns = [...new Set([...(Array.isArray(highRisk) ? highRisk : []), ...DEFAULT_HIGH_RISK_PATHS])]
@@ -379,8 +376,8 @@ export function classifyDoorType({
   } else if (isOneWay || highRiskHits.length === 1 || files.length >= 4) {
     blastRadius = 'medium'
   }
-  const hasHumanAuth = Boolean(gateWeakened) || humanAuth
-  const mergeAuthority = hasHumanAuth || isOneWay ? 'human-required' : (highRiskHits.length > 0 ? 'reviewer-with-fault-injection' : 'reviewer-direct')
+  const hasHumanAuth = Boolean(gateWeakened) || humanAuth || Boolean(untrustedSurface)
+  const mergeAuthority = hasHumanAuth ? 'human-required' : ((isOneWay || highRiskHits.length > 0) ? 'reviewer-with-fault-injection' : 'reviewer-direct')
 
   return {
     doorType: isOneWay ? 'one-way' : 'two-way',

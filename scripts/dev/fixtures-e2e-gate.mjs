@@ -325,4 +325,129 @@ export function registerStageBLoopB5Cases(cases) {
       rmTree(dir)
     }
   }])
+
+  cases.push(['C7+C8：precheck 先于命令执行、quick --target 跳过门禁钩子、mcp-delegate/离线理由拦截、HUMAN_MERGE_AUTHORITY 退出 4 与 verify-tools 收敛', async () => {
+    const { GenericRemoteBackend } = await import('../../kit/skills/lib/task-backend-local.mjs')
+    const { updateTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { VALID_TOOL_KINDS } = await import('../../kit/skills/lib/feature-map.mjs')
+    void VALID_TOOL_KINDS
+
+    // 1. C7 precheck 先于命令执行 + quick --target 跳过 edit-gate/govern + smoke 已过仅补 --e2e-evidence 不重跑
+    const c7Dir = tmpProject({
+      '.gitignore': '.worktrees/\nsmoke.count\n',
+      'AGENTS.md': [
+        '# c7-repo',
+        '',
+        '```yaml',
+        'quick-test: node test.mjs {target}',
+        'full-test: node test.mjs',
+        'smoke-verify: node smoke.mjs',
+        'merge-gate: node test.mjs',
+        '```',
+        '',
+      ].join('\n'),
+      'test.mjs': 'process.exit(0)\n',
+      'smoke.mjs': 'import fs from "node:fs"; const n = (fs.existsSync("smoke.count") ? Number(fs.readFileSync("smoke.count","utf8")) : 0) + 1; fs.writeFileSync("smoke.count", String(n));\n',
+      'src/App.tsx': 'export const App = () => "v1"\n',
+      'shots/ui.png': 'png\n',
+    })
+    gitInit(c7Dir, { branch: 'main' })
+    try {
+      const roots = await resolveRepoRoots(c7Dir)
+      await handleStart({ task: 'c7-t', case: '2', slug: 'c7-t', implementer: 'alice', 'no-issue': true, reason: 'C7 verify 顺序与 quick --target 夹具' }, roots)
+      const wt = join(c7Dir, '.worktrees', 'impl-c7-t')
+      writeFileSync(join(wt, 'src/App.tsx'), 'export const App = () => "v2"\n')
+      gitCommitFast(wt, 'feat: c7 ui', { updateOnly: true })
+
+      // 反面：传缺失附件 + 创建标记文件的命令，precheck 必须在命令执行前拦下，标记文件不得出现
+      const markerPath = join(wt, 'ran-despite-precheck.flag')
+      const preBlock = await withQuietIo(() => handleVerify({
+        task: 'c7-t', mode: 'gate', cmd: 'node -e "require(\'fs\').writeFileSync(\'ran-despite-precheck.flag\', \'1\')"',
+        artifact: [join(wt, 'no-such-art.png')], json: true,
+      }, roots))
+      if (preBlock.res.exitCode === 0) return '缺失附件未阻断 verify'
+      if (existsSync(markerPath)) return 'precheck 未在命令执行前拦截：命令仍然被执行并生成了文件'
+
+      // 正向：quick --target 即使改了 src/App.tsx（含 suppression 注释也不触发 --final edit-gate）且不走 precheck? Wait: quick --target passes if clean
+      const quickRes = await withQuietIo(() => handleVerify({ task: 'c7-t', mode: 'quick', target: 'test.mjs', artifact: [join(wt, 'shots/ui.png')] }, roots))
+      if (quickRes.res.exitCode !== 0) return `quick --target 合法路径失败：${quickRes.err}`
+
+      // 正向：smoke 执行 1 次后，同 HEAD 传 --e2e-evidence 补录观察不再重跑 smoke.mjs
+      const sm1 = await withQuietIo(() => handleVerify({ task: 'c7-t', mode: 'smoke', artifact: [join(wt, 'shots/ui.png')] }, roots))
+      if (sm1.res.exitCode !== 0) return `第一次 smoke verify 失败：${sm1.err}`
+      const countAfter1 = readFileSync(join(wt, 'smoke.count'), 'utf8').trim()
+      const sm2 = await withQuietIo(() => handleVerify({
+        task: 'c7-t', mode: 'smoke', artifact: [join(wt, 'shots/ui.png')],
+        'e2e-evidence': '执行 node smoke.mjs 观察 smoke.count 成功写入 1 且进程退出码 0',
+      }, roots))
+      if (sm2.res.exitCode !== 0) return `仅补 --e2e-evidence smoke verify 失败：${sm2.err}`
+      const countAfter2 = readFileSync(join(wt, 'smoke.count'), 'utf8').trim()
+      if (countAfter1 !== '1' || countAfter2 !== '1') {
+        return `同 HEAD 仅补 --e2e-evidence 重跑了 smoke 命令（count=${countAfter1}->${countAfter2}）`
+      }
+    } finally { rmTree(c7Dir) }
+
+    // 2. C8：generic-git 离线 --human-approved 缺/空洞理由返回 USAGE，真实理由通过；BLOCKED_HUMAN_MERGE_AUTHORITY 退出 4；verify-tools --kind 非法退出 2
+    const c8Dir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# c8\n\n```yaml\nquick-test: node -e "process.exit(0)"\nfull-test: node -e "process.exit(0)"\nsmoke-verify: none\nmerge-gate: node -e "process.exit(0)"\n```\n\n## 取舍\n\n```text\n- `merge-authority`: human\n```\n',
+      'src/a.mjs': 'export const a = 1\n',
+    })
+    gitInit(c8Dir, { branch: 'main' })
+    try {
+      const roots = await resolveRepoRoots(c8Dir)
+      const gb = new GenericRemoteBackend({ mainRoot: c8Dir, gitDir: roots.gitDir, pushRemote: 'missing-remote', baseBranch: 'main' })
+      const badOffline = await gb.mergePr({ humanApproved: true, reason: 'ok', branch: 'feat/x', baseBranch: 'main' })
+      if (badOffline.ok || badOffline.exitCode !== EXIT.USAGE || !badOffline.blocked) {
+        return `generic-git 离线空洞理由未按 USAGE 拦截：${JSON.stringify(badOffline)}`
+      }
+      const okOffline = await gb.mergePr({
+        humanApproved: true, reason: '远端临时维护中，已由管理员在 Git 网页端确认分支合入 main 且提交记录一致',
+        branch: 'feat/x', baseBranch: 'main',
+      })
+      if (!okOffline.ok || !okOffline.merged) return `generic-git 离线合法理由未放行：${JSON.stringify(okOffline)}`
+
+      await handleStart({ task: 'c8-h', case: '2', slug: 'c8-h', implementer: 'alice', 'no-issue': true, reason: '测试 merge-authority human 退出码 4' }, roots)
+      await seedExploredFor(c8Dir, 'c8-h')
+      const wt8 = join(c8Dir, '.worktrees', 'impl-c8-h')
+      writeFileSync(join(wt8, 'src/a.mjs'), 'export const a = 2\n')
+      gitCommitFast(wt8, 'feat: c8', { updateOnly: true })
+      const v8 = await withQuietIo(() => handleVerify({ task: 'c8-h', mode: 'gate' }, roots))
+      if (v8.res.exitCode !== 0) return `c8-h verify 失败：${v8.err}`
+      const s8 = await withQuietIo(() => handleSubmit({ task: 'c8-h', agent: 'alice' }, roots))
+      if (s8.res.exitCode !== 0) return `c8-h submit 失败：${s8.err}`
+      const tok8 = await issueTokenFor(c8Dir, 'c8-h', 1)
+      const revRoots8 = await resolveRepoRoots(join(c8Dir, '.worktrees', 'review-c8-h'))
+      const r8 = await withQuietIo(() => handleRecord({
+        task: 'c8-h', round: '1', verdict: 'pass', 'reviewer-id': 'rev-8', 'review-token': tok8,
+        evidence: '运行 node -e "process.exit(0)" 实测 src/a.mjs 导出 2 退出 0', json: true,
+      }, revRoots8))
+      if (r8.res !== 0) return `c8-h record 失败：${r8.err} ${r8.out}`
+      const mHuman = await withQuietIo(() => handleMerge({ task: 'c8-h', json: true }, roots))
+      if (mHuman.res.exitCode !== EXIT.HUMAN || mHuman.res.code !== 'BLOCKED_HUMAN_MERGE_AUTHORITY') {
+        return `BLOCKED_HUMAN_MERGE_AUTHORITY 未返回 EXIT.HUMAN (4)：${JSON.stringify(mHuman.res)}`
+      }
+
+      // 缺少远端 PR 且无分支的 maintainer 场景不得静默落盘 merged（防止 null mergeRes 穿透）
+      gitSync(c8Dir, ['remote', 'add', 'origin', 'https://github.com/acme/c8-demo.git'])
+      await updateTaskLedger(c8Dir, 'c8-h', (cur) => ({ ...cur, role: 'maintainer', providerId: 'github', prNumber: null, branch: null }))
+      const mNoPr = await withQuietIo(() => handleMerge({
+        task: 'c8-h', 'human-approved': true,
+        _ghProbe: { client: { getCommitChecks: async () => ({ ok: true }) }, env: { trackB: { ok: true, tier: 'track-b', login: 'alice' } } },
+        json: true,
+      }, roots))
+      const ldgAfterNoPr = readTaskLedger(c8Dir, 'c8-h')
+      if (mNoPr.res.exitCode === 0 || ldgAfterNoPr.status === 'merged') {
+        return `空 mergeRes 静默穿透将账本标成了 merged：${JSON.stringify({ res: mNoPr.res, status: ldgAfterNoPr.status })}`
+      }
+
+      const badKind = await runAbsAsync('kit/skills/dev-verify-tools/scripts/verify-tools.mjs', [
+        'create', c8Dir, '--feature', 'f1', '--kind', 'bogus-kind', '--command', 'node -e "process.exit(0)"',
+      ], { cwd: c8Dir })
+      if (badKind.status !== EXIT.USAGE) {
+        return `verify-tools --kind 非法未退出 USAGE(2)：exit=${badKind.status} out=${badKind.stdout} err=${badKind.stderr}`
+      }
+      return true
+    } finally { rmTree(c8Dir) }
+  }])
 }

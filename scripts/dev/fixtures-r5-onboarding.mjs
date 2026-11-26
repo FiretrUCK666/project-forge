@@ -8,7 +8,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { generateRepoMap } from '../../kit/skills/dev-explore/scripts/repo-map.mjs'
@@ -350,6 +350,41 @@ export function registerR5OnboardingCases(cases) {
       return true
     } finally {
       rmTree(dir)
+    }
+  }])
+
+  cases.push(['C5 onboarding：纯库/CLI 仓库无 smoke 入口时 smoke-verify 默认 none，有 smoke 文件时保留占位', async () => {
+    const libDir = tmpProject({
+      'package.json': '{"name":"pure-lib","version":"1.0.0","scripts":{"test":"node test.mjs"}}\n',
+      'src/index.mjs': 'export const add = (a, b) => a + b\n',
+      'test.mjs': 'process.exit(0)\n',
+    })
+    const appDir = tmpProject({
+      'package.json': '{"name":"app-smoke","version":"1.0.0","scripts":{"test":"node test.mjs"}}\n',
+      'src/index.mjs': 'export const main = () => 1\n',
+      'test/smoke.mjs': 'process.exit(0)\n',
+    })
+    try {
+      const libVars = buildDevProfileVars({
+        ecosystem: { kinds: ['node'], manifests: ['package.json'], packageScripts: ['test'] },
+        commands: { test: 'npm test' },
+        scale: { codeFiles: 2 },
+      }, libDir)
+      if (libVars.PROFILE_SMOKE_VERIFY !== 'none') {
+        return `纯库无 smoke 入口时 smoke-verify 应默认 none，实际：${libVars.PROFILE_SMOKE_VERIFY}`
+      }
+      const appVars = buildDevProfileVars({
+        ecosystem: { kinds: ['node'], manifests: ['package.json'], packageScripts: ['test'] },
+        commands: { test: 'npm test' },
+        scale: { codeFiles: 2 },
+      }, appDir)
+      if (appVars.PROFILE_SMOKE_VERIFY === 'none') {
+        return `存在 test/smoke.mjs 时 smoke-verify 不得降成 none：${appVars.PROFILE_SMOKE_VERIFY}`
+      }
+      return true
+    } finally {
+      rmTree(libDir)
+      rmTree(appDir)
     }
   }])
 }

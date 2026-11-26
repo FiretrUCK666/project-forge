@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: "Empirical Gate Cohesion, UI Artifact Parity and Merge Safety"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-26
 updated: 2026-11-26
-issue: null
+issue: 207
 pr: null
-branch: feat/governance-cohesion-v2
+branch: feat/empirical-handoff-cohesion
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-governance-cohesion-r4, round=4, sha=c0c41e1f7305, summary=Verified mechanical lint/naming fixes at 6e6f870; all design invariants and C1..C12 remain intact.)"
-related_prd: ../prd/261126-suite-cohesion-v2-prd.md
-related_todo: ../todo/261126-empirical-handoff-cohesion-todo.md
+related_prd: ../../prd/261126-suite-cohesion-v2-prd.md
+related_todo: ../todo/261126-issue207-empirical-handoff-cohesion-todo.md
 high_risk_paths: [kit/, SKILL.md]
 task_id: empirical-handoff-cohesion
 depends_on: []
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helper
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（实证门禁策略、UI 产物判据、合并安全与流转工具契约对齐；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
-| 分支 / Issue / PR | `feat/governance-cohesion-v2` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/empirical-handoff-cohesion` / #207 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（策略边界与退出码已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261126-suite-cohesion-v2-prd.md` / `../todo/261126-empirical-handoff-cohesion-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/archive/todo/261126-issue207-empirical-handoff-cohesion-todo.md` |
 
 - **变更一句话**：消除 `check-empirical`/`check-fault` 死锁与过严拦截，落地 `review-ledger` 回执自动复用与单一实质判据，修复 UI 产物校验链、`mergeAuthority` 边界、`mcp-delegate`/`generic-git` 合并漏洞及多处流转工具缺陷。
 
@@ -124,10 +124,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C5: `review-empirical.mjs:420` 与 `review-empirical-state.mjs:316` 解决省略 `smoke-verify` 死锁，`scripts/lib/agents-defaults.mjs:406` 优化纯库/CLI 新手配置，将 `review-empirical.mjs:92` `faultRequired` 精确调整为 `!isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired)`（仅移除 `|| hasDevProfileTestCmds`，保留高风险 `smoke-verify: none` 及 `fixtures-r8-bugfixes.mjs:348-356` 中风险运行时样本触发 `faultRequired === true`），且四项 Dev Profile 全 `explicitNone` 纯文档仓经静态校验通过 `check-empirical`。
-- [ ] C6: `review-ledger.mjs` `record` 自动复用同 `HEAD` 有效 `check-empirical` 回执（保留 L121 `if (!evidenceRaw) {` 供 `I117`）、消除 L426-438 `empParts` 三重拼接、统一 `evaluateObservationSubstance` 与 `validateE2eEvidenceText`、取消仅为附着文本重跑 `flow verify --mode smoke`。
-- [ ] C7: 从 `flow-lifecycle-helpers.mjs`（795 行）抽离 precheck 辅助至 `flow-lifecycle-hooks.mjs` 并于 L405 透传 `implRoot`（两文件均 `<= 800` 行）；`flow-lifecycle.mjs:330` precheck 前置于命令执行、`flow-lifecycle-helpers.mjs:620` 移除矛盾 `--visual-checked` 提示、`flow-lifecycle.mjs:94,402` 在 `quick --target` 内循环跳过 `--final` edit-gate 与重复 `govern-audit`；将细化 `isUiVisualFile` 辅助抽入 `empirical-artifacts.mjs`（`static-gates.mjs <= 800` 行），统一 `empirical-artifacts.mjs` 标准并豁免非 UI README `.svg` 与模板。
-- [ ] C8: 收窄 `static-gates.mjs:383`（`classifyDoorType` 接受由 `review-gates.mjs:518,525` 透传的 `untrustedSurface = false`）与 `review-gates.mjs:568` `mergeAuthority = 'human-required'` 为 `gateWeakened || humanAuth || untrustedSurface`（同步 `scripts/dev/fixtures-govern.mjs:60`），将 `kit/skills/lib/exit-codes.mjs:133` `BLOCKED_HUMAN_MERGE_AUTHORITY` 从 `FACT_CODES` 迁至 `HUMAN_CODES`（`4`）并使 `flow-merge.mjs:501-503` 返回 `EXIT.HUMAN`（`4`，通过 `exit-code-parity.mjs:152`）；在 `flow-merge.mjs:657-722` 阻断 `!mergeRes || mergeRes?.delegated === true || mergeRes?.ok === false`（覆盖 `!ledger.prNumber && !ledger.branch` 及 `prNumber === null` 落入 `GitHubBackend.mergePr`）；补齐 `generic-git` 离线 `--reason` 校验（对齐 `task-backend-local.mjs:523`）、修复 `flow-lifecycle-finalize.mjs:229,243`、`workflow-helpers.mjs:43`、`flow-next.mjs:346`、`handoff-package.mjs:338-342`、`verify-tools.mjs:65,129,392`、`workflow-policy.mjs:727`，同步 `node scripts/equip.mjs .` 并全绿通过 `preflight.mjs`、`fixtures.mjs` 与 `verify-injections.mjs --jobs 4`。
+- [x] C5: `review-empirical.mjs:420` 与 `review-empirical-state.mjs:316` 解决省略 `smoke-verify` 死锁，`scripts/lib/agents-defaults.mjs:406` 优化纯库/CLI 新手配置，将 `review-empirical.mjs:92` `faultRequired` 精确调整为 `!isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired)`（仅移除 `|| hasDevProfileTestCmds`，保留高风险 `smoke-verify: none` 及 `fixtures-r8-bugfixes.mjs:348-356` 中风险运行时样本触发 `faultRequired === true`），且四项 Dev Profile 全 `explicitNone` 纯文档仓经静态校验通过 `check-empirical`。
+- [x] C6: `review-ledger.mjs` `record` 自动复用同 `HEAD` 有效 `check-empirical` 回执（保留 L121 `if (!evidenceRaw) {` 供 `I117`）、消除 L426-438 `empParts` 三重拼接、统一 `evaluateObservationSubstance` 与 `validateE2eEvidenceText`、取消仅为附着文本重跑 `flow verify --mode smoke`。
+- [x] C7: 从 `flow-lifecycle-helpers.mjs`（795 行）抽离 precheck 辅助至 `flow-lifecycle-hooks.mjs` 并于 L405 透传 `implRoot`（两文件均 `<= 800` 行）；`flow-lifecycle.mjs:330` precheck 前置于命令执行、`flow-lifecycle-helpers.mjs:620` 移除矛盾 `--visual-checked` 提示、`flow-lifecycle.mjs:94,402` 在 `quick --target` 内循环跳过 `--final` edit-gate 与重复 `govern-audit`；将细化 `isUiVisualFile` 辅助抽入 `empirical-artifacts.mjs`（`static-gates.mjs <= 800` 行），统一 `empirical-artifacts.mjs` 标准并豁免非 UI README `.svg` 与模板。
+- [x] C8: 收窄 `static-gates.mjs:383`（`classifyDoorType` 接受由 `review-gates.mjs:518,525` 透传的 `untrustedSurface = false`）与 `review-gates.mjs:568` `mergeAuthority = 'human-required'` 为 `gateWeakened || humanAuth || untrustedSurface`（同步 `scripts/dev/fixtures-govern.mjs:60`），将 `kit/skills/lib/exit-codes.mjs:133` `BLOCKED_HUMAN_MERGE_AUTHORITY` 从 `FACT_CODES` 迁至 `HUMAN_CODES`（`4`）并使 `flow-merge.mjs:501-503` 返回 `EXIT.HUMAN`（`4`，通过 `exit-code-parity.mjs:152`）；在 `flow-merge.mjs:657-722` 阻断 `!mergeRes || mergeRes?.delegated === true || mergeRes?.ok === false`（覆盖 `!ledger.prNumber && !ledger.branch` 及 `prNumber === null` 落入 `GitHubBackend.mergePr`）；补齐 `generic-git` 离线 `--reason` 校验（对齐 `task-backend-local.mjs:523`）、修复 `flow-lifecycle-finalize.mjs:229,243`、`workflow-helpers.mjs:43`、`flow-next.mjs:346`、`handoff-package.mjs:338-342`、`verify-tools.mjs:65,129,392`、`workflow-policy.mjs:727`，同步 `node scripts/equip.mjs .` 并全绿通过 `preflight.mjs`、`fixtures.mjs` 与 `verify-injections.mjs --jobs 4`。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -141,6 +141,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：完成 C5–C8 全部工程收敛：`review-empirical*.mjs` 与 `scripts/lib/agents-defaults.mjs` 解决省略 `smoke-verify` 死锁、纯库/CLI 默认值与全 `none` 文档仓放行并收窄 `faultRequired`（去 `|| hasDevProfileTestCmds`）；`review-ledger.mjs`、`review-locks.mjs`、`evidence-substance.mjs`、`verify-state.mjs`、`workflow-policy.mjs` 实现同 HEAD 有效 `check-empirical` 回执自动复用（保留 `I117`）、去三重拼接、统一实质判据并消除 `smoke --e2e-evidence` 重复重跑；抽离 `runVerifyPrecheck` 至 `flow-lifecycle-hooks.mjs` 并抽离 `isUiVisualFileCandidate` 至 `empirical-artifacts.mjs` 使 `flow-lifecycle-helpers.mjs`（758 行）、`static-gates.mjs`（788 行）、`review-gates.mjs`（792 行）均严守 800 行上限；`flow-merge.mjs` 与 `task-backend-local.mjs` 堵住空/委托 `mergeRes` 穿透并补齐离线 `generic-git` `--reason` 校验，收窄 `mergeAuthority === 'human-required'` 且 `BLOCKED_HUMAN_MERGE_AUTHORITY` 统一返回 `EXIT.HUMAN`（`4`），修复 `flow-lifecycle-finalize.mjs`、`workflow-helpers.mjs`、`flow-next.mjs`、`handoff-package.mjs`、`verify-tools.mjs`、`workflow-policy.mjs` 收尾缺陷并补全正反双向回归夹具。
+- **与草案的差异**：因 `isUiVisualFile` 架构图豁免单源收敛进 `kit/skills/lib/empirical-artifacts.mjs`，同步更新 `scripts/dev/injections-data-visual-engine.mjs`（`I961`）指向该单源实现并通过复验。
+- **关联同步文件**：`kit/` 与 `.agents/skills/`（经 `equip.mjs .` 全量同步）、`scripts/lib/agents-defaults.mjs`、`scripts/dev/fixtures-govern.mjs`、`scripts/dev/fixtures-plan-wave-slices.mjs`、`scripts/dev/fixtures-review-token.mjs`、`scripts/dev/fixtures-r5-onboarding.mjs`、`scripts/dev/fixtures-review-empirical.mjs`、`scripts/dev/fixtures-empirical-cycle.mjs`、`scripts/dev/fixtures-e2e-gate.mjs`、`scripts/dev/injections-data-visual-engine.mjs`。

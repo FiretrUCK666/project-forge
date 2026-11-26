@@ -40,8 +40,8 @@ import {
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, isUiVisualFile, matchGlob } from '../../lib/static-gates.mjs'
-import * as workflowPolicy from '../../lib/workflow-policy.mjs'
 import { getChangedFiles } from './flow-inspect.mjs'
+import { runVerifyPrecheck } from './flow-lifecycle-hooks.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 export function computeFlowCoupledSync(implRoot, mainRoot, changedFiles) {
@@ -356,60 +356,24 @@ export async function handleVerifyE2eFailure({
   return { diagnostic, escalation }
 }
 
-/**
- * verify 前置预检的 Fail-Soft 调用口。
- *
- * `workflow-policy.mjs` 的实证校验入口由另一条并行切片负责扩展（`validateVerifyPrecheck`）。
- * 本文件按名字探测它，**不按版本探测**：
- *
- * - 还没实现 → 直接放行。没这道预检时，后面的 `writeVerificationEvidence` 仍照旧工作，
- *   这里硬失败等于为「一个还没写的函数」把整条 verify 拦死；
- * - 已经实现 → 完全按它返回的 `{ ok, code, exitCode }` 办。判据只有一个来源，不在这里重写一份。
- *
- * 用命名空间导入而不是具名导入，是因为具名导入不存在的导出会让整个模块在链接期就抛错——
- * 那样 Fail-Soft 无从谈起，两侧谁先合入都会把对方打断。
- *
- * ## 参数名必须与对方读的一字不差
- *
- * 它读的是 `repoRoot` / `gitCommonDir` / `headSha`。名字对不上时它内部的实证路径与根全是
- * `null`，于是「校验通过、什么都没落账」——门禁看着在工作，附件实证链条其实是断的。
- *
- * ## 传 `record: false`，落账只写一次
- *
- * 默认它自己会往 `evidence.json` 写一份。紧随其后的 `writeVerificationEvidence` 写的是
- * 整份新对象，会把刚写进去的 `artifacts` / `visual` 整个抹掉。与其让两处抢着写再合并，
- * 不如让它只校验、把结果交回来，由本文件一次性写全——写一次就没有覆盖窗口。
- */
-function runVerifyPrecheck(payload) {
-  const fn = workflowPolicy?.validateVerifyPrecheck
-  if (typeof fn !== 'function') return null
-  try {
-    const res = fn({ ...payload, record: false })
-    if (!res) return null
-    if (res.ok === false) return { ...res, blocked: true, exitCode: Number(res.exitCode) || 3 }
-    return { ...res, blocked: false }
-  } catch (err) {
-    process.stderr.write(`前置换算异常，按 Fail-Soft 放行：${err instanceof Error ? err.message : String(err)}\n`)
-    return null
-  }
-}
-
 export function recordVerifyEvidenceForFlow({
-  roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName, targetVal,
+  roots, implRoot = null, taskId, ledger, profileKey, currentHead, dirty, policy, modeName, targetVal,
   cmdStr, customCmd, exitCode, explicitNoneSkipped, docStaticRes,
   executed = !explicitNoneSkipped, errorOnly = false, e2eObservationText = '',
   durationMs = null, smokeDurationMs = null,
   smokeCmd = null, smokeExitCode = null, smokeExecuted = false, smokeErrorOnly = false,
-  artifacts = [], visualCheckedRaw = false, visualBlockedReason = '',
+  artifacts = [], visualCheckedRaw = false, visualBlockedReason = '', precheckResult = undefined,
 }) {
-  const precheck = runVerifyPrecheck({
-    repoRoot: roots.workTreeRoot,
-    gitCommonDir: roots.gitDir,
-    headSha: currentHead,
-    policy, taskId, dirty, mode: modeName, exitCode,
-    artifacts, visualCheckedRaw, visualBlockedReason,
-    observationSummary: String(e2eObservationText ?? '').trim(),
-  })
+  const precheck = precheckResult !== undefined
+    ? precheckResult
+    : runVerifyPrecheck({
+      repoRoot: implRoot || roots.workTreeRoot,
+      gitCommonDir: roots.gitDir,
+      headSha: currentHead,
+      policy, taskId, dirty, mode: modeName, exitCode,
+      artifacts, visualCheckedRaw, visualBlockedReason,
+      observationSummary: String(e2eObservationText ?? '').trim(),
+    })
   if (precheck?.blocked) {
     const msg = `${precheck.code ?? 'BLOCKED_VERIFY_PRECHECK'}: ${precheck.reason ?? precheck.message ?? '实证前置校验未通过'}`
     process.stderr.write(`${msg}\n`)
@@ -617,7 +581,7 @@ export function emitVerifyOutcomeOutput({
     if (policy.smokeRequired && !evRec.e2eObservation) {
       verifyNextSteps.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)
     } else if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {
-      verifyNextSteps.unshift(`检测到 UI/视觉改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请核验实际渲染、交互与浅深色截图后补 --visual-checked。`)
+      verifyNextSteps.unshift(`检测到 UI/视觉改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请核验实际渲染、交互与浅深色截图后补 --artifact "<真实非空产物路径>" --e2e-evidence "<渲染与交互观察>"（无渲染环境时用 --visual-blocked-reason "<阻塞原因>"）。`)
     }
   } else {
     verifyNextSteps = e2eFailureReport?.diagnostic?.NextSteps?.length

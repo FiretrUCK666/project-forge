@@ -89,8 +89,8 @@ export function registerIssue52Cases(cases) {
       const j2 = JSON.parse(n2.stdout)
       const tok = j1.reviewToken
       if (!tok || tok !== j2.reviewToken) return `flow next 连跑两次未复用同一未消费令牌：${tok} vs ${j2.reviewToken}`
-      if (!j1.command?.includes('--round 4') || !j1.command?.includes(`--review-token ${tok}`) || !j1.handoffPrompt?.includes('--round 4')) {
-        return `next command 未正确计算 --round 4 或附带令牌：${JSON.stringify({ handoff: j1.handoff, cmd: j1.command })}`
+      if (!j1.command?.includes('--round 4') || j1.command?.includes('--review-token') || j1.command?.includes('--reviewer-id') || !j1.recordCommand?.includes(`--review-token ${tok}`) || !j1.handoffPrompt?.includes('--round 4')) {
+        return `next command/recordCommand 未正确计算 --round 4 或附带令牌：${JSON.stringify({ handoff: j1.handoff, cmd: j1.command, recordCmd: j1.recordCommand })}`
       }
 
       // 反面 1：缺令牌 / 假令牌 / 错误轮次令牌均须 exit 2 BLOCKED_REVIEW_TOKEN

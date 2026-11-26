@@ -9,24 +9,52 @@
  */
 
 import { EXIT } from './exit-codes.mjs'
-import { statSync } from 'node:fs'
-import { basename, isAbsolute, relative, resolve } from 'node:path'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 
-import { posixPath, readJsonSafe, sha256File, writeJsonAtomic } from './git.mjs'
-import { evaluateTextSubstance } from './evidence-substance.mjs'
+import { verifyArchitectureMapHeader } from './feature-map-graph.mjs'
+import { posixPath, readJsonSafe, readTextSafe, sha256File, writeJsonAtomic } from './git.mjs'
+import { SYNTHETIC_OBSERVATION_TEXTS, evaluateTextSubstance, isSyntheticObservationText } from './evidence-substance.mjs'
+
+export { SYNTHETIC_OBSERVATION_TEXTS }
 
 /** 单个附件体积上限：超过它就不再是「实证产物」，而是留下来的临时大二进制。 */
 export const ARTIFACT_MAX_BYTES = 50 * 1024 * 1024
 
-/**
- * 旧式合成观察串：由布尔开关直接拼出来的「已核验」，里面没有观察内容。
- * 它们能被当成实证，正是本条判据要堵的敷衍通道。
- */
-export const SYNTHETIC_OBSERVATION_TEXTS = Object.freeze([
-  'e2e/visual runtime behavior observed and verified',
-  '实际运行、端到端交互与输出观察核验已确认',
-  '独立审查已核验真实端到端运行、交互与输出观察',
-])
+const APP_UI_DIR_PREFIX_RE = /^(?:src|app|pages|views|components|ui|frontend|web|client|public)\//i
+const NON_UI_TEMPLATE_PATH_RE = /^(?:templates\/|kit\/[^/]+\/templates\/|docs\/templates\/|\.github\/|\.agents\/)/i
+const NON_UI_SVG_DIR_RE = /^(?:docs|assets|images|img|media|badges|svg|static\/docs)\//i
+const NON_UI_SVG_NAME_RE = /(?:^|\/)(?:readme|hero|banner|badge|diagram|architecture|flowchart|logo|shield)[^/]*\.svg$/i
+
+/** 判断 `.svg` 或工程模板路径是否属于非界面文档/工程模板资产，避免误触发 `BLOCKED_UI_ARTIFACT_REQUIRED`。 */
+export function isNonUiVisualAsset(fileRel, { repoRoot = null } = {}) {
+  const p = normRel(fileRel)
+  if (!p) return true
+  if (NON_UI_TEMPLATE_PATH_RE.test(p)) return true
+  if (p === 'docs/architecture-map.html' && repoRoot && verifyArchitectureMapHeader(repoRoot, p).ok) return true
+  if (/\.svg$/i.test(p)) {
+    if (/^docs\//i.test(p)) return true
+    if (!APP_UI_DIR_PREFIX_RE.test(p)) {
+      if (NON_UI_SVG_DIR_RE.test(p) || NON_UI_SVG_NAME_RE.test(p)) return true
+      if (repoRoot && existsSync(repoRoot)) {
+        try {
+          for (const name of readdirSync(repoRoot)) {
+            if (!/^readme(?:\.[^/]+)?\.md$/i.test(name)) continue
+            const txt = readTextSafe(join(repoRoot, name), 256 * 1024) ?? ''
+            if (txt.includes(p) || txt.includes(encodeURI(p))) return true
+          }
+        } catch { /* ignore */ }
+      }
+    }
+  }
+  return false
+}
+
+/** 统一界面/视觉资产判定入口（供 `static-gates.mjs` 薄委托复用）。 */
+export function isUiVisualFileCandidate(fileRel, { repoRoot = null, uiExtMatch = true } = {}) {
+  if (!uiExtMatch) return false
+  return !isNonUiVisualAsset(fileRel, { repoRoot })
+}
 
 function normRel(p) {
   return posixPath(String(p ?? '')).trim().replace(/^\.\//, '').replace(/^\/+/, '')
@@ -140,8 +168,7 @@ export function normalizeArtifactRecords({ repoRoot = null, artifacts = [], capt
 export function evaluateObservationSubstance(raw) {
   const text = String(raw ?? '').trim()
   if (!text) return { ok: false, code: 'BLOCKED_VISUAL_OBSERVATION_REQUIRED', reason: '未提供视觉/渲染观察摘要。' }
-  const lowered = text.toLowerCase()
-  if (SYNTHETIC_OBSERVATION_TEXTS.some((s) => lowered === s.toLowerCase() || lowered.includes(s.toLowerCase()))) {
+  if (isSyntheticObservationText(text)) {
     return {
       ok: false,
       code: 'BLOCKED_VISUAL_OBSERVATION_PLACEHOLDER',
@@ -208,9 +235,11 @@ export function validateArtifactsAndVisual({
   }
 
   const placeholder = observation.code === 'BLOCKED_VISUAL_OBSERVATION_PLACEHOLDER' ? observation.reason : null
+  const invalidBlockedReason = String(visualBlockedReason ?? '').trim() && !blocked.ok ? blocked.reason : null
   const reason = [
     `BLOCKED_UI_ARTIFACT_REQUIRED: 变更触及界面资源（${uiFiles.slice(0, 5).join(', ')}），仅凭文字观察或 --visual-checked 开关不足以放行。`,
     placeholder,
+    invalidBlockedReason,
     '请至少满足一项：① 附真实非空截图/录像实证附件 --artifact "<产物路径>"（可多个）；② 环境确实无法渲染时显式声明 --visual-blocked-reason "<阻塞原因>" 诚实报阻。',
   ].filter(Boolean).join(' ')
   return { ok: false, code: 'BLOCKED_UI_ARTIFACT_REQUIRED', exitCode: EXIT.FACT, reason, records: normalized.records, errors: [], visual }
@@ -228,11 +257,6 @@ export function evaluateStoredVisualEvidence({ evidence = null, policy = null, h
     .filter(Boolean))].sort()
   if (uiFiles.length === 0) return { ok: true, code: null, reason: null, unclaimed: true, uiFiles }
 
-  const artifacts = Array.isArray(evidence?.artifacts)
-    ? evidence.artifacts.filter((r) => String(r?.relPath ?? '').trim())
-    : []
-  if (artifacts.length > 0) return { ok: true, code: null, reason: null, unclaimed: false, uiFiles, satisfiedBy: 'artifacts' }
-
   const stored = evidence?.visual && typeof evidence.visual === 'object' ? evidence.visual : null
   if (stored && headSha && stored.headSha && stored.headSha !== headSha) {
     return {
@@ -242,6 +266,11 @@ export function evaluateStoredVisualEvidence({ evidence = null, policy = null, h
       uiFiles,
     }
   }
+
+  const artifacts = Array.isArray(evidence?.artifacts)
+    ? evidence.artifacts.filter((r) => String(r?.relPath ?? '').trim() && (r?.bytes === undefined || Number(r.bytes) > 0))
+    : []
+  if (artifacts.length > 0) return { ok: true, code: null, reason: null, unclaimed: false, uiFiles, satisfiedBy: 'artifacts' }
   for (const key of ['observation', 'blockedReason']) {
     const text = String(stored?.[key] ?? '').trim()
     if (!text) continue

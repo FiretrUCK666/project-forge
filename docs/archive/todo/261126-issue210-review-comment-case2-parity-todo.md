@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: "Review Comment Slimming, Case 2 C1..Cn Parity and Noise Removal"
-status: active
+status: done
 created: 2026-11-26
 updated: 2026-11-26
 issue: 210
@@ -10,10 +10,10 @@ branch: feat/review-comment-case2-parity
 owner: planner-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-26
 task_id: review-comment-case2-parity
 planned_at: ff2c31b7e9e6762e233fecc57486ddfe04aa085d
-related_prd: ../prd/261126-suite-cohesion-v2-prd.md
+related_prd: ../../prd/261126-suite-cohesion-v2-prd.md
 related_spec: ../specs/261126-issue210-review-comment-case2-parity-spec.md
 depends_on: [empirical-handoff-cohesion]
 scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comments.mjs, kit/skills/lib/plan-sync.mjs, kit/skills/dev-flow/scripts/flow-context.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-review/scripts/review-sync.mjs, kit/skills/dev-review/SKILL.md, scripts/dev/preflight-contract-rules.mjs, scripts/dev/preflight-contracts.mjs, templates/pull-request-template.md, .github/pull_request_template.md, references/collaboration.md, scripts/dev/fixtures-review-contracts.mjs, scripts/dev/fixtures-flow.mjs, scripts/dev/fixtures-trace-sync.mjs, scripts/dev/injections-data-core.mjs, scripts/dev/injections-data-trace-sync.mjs]
@@ -25,15 +25,15 @@ scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comme
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-26` / `2026-11-26` |
 | 分支 / 基线 | `feat/review-comment-case2-parity` @ `ff2c31b` |
 | 任务编号 | `review-comment-case2-parity` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（评论契约与依赖顺序已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #210 / 未关联 / `docs/specs/261126-issue210-review-comment-case2-parity-spec.md` |
+| 关联 Issue / PR / SPEC | #210 / 未关联 / `docs/archive/specs/261126-issue210-review-comment-case2-parity-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261126-issue210-review-comment-case2-parity-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261126-issue210-review-comment-case2-parity-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -81,7 +81,7 @@ scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comme
 
 ## 断点与遗留决策
 
-- **当前状态**：已完成，无遗留
+- **当前状态**：`已完成 (done)`
 - **待拍板事项**：无
 - **下一步第一件事**：经独立审查与合前门禁验收后合并收尾。
 

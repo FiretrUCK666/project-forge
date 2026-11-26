@@ -13,7 +13,7 @@ plan_mode: interactive
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-governance-cohesion-r3, round=3, sha=372bbdf9e2a9, summary=Round 3 PASS: F3/F4 resolved via acyclic kit/skills/lib/plan-sync.mjs (600L) pure criteria + getLocalIssue extraction shrinking review-gates.mjs (791L) < 780L while retaining parseAcceptanceCriteria + I247 (L255-256), plus backend instantiation ahead of review-sync.mjs:369.)"
-related_prd: ../prd/261126-governance-cohesion-v2-prd.md
+related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_todo: ../todo/261126-review-comment-case2-parity-todo.md
 high_risk_paths: [kit/, templates/]
 task_id: review-comment-case2-parity
@@ -33,7 +33,7 @@ scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comme
 | 分支 / Issue / PR | `feat/governance-cohesion-v2` / 未关联 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（评论字段契约与依赖顺序已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261126-governance-cohesion-v2-prd.md` / `../todo/261126-review-comment-case2-parity-todo.md` |
+| 关联 PRD / Todo | `../prd/261126-suite-cohesion-v2-prd.md` / `../todo/261126-review-comment-case2-parity-todo.md` |
 
 - **变更一句话**：保障 Case 2 `C1..Cn` 在截断、全角冒号与本地/远端工单回退下全量不丢，单源瘦身 PR/Issue 审查评论并清除噪音、冗余首评与内部 CLI 命令泄漏，锁步对齐新三字段 `REVIEW_FIELDS`、PR 模板、契约脚本、技能说明、夹具与故障注入。
 
@@ -146,7 +146,7 @@ flowchart LR
 
 ## 澄清与补充记录
 
-- 已根据 Round 1 Critique 明确 `REVIEW_FIELDS` 三字段数组与条件止损契约，补充 `preflight-contracts.mjs`、`kit/skills/dev-review/SKILL.md` 与全套夹具/注入到 `scope_files` 及 `C9`/`C11`/`C12`，并指定 `review-gates.mjs` 本地回退抽离至 `review-sync.mjs` 且 `backend` 上移至 L369 前。
+- 已根据 Round 1 Critique 明确 `REVIEW_FIELDS` 三字段数组与条件止损契约，补充 `preflight-contracts.mjs`、`kit/skills/dev-review/SKILL.md` 与全套夹具/注入到 `scope_files` 及 `C9`/`C11`/`C12`，并指定 `review-gates.mjs` 本地回退抽离至 `kit/skills/lib/plan-sync.mjs` 且 `backend` 上移至 L369 前。
 
 ## 实现说明
 

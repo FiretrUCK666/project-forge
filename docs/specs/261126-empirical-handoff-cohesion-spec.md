@@ -13,7 +13,7 @@ plan_mode: interactive
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-governance-cohesion-r3, round=3, sha=c00e10a5d085, summary=Round 3 PASS: F2/F4 (exit-codes.mjs:133 FACT_CODES->HUMAN_CODES parity with exit-code-parity.mjs:152 and flow-merge.mjs:501-503 EXIT.HUMAN) and minor F5 (flow-lifecycle-helpers.mjs:620, static-gates.mjs:383 untrustedSurface <=800L, flow-merge.mjs:657-722 !mergeRes guard) verified.)"
-related_prd: ../prd/261126-governance-cohesion-v2-prd.md
+related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_todo: ../todo/261126-empirical-handoff-cohesion-todo.md
 high_risk_paths: [kit/, SKILL.md]
 task_id: empirical-handoff-cohesion
@@ -33,7 +33,7 @@ scope_files: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helper
 | 分支 / Issue / PR | `feat/governance-cohesion-v2` / 未关联 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（策略边界与退出码已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261126-governance-cohesion-v2-prd.md` / `../todo/261126-empirical-handoff-cohesion-todo.md` |
+| 关联 PRD / Todo | `../prd/261126-suite-cohesion-v2-prd.md` / `../todo/261126-empirical-handoff-cohesion-todo.md` |
 
 - **变更一句话**：消除 `check-empirical`/`check-fault` 死锁与过严拦截，落地 `review-ledger` 回执自动复用与单一实质判据，修复 UI 产物校验链、`mergeAuthority` 边界、`mcp-delegate`/`generic-git` 合并漏洞及多处流转工具缺陷。
 
@@ -80,7 +80,7 @@ flowchart LR
    - `flow-lifecycle.mjs`：L330 处测试执行前先跑 precheck 提前暴露缺少实证产物问题；L94 与 L402 当 `mode === 'quick' && Boolean(rawTarget)` 时跳过 `--final` `edit-gate` 与重复 `govern-audit`（全量 `full`/`gate` 与 `finalize` 照常强检）。
    - 将细化 `isUiVisualFile` 路径分类辅助抽入 `kit/skills/lib/empirical-artifacts.mjs`，在 `static-gates.mjs` 薄委托调用（保持 `static-gates.mjs <= 800` 行），统一 `empirical-artifacts.mjs` 双重标准，使非 UI 的 README `.svg` 或工程模板不误触发高风险 `BLOCKED_UI_ARTIFACT_REQUIRED`。
 4. **合并权限收窄、退出码对拍、`mcp-delegate` 阻断与流转工具修复**：
-   - `static-gates.mjs:383`（`classifyDoorType` 接受可选参数 `untrustedSurface = false`，由 `review-gates.mjs:518,525` 计算并经 L548 透传）与 `review-gates.mjs:568`：将 `mergeAuthority = 'human-required'` 统一收窄为 `gateWeakened || humanAuth || untrustedSurface`（移除裸 `isOneWay` / `doorType === 'one-way'`），使未弱化门禁的 `one-way`/`highRiskHits` 差异落入 `'reviewer-with-fault-injection'`，与 `AGENTS.md` / `references/collaboration.md`「仅弱化门禁须人点头；取舍写 `merge-authority: human` 收回人合」一致；同步更新 `scripts/dev/fixtures-govern.mjs:60`。
+   - `static-gates.mjs:383`（`classifyDoorType` 接受可选参数 `untrustedSurface = false`，由 `review-gates.mjs:518,525` 计算并经 L548 透传）与 `review-gates.mjs:568`：将 `mergeAuthority = 'human-required'` 统一收窄为 `gateWeakened || humanAuth || untrustedSurface`（移除裸 `isOneWay` / `doorType === 'one-way'`），使未弱化门禁的 `one-way`/`highRiskHits` 差异落入 `'reviewer-with-fault-injection'`，与 `AGENTS.md` / `references/collaboration.md` 的「八、谁能合」（仅弱化门禁须人点头；取舍写 `merge-authority: human` 收回人合）一致；同步更新 `scripts/dev/fixtures-govern.mjs:60`。
    - `kit/skills/lib/exit-codes.mjs:133` 与 `flow-merge.mjs:501-503`：将 `'BLOCKED_HUMAN_MERGE_AUTHORITY'` 从 `FACT_CODES`（`3`）迁至 `HUMAN_CODES`（`4`），与 `flow-merge.mjs:501-503` 返回 `EXIT.HUMAN`（`4`）锁步对齐，确保 `scripts/dev/preflight.mjs`（`evaluateExitCodeParity` 位于 `exit-code-parity.mjs:152`）全绿通过。
    - `flow-merge.mjs:657-722`：修复 `canUseGhApi && ledger.prNumber` 在 L578 为假（含 `mcp-delegate` 遗留 `ledger.prNumber === null`，以及 `!ledger.prNumber && !ledger.branch` 场景）时落入 L657 分支调用 `GitHubBackend.mergePr` 返回 `{ ok: false, delegated: true }`、绕过 L679（`blocked`）与 L693（`merged === false`）并在 L722 静默将 `ledger.status` 置为 `'merged'` 的缺陷；在 L722 之前显式守卫 `!mergeRes || mergeRes?.delegated === true || mergeRes?.ok === false`（阻断或按委托载荷分支退出）。
    - `flow-merge.mjs:528,660` 与 `task-backend-local.mjs:523`：对 `generic-git` 离线 `--human-approved` 强制校验非空合规 `--reason`。

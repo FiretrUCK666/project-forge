@@ -13,7 +13,7 @@ approved: false
 done_at: null
 task_id: review-comment-case2-parity
 planned_at: ff2c31b7e9e6762e233fecc57486ddfe04aa085d
-related_prd: ../prd/261126-governance-cohesion-v2-prd.md
+related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_spec: ../specs/261126-review-comment-case2-parity-spec.md
 depends_on: [empirical-handoff-cohesion]
 scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comments.mjs, kit/skills/lib/plan-sync.mjs, kit/skills/dev-flow/scripts/flow-context.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-review/scripts/review-sync.mjs, kit/skills/dev-review/SKILL.md, scripts/dev/preflight-contract-rules.mjs, scripts/dev/preflight-contracts.mjs, templates/pull-request-template.md, .github/pull_request_template.md, references/collaboration.md, scripts/dev/fixtures-review-contracts.mjs, scripts/dev/fixtures-flow.mjs, scripts/dev/fixtures-trace-sync.mjs, scripts/dev/injections-data-core.mjs, scripts/dev/injections-data-trace-sync.mjs]
@@ -87,7 +87,7 @@ scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comme
 
 ## 澄清与补充记录
 
-- 已根据 Round 1 Critique 补充三字段 `REVIEW_FIELDS`、条件 `止损记录`、`preflight-contracts.mjs:407-419`、`dev-review/SKILL.md:95`、3 个测试夹具与 `I7`/`I8`/`I413`/`I414` 锁步清单，并指定 `review-gates.mjs` 抽离至 `review-sync.mjs` 且 `backend` 上移至 L369 前。
+- 已根据 Round 1 Critique 补充三字段 `REVIEW_FIELDS`、条件 `止损记录`、`preflight-contracts.mjs:407-419`、`dev-review/SKILL.md:95`、3 个测试夹具与 `I7`/`I8`/`I413`/`I414` 锁步清单，并指定 `review-gates.mjs` 抽离至 `kit/skills/lib/plan-sync.mjs` 且 `backend` 上移至 L369 前。
 
 ## 完成后的记录
 

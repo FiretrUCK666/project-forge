@@ -13,7 +13,7 @@ approved: false
 done_at: null
 task_id: empirical-handoff-cohesion
 planned_at: ff2c31b7e9e6762e233fecc57486ddfe04aa085d
-related_prd: ../prd/261126-governance-cohesion-v2-prd.md
+related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_spec: ../specs/261126-empirical-handoff-cohesion-spec.md
 depends_on: []
 scope_files: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helpers.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/empirical-artifacts.mjs, kit/skills/lib/exit-codes.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/task-backend-local.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/lib/verify-state.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-review/scripts/review-empirical-state.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-flow/scripts/flow-next.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, scripts/lib/agents-defaults.mjs, scripts/dev/fixtures-govern.mjs]

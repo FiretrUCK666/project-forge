@@ -13,7 +13,7 @@ approved: false
 done_at: null
 task_id: doc-graph-evergreen-brief
 planned_at: ff2c31b7e9e6762e233fecc57486ddfe04aa085d
-related_prd: ../prd/261126-governance-cohesion-v2-prd.md
+related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_spec: ../specs/261126-doc-graph-evergreen-brief-spec.md
 depends_on: []
 scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skills/lib/markdown-scan.mjs, kit/skills/lib/context-brief.mjs, kit/skills/dev-govern/scripts/govern-evergreen.mjs, kit/skills/dev-govern/scripts/govern-docs.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs, kit/skills/dev-review/scripts/review-context.mjs, scripts/survey.mjs, scripts/lib/survey-scan.mjs, scripts/lib/survey-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-brief.mjs, kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/SKILL.md]

@@ -1,6 +1,6 @@
 ---
 kind: prd
-title: "Governance Cohesion, Universal Doc Graph and Empirical Gate Parity v2"
+title: "Suite Cohesion, Universal Doc Graph and Empirical Gate Parity v2"
 status: active
 created: 2026-11-26
 updated: 2026-11-26
@@ -14,7 +14,7 @@ related_todo: null
 multi_spec: true
 ---
 
-# Governance Cohesion, Universal Doc Graph and Empirical Gate Parity v2 — 产品需求说明（PRD）
+# Suite Cohesion, Universal Doc Graph and Empirical Gate Parity v2 — 产品需求说明（PRD）
 
 ## 文档信息
 

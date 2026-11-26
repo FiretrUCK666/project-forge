@@ -113,6 +113,7 @@
         "kit/skills/lib/git-worktree-env.mjs",
         "kit/skills/lib/exec.mjs",
         "kit/skills/lib/profile-sniffer.mjs",
+        "kit/skills/lib/doc-graph.mjs",
         "kit/skills/lib/profile.mjs",
         "kit/skills/lib/git-fast.mjs",
         "kit/skills/lib/git-status-fast.mjs",

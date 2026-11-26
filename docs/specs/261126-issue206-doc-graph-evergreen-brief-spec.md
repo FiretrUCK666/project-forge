@@ -5,16 +5,16 @@ status: approved
 tier: L3
 created: 2026-11-26
 updated: 2026-11-26
-issue: null
+issue: 206
 pr: null
-branch: feat/governance-cohesion-v2
+branch: feat/doc-graph-evergreen-brief
 owner: planner-arch
 plan_mode: interactive
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-governance-cohesion-r1, round=1, sha=eceb3a57b87a, summary=Round 1 PASS: acyclic doc-graph.mjs leaf boundary, I217/I218/I934 and fixtures-r8-bugfixes:379 anchors verified, Wave 1 scope_files disjoint, C1..C4 consistent across PRD/SPEC/Todo.)"
 related_prd: ../prd/261126-suite-cohesion-v2-prd.md
-related_todo: ../todo/261126-doc-graph-evergreen-brief-todo.md
+related_todo: ../todo/261126-issue206-doc-graph-evergreen-brief-todo.md
 high_risk_paths: [kit/, SKILL.md]
 task_id: doc-graph-evergreen-brief
 depends_on: []
@@ -30,10 +30,10 @@ scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skil
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块文档图谱内核、勘察与规划简报契约改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
-| 分支 / Issue / PR | `feat/governance-cohesion-v2` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/doc-graph-evergreen-brief` / #206 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界与不变量已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/todo/261126-doc-graph-evergreen-brief-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/todo/261126-issue206-doc-graph-evergreen-brief-todo.md` |
 
 - **变更一句话**：新增纯结构叶子模块 `kit/skills/lib/doc-graph.mjs` (new) 取代硬编码常青词表与自然语言正则，统一驱动治理、勘察与工具审计，并打通 Case 5、Case 3 与 `tdd` 的 Living Visual Brief 与 CLI 输出体验。
 
@@ -141,6 +141,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：新增纯叶子内核 `kit/skills/lib/doc-graph.mjs`（727 行，仅导入 `node:*`、`./git.mjs`、`./markdown-scan.mjs`、`./doc-frontmatter.mjs`）与 `markdown-scan.mjs` 标题 slug 复用导出；移除 `profile.mjs` 中 `CLASSIC_EVERGREEN_RE` 与自然语言正则并修复 `L378` `activeRawKey`；将 `docGraph` 单源接入 `govern-*`、`verify-tools-audit.mjs`（含 `resolveDocAnchor` 与目录前缀匹配）、`review-context.mjs`、`context-brief.mjs` 及 `survey*.mjs` S1 分片；完成 Case 5/3/`tdd` 简报生成、`init` 打印 `htmlUri`、`approve` 附 `--agent` 与 `dev-plan/SKILL.md` 呈递规范更新，并新增 `scripts/dev/fixtures-doc-graph.mjs` 双向夹具验证。
+- **与草案的差异**：`context-brief.mjs` 同步收纳 `docGraph.unaccountedDocs`（按低优先级排在已登记权威文档与子包 `AGENTS.md` 之后），确保无 `CLASSIC_EVERGREEN_RE` 下既有 `otherEvergreenDocs` 提示零丢失；`survey-plan.mjs` 保留 `I227` 精确行并追加 `else if (docGraphTargets.length > 0)` 分支。
+- **关联同步文件**：`.agents/skills/**`（`equip.mjs .`）、`docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`scripts/dev/fixtures-doc-graph.mjs`。

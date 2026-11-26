@@ -415,7 +415,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const staticPromise = scanProjectStaticFacts(root)
   const [gitFacts, staticFacts] = await Promise.all([gitPromise, staticPromise])
   const {
-    rawWs, relFiles, relSet, dirSet, ecosystem, taskEntryMeta, taskCommands, docs, workspace,
+    rawWs, relFiles, relSet, dirSet, ecosystem, taskEntryMeta, taskCommands, docs, docGraph, workspace,
     kit, localSkills, artifacts, universal, agentsText, tddText,
   } = staticFacts
   const ws = await finalizeWalkWorkspace(root, rawWs, gitFacts)
@@ -566,6 +566,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     localSkills,
     kit,
     docs,
+    docGraph,
     reentry,
     ignores: {
       hasGitignore: relSet ? relSet.has('.gitignore') : existsSync(join(root, '.gitignore')),

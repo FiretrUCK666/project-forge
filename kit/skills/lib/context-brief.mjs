@@ -124,6 +124,7 @@ function emptyBrief(warning = null) {
       downstream: [],
       matchedFlows: [],
     },
+    docGraph: null,
   }
 }
 
@@ -199,14 +200,36 @@ export function buildContextBrief(repoRoot, {
     .flatMap((k) => k.toLowerCase().split(/[\s,，;；/]+/))
     .filter((t) => t.length >= 2)
 
-  // 1. 合并全类常青发现（profile / frontmatter / entry-link / convention）+ 子包 */AGENTS.md
+  // 1. 合并全类常青发现（profile / frontmatter / entry-link / convention / unaccounted）+ 子包 */AGENTS.md
   const byPath = new Map()
+  let docGraphSummary = null
   try {
     const ev = discoverEvergreenDocs(root, profile ? { profile } : {})
     for (const d of ev?.markdownDocs ?? []) {
       const p = normRelPath(d?.path)
       if (!p || normExcludes.has(p) || byPath.has(p)) continue
       byPath.set(p, { path: p, source: d.source ?? 'convention', family: d.family ?? '', stem: d.stem ?? '' })
+    }
+    for (const u of ev?.docGraph?.unaccountedDocs ?? []) {
+      const p = normRelPath(u?.path)
+      if (!p || normExcludes.has(p) || byPath.has(p)) continue
+      byPath.set(p, { path: p, source: 'unaccounted', family: u.stem ?? '', stem: u.stem ?? '' })
+    }
+    const dg = ev?.docGraph
+    if (dg) {
+      docGraphSummary = {
+        entryCount: dg.accounted.entry.length,
+        authorityCount: dg.accounted.registeredAuthority.length,
+        unaccountedCount: dg.accounted.unaccounted.length,
+        nonMarkdownAuthorities: (dg.nonMarkdownDocs ?? []).map((d) => d.path).slice(0, 8),
+        unaccountedDocs: (dg.unaccountedDocs ?? []).map((d) => d.path).slice(0, 8),
+        brokenLinksCount: (dg.brokenLinks ?? []).length,
+        brokenAnchorsCount: (dg.brokenAnchors ?? []).length,
+        anchorWarningsCount: (dg.anchorWarnings ?? []).length,
+        cyclesCount: (dg.cycles ?? []).length,
+        redirectChainsCount: (dg.redirectChains ?? []).length,
+        orphansCount: (dg.orphans ?? []).length,
+      }
     }
   } catch { /* Fail-Soft */ }
 
@@ -349,6 +372,7 @@ export function buildContextBrief(repoRoot, {
     totalEvergreenDocs,
     relatedSlices,
     featureMap,
+    docGraph: docGraphSummary,
   }
 }
 

@@ -10,7 +10,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 
 import { DEFAULT_WALK_SKIP_DIRS, isInsideDir, isMacOsJunkPath, posixPath } from '../../lib/git.mjs'
 import { findChangelogVoice } from '../../lib/no-changelog-voice.mjs'
-import { discoverEvergreenDocs } from '../../lib/profile.mjs'
+import { discoverEvergreenDocs, readDecisions } from '../../lib/profile.mjs'
 import { CODE_EXT_RE } from '../../lib/static-gates.mjs'
 import { addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
@@ -92,11 +92,19 @@ export function discoverEvergreenAuthorityDocs(repoRoot, files = [], agentsText 
   return discoverEvergreenDocs(repoRoot, { files, agentsText, authoritativeTddPath })
 }
 
-/** 统一检查全部常青权威文档的失效路径、履历体写法及未指向的多副本分裂（`docs.duplicate-authority`）。 */
+/** 统一检查全部常青权威文档与图谱的失效路径、履历体、未纳管活跃文档、断锚点/环/跳转链/分歧及多副本分裂（`docs.duplicate-authority`）。 */
 export function checkEvergreenAuthorityDocs(repoRoot, files, agentsText, authoritativeTddPath, findings) {
   const discovered = discoverEvergreenDocs(repoRoot, { files, agentsText, authoritativeTddPath })
   const vitePressRoots = detectEvergreenVitePressRoots(repoRoot)
-  for (const doc of discovered.markdownDocs) {
+  const graph = discovered.docGraph
+  const decisions = readDecisions(agentsText)
+  const mdToScan = new Map()
+  for (const doc of discovered.markdownDocs) mdToScan.set(doc.path, doc)
+  for (const u of graph?.unaccountedDocs ?? []) {
+    if (!mdToScan.has(u.path)) mdToScan.set(u.path, u)
+  }
+
+  for (const doc of mdToScan.values()) {
     const info = readTextStrictInfo(join(repoRoot, doc.path))
     if (!info?.text) continue
     if (doc.path !== authoritativeTddPath) {
@@ -142,6 +150,82 @@ export function checkEvergreenAuthorityDocs(repoRoot, files, agentsText, authori
       title: `Duplicate unlinked evergreen authority docs for "${grp.stem}": ${grp.paths.join(', ')}`,
       action: `Converge ${grp.paths.join(' and ')} into a single canonical authority doc and point all entry docs to it.`,
     })
+  }
+
+  if (graph) {
+    if (!decisions.has('allow-unaccounted-docs')) {
+      for (const u of graph.unaccountedDocs ?? []) {
+        addFinding(findings, {
+          id: `docs.unaccounted-active-doc.${u.path}`,
+          category: 'docs',
+          severity: 'medium',
+          file: u.path,
+          title: `Unaccounted active doc outside doc graph: ${u.path}`,
+          action: `Link ${u.path} from AGENTS.md / README.md, register in evergreen-docs / frontmatter, or mark non-governed.`,
+        })
+      }
+    }
+    for (const ba of (graph.brokenAnchors ?? []).slice(0, 20)) {
+      addFinding(findings, {
+        id: `docs.broken-anchor.${ba.file}:${ba.line}.${ba.fragment}`,
+        category: 'docs',
+        severity: 'medium',
+        file: ba.file,
+        line: ba.line,
+        title: `Broken Markdown heading anchor in ${ba.file}:${ba.line} -> "${ba.target}"`,
+        action: `Fix heading fragment "#${ba.fragment}" in ${ba.file} or update heading in ${ba.resolvedTarget}.`,
+      })
+    }
+    for (const aw of (graph.anchorWarnings ?? []).slice(0, 20)) {
+      addFinding(findings, {
+        id: `docs.missing-anchor-heading.${aw.featureId}.${aw.path}`,
+        category: 'docs',
+        severity: 'low',
+        file: aw.targetRel,
+        title: `Feature-map docAnchor heading missing: "${aw.path}" (feature=${aw.featureId})`,
+        action: `Add heading "#${aw.fragment}" in ${aw.targetRel} or update docAnchors in docs/feature-map.json.`,
+      })
+    }
+    for (const cyc of graph.cycles ?? []) {
+      addFinding(findings, {
+        id: `docs.authority-cycle.${cyc.nodes.join('->')}`,
+        category: 'docs',
+        severity: 'medium',
+        file: cyc.nodes[0],
+        title: `Authority pointer cycle detected: ${cyc.nodes.join(' <-> ')}`,
+        action: `Break circular pointer between ${cyc.nodes.join(', ')} into a single acyclic canonical target.`,
+      })
+    }
+    for (const rc of graph.redirectChains ?? []) {
+      addFinding(findings, {
+        id: `docs.redirect-chain.${rc.from}`,
+        category: 'docs',
+        severity: 'low',
+        file: rc.from,
+        title: `Multi-hop doc redirect chain (${rc.hops} hops): ${rc.chain.join(' -> ')}`,
+        action: `Point ${rc.from} directly to ${rc.to} to eliminate intermediate redirect hops.`,
+      })
+    }
+    for (const orp of graph.orphans ?? []) {
+      addFinding(findings, {
+        id: `docs.orphan-authority.${orp.path}`,
+        category: 'docs',
+        severity: 'low',
+        file: orp.path,
+        title: `Orphan authority doc unreachable from entry docs: ${orp.path}`,
+        action: `Link ${orp.path} from AGENTS.md or README.md so readers can discover it.`,
+      })
+    }
+    for (const div of graph.entryDivergence ?? []) {
+      addFinding(findings, {
+        id: `docs.entry-divergence.${div.stem}`,
+        category: 'docs',
+        severity: 'medium',
+        file: div.entries[0],
+        title: `Entry docs diverge on "${div.stem}" targets: ${div.targets.join(' vs ')}`,
+        action: `Align ${div.entries.join(' and ')} to point to the same canonical "${div.stem}" authority doc.`,
+      })
+    }
   }
   return discovered
 }

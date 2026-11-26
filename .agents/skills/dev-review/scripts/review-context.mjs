@@ -337,10 +337,23 @@ export async function assembleReviewContext({ reviewRoot, mainRoot, gitDir, diff
     role: 'reviewer',
     profile: effectiveProfile,
   })
+  const dg = contextBrief?.docGraph
+  const docGraphWarnings = []
+  if (dg) {
+    if (dg.brokenLinksCount > 0) docGraphWarnings.push(`存在 ${dg.brokenLinksCount} 处文档断链 (brokenLinks)`)
+    if (dg.brokenAnchorsCount > 0) docGraphWarnings.push(`存在 ${dg.brokenAnchorsCount} 处失效文档标题锚点 (brokenAnchors)`)
+    if (dg.anchorWarningsCount > 0) docGraphWarnings.push(`存在 ${dg.anchorWarningsCount} 处 feature-map docAnchors 缺标题告警 (missing-doc-anchor-heading)`)
+    if (dg.cyclesCount > 0) docGraphWarnings.push(`检测到 ${dg.cyclesCount} 组权威文档互指环 (cycles)`)
+    if (dg.redirectChainsCount > 0) docGraphWarnings.push(`检测到 ${dg.redirectChainsCount} 条多跳重定向链 (redirectChains)`)
+    if (dg.orphansCount > 0) docGraphWarnings.push(`存在 ${dg.orphansCount} 份从入口不可达的权威文档 (orphans)`)
+    if (dg.unaccountedCount > 0) docGraphWarnings.push(`存在 ${dg.unaccountedCount} 份未纳管活跃文档 (${(dg.unaccountedDocs ?? []).slice(0, 4).join(', ')})`)
+  }
+  for (const w of docGraphWarnings) warnings.push(w)
 
   return {
     featureMapSource,
     warnings,
+    docGraphWarnings,
     changedFilesCount: changedFiles.length,
     runtimeFilesCount: runtimeChanged.length,
     contextBrief,
@@ -402,6 +415,10 @@ export function formatReviewContextLines(rc) {
   }
   for (const item of rc.empiricalTaskOrder.actionItems) lines.push(`  * ${item}`)
   for (const h of rc.solidificationHints ?? []) lines.push(`  - [${h.code}] ${h.suggestion}`)
+  if ((rc.docGraphWarnings?.length ?? 0) > 0) {
+    lines.push(`  Doc Graph Alerts (${rc.docGraphWarnings.length}):`)
+    for (const w of rc.docGraphWarnings.slice(0, 6)) lines.push(`    - ${w}`)
+  }
   const brief = rc.contextBrief ?? rc.evergreenContext
   const topoFm = brief?.featureMap
   if (topoFm && !topoFm.corrupt && (rc.affectedBusinessFlows?.length ?? 0) > 0) {

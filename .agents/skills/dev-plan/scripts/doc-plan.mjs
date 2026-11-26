@@ -244,6 +244,9 @@ async function main(argv) {
       if (cli.json) process.stdout.write(`${JSON.stringify(withNextSteps(res, initNextSteps, { repoRoot: mainRoot }), null, 2)}\n`)
       else {
         process.stdout.write(`已生成 ${res.kind.toUpperCase()}：${res.files.join(', ')}（Planned at: ${res.plannedAt}${res.worktreePath ? `, worktree=${res.worktreePath}` : ''}）\n`)
+        if (res.visualBrief?.htmlUri) {
+          process.stdout.write(`- Living Visual Brief (${res.visualBrief.confirmedState}): ${res.visualBrief.htmlUri}\n`)
+        }
         const briefLines = formatContextBriefLines(res.contextBrief)
         if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
         printNextStep(initNextSteps, { repoRoot: mainRoot })
@@ -589,7 +592,7 @@ async function main(argv) {
         phase: 'approve', file: res.file, taskId: taskKey ?? null,
         issueNumber: issueNum, summary: `已批准 ${res.file}（C1..Cn=${res.criteriaCount}）`,
       }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
-      const startHint = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case ${fm.data?.kind === 'todo' ? 3 : 4}${issueNum ? ` --issue ${issueNum}` : ' [--issue <N> | --create-issue --title "<标题>"]'}`
+      const startHint = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case ${fm.data?.kind === 'todo' ? 3 : 4}${issueNum ? ` --issue ${issueNum}` : ' [--issue <N> | --create-issue --title "<标题>"]'} --agent <agentId>`
       if (res.status === 'approved' || res.status === 'active') res.nextStep = startHint
       const approveNext = res.nextStep
         ? [{ skill: 'dev-flow', text: `规划已批准，移交 dev-flow 启动隔离工作区【须派发独立实施子代理/新会话认领实施，严禁规划作者在当前上下文自建自改】：${startHint}` }]
@@ -598,6 +601,7 @@ async function main(argv) {
       else {
         process.stdout.write(`文档已切换为 ${res.status}：${res.file}（原状态：${res.previousStatus}）\n`)
         if (res.activatedTodos?.length > 0) process.stdout.write(`已联动激活配套 Todo：${res.activatedTodos.join(', ')}\n`)
+        if (res.visualBrief?.htmlUri) process.stdout.write(`- Living Visual Brief (${res.visualBrief.confirmedState}): ${res.visualBrief.htmlUri}\n`)
         if (res.warning) process.stdout.write(`提示：${res.warning}\n`)
         if (approveNext.length > 0) printNextStep(approveNext, { repoRoot: mainRoot })
       }

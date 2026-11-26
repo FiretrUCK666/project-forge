@@ -7,6 +7,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { buildDocGraph } from '../../kit/skills/lib/doc-graph.mjs'
 import { scanNeutralCiSteps } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { claimsOf } from './claims.mjs'
 import * as protocol from './protocol.mjs'
@@ -56,6 +57,7 @@ export async function scanProjectStaticFacts(root) {
 
   const agentsText = docs?.agents ? (textByRel.get(docs.agents.file) ?? readTextSafe(join(root, docs.agents.file)) ?? '') : ''
   const tddText = docs?.tdd ? (textByRel.get(docs.tdd) ?? readTextSafe(join(root, docs.tdd)) ?? '') : ''
+  const docGraph = buildDocGraph(root, { files: relFiles, agentsText, authoritativeTddPath: docs?.tdd ?? null })
 
   return {
     rawWs,
@@ -66,6 +68,7 @@ export async function scanProjectStaticFacts(root) {
     taskEntryMeta,
     taskCommands,
     docs,
+    docGraph,
     workspace,
     kit,
     localSkills,

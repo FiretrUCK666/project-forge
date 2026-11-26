@@ -4,9 +4,9 @@ title: "Universal Doc Graph, Evergreen Hygiene, Case 5 and Brief UX"
 status: active
 created: 2026-11-26
 updated: 2026-11-26
-issue: null
+issue: 206
 pr: null
-branch: feat/governance-cohesion-v2
+branch: feat/doc-graph-evergreen-brief
 owner: planner-arch
 plan_mode: interactive
 approved: false
@@ -14,7 +14,7 @@ done_at: null
 task_id: doc-graph-evergreen-brief
 planned_at: ff2c31b7e9e6762e233fecc57486ddfe04aa085d
 related_prd: ../prd/261126-suite-cohesion-v2-prd.md
-related_spec: ../specs/261126-doc-graph-evergreen-brief-spec.md
+related_spec: ../specs/261126-issue206-doc-graph-evergreen-brief-spec.md
 depends_on: []
 scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skills/lib/markdown-scan.mjs, kit/skills/lib/context-brief.mjs, kit/skills/dev-govern/scripts/govern-evergreen.mjs, kit/skills/dev-govern/scripts/govern-docs.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs, kit/skills/dev-review/scripts/review-context.mjs, scripts/survey.mjs, scripts/lib/survey-scan.mjs, scripts/lib/survey-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-brief.mjs, kit/skills/dev-plan/scripts/doc-plan-ops.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/SKILL.md]
 ---
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skil
 | --- | --- |
 | 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-26` / `2026-11-26` |
-| 分支 / 基线 | `feat/governance-cohesion-v2` @ `ff2c31b` |
+| 分支 / 基线 | `feat/doc-graph-evergreen-brief` @ `ff2c31b` |
 | 任务编号 | `doc-graph-evergreen-brief` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与不变量已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261126-doc-graph-evergreen-brief-spec.md` |
+| 关联 Issue / PR / SPEC | #206 / 未关联 / `docs/specs/261126-issue206-doc-graph-evergreen-brief-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261126-doc-graph-evergreen-brief-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261126-issue206-doc-graph-evergreen-brief-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -45,10 +45,10 @@ scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skil
 
 ## 验收标准与执行清单
 
-- [ ] C1: 新增叶子模块 `kit/skills/lib/doc-graph.mjs` (new)（仅导入 `node:fs`、`node:path`、`./git.mjs`、`./markdown-scan.mjs`、`./doc-frontmatter.mjs`）实现 `accountActiveDocs` 与 4 项图谱校验（`brokenLinks`/`brokenAnchors` 含独立 `anchorWarnings`、`cycles`、`redirectChains`、`entryDivergenceAndOrphans`），支持非 Markdown 权威对象，移除 `CLASSIC_EVERGREEN_RE` 与 `profile.mjs:717` 自然语言正则，修复 `profile.mjs:378` `activeRawKey` 并保留 L537 `I217`，经 `node scripts/dev/fixtures.mjs` 验证通过。
-- [ ] C2: 将 `docGraph` 单源接入 `govern-evergreen.mjs`（保留 L136 `I218`）、`govern-audit.mjs`（含 L395 目录前缀匹配对齐）、`govern-docs.mjs`、`verify-tools-audit.mjs`（`resolveDocAnchor` + 目录前缀匹配）、`review-context.mjs`、`context-brief.mjs` 及 `scripts/survey.mjs`/`scripts/lib/survey-scan.mjs`/`scripts/lib/survey-plan.mjs`（S1 探索注入且 `explorationStrategy` `--check` 通过、`survey-docs.mjs <= 791` 行），经 `node scripts/dev/fixtures.mjs` 验证通过。
-- [ ] C3: 修复 Case 5/3 与 Brief UX：`doc-plan-brief.mjs` L169 支持 `result.caseType >= 3`、Case 5 结构化 `nextSteps`、保留 L197 `I934`、Case 3 路由至 `doc-plan.mjs init --kind todo`；`doc-plan-ops.mjs` 对 `tdd` 生成简报；`doc-plan.mjs` `init` 输出 `htmlUri` 且 Case 4 `approve` 带 `--agent`；更新 `kit/skills/dev-plan/SKILL.md`（`<= 14336` B 且 `<= 180` 行），经 `node scripts/dev/preflight.mjs` 与 `fixtures.mjs` 验证通过。
-- [ ] C4: 执行 `node scripts/equip.mjs .` 同步，补齐正反双向夹具（`fixtures-r8-bugfixes.mjs:379` 通过），全绿通过 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4` 与 `merge-gate.mjs`。
+- [x] C1: 新增叶子模块 `kit/skills/lib/doc-graph.mjs` (new)（仅导入 `node:fs`、`node:path`、`./git.mjs`、`./markdown-scan.mjs`、`./doc-frontmatter.mjs`）实现 `accountActiveDocs` 与 4 项图谱校验（`brokenLinks`/`brokenAnchors` 含独立 `anchorWarnings`、`cycles`、`redirectChains`、`entryDivergenceAndOrphans`），支持非 Markdown 权威对象，移除 `CLASSIC_EVERGREEN_RE` 与 `profile.mjs:717` 自然语言正则，修复 `profile.mjs:378` `activeRawKey` 并保留 L537 `I217`，经 `node scripts/dev/fixtures.mjs` 验证通过。
+- [x] C2: 将 `docGraph` 单源接入 `govern-evergreen.mjs`（保留 L136 `I218`）、`govern-audit.mjs`（含 L395 目录前缀匹配对齐）、`govern-docs.mjs`、`verify-tools-audit.mjs`（`resolveDocAnchor` + 目录前缀匹配）、`review-context.mjs`、`context-brief.mjs` 及 `scripts/survey.mjs`/`scripts/lib/survey-scan.mjs`/`scripts/lib/survey-plan.mjs`（S1 探索注入且 `explorationStrategy` `--check` 通过、`survey-docs.mjs <= 791` 行），经 `node scripts/dev/fixtures.mjs` 验证通过。
+- [x] C3: 修复 Case 5/3 与 Brief UX：`doc-plan-brief.mjs` L169 支持 `result.caseType >= 3`、Case 5 结构化 `nextSteps`、保留 L197 `I934`、Case 3 路由至 `doc-plan.mjs init --kind todo`；`doc-plan-ops.mjs` 对 `tdd` 生成简报；`doc-plan.mjs` `init` 输出 `htmlUri` 且 Case 4 `approve` 带 `--agent`；更新 `kit/skills/dev-plan/SKILL.md`（`<= 14336` B 且 `<= 180` 行），经 `node scripts/dev/preflight.mjs` 与 `fixtures.mjs` 验证通过。
+- [x] C4: 执行 `node scripts/equip.mjs .` 同步，补齐正反双向夹具（`fixtures-r8-bugfixes.mjs:379` 通过），全绿通过 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4` 与 `merge-gate.mjs`。
 
 ## 执行步骤
 
@@ -88,5 +88,12 @@ scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skil
 **在合并之前写完，随这次改动一起提交。**
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/equip.mjs . --check`：通过（`157` 个套件文件字节级一致）。
+  - `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render . --check`：通过（`docs/architecture-map.html` 同步）。
+  - `node scripts/compose-agents.mjs . --check`：通过（`AGENTS.md` 23299 B，标记成对）。
+  - `node scripts/dev/preflight.mjs`：通过（41/41 项全绿，`kit/skills/dev-plan/SKILL.md` 93 行 / 13286 B）。
+  - `node scripts/dev/fixtures.mjs --jobs 6`：通过（含 `fixtures-doc-graph.mjs` 4 项、`fixtures-r8-bugfixes.mjs` 10 项、`fixtures-survey.mjs` 13 项、`fixtures-iterate-evolution.mjs` 12 项、`fixtures-living-brief.mjs` 5 项、`fixtures-w6c-context-brief.mjs` 3 项，共 583 项全过）。
+  - `node scripts/dev/verify-injections.mjs --jobs 4`：全量通过（`I217`/`I218`/`I227`/`I934` 等全部红灯拦截）。
+  - `node .agents/skills/dev-edit/scripts/edit-gate.mjs --final --json`：0 阻断（`blockers: 0`）。
+- **文档同步检查**：已同步 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`kit/skills/dev-plan/SKILL.md` 与 `.agents/skills/`。
+- **遗留问题**：无。

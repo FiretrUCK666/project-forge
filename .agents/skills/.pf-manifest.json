@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-26T18:50:42.481Z",
+  "installedAt": "2026-11-26T18:59:24.464Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
@@ -343,7 +343,7 @@
       "sha256": "720a64a580c8f05cb795f34290b70ef2c7002471268dc8ff96776864d8f78e36"
     },
     "lib/harness-context.mjs": {
-      "sha256": "5c904f2b3ee57e1c3b0ae885c2c30703167864472a5363064a5f7584809280e6"
+      "sha256": "de0f3599388713c42b0a43f9a7c80df268b7591f644a64b6c5520e6d50370516"
     },
     "lib/intake-triage.mjs": {
       "sha256": "c0ffe93202c2bcdb94a770f7e1573061e98c7fbfd186d9ec16c7182f47fa7242"

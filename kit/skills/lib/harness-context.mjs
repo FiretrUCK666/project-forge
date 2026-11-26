@@ -110,12 +110,20 @@ export function enforceSlotBoundary({
   const isSameMain = Boolean(mainRoot && implRoot && canonicalPath(mainRoot) === canonicalPath(implRoot))
   const isSandboxSlot = Boolean(sandbox || (implRoot && /(?:^|[/\\])\.worktrees[/\\]sandbox-[^/\\]+$/i.test(String(implRoot))))
 
-  if ((caseNum >= 2 || isSandboxSlot) && hasCommits && isDirtyMain) {
+  if (caseNum >= 2 && hasCommits && isDirtyMain) {
     return {
       ok: false,
       code: 'BLOCKED_DIRTY_MAIN',
       exitCode: EXIT.FACT,
-      reason: '主仓工作区存在未提交脏改动，Case >= 2 或隔离沙箱禁止在脏主仓上开启或合并隔离槽位；请先清理或提交主仓改动。',
+      reason: '主仓工作区存在未提交脏改动，Case >= 2 禁止在脏主仓上开启或合并隔离槽位；请先清理或提交主仓改动。',
+    }
+  }
+  if (isSandboxSlot && hasCommits && isDirtyMain) {
+    return {
+      ok: false,
+      code: 'BLOCKED_DIRTY_MAIN',
+      exitCode: EXIT.FACT,
+      reason: '主仓工作区存在未提交脏改动，隔离沙箱禁止在脏主仓上开启或合并隔离槽位；请先清理或提交主仓改动。',
     }
   }
   if (caseNum === 1 && !isSandboxSlot) {

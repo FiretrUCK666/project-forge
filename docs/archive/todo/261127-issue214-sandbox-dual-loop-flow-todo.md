@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 隔离沙箱双环工作树与真实差分晋升流水线
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
 issue: 214
@@ -10,10 +10,10 @@ branch: feat/sandbox-dual-loop-flow
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-27
 task_id: sandbox-dual-loop-flow
 planned_at: 5feb0dbff6d86a217c45d74e44fe6949a35f912c
-related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
+related_prd: ../../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
 related_spec: ../specs/261127-issue214-sandbox-dual-loop-flow-spec.md
 ---
 
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-issue214-sandbox-dual-loop-flow-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / 基线 | `feat/sandbox-dual-loop-flow` @ `5feb0db` |
 | 任务编号 | `sandbox-dual-loop-flow` |
 | 负责人 / 审批 | plan-sandbox-v1 / `false` |
 | 规划态 | `interactive`（架构决策已拍板，待 Critique 与审批） |
-| 关联 Issue / PR / SPEC | #214 / 未关联 / `docs/specs/261127-issue214-sandbox-dual-loop-flow-spec.md` |
+| 关联 Issue / PR / SPEC | #214 / 未关联 / `docs/archive/specs/261127-issue214-sandbox-dual-loop-flow-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -79,7 +79,7 @@ related_spec: ../specs/261127-issue214-sandbox-dual-loop-flow-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（Wave 2 切片，依赖 `single-source-policy-core`）
+- **当前状态**：`已完成 (done)`（Wave 2 切片，依赖 `single-source-policy-core`）
 - **待拍板事项**：无
 - **下一步第一件事**：待 Wave 1 合入 `main` 且本 SPEC 获 `approve` 后，派独立实施子代理在隔离 worktree 启动步骤 1。
 

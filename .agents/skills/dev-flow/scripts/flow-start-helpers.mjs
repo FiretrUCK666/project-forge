@@ -270,6 +270,9 @@ export function evaluateIssueBindingExemption({
   if (Boolean(isPlanning)) {
     return { blocked: false, exempt: true, exemptKind: 'planning', reason: '--planning 隔离规划阶段暂不绑定工单', at: now }
   }
+  if (Boolean(opts.sandbox)) {
+    return { blocked: false, exempt: true, exemptKind: 'sandbox', reason: '沙箱探索阶段暂不强制建单', at: now }
+  }
   if (opts['allow-plan-bootstrap'] === true) {
     return { blocked: false, exempt: true, exemptKind: 'allow-plan-bootstrap', reason: '携带 --allow-plan-bootstrap 规划引导豁免建单', at: now }
   }
@@ -334,6 +337,7 @@ export async function resolveOrBindStartIssue({
   ledger = null,
   opts = {},
   implementerId = null,
+  commandName = 'start',
 } = {}) {
   const flagChk = validateStartIssueFlags(opts, linkedIssues)
   if (flagChk.blocked) return flagChk
@@ -402,17 +406,19 @@ export async function resolveOrBindStartIssue({
   const wantCreateFlag = Boolean(opts['create-issue'])
 
   if (!wantCreateFlag && !hasExplicitBody && verifiedPlanDocs.length === 0) {
+    const cmdName = commandName === 'promote' ? 'promote' : 'start'
+    const stageWord = cmdName === 'promote' ? '晋升' : '开工'
     return {
       blocked: true,
       code: 'BLOCKED_MISSING_ISSUE_BINDING',
       exitCode: EXIT.FACT,
       reason: [
-        `Case ${caseType} 无关联规划文档时，开工必须绑定已有工单或提供合规工单正文。`,
+        `Case ${caseType} 无关联规划文档时，${stageWord}必须绑定已有工单或提供合规工单正文。`,
         '可选修复方式：',
-        '  1) 绑定已有工单：flow.mjs start ... --issue <N>',
-        '  2) 附带合规正文建单：flow.mjs start ... --body-file <path>（或 --body "<符合 5 项结构底线的正文>"）',
+        `  1) 绑定已有工单：flow.mjs ${cmdName} ... --issue <N>`,
+        `  2) 附带合规正文建单：flow.mjs ${cmdName} ... --body-file <path>（或 --body "<符合 5 项结构底线的正文>"）`,
         '  3) 先独立建单再开工：flow.mjs issue create --title "<标题>" --case 2 --body-file <path>',
-        '  4) 确需豁免建单：flow.mjs start ... --no-issue --reason "<可核对理由>"（或在 AGENTS.md「## 取舍」声明 no-auto-issue）',
+        `  4) 确需豁免建单：flow.mjs ${cmdName} ... --no-issue --reason "<可核对理由>"（或在 AGENTS.md「## 取舍」声明 no-auto-issue）`,
       ].join('\n'),
     }
   }

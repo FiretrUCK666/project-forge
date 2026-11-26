@@ -639,6 +639,8 @@
         "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
         "kit/skills/lib/workflow-policy.mjs",
         "kit/skills/lib/gate-receipt.mjs",
+        "kit/skills/lib/sandbox-scope.mjs",
+        "kit/skills/dev-flow/scripts/flow-sandbox.mjs",
         "kit/skills/lib/pr-template-hydrate.mjs",
         "kit/skills/lib/issue-quality.mjs",
         "kit/skills/lib/issue-template-hydrate.mjs",
@@ -737,7 +739,9 @@
         "scripts/dev/injections-data-health-sweep.mjs",
         "scripts/dev/fixtures-r8-bugfixes.mjs",
         "scripts/dev/fixtures-policy-axes.mjs",
-        "scripts/dev/injections-data-policy-axes.mjs"
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -897,7 +901,9 @@
         "scripts/dev/injections-data-health-sweep.mjs",
         "scripts/dev/fixtures-r8-bugfixes.mjs",
         "scripts/dev/fixtures-policy-axes.mjs",
-        "scripts/dev/injections-data-policy-axes.mjs"
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -1117,7 +1123,9 @@
         "scripts/dev/injections-data-health-sweep.mjs",
         "scripts/dev/fixtures-r8-bugfixes.mjs",
         "scripts/dev/fixtures-policy-axes.mjs",
-        "scripts/dev/injections-data-policy-axes.mjs"
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -1312,7 +1320,9 @@
         "scripts/dev/injections-data-health-sweep.mjs",
         "scripts/dev/fixtures-r8-bugfixes.mjs",
         "scripts/dev/fixtures-policy-axes.mjs",
-        "scripts/dev/injections-data-policy-axes.mjs"
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"

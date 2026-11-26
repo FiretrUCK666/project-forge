@@ -40,6 +40,7 @@ import {
   evaluateMasterIssueCloseGuard, handleClaim, handleRelease,
 } from './flow-merge-claim.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
+import { guardSandboxPreSubmitOrFinalize } from './flow-sandbox.mjs'
 
 export { analyzeIssueClaimState, handleAbort, handleClaim, handleCleanup, handleRelease, handleStatus }
 
@@ -332,6 +333,8 @@ export async function assertPreMergeGates({
     process.stderr.write(`BLOCKED_ROLE_CANNOT_MERGE: 当前身份为 ${ledger.role}，不允许执行合并。\n`)
     return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_ROLE_CANNOT_MERGE' }
   }
+  const sbGuard = guardSandboxPreSubmitOrFinalize(ledger, opts, 'merge')
+  if (!sbGuard.ok) return { ok: false, exitCode: sbGuard.exitCode, code: sbGuard.code }
 
   const implRoot = ledger.worktreePath ? resolve(mainRoot, ledger.worktreePath) : mainRoot
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)

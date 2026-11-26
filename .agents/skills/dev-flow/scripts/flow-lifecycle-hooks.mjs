@@ -18,6 +18,7 @@ import {
   loadForgeHooksConfig, resolveStageHookCommands, scanExtensionSlotHazards,
 } from '../../lib/overlay.mjs'
 import { readDecisions } from '../../lib/profile.mjs'
+import { isInnerVerifyMode } from '../../lib/sandbox-scope.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import { validateFeatureMapTopology } from '../../lib/feature-map-graph.mjs'
@@ -161,7 +162,8 @@ export function checkLifecyclePreconditions(ledger, opts = {}) {
   const ownerCheck = assertSubmitOwnership(ledger, { ...opts, requireAgent: false })
   if (!ownerCheck.ok) return { ...ownerCheck, warnings }
   const caseNum = Number(ledger.caseType ?? 3)
-  if (caseNum >= 2 && Boolean(ledger.baseSha) && !ledger.claimedAt) {
+  const innerVerify = opts._stage === 'verify' && isInnerVerifyMode(ledger, opts)
+  if (!innerVerify && caseNum >= 2 && Boolean(ledger.baseSha) && !ledger.claimedAt) {
     return {
       ok: false,
       code: 'BLOCKED_UNCLAIMED_TASK',
@@ -170,7 +172,7 @@ export function checkLifecyclePreconditions(ledger, opts = {}) {
       message: `BLOCKED_UNCLAIMED_TASK: Case ${caseNum} 任务 ${ledger.taskId} 尚未认领（缺少 claimedAt），请先运行 flow.mjs claim --task ${ledger.taskId}。`,
     }
   }
-  if (caseNum >= 3 && !hasExploredEvidence(ledger)) {
+  if (!innerVerify && caseNum >= 3 && !hasExploredEvidence(ledger)) {
     return {
       ok: false,
       code: 'BLOCKED_UNEXPLORED_TASK',

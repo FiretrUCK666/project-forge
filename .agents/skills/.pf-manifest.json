@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-26T17:48:42.607Z",
+  "installedAt": "2026-11-26T18:59:24.464Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
@@ -37,7 +37,7 @@
       "sha256": "3e39303db8f09af674a22b42251d817a0b8348c18a2371b27bdd9f783aefab50"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
-      "sha256": "600c2ee74d13b2e55ebf03c9fe15008623283d22ae02f84fe2a1c819ab050cd7"
+      "sha256": "d987a8fe0bd6d2269bf63dfe42295d20ab00da6c4f7727999dfd9a4827498e34"
     },
     "dev-flow/scripts/flow-intake.mjs": {
       "sha256": "83849508a54b79d4e117ac04ad973afe247db51b5468b2cc590287eff2356964"
@@ -46,28 +46,31 @@
       "sha256": "ad7cd01c9f29a15fd4276bf6defa4398bc6e20b72d6c331092765c35f8b272dc"
     },
     "dev-flow/scripts/flow-lifecycle-finalize.mjs": {
-      "sha256": "bd65ead79f84e6096ac8c3eb6d81b95f723e2435b8fda3cc4c54490c6de089f2"
+      "sha256": "cbca9b416dc9e159f9da820187c324c5119fc4cc4e6c8ec81e495dd5dfff8b08"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
       "sha256": "8f97d4de1006d08e81a297e7ed0c9279b61775f877396de7436942da6c629318"
     },
     "dev-flow/scripts/flow-lifecycle-hooks.mjs": {
-      "sha256": "fd47f274fed9a761dbd4306f27eb210503dd8aac496c6085717f92184325f759"
+      "sha256": "fc4456012a19eedfacb37c95f7648cd789a482d5fb16635a31211063933e3dad"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "ffa0bcb3f7a95153684c5659ec202b309db910ba73c0ff8c2d8def62e6f7036c"
+      "sha256": "98f3a4125d7dc86ce4b9807cc07133c3cdb7800551391862fbf4c21c609b372e"
     },
     "dev-flow/scripts/flow-merge-claim.mjs": {
       "sha256": "07b793cbf8601ab4e8fbe9f17fd03ff1479123e15bb89ef103fde3a9861e31a1"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "bf9fc0d65298401805118797e173c93bc2d87016c186088a1bf7daaa3ead9163"
+      "sha256": "10317f4489b31f75546469869b9dc66eeb074dd6e86a75b2b9c3c313c584fdbb"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "c767a9e2b1f427c9ebb9b053badc1a77d7dc444aedad0836c5a014d961bd5bea"
     },
+    "dev-flow/scripts/flow-sandbox.mjs": {
+      "sha256": "0b6851846851655c8dbbf9ca62bfb7ac511fda1950b5781e62f9d779aca75bc6"
+    },
     "dev-flow/scripts/flow-start-helpers.mjs": {
-      "sha256": "fadb93a8cdeb538e27d4a34f1e7e5b900ab152f82bef86a6b392626e00fa2290"
+      "sha256": "c425b4afe759765f6f22daa8e49b59179c586bd5978d715f3e0352e9f89db4f2"
     },
     "dev-flow/scripts/flow-start-provenance.mjs": {
       "sha256": "154d6fd37b3a1ffdde78271e12e2d3ddd0fe1be8d4248b29e3f49664b496f3ef"
@@ -79,7 +82,7 @@
       "sha256": "4afa6576f9cfbec416b3e5fac5aa31cecedfc5a7070d34d4fe8b3e578d699cac"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "186c7ab2f4a7da2860ca3eea9de73bc1cfeda5df535b4537dbbaf4313eed93b0"
+      "sha256": "9eb0ed6fd90825fb7355fa493c3d679844f4d11dcc204883da277de2a56c97db"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
       "sha256": "95ea7a98109e91d4629650385170e2633c606969eb91e8e90e8a863c94359748"
@@ -289,7 +292,7 @@
       "sha256": "07caf0bb51bd80bee9747f958b963c9ecf086a99683d5acfc466ccee1965f6b8"
     },
     "lib/exit-codes.mjs": {
-      "sha256": "f46beb4b1476e17251c7aa62b3e7113f47ef2f9dee732d789d2caab5c29461c9"
+      "sha256": "2feb35114199a0484f12bec3db5a14eaa6c17a0e8b7b2a3c6f9c439da57dd4ad"
     },
     "lib/feature-map-graph.mjs": {
       "sha256": "2ab39c3efdc1d6ee53b21592d538b881570b4fda232ba9acc22ceef6a845a387"
@@ -340,7 +343,7 @@
       "sha256": "720a64a580c8f05cb795f34290b70ef2c7002471268dc8ff96776864d8f78e36"
     },
     "lib/harness-context.mjs": {
-      "sha256": "9097bb684bc6272b59061dc623495c165b2efd0755f52c67a8c1e0d3815cbf46"
+      "sha256": "de0f3599388713c42b0a43f9a7c80df268b7591f644a64b6c5520e6d50370516"
     },
     "lib/intake-triage.mjs": {
       "sha256": "c0ffe93202c2bcdb94a770f7e1573061e98c7fbfd186d9ec16c7182f47fa7242"
@@ -352,7 +355,7 @@
       "sha256": "4baa9391b6956c9346271afba6f2ab576363aa200f058f9bc7a333dc3ac9f3cd"
     },
     "lib/ledger.mjs": {
-      "sha256": "0c4b33dcbbb6b7264b6dfd4d774040985a9165367cc99b6bbd60a97dd5e5ebf2"
+      "sha256": "f496a2089a33150ef13f076ee106c10cbe8d285933bafc0545b10319d45befb8"
     },
     "lib/local-issues.mjs": {
       "sha256": "7f55a4729534cf314796d4121ac98175e5ed5140c9fd9f52f4c382dbf335ca3e"
@@ -361,7 +364,7 @@
       "sha256": "6ec7d56986e6f6e22a94f9679645ba361f9fe868704591734619c10cdf4cb954"
     },
     "lib/mutability.mjs": {
-      "sha256": "9a8008bee6ebfc496f7ae12df1d58b8bba08fd544204a7de8936afba2090206f"
+      "sha256": "577cbd5e2d4c88bbcfb52c34b3b27e80002eba103a37b6e0572dec6cd31c544a"
     },
     "lib/no-changelog-voice.mjs": {
       "sha256": "289899c46e4dbdb6a5fdd974bff8e3401b7e7b242a49ff0d3e3b214971d36891"
@@ -408,6 +411,9 @@
     "lib/review-comment-render.mjs": {
       "sha256": "371f46668300842e06aa854eebbc5aabd4aca334a9cce3a5e088d2ba81b41f43"
     },
+    "lib/sandbox-scope.mjs": {
+      "sha256": "cfadecf89ecedbcb1a60c47b6c0bc55fb0edbc57a27840510ec53a7449684b6a"
+    },
     "lib/session-orient.mjs": {
       "sha256": "477ad72ff05044e790c0583785840bea3203d1a1e1bf429e28e5f2634d813674"
     },
@@ -436,7 +442,7 @@
       "sha256": "63620f78814d521e801d3dc59c398c8558954b77dbb571bccc3f76c689a26bb1"
     },
     "lib/subcommand-meta.mjs": {
-      "sha256": "e70ea88e0ac31ca86519fa1db52f8f9f73c55f0b13236ed3cdf31f42af7e2a13"
+      "sha256": "38db28223d3557d6bfb5b3e9e3e9b26b6e37c38561dd943a45396f9ba500c826"
     },
     "lib/suite-inventory.mjs": {
       "sha256": "efc4fbe9ce5a3ab73ad1f820a410da0f185480360628978d62ff9f2dec91b107"
@@ -496,7 +502,7 @@
       "sha256": "3a13249912a9d650ae3ce2a6f6e85bf891514b146f1fbfb2e9c0b05d12fc50a2"
     },
     "lib/workflow-policy-next.mjs": {
-      "sha256": "26cb378ff0ae67830068ceb3ab9787d83ce8218cef1a024452a24172e4b8b72d"
+      "sha256": "64c4b86c630e77efe8ce81fe7f9a300d7b1244218100c5a23fee986ebebe456b"
     },
     "lib/workflow-policy.mjs": {
       "sha256": "19b308ad5180baa0103a83dc39a2e3920e2ab5b1d36f8e8402e6222ead1a2389"

@@ -103,10 +103,12 @@ export function enforceSlotBoundary({
   caseType = 3,
   isDirtyMain = false,
   commits = 1,
+  sandbox = false,
 } = {}) {
   const caseNum = Number(caseType ?? 3)
   const hasCommits = Number(commits ?? 1) > 0
   const isSameMain = Boolean(mainRoot && implRoot && canonicalPath(mainRoot) === canonicalPath(implRoot))
+  const isSandboxSlot = Boolean(sandbox || (implRoot && /(?:^|[/\\])\.worktrees[/\\]sandbox-[^/\\]+$/i.test(String(implRoot))))
 
   if (caseNum >= 2 && hasCommits && isDirtyMain) {
     return {
@@ -116,7 +118,15 @@ export function enforceSlotBoundary({
       reason: '主仓工作区存在未提交脏改动，Case >= 2 禁止在脏主仓上开启或合并隔离槽位；请先清理或提交主仓改动。',
     }
   }
-  if (caseNum === 1) {
+  if (isSandboxSlot && hasCommits && isDirtyMain) {
+    return {
+      ok: false,
+      code: 'BLOCKED_DIRTY_MAIN',
+      exitCode: EXIT.FACT,
+      reason: '主仓工作区存在未提交脏改动，隔离沙箱禁止在脏主仓上开启或合并隔离槽位；请先清理或提交主仓改动。',
+    }
+  }
+  if (caseNum === 1 && !isSandboxSlot) {
     return { ok: true, inPlace: isSameMain }
   }
   if (hasCommits && isSameMain) {
@@ -124,10 +134,10 @@ export function enforceSlotBoundary({
       ok: false,
       code: 'BLOCKED_MAIN_SLOT_VIOLATION',
       exitCode: EXIT.FACT,
-      reason: `Case ${caseNum}（commits > 0）禁止直接在主仓原地实施（implRoot === mainRoot），必须使用隔离 .worktrees/impl-<taskId>/。`,
+      reason: `Case ${caseNum}（commits > 0）禁止直接在主仓原地实施（implRoot === mainRoot），必须使用隔离 .worktrees/impl-<taskId>/ 或 .worktrees/sandbox-<taskId>/。`,
     }
   }
-  return { ok: true, inPlace: false }
+  return { ok: true, inPlace: false, ...(isSandboxSlot ? { sandboxSlot: true } : {}) }
 }
 
 export const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i

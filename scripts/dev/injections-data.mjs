@@ -12,6 +12,7 @@ const PRIORITY_FILES = [
   'injections-data-workflow.mjs',
   'injections-data-gates.mjs',
   'injections-data-adaptive.mjs',
+  'injections-data-sandbox-flow.mjs',
 ]
 const PRIORITY_INDEX = new Map(PRIORITY_FILES.map((name, i) => [name, i]))
 

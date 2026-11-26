@@ -371,6 +371,10 @@ export async function handleStart(opts, roots) {
   const rawTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : (defaultPrTask ?? (opts.title ? slugify(opts.title) : prelimTaskId))))
   let taskId = sanitizeTaskId(rawTaskId)
   let slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
+  if (opts.sandbox && !effectiveExternalPr) {
+    const { handleSandboxStart } = await import('./flow-sandbox.mjs')
+    return handleSandboxStart({ opts, roots, state, taskId, slug, role, providerId, linkedIssues })
+  }
 
   const isPlanning = Boolean(opts.planning)
   await fetchGitClaimRefs(roots.mainRoot, { remoteUrls: state.remoteUrls ?? {}, role, opts })

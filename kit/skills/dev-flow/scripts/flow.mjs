@@ -3,7 +3,7 @@
  * flow.mjs —— Git 协同流转状态机总入口（零记忆自动推断 --task，按子命令按需加载减少启动耗时）。
  *
  * 子命令：
- *   inspect | next | explore | intake | start | issue | close | milestone | claim | release | finalize | verify | submit | rework | sync | merge | cleanup | status | abort | batch
+ *   inspect | next | explore | intake | start | promote | issue | close | milestone | claim | release | finalize | verify | submit | rework | sync | merge | cleanup | status | abort | batch
  */
 
 import { basename } from 'node:path'
@@ -31,25 +31,26 @@ const SUBCOMMANDS = subcommandNamesFor('flow')
  */
 const GENERATED_BODY_SUBCOMMANDS = new Set(['submit', 'rework'])
 /** 只允许建单、开工绑定与评论写正文的子命令（那里的正文是内容本身）。 */
-const CONTENT_BODY_SUBCOMMANDS = new Set(['start', 'issue', 'milestone', 'intake', 'next', 'claim', 'release'])
+const CONTENT_BODY_SUBCOMMANDS = new Set(['start', 'promote', 'issue', 'milestone', 'intake', 'next', 'claim', 'release'])
 
 function printHelp() {
   process.stdout.write([
     '用法：node .agents/skills/dev-flow/scripts/flow.mjs <子命令> [选项]',
     '',
-    '子命令（next/explore/claim/release/finalize/verify/submit/rework/sync/merge/cleanup/status/abort 支持自动推断 --task）：',
+    '子命令（next/explore/promote/claim/release/finalize/verify/submit/rework/sync/merge/cleanup/status/abort 支持自动推断 --task）：',
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
     '  explore   [--task <id>] [--focus <subdir>] [--mode <mode>] [--agent <id>] [--json]',
     '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
-    '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--no-issue --reason "<原因>"] [--body "<内容>" | --body-file <路径>] [--spec <path>] [--todo <path>] [--prd <path>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
+    '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--sandbox] [--write-scope <glob,...>] [--issue <N>] [--create-issue --title "<标题>"] [--no-issue --reason "<原因>"] [--body "<内容>" | --body-file <路径>] [--spec <path>] [--todo <path>] [--prd <path>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
+    '  promote   [--task <id>] [--issue <N>] [--issues <a,b>] [--body "<内容>" | --body-file <路径>] [--todo <path>] [--no-issue --reason "<原因>"] [--conflicts-tdd] [--agent <id>] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--case <1..5>] [--spec <path>] [--todo <path>] [--prd <path>] [--files <a,b>] [--body "<内容>" | --body-file <路径>] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
     '  close     --issue <N> [--into <targetIssue>] --reason "<原因>" [--task <id>] [--json]',
     '  milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--title "<标题>"] [--description "<描述>"] [--due <ISO>] [--issue <N>] [--pr <N>] [--task <id>] [--state open|closed|all] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--skip-govern] [--json]',
-    '  verify    [--task <id>] [--mode quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-evidence <text>] [--artifact <path>] [--visual-checked] [--visual-blocked-reason <text>] [--human-approved] [--skip-edit-gate] [--skip-govern] [--json]',
+    '  verify    [--task <id>] [--mode quick|smoke|full|gate] [--inner] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-evidence <text>] [--artifact <path>] [--visual-checked] [--visual-blocked-reason <text>] [--human-approved] [--skip-edit-gate] [--skip-govern] [--json]',
     '  submit    [--task <id>] [--agent <id>] [--host-mode <multi-agent|single-session>] [--human-approved] [--draft] [--new-pr] [--offline] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--reopen --reason "<原因>"] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
@@ -75,7 +76,7 @@ async function main(argv) {
         'create-issue', 'no-issue', 'takeover', 'reset-review-slot',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd', 'offline',
         'ack-no-issue-context', 'apply', 'dry-run', 'skip-edit-gate', 'skip-govern', 'strict-lifecycle', 'run-govern-hook',
-        'allow-plan-bootstrap', 'planning', 'all', 'reopen',
+        'allow-plan-bootstrap', 'planning', 'all', 'reopen', 'sandbox', 'inner', 'conflicts-tdd',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
@@ -84,7 +85,7 @@ async function main(argv) {
         'labels', 'method', 'reason', 'into', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus',
         'milestone', 'due', 'due-on', 'description',
         'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
-        'visual-blocked-reason', 'host-mode', 'reviewer-id', 'preview-hash',
+        'visual-blocked-reason', 'host-mode', 'reviewer-id', 'preview-hash', 'write-scope',
       ],
       aliases: {
         tier: 'mode',
@@ -200,6 +201,10 @@ async function main(argv) {
     if (sub === 'start') {
       const { handleStart } = await import('./flow-inspect.mjs')
       return (await handleStart(opts, roots)).exitCode
+    }
+    if (sub === 'promote') {
+      const { handlePromote } = await import('./flow-sandbox.mjs')
+      return (await handlePromote(opts, roots)).exitCode
     }
     if (sub === 'issue') {
       const { handleIssue } = await import('./flow-issues.mjs')

@@ -159,6 +159,9 @@ function inferCandidatePhaseAndMutability(t) {
   const stopLossActive = Boolean((t?.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t?.humanApprovedStopLoss)
   let candPhase
   if (t?.planning === true || st === 'planning') candPhase = 'planning'
+  else if (t?.sandboxMode === true || st === 'sandbox-iterating' || st === 'sandbox-ready-to-promote' || st === 'sandbox-needs-spec') {
+    candPhase = st === 'sandbox-needs-spec' ? 'sandbox-needs-spec' : (st === 'sandbox-ready-to-promote' ? 'sandbox-ready-to-promote' : 'sandbox-iterating')
+  }
   else if (st === 'released') candPhase = 'released'
   else if (st === 'started' && !t?.claimedAt && t?.role !== 'inbound-external-pr') candPhase = 'needs-claim'
   else if (st === 'merged') candPhase = 'needs-cleanup'
@@ -383,6 +386,31 @@ export function evaluateNextState({
     command = t.specFile
       ? `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${t.specFile}"`
       : `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${t.taskId}`
+  } else if (t.sandboxMode === true || t.status === 'sandbox-iterating' || t.status === 'sandbox-ready-to-promote' || t.status === 'sandbox-needs-spec') {
+    if (t.status === 'sandbox-needs-spec' || t.pocStatus === 'needs-spec' || t.pocStatus === 'needs-tdd') {
+      phase = 'sandbox-needs-spec'
+      ownerRole = 'coordinator'
+      if (t.pocStatus === 'needs-tdd') {
+        blockingReasons.push('BLOCKED_CASE_5_TDD_CONFLICT')
+        nextAction = '沙箱改动与 docs/TDD.md 存在架构冲突（Case 5），请先修订并批准 docs/TDD.md，再推进 SPEC 与外环实施'
+        command = 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "docs/TDD.md"'
+      } else {
+        nextAction = '沙箱 PoC 命中 Case 4 / 高风险边界，请先起草 SPEC（或 1:N PRD）经独立 Critique 与 approve 后进入外环实施'
+        command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug ${t.slug ?? t.taskId} --title "${t.slug ?? t.taskId}"`
+      }
+    } else if ((rt.dirty ?? 0) === 0 && ((rt.commitsAheadOfBase ?? 0) > 0 || t.status === 'sandbox-ready-to-promote')) {
+      phase = 'sandbox-ready-to-promote'
+      ownerRole = 'coordinator'
+      nextAction = '沙箱改动已提交且工作区干净，可执行 flow.mjs promote 按真实 diff 确定性分类并晋升至外环'
+      command = `node ".agents/skills/dev-flow/scripts/flow.mjs" promote --task ${t.taskId}`
+    } else {
+      phase = 'sandbox-iterating'
+      ownerRole = 'implementer'
+      nextAction = (rt.dirty ?? 0) > 0
+        ? '沙箱工作位存在未提交改动，可继续迭代或运行内环快检（flow verify --inner），收敛提交后执行 flow promote'
+        : '隔离沙箱已就绪，请在沙箱内高频试错并运行内环快检（flow verify --inner），收敛提交后执行 flow promote'
+      command = `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${t.taskId} --inner`
+    }
   } else if (t.status === 'released') {
     phase = 'released'
     ownerRole = 'coordinator'

@@ -13,6 +13,7 @@ import { formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { checkMermaidLabelWidth, isSharedMasterPrd } from '../../lib/docs.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
+import { appendFallbackCriteriaFromTask, extractCriteriaFromBodyText } from '../../lib/plan-sync.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
   CODE_EXT_RE, GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, TEST_FILE_RE,
@@ -166,43 +167,17 @@ export function checkDocCodeParity(repoRoot, mainRoot, diff, devProfile, task) {
  * Reads frozen acceptance criteria C1..Cn from task docs, including
  * `.worktrees/.state/private-docs/<taskId>/` for contributor-fork mode.
  */
-export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
+export function parseAcceptanceCriteria(repoRoot, mainRoot, task, { gitDir = null } = {}) {
   const criteria = []
   const seen = new Set()
-  const appendCriteriaFromText = (txt, sourceLabel) => {
-    if (!txt) return
-    let inFence = false
-    let nextAuto = 1
-    for (const rawLine of String(txt).replace(/\r\n/g, '\n').split('\n')) {
-      if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
-      if (inFence) continue
-      const m = /^- \[([ xX])\]\s+(?:(C\d+)\s*:\s*)?(.+)$/.exec(rawLine.trim())
-      if (!m) continue
-      let id = m[2] ? m[2].toUpperCase() : null
-      if (!id) {
-        while (seen.has(`C${nextAuto}`)) nextAuto += 1
-        id = `C${nextAuto}`
-        nextAuto += 1
-      }
-      if (seen.has(id)) continue
-      seen.add(id)
-      criteria.push({ id, checked: m[1].toLowerCase() === 'x', text: m[3].trim(), source: sourceLabel })
-    }
-  }
 
   const readFrom = (relPath) => {
     if (!relPath) return
-    const p1 = join(repoRoot, relPath)
-    const p2 = join(mainRoot, relPath)
-    const txt = readTextSafe(p1) ?? readTextSafe(p2)
+    const txt = readTextSafe(join(repoRoot, relPath)) ?? readTextSafe(join(mainRoot, relPath))
     if (!txt) return
-    for (const line of txt.split('\n')) {
-      const m = /^- \[([ xX])\]\s+(C\d+)\s*[:：]\s*(.+)$/.exec(line.trim())
-      if (!m) continue
-      const id = m[2].toUpperCase()
-      if (seen.has(id)) continue
-      seen.add(id)
-      criteria.push({ id, checked: m[1].toLowerCase() === 'x', text: m[3].trim(), source: posixPath(relPath) })
+    const source = posixPath(relPath)
+    for (const item of extractCriteriaFromBodyText(txt, source, { seen, allowUnnumbered: false })) {
+      criteria.push(item)
     }
   }
 
@@ -254,13 +229,7 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
 
   // Case 2 或外部 PR 无本地规划文件时，回退解析账本 issueContext 与 prContext 复选框
   if (criteria.length === 0) {
-    for (const iss of Array.isArray(task?.issueContext) ? task.issueContext : []) {
-      appendCriteriaFromText(iss?.body || iss?.summary || '', iss?.number ? `issue#${iss.number}` : 'issue')
-    }
-    if (task?.prContext && typeof task.prContext === 'object') {
-      const prNum = task.prNumber ?? task.prContext.number ?? null
-      appendCriteriaFromText(task.prContext.body || task.prContext.summary || '', prNum ? `pr#${prNum}` : 'pr')
-    }
+    appendFallbackCriteriaFromTask(criteria, seen, { mainRoot, task, gitDir })
   }
   return criteria
 }

@@ -754,8 +754,7 @@ export async function handleSubmit(opts, roots) {
       ledger.prNumber = prResult.number
       ledger.prUrl = prResult.url ?? null
       ledger.prState = 'OPEN'
-      const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: false, round: 1, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number, prUrl: prResult.url, linkedIssues: ledger.linkedIssues ?? [] })
-      commentResults.push({ target: `PR #${prResult.number}`, res: await backend.postComment({ repo: targetRepo, number: prResult.number, body: prCommentBody, statePayload: { taskId, action: 'pr-submitted', round: 1, ...submitStateIdentity, prNumber: prResult.number, headSha: currentHead } }) })
+      const { issueCommentBodyFor } = buildSubmitComments({ isRework: false, round: 1, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number, prUrl: prResult.url, linkedIssues: ledger.linkedIssues ?? [] })
       for (const iss of ledger.linkedIssues ?? []) {
         commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'pr-created', ...submitStateIdentity, prNumber: prResult.number, headSha: currentHead } }) })
       }

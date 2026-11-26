@@ -11,6 +11,7 @@ import { parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { gitRun, readJsonSafe, readTextSafe, sha256Text, writeJsonAtomic } from './git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from './ledger.mjs'
+import { getLocalIssue } from './local-issues.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, parseRemoteUrls, probeForWrite, resolveRemoteDescriptor,
 } from './platform.mjs'
@@ -119,6 +120,61 @@ export function syncIssueCriteriaCheckboxes(existingBody = '', { criteria = [], 
   }
 
   return { body: out.join('\n'), changed, checkedIds, uncheckedIds }
+}
+
+const BODY_CRITERIA_LINE_RE = /^[-*]\s+\[([ xX])\]\s+(?:(?:\*\*)?(C\d+)(?:\*\*)?\s*[:：]\s*)?(.+)$/i
+const STRICT_NUMBERED_CRITERIA_LINE_RE = /^[-*]\s+\[([ xX])\]\s+(?:\*\*)?(C\d+)(?:\*\*)?\s*[:：]\s*(.+)$/i
+
+/** 从任意工单/规划文档正文中无损提取验收条款（跳过围栏代码块，兼容全角 `C1：` 与未编号复选框）。 */
+export function extractCriteriaFromBodyText(txt, sourceLabel, { seen = new Set(), allowUnnumbered = true } = {}) {
+  const extracted = []
+  if (!txt) return extracted
+  let inFence = false
+  let nextAuto = 1
+  const pattern = allowUnnumbered ? BODY_CRITERIA_LINE_RE : STRICT_NUMBERED_CRITERIA_LINE_RE
+  for (const rawLine of String(txt).replace(/\r\n/g, '\n').split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const m = pattern.exec(rawLine.trim())
+    if (!m) continue
+    let id = m[2] ? m[2].toUpperCase() : null
+    if (!id) {
+      while (seen.has(`C${nextAuto}`)) nextAuto += 1
+      id = `C${nextAuto}`
+      nextAuto += 1
+    }
+    if (seen.has(id)) continue
+    seen.add(id)
+    extracted.push({ id, checked: m[1].toLowerCase() === 'x', text: m[3].trim(), source: sourceLabel })
+  }
+  return extracted
+}
+
+/** Case 2 或无本地规划文档时，依次从 `issueContext`、`prContext` 与同步本地工单 `getLocalIssue` 回退提取验收条款。 */
+export function appendFallbackCriteriaFromTask(criteria, seen, { mainRoot = null, task = null, gitDir = null } = {}) {
+  const pushFrom = (txt, label) => {
+    for (const item of extractCriteriaFromBodyText(txt, label, { seen, allowUnnumbered: true })) {
+      criteria.push(item)
+    }
+  }
+  for (const iss of Array.isArray(task?.issueContext) ? task.issueContext : []) {
+    pushFrom(iss?.body || iss?.summary || '', iss?.number ? `issue#${iss.number}` : 'issue')
+  }
+  if (task?.prContext && typeof task.prContext === 'object') {
+    const prNum = task.prNumber ?? task.prContext.number ?? null
+    pushFrom(task.prContext.body || task.prContext.summary || '', prNum ? `pr#${prNum}` : 'pr')
+  }
+  if (criteria.length === 0 && mainRoot && Array.isArray(task?.linkedIssues)) {
+    for (const rawNum of task.linkedIssues) {
+      const num = Number(rawNum)
+      if (!Number.isInteger(num) || num <= 0) continue
+      try {
+        const localRes = getLocalIssue({ mainRoot, gitDir: gitDir ?? task?.gitDir ?? null, number: num })
+        if (localRes?.ok && localRes.body) pushFrom(localRes.body, `issue#${num}`)
+      } catch { /* Fail-Soft: 本地工单损坏或不可读时不阻塞审查 */ }
+    }
+  }
+  return criteria
 }
 
 export function resolveDocIssueNumber(repoRoot, file, explicitIssue = null) {

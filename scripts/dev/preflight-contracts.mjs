@@ -410,10 +410,10 @@ function checkReviewContract({ ROOT, readText, fail, note }) {
     if (!existsSync(path)) { fail(`审查栏对拍：缺 ${site}`); continue }
     const missing = reviewBlockMissing(readText(path))
     if (missing.length === REVIEW_FIELDS.length) {
-      fail(`${site} 里没有一块同时排着审查栏的这四个字段——模板、实例、判据三处必须是同一批词，`
+      fail(`${site} 里没有一块同时排着审查栏的这 ${REVIEW_FIELDS.length} 个字段——模板、实例、判据三处必须是同一批词，`
         + `否则填了也没人按它判。字段表在 scripts/dev/preflight-contract-rules.mjs 的 REVIEW_FIELDS`)
     } else if (missing.length > 0 && missing.length < REVIEW_FIELDS.length) {
-      fail(`${site} 的审查栏字段块不完整，缺「${missing.join('、')}」——四个字段要排在同一段里；分散在正文各处的同名文字不算`)
+      fail(`${site} 的审查栏字段块不完整，缺「${missing.join('、')}」——这 ${REVIEW_FIELDS.length} 个字段要排在同一段里；分散在正文各处的同名文字不算`)
     }
   }
   note(`审查栏对拍：${REVIEW_FIELDS.length} 个字段在三处各排成一块`)

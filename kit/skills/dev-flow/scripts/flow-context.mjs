@@ -72,10 +72,32 @@ export async function resolveReadClient({ mainRoot, remoteUrls, providerId, targ
   }
 }
 
-/** 规范化并截断正文摘要，写入账本供无联网交接阅读。 */
+/** 规范化并截断正文摘要，写入账本供无联网交接阅读；超长截断时完整保留 `- [ ] C*` 验收条款行。 */
 export function summarizeContextBody(rawBody, maxLen = 1200) {
   const body = String(rawBody ?? '').replace(/\r\n/g, '\n').trim()
-  return body.length > maxLen ? `${body.slice(0, maxLen)}…` : body
+  if (body.length <= maxLen) return body
+  let head = body.slice(0, maxLen)
+  const cutMidLine = body[maxLen] !== '\n'
+  if (cutMidLine) {
+    const lastNl = head.lastIndexOf('\n')
+    const nextNl = body.indexOf('\n', lastNl + 1)
+    const fullLineAtCut = body.slice(lastNl + 1, nextNl >= 0 ? nextNl : body.length)
+    if (/^\s*[-*]\s+\[[ xX]\]/i.test(fullLineAtCut) && lastNl > 0) {
+      head = head.slice(0, lastNl)
+    }
+  }
+  const headLineSet = new Set(head.split('\n').map((l) => l.trim()))
+  const preserved = []
+  let inFence = false
+  for (const rawLine of body.split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const trimmed = rawLine.trim()
+    if (/^[-*]\s+\[[ xX]\]\s+(?:\*\*)?C\d+(?:\*\*)?(?:\s*[:：]|\s|$)/i.test(trimmed) && !headLineSet.has(trimmed)) {
+      preserved.push(trimmed)
+    }
+  }
+  return preserved.length > 0 ? `${head}…\n\n${preserved.join('\n')}` : `${head}…`
 }
 
 /** 批量拉取或补全关联 Issue 上下文；无远端/通用仓优先读取本地持久化工单，已拉取过不重复请求。 */

@@ -108,7 +108,7 @@ export function evaluatePushTierContract(filesMap) {
   return { ok: failures.length === 0, failures }
 }
 
-export const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']
+export const REVIEW_FIELDS = ['逐条标准状态', '故障注入记录', '实证核验']
 export const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m
 export const ACCEPTANCE_ID_SITES = ['kit/skills/templates/docs-todo.md', 'kit/skills/templates/docs-spec.md']
 

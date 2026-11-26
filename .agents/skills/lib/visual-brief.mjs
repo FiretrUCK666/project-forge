@@ -756,11 +756,13 @@ export function pruneStaleBriefs(mainRoot, { maxAgeDays = 30, taskId = null } = 
   let kept = 0
   for (const sc of all) {
     let shouldPrune = false
-    if (explicitTaskKey && sc.kind !== 'master-prd' && (sc.taskId === taskId || sc.briefKey === explicitTaskKey)) {
+    if (explicitTaskKey && sc.kind !== 'master-prd' && (sc.taskId === taskId || sc.briefKey === explicitTaskKey || sc.parentBriefKey === explicitTaskKey)) {
       shouldPrune = true
     } else if (sc.kind === 'task' && sc.taskId) {
       const led = ledgerByTask.get(sc.taskId)
+      const updatedMs = sc.updatedAt ? Date.parse(sc.updatedAt) : NaN
       if (led && TERMINAL_TASK_STATUSES.has(String(led.status ?? '').toLowerCase())) shouldPrune = true
+      else if (!led && Number.isFinite(updatedMs) && updatedMs < cutoffMs) shouldPrune = true
     } else if (sc.kind === 'master-prd' && sc.masterPrdRel) {
       const prdDoc = allDocs.find((d) => d.kind === 'prd' && deriveMasterPrdBriefKey(d.rel) === sc.briefKey)
       if (prdDoc && (prdDoc.archived || TERMINAL_DOC_STATUSES.has(prdDoc.status))) {
@@ -772,7 +774,12 @@ export function pruneStaleBriefs(mainRoot, { maxAgeDays = 30, taskId = null } = 
     } else if (sc.kind === 'topic') {
       const tEntry = sc.topicId ? session?.topics?.[sc.topicId] : null
       const updatedMs = sc.updatedAt ? Date.parse(sc.updatedAt) : NaN
-      if (tEntry?.consumedByTaskId || (Number.isFinite(updatedMs) && updatedMs < cutoffMs)) shouldPrune = true
+      const consumedLed = tEntry?.consumedByTaskId ? ledgerByTask.get(tEntry.consumedByTaskId) : null
+      const consumedByTarget = Boolean(taskId && tEntry?.consumedByTaskId === taskId)
+      const consumedByTerminal = Boolean(consumedLed && TERMINAL_TASK_STATUSES.has(String(consumedLed.status ?? '').toLowerCase()))
+      if (consumedByTarget || consumedByTerminal || tEntry?.consumedByTaskId || (Number.isFinite(updatedMs) && updatedMs < cutoffMs)) {
+        shouldPrune = true
+      }
     }
 
     if (shouldPrune) {

@@ -346,7 +346,7 @@ export {
   readFeatureMapSafe,
   resolveNativeTestDir,
   updateFeatureMapTestRefs,
-} from './test-inventory.mjs'
+} from './suite-inventory.mjs'
 
 export {
   appendGovernSignal,

@@ -20,7 +20,7 @@ import { readDecisions } from '../../lib/profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import { validateFeatureMapTopology } from '../../lib/feature-map-graph.mjs'
-import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
+import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/suite-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 
 const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i

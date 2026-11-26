@@ -17,7 +17,7 @@ import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
 import {
   isPathInQuickTestScope, readFeatureMapSafe, resolveNativeTestDir, slugTestToken,
-} from '../../lib/test-inventory.mjs'
+} from '../../lib/suite-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 
 export const VALID_TIERS = new Set(['integration', 'e2e', 'perf', 'regression'])

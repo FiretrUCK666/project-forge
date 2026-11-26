@@ -1,6 +1,6 @@
 # {{PROJECT_NAME}} — 项目工程契约（每次会话自动读）
 
-AI 新会话先读本文件，确认定位、边界、命令与协作流程。**只写现状，不写履历；面向人的文档见 `README.md`、`CONTRIBUTING.md`（可选）、`{{RELEASING_DOC}}`。** 账号、远端、分支与版本现场读取；**24KB 预警、上限 30KB**，长文外置 `docs/TDD.md` 或 `<subdir>/AGENTS.md`。
+AI 新会话先读本文件，确认定位、边界、命令与协作流程。**只写现状，不写履历；面向人的文档见 `{{PRIMARY_README}}`、`CONTRIBUTING.md`（可选）、`{{RELEASING_DOC}}`。** 账号、远端、分支与版本现场读取；**24KB 预警、上限 30KB**，长文外置 `docs/TDD.md` 或 `<subdir>/AGENTS.md`。
 
 <!-- project-forge: begin 意图路由 -->
 ## 意图路由（静默触发，不反问）
@@ -125,7 +125,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
 - **严控范围与依赖**：改前读邻近实现并清旧逻辑；禁擅增第三方依赖，确需引入先说明并获确认。
 - **测试正反双向与分层控频**：修缺陷先写失败测试（Red-Green）；新判定/解析配正反双向用例。编码期跑 `--tier quick --target <path>`，合前跑 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证、单测 `>=1s` sleep 与弱化门禁；单测超 800 行按模块拆分。
-- **禁坏味注释与文档同步**：只写现状——**禁履历/死代码注释**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、边界或契约同步 `docs/TDD.md`（若存在）、`README.md`、`AGENTS.md`。
+- **禁坏味注释与文档同步**：只写现状——**禁履历/死代码注释**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、边界或契约同步 `docs/TDD.md`（若存在）、`{{PRIMARY_README}}`、`AGENTS.md`。
 - {{COMMIT_STYLE_HINT}}
 <!-- project-forge: if has-bilingual-docs -->
 - **多语文档成对同步**：本仓库有 {{README_LIST}}，改任一版本必须同步另一份并保持双向链接有效。
@@ -235,7 +235,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 | --- | --- |
 | `<核心模块或公开契约>` | `docs/TDD.md`、`<对应测试与 README>` |
 <!-- project-forge: if has-bilingual-docs -->
-| `README.md` | {{README_LIST}}（成对同步） |
+| `{{PRIMARY_README}}` | {{README_LIST}}（成对同步） |
 <!-- project-forge: endif -->
 
 <!-- project-forge: fill 改哪看哪：替换为本项目真实「改动路径与联动文件」映射（至少含反引号相对路径，无则删去示例行） -->

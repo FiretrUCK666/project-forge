@@ -89,7 +89,7 @@ export function computeEmpiricalRequirements({
   const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
 
   const empiricalRequired = !isEmptyDiff && !isLowRiskPureDoc
-  const faultRequired = !isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired || hasDevProfileTestCmds || !isLowRiskPureDoc)
+  const faultRequired = !isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired || hasDevProfileTestCmds)
   const visualCheckRequired = !isEmptyDiff && Boolean(behavioralGate?.empiricalVisualCheckRequired)
   const businessFlowEmpiricalRequired = !isEmptyDiff && !isLowRiskPureDoc && runtimeTouched && !policy.smokeExplicitNone
   const e2eObservationRequired = !isEmptyDiff && !isLowRiskPureDoc && (smokeRequired || visualCheckRequired || businessFlowEmpiricalRequired)

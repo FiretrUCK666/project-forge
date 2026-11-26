@@ -482,6 +482,33 @@ export function detectOptionalNativeCheckers(repoRoot) {
     configured.push({ id: 'markdownlint', tool: 'markdownlint', configFile: targetMdCfg, command: null, declared: true })
     addAdvice('markdownlint', 'markdownlint', targetMdCfg, mentionsAgents(mdLintCfg) || mentionsAgents(mdLintIgnore), '在 `.markdownlintignore` 中添加 `.agents/`')
   }
+  const prettierCfg = hasFile(
+    '.prettierrc', '.prettierrc.json', '.prettierrc.yml', '.prettierrc.yaml', '.prettierrc.json5',
+    '.prettierrc.js', '.prettierrc.cjs', '.prettierrc.mjs', '.prettierrc.ts',
+    'prettier.config.js', 'prettier.config.cjs', 'prettier.config.mjs', 'prettier.config.ts',
+  ) || (pkg?.prettier ? 'package.json' : null)
+  const prettierIgnore = hasFile('.prettierignore')
+  if (prettierCfg || prettierIgnore) {
+    const targetPrettierCfg = prettierCfg ?? prettierIgnore
+    const fmtKey = scripts.format ? 'format' : (scripts.fmt ? 'fmt' : null)
+    const ignoresAgents = mentionsAgents(prettierIgnore) || mentionsAgents(prettierCfg)
+    const ignoresWorktrees = Boolean(
+      (prettierIgnore && /\.worktrees\b/.test(readTextSafe(join(repoRoot, prettierIgnore)) ?? ''))
+      || (prettierCfg && /\.worktrees\b/.test(readTextSafe(join(repoRoot, prettierCfg)) ?? '')),
+    )
+    const missingIgnore = [
+      ...(!ignoresAgents ? ['.agents/'] : []),
+      ...(!ignoresWorktrees ? ['.worktrees/'] : []),
+    ]
+    configured.push({ id: 'prettier', tool: 'prettier', configFile: targetPrettierCfg, command: fmtKey ? runScript(fmtKey) : null, declared: Boolean(fmtKey) })
+    addAdvice(
+      'prettier',
+      'prettier',
+      prettierIgnore ?? targetPrettierCfg,
+      ignoresAgents && ignoresWorktrees,
+      `在 \`.prettierignore\` 中添加 ${(missingIgnore.length > 0 ? missingIgnore : ['.agents/', '.worktrees/']).map((p) => `\`${p}\``).join(' 与 ')}`,
+    )
+  }
   if (existsSync(join(repoRoot, 'Cargo.toml'))) configured.push({ id: 'clippy', tool: 'cargo-clippy', configFile: 'Cargo.toml', command: 'cargo clippy --all-targets', declared: true })
   if (existsSync(join(repoRoot, 'go.mod'))) configured.push({ id: 'go-vet', tool: 'go-vet', configFile: 'go.mod', command: 'go vet ./...', declared: true })
   return { configured, hasNativeConfig: configured.length > 0, agentIgnoreAdvice }

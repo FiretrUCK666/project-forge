@@ -29,7 +29,7 @@ import { TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import {
   collectConfiguredTestEntries, expandVerificationCommands, renderNativeTestContent,
   resolveNativeTestDir, resolveTestRunner, updateFeatureMapTestRefs, validateGeneratedTestQuality,
-} from '../../lib/test-inventory.mjs'
+} from '../../lib/suite-inventory.mjs'
 import {
   STOP_REASONS, buildCyclePlan, formatCycleText, loadCycleState,
   mergeCycleGates, mergeCycleHistory, saveCycleState,

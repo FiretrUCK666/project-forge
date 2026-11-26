@@ -620,6 +620,18 @@ export function installGitHooks(targetDir, { dryRun = false } = {}) {
     try {
       chmodSync(destAbs, 0o755)
     } catch { /* windows NTFS ignores POSIX mode */ }
+    const trackedHook = spawnSync('git', ['ls-files', '--stage', '--', '.githooks/pre-push'], {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    if (trackedHook.status === 0 && trackedHook.stdout.trim() && !/^100755\s/m.test(trackedHook.stdout)) {
+      spawnSync('git', ['update-index', '--chmod=+x', '.githooks/pre-push'], {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+      })
+    }
     if (configNeedsUpdate) {
       const res = spawnSync('git', ['config', '--local', 'core.hooksPath', '.githooks'], {
         cwd: root,

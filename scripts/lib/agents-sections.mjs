@@ -33,6 +33,28 @@ export function migrateRegionMarkers(text, migrations = REGION_MIGRATIONS) {
   return { text: lines.join('\n'), migrated }
 }
 
+function parseDevProfileYamlEntries(yamlBody) {
+  const entries = []
+  let active = null
+  for (const rawLine of String(yamlBody ?? '').split('\n')) {
+    const noComment = rawLine.replace(/(?:^|\s)#.*$/, '')
+    const trimmed = noComment.trim()
+    if (!trimmed) continue
+    if (active && /^\s+[-*]\s+/.test(noComment)) {
+      active.listItems.push(trimmed.replace(/^[-*]\s+/, '').trim())
+      continue
+    }
+    const kv = /^([a-z-]+)\s*:\s*(.*)$/i.exec(trimmed)
+    if (!kv) {
+      active = null
+      continue
+    }
+    active = { key: kv[1], inlineVal: kv[2].trim(), listItems: [] }
+    entries.push(active)
+  }
+  return entries
+}
+
 function isCalibratedDevProfile(regionId, bodyLines) {
   if (regionId !== 'Dev Profile') return false
   const bodyText = bodyLines.join('\n')
@@ -40,14 +62,14 @@ function isCalibratedDevProfile(regionId, bodyLines) {
   const yamlMatch = /```ya?ml\n([\s\S]*?)```/i.exec(bodyText)
   if (!yamlMatch) return false
   const found = new Map()
-  for (const line of yamlMatch[1].split('\n')) {
-    const clean = line.replace(/(?:^|\s)#.*$/, '').trim()
-    const kv = /^([a-z-]+)\s*:\s*(.*)$/i.exec(clean)
-    if (kv) found.set(kv[1].toLowerCase(), kv[2].trim())
+  for (const entry of parseDevProfileYamlEntries(yamlMatch[1])) {
+    found.set(entry.key.toLowerCase(), entry)
   }
   return DEV_PROFILE_KEYS.every((k) => {
-    const v = found.get(k)
-    return typeof v === 'string' && v.length > 0 && !isAnglePlaceholder(v)
+    const entry = found.get(k)
+    if (!entry) return false
+    if (entry.inlineVal) return !isAnglePlaceholder(entry.inlineVal)
+    return entry.listItems.length > 0 && entry.listItems.every((v) => v.length > 0 && !isAnglePlaceholder(v))
   })
 }
 
@@ -499,18 +521,24 @@ export function validateDevProfileRegion(agentsText) {
   }
   const yamlMatch = /```ya?ml\n([\s\S]*?)```/i.exec(body)
   if (!yamlMatch) return { ok: false, reason: 'Dev Profile 缺少 yaml 配置块' }
-  let count = 0
-  for (const line of yamlMatch[1].split('\n')) {
-    const clean = line.replace(/(?:^|\s)#.*$/, '').trim()
-    const kv = /^([a-z-]+)\s*:\s*(.*)$/i.exec(clean)
-    if (!kv) continue
-    count += 1
-    const val = kv[2].trim()
-    if (!val || isAnglePlaceholder(val) || /^(?:待填|待补充|tbd|fixme)$/i.test(val)) {
-      return { ok: false, reason: `Dev Profile 键 ${kv[1]} 仍为占位或空值（${val || '空'}）` }
+  const entries = parseDevProfileYamlEntries(yamlMatch[1])
+  const isUnfilled = (v) => !v || isAnglePlaceholder(v) || /^(?:待填|待补充|tbd|fixme)$/i.test(v)
+  for (const entry of entries) {
+    if (entry.inlineVal) {
+      if (isUnfilled(entry.inlineVal)) {
+        return { ok: false, reason: `Dev Profile 键 ${entry.key} 仍为占位或空值（${entry.inlineVal}）` }
+      }
+      continue
+    }
+    if (entry.listItems.length === 0) {
+      return { ok: false, reason: `Dev Profile 键 ${entry.key} 仍为占位或空值（空）` }
+    }
+    const badItem = entry.listItems.find((item) => isUnfilled(item))
+    if (badItem !== undefined) {
+      return { ok: false, reason: `Dev Profile 键 ${entry.key} 仍为占位或空值（${badItem || '空'}）` }
     }
   }
-  return count > 0 ? { ok: true } : { ok: false, reason: 'Dev Profile 配置块为空' }
+  return entries.length > 0 ? { ok: true } : { ok: false, reason: 'Dev Profile 配置块为空' }
 }
 
 

@@ -1,5 +1,5 @@
 /**
- * test-inventory.mjs —— 多生态测试盘点、原生测试目录解析与功能地图测试关联共享引擎。
+ * suite-inventory.mjs —— 多生态测试盘点、原生测试目录解析与功能地图测试关联共享引擎。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-govern/govern-tests.mjs 与 dev-iterate/iterate.mjs 共用。
  */
@@ -421,8 +421,27 @@ export function resolveNativeTestDir(repoRoot, { ecosystem = null, tier = 'integ
     tsx: 'npx tsx --test',
     node: 'node --test',
   }
+  let pythonRunnerHint = 'python3 -m unittest'
+  if (stack === 'python') {
+    const venvPyRel = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' : '.venv/bin/python'
+    const venvPyExists = existsSync(join(repoRoot, ...(process.platform === 'win32' ? ['.venv', 'Scripts', 'python.exe'] : ['.venv', 'bin', 'python'])))
+    const pyProjText = readTextSafe(join(repoRoot, 'pyproject.toml')) ?? ''
+    const setupCfgText = readTextSafe(join(repoRoot, 'setup.cfg')) ?? ''
+    const hasPytestConfig = existsSync(join(repoRoot, 'pytest.ini'))
+      || existsSync(join(repoRoot, 'conftest.py'))
+      || existsSync(join(repoRoot, 'tox.ini'))
+      || /\[tool\.pytest\b/.test(pyProjText)
+      || /\[tool:pytest\]/.test(setupCfgText)
+      || existsSync(join(repoRoot, '.venv', 'Scripts', 'pytest.exe'))
+      || existsSync(join(repoRoot, '.venv', 'bin', 'pytest'))
+    if (venvPyExists) {
+      pythonRunnerHint = hasPytestConfig ? `${venvPyRel} -m pytest` : `${venvPyRel} -m unittest`
+    } else if (hasPytestConfig) {
+      pythonRunnerHint = 'pytest'
+    }
+  }
   const runnerHint = stack === 'python'
-    ? 'python3 -m unittest'
+    ? pythonRunnerHint
     : stack === 'go'
       ? `go test ./${dirRel}/...`
       : stack === 'rust'

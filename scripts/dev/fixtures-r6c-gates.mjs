@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { readTaskLedger, writeTaskLedger } from '../../kit/skills/lib/ledger.mjs'
 import { appendGovernSignal, isActionableSignalCodeTarget, readSignalsJsonl, resolveGovernStateDir } from '../../kit/skills/lib/signals.mjs'
 import { TEST_FILE_RE, isLegalArchiveMove } from '../../kit/skills/lib/static-gates.mjs'
-import { collectTestInventory, resolveNativeTestDir, resolveTestRunner, slugTestToken } from '../../kit/skills/lib/test-inventory.mjs'
+import { collectTestInventory, resolveNativeTestDir, resolveTestRunner, slugTestToken } from '../../kit/skills/lib/suite-inventory.mjs'
 import { evaluateToolStaleness } from '../../kit/skills/lib/verify-state.mjs'
 import { createFakeGhEnv, gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 

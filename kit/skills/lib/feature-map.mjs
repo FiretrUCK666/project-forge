@@ -323,7 +323,8 @@ export function mergeFeatureMapIncremental(existing, discovered) {
       }
     }
     if (!match.domain && cand.domain) { match.domain = cand.domain; changed = true }
-    if ((!Array.isArray(match.dependsOn) || match.dependsOn.length === 0) && Array.isArray(cand.dependsOn) && cand.dependsOn.length > 0) {
+    // 显式声明 `dependsOn: []` 的叶子节点不得被自动推断覆盖
+    if (!Array.isArray(match.dependsOn) && Array.isArray(cand.dependsOn) && cand.dependsOn.length > 0) {
       match.dependsOn = [...cand.dependsOn]; changed = true
     }
     if ((!Array.isArray(match.actors) || match.actors.length === 0) && Array.isArray(cand.actors) && cand.actors.length > 0) {

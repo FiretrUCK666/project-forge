@@ -49,9 +49,9 @@ export const INJECTIONS_W5_BLIND_FIXES = [
   },
   {
     id: 'I422',
-    what: 'C4: test-inventory.mjs 禁用 TypeScript 项目识别，纯 TS 仓退回写入 .mjs 测试',
-    file: 'kit/skills/lib/test-inventory.mjs',
-    alsoDropIn: ['.agents/skills/lib/test-inventory.mjs'],
+    what: 'C4: suite-inventory.mjs 禁用 TypeScript 项目识别，纯 TS 仓退回写入 .mjs 测试',
+    file: 'kit/skills/lib/suite-inventory.mjs',
+    alsoDropIn: ['.agents/skills/lib/suite-inventory.mjs'],
     from: "  const isTypeScript = stack === 'node' ? detectTypeScriptProject(repoRoot, files, dirRel) : false",
     to: "  const isTypeScript = false",
     expect: 'W5 C4',

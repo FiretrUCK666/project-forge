@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from 'node:path'
 
 import { buildIterationPlan, generateIterationTests, runIterationSuites } from '../../kit/skills/dev-iterate/scripts/iterate.mjs'
-import { validateGeneratedTestQuality, resolveNativeTestDir } from '../../kit/skills/lib/test-inventory.mjs'
+import { validateGeneratedTestQuality, resolveNativeTestDir } from '../../kit/skills/lib/suite-inventory.mjs'
 import { TOOL_OWNED_PREFIXES, isUserExtensionSlot } from '../../kit/skills/lib/tool-owned.mjs'
 import {
   discoverForgeExtensions, loadForgeHooksConfig, loadForgeOverlays, scanExtensionSlotHazards, validateForgeHooksConfig,

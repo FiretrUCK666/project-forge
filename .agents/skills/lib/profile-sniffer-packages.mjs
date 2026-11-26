@@ -357,13 +357,28 @@ export function detectNonNodePackageCommands(repoRoot, bucket) {
     }
   }
   if (bucket.ecosystems.has('python')) {
-    const hasTests = existsSync(join(absDir, 'tests')) || existsSync(join(absDir, 'test')) || existsSync(join(absDir, 'pytest.ini'))
+    const pyProjText = readTextSafe(join(absDir, 'pyproject.toml')) ?? ''
+    const setupCfgText = readTextSafe(join(absDir, 'setup.cfg')) ?? ''
+    const hasPytestConfig = existsSync(join(absDir, 'pytest.ini'))
+      || existsSync(join(absDir, 'conftest.py'))
+      || existsSync(join(absDir, 'tox.ini'))
+      || /\[tool\.pytest\b/.test(pyProjText)
+      || /\[tool:pytest\]/.test(setupCfgText)
+    const hasTests = hasPytestConfig || existsSync(join(absDir, 'tests')) || existsSync(join(absDir, 'test'))
     if (hasTests) {
       const isUv = existsSync(join(absDir, 'uv.lock')) || existsSync(join(repoRoot, 'uv.lock'))
       const isPoetry = existsSync(join(absDir, 'poetry.lock')) || existsSync(join(repoRoot, 'poetry.lock'))
+      const venvSub = process.platform === 'win32' ? ['.venv', 'Scripts', 'python.exe'] : ['.venv', 'bin', 'python']
+      const venvSep = process.platform === 'win32' ? '\\' : '/'
+      const venvInPkg = existsSync(join(absDir, ...venvSub))
+      const venvInRoot = !venvInPkg && existsSync(join(repoRoot, ...venvSub))
+      const venvPy = venvInPkg
+        ? (dirRel ? `${dirRel.replace(/\//g, venvSep)}${venvSep}${venvSub.join(venvSep)}` : venvSub.join(venvSep))
+        : (venvInRoot ? venvSub.join(venvSep) : null)
+      const pytestBase = venvPy ? `${venvPy} -m pytest` : 'pytest'
       const cmd = dirRel
-        ? (isUv ? `uv run --directory ${dirRel} pytest` : isPoetry ? `poetry -C ${dirRel} run pytest` : `pytest ${dirRel}`)
-        : (isUv ? 'uv run pytest' : isPoetry ? 'poetry run pytest' : 'pytest')
+        ? (isUv ? `uv run --directory ${dirRel} pytest` : isPoetry ? `poetry -C ${dirRel} run pytest` : `${pytestBase} ${dirRel}`)
+        : (isUv ? 'uv run pytest' : isPoetry ? 'poetry run pytest' : pytestBase)
       bucket.commands.python = { quickTest: cmd }
     }
   }

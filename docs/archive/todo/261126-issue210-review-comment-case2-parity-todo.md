@@ -5,7 +5,7 @@ status: done
 created: 2026-11-26
 updated: 2026-11-26
 issue: 210
-pr: null
+pr: 211
 branch: feat/review-comment-case2-parity
 owner: planner-arch
 plan_mode: interactive
@@ -13,7 +13,7 @@ approved: false
 done_at: 2026-11-26
 task_id: review-comment-case2-parity
 planned_at: ff2c31b7e9e6762e233fecc57486ddfe04aa085d
-related_prd: ../../prd/261126-suite-cohesion-v2-prd.md
+related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_spec: ../specs/261126-issue210-review-comment-case2-parity-spec.md
 depends_on: [empirical-handoff-cohesion]
 scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comments.mjs, kit/skills/lib/plan-sync.mjs, kit/skills/dev-flow/scripts/flow-context.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-review/scripts/review-sync.mjs, kit/skills/dev-review/SKILL.md, scripts/dev/preflight-contract-rules.mjs, scripts/dev/preflight-contracts.mjs, templates/pull-request-template.md, .github/pull_request_template.md, references/collaboration.md, scripts/dev/fixtures-review-contracts.mjs, scripts/dev/fixtures-flow.mjs, scripts/dev/fixtures-trace-sync.mjs, scripts/dev/injections-data-core.mjs, scripts/dev/injections-data-trace-sync.mjs]
@@ -31,7 +31,7 @@ scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comme
 | 任务编号 | `review-comment-case2-parity` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（评论契约与依赖顺序已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #210 / 未关联 / `docs/archive/specs/261126-issue210-review-comment-case2-parity-spec.md` |
+| 关联 Issue / PR / SPEC | #210 / #211 / `docs/archive/specs/261126-issue210-review-comment-case2-parity-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261126-issue210-review-comment-case2-parity-spec.md`。
 

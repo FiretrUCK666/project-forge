@@ -6,14 +6,14 @@ tier: L3
 created: 2026-11-26
 updated: 2026-11-26
 issue: 210
-pr: null
+pr: 211
 branch: feat/review-comment-case2-parity
 owner: planner-arch
 plan_mode: interactive
 approved: true
 implemented: true
 plan_critique: "passed (reviewer=critic-governance-cohesion-r4, round=4, sha=cf09b3f1614e, summary=Verified mechanical lint/naming fixes at 6e6f870; all design invariants and C1..C12 remain intact.)"
-related_prd: ../../prd/261126-suite-cohesion-v2-prd.md
+related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_todo: ../todo/261126-issue210-review-comment-case2-parity-todo.md
 high_risk_paths: [kit/, templates/]
 task_id: review-comment-case2-parity
@@ -30,10 +30,10 @@ scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comme
 | 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块评论契约瘦身、Case 2 `C1..Cn` 跨后端无损提取与契约规则锁步改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
-| 分支 / Issue / PR | `feat/review-comment-case2-parity` / #210 / 未关联 |
+| 分支 / Issue / PR | `feat/review-comment-case2-parity` / #210 / #211 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（评论字段契约与依赖顺序已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/archive/todo/261126-issue210-review-comment-case2-parity-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261126-suite-cohesion-v2-prd.md` / `docs/archive/todo/261126-issue210-review-comment-case2-parity-todo.md` |
 
 - **变更一句话**：保障 Case 2 `C1..Cn` 在截断、全角冒号与本地/远端工单回退下全量不丢，单源瘦身 PR/Issue 审查评论并清除噪音、冗余首评与内部 CLI 命令泄漏，锁步对齐新三字段 `REVIEW_FIELDS`、PR 模板、契约脚本、技能说明、夹具与故障注入。
 

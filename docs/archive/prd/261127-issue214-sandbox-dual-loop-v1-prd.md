@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: 沙箱双环与单源三轴策略重构
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
 issue: 214
@@ -20,12 +20,12 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 关联 Issue / PR | #214 / 未关联 |
 | 提出方 / 负责人 | plan-sandbox-v1 |
 | 规划态 | `interactive`（本轮 `/grill-me` 7 项架构决策已全部拍板清零） |
-| 关联设计 / 任务单 | 1:N 总控 PRD，拆分为 3 组严格顺序依赖切片（Wave 1 -> Wave 2 -> Wave 3），每波独立全绿合入 |
+| 关联设计 / 任务单 | `docs/archive/specs/261127-issue214-triage-brief-contract-parity-spec.md` / `docs/archive/todo/261127-issue214-triage-brief-contract-parity-todo.md` |
 
 - **目标读者**：实现子代理、独立 Critique 审稿人、独立代码审查者与后续接手维护者
 

@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 确定性入口分流、契约对拍与异构仓库双向实证
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
@@ -11,7 +11,7 @@ branch: feat/triage-brief-contract-parity
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-sandbox-r2, round=2, sha=7dbd821f5565, summary=Round 1 F1/F2 均已闭环：全路径展开无幻觉、fixtures-r6d-contracts 等补齐 scope_files、doc-plan-brief 两处触发统筹兼容多轮 note、doc-audit 仅去 fileCount>=6 悬崖并保留 fileCount>=12 prdNeed 且严守 <=800L。)"
 related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
 related_todo: ../todo/261127-issue214-triage-brief-contract-parity-todo.md
@@ -26,13 +26,13 @@ scope_files: [kit/skills/dev-plan/scripts/triage-rules.mjs, kit/skills/dev-plan/
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（入口分流算法、全仓契约/模板/技能同构与 7 类异构栈 E2E 验证；Wave 3，依赖切片 1 与切片 2） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / Issue / PR | `feat/triage-brief-contract-parity` / #214 / 未关联 |
 | 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
-| 关联 PRD / Todo | `docs/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-issue214-triage-brief-contract-parity-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/archive/todo/261127-issue214-triage-brief-contract-parity-todo.md` |
 
 - **变更一句话**：升级 `doc-plan.mjs triage` 输出确定性三出口 `recommendedEntry` 并仅移除 `fileCount >= 6` 钝化悬崖（保留 `fileCount >= 12` PRD 判据），统筹 `doc-plan-brief.mjs` 两处按需 Brief 触发，完成全仓模板、契约、文档、5 份技能说明与自举门禁同构对拍，并在 7 类异构仿真仓库上完成全链路双向实证。
 

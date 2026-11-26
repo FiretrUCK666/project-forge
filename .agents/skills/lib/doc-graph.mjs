@@ -155,10 +155,51 @@ function detectVitePressRoots(repoRoot) {
   return [...roots]
 }
 
-function resolveFileCandidate(repoRoot, fromRel, rawTarget, vitePressRoots = []) {
+function createCandidateResolver(repoRoot, fileSet = new Set()) {
+  const existsCache = new Map()
+  const dirFilesCache = new Map()
+
+  const checkRel = (rawRel) => {
+    const clean = normRel(rawRel)
+    if (!clean || clean === '.' || clean === '..' || clean.startsWith('../')) return null
+    if (fileSet.has(clean)) return clean
+    if (existsCache.has(clean)) return existsCache.get(clean) ? clean : null
+    const slashIdx = clean.lastIndexOf('/')
+    const dir = slashIdx >= 0 ? clean.slice(0, slashIdx) : '.'
+    const base = slashIdx >= 0 ? clean.slice(slashIdx + 1) : clean
+    if (!dirFilesCache.has(dir)) {
+      const absDir = dir === '.' ? repoRoot : join(repoRoot, dir)
+      let files = null
+      if (isInsideDir(absDir, repoRoot)) {
+        try {
+          const entries = readdirSync(absDir, { withFileTypes: true })
+          files = new Set()
+          for (const e of entries) {
+            if (e.isFile()) files.add(e.name)
+            else if (e.isSymbolicLink()) {
+              try { if (statSync(join(absDir, e.name)).isFile()) files.add(e.name) } catch { /* ignore broken symlink */ }
+            }
+          }
+        } catch { files = null }
+      }
+      dirFilesCache.set(dir, files)
+    }
+    const set = dirFilesCache.get(dir)
+    const found = Boolean(set && set.has(base))
+    existsCache.set(clean, found)
+    return found ? clean : null
+  }
+
+  return { checkRel }
+}
+
+function resolveFileCandidate(repoRoot, fromRel, rawTarget, vitePressRoots = [], resolver = null) {
   const decoded = decodeUriSafe(String(rawTarget ?? '').trim())
   if (!decoded) return { exists: false, resolvedRel: '' }
-  const checkAbs = (absCand) => {
+  const checkRel = resolver?.checkRel ?? ((relCand) => {
+    const clean = normRel(relCand)
+    if (!clean || clean === '.' || clean === '..' || clean.startsWith('../')) return null
+    const absCand = resolve(repoRoot, clean)
     if (!isInsideDir(absCand, repoRoot)) return null
     try {
       if (existsSync(absCand) && statSync(absCand).isFile()) {
@@ -166,7 +207,7 @@ function resolveFileCandidate(repoRoot, fromRel, rawTarget, vitePressRoots = [])
       }
     } catch { return null }
     return null
-  }
+  })
   if (decoded.startsWith('/')) {
     const route = decoded.replace(/^\/+/, '').replace(/\/+$/, '')
     const cands = [route, `${route}.md`, `${route}/index.md`]
@@ -178,25 +219,26 @@ function resolveFileCandidate(repoRoot, fromRel, rawTarget, vitePressRoots = [])
       const pre = vpRoot ? `${vpRoot}/` : ''
       for (const c of cands) {
         if (!c) continue
-        const hit = checkAbs(join(repoRoot, `${pre}${c}`))
+        const hit = checkRel(`${pre}${c}`)
         if (hit) return { exists: true, resolvedRel: hit }
       }
     }
     return { exists: false, resolvedRel: route }
   }
-  const fromDirAbs = dirname(join(repoRoot, fromRel))
-  const direct = checkAbs(resolve(fromDirAbs, decoded))
+  const fromDir = posix.dirname(normRel(fromRel))
+  const joinFromDir = (relTarget) => normRel(posix.normalize(fromDir === '.' ? normRel(relTarget) : posix.join(fromDir, normRel(relTarget))))
+  const directCand = joinFromDir(decoded)
+  const direct = checkRel(directCand)
   if (direct) return { exists: true, resolvedRel: direct }
   if (/\.html$/i.test(decoded)) {
-    const mdAlt = checkAbs(resolve(fromDirAbs, decoded.replace(/\.html$/i, '.md')))
+    const mdAlt = checkRel(joinFromDir(decoded.replace(/\.html$/i, '.md')))
     if (mdAlt) return { exists: true, resolvedRel: mdAlt }
   }
   if (fromRel === '.github' || fromRel.startsWith('.github/')) {
-    const fb = checkAbs(resolve(repoRoot, decoded))
+    const fb = checkRel(decoded)
     if (fb) return { exists: true, resolvedRel: fb }
   }
-  const relCand = normRel(posix.normalize(posix.join(posix.dirname(fromRel), decoded)))
-  return { exists: false, resolvedRel: relCand.startsWith('..') ? decoded : relCand }
+  return { exists: false, resolvedRel: directCand.startsWith('..') ? decoded : directCand }
 }
 
 /** 校验 `docAnchors` 条目（`path` 与可选 `#heading`），返回文件与锚点命中详情。 */
@@ -251,7 +293,7 @@ function classifyFrontmatterMeta(text) {
   return { isOptOut, isOptIn, pointers }
 }
 
-function extractMarkdownLinksAndRefs(repoRoot, fromRel, text, vitePressRoots) {
+function extractMarkdownLinksAndRefs(repoRoot, fromRel, text, vitePressRoots, resolver = null) {
   const lines = scanLines(text)
   const fmEnd = findFrontmatterEndLine(lines)
   const mdLinks = []
@@ -277,13 +319,13 @@ function extractMarkdownLinksAndRefs(repoRoot, fromRel, text, vitePressRoots) {
         if (frag) mdLinks.push({ from: fromRel, to: fromRel, exists: true, fragment: frag, line: i + 1, raw: noTitle })
         continue
       }
-      const res = resolveFileCandidate(repoRoot, fromRel, pathPart, vitePressRoots)
+      const res = resolveFileCandidate(repoRoot, fromRel, pathPart, vitePressRoots, resolver)
       mdLinks.push({ from: fromRel, to: res.resolvedRel, exists: res.exists, fragment: frag, line: i + 1, raw: noTitle })
     }
     for (const m of info.line.matchAll(/`([^`\n\s]+\.[a-z0-9_-]+)`/gi)) {
       const tok = m[1].trim()
       if (/^(?:https?:|mailto:|\/|<)/.test(tok) || /[<>*?{}]/.test(tok)) continue
-      const res = resolveFileCandidate(repoRoot, fromRel, tok, vitePressRoots)
+      const res = resolveFileCandidate(repoRoot, fromRel, tok, vitePressRoots, resolver)
       if (res.exists) backtickRefs.push({ from: fromRel, to: res.resolvedRel, line: i + 1, raw: tok })
     }
   }
@@ -385,10 +427,12 @@ export function accountActiveDocs(repoRoot, options = {}) {
   const registerAuth = (rawRel, source) => {
     const clean = normRel(rawRel)
     if (!clean || clean.includes('..') || entrySet.has(clean) || isTransient(clean)) return
-    const abs = resolve(root, clean)
-    if (!isInsideDir(abs, root)) return
-    try { if (!existsSync(abs) || !statSync(abs).isFile()) return } catch { return }
-    fileSet.add(clean)
+    if (!fileSet.has(clean)) {
+      const abs = resolve(root, clean)
+      if (!isInsideDir(abs, root)) return
+      try { if (!existsSync(abs) || !statSync(abs).isFile()) return } catch { return }
+      fileSet.add(clean)
+    }
     if (explicitNonGovSet.has(clean)) {
       if (source !== 'profile') return
       explicitNonGovSet.delete(clean)
@@ -429,11 +473,12 @@ export function accountActiveDocs(repoRoot, options = {}) {
 
   // Layer 3: entry links & transitive structural graph links
   const vitePressRoots = detectVitePressRoots(root)
+  const resolver = createCandidateResolver(root, fileSet)
   const parsedCache = new Map()
   const parseEdgesFor = (rel) => {
     if (parsedCache.has(rel)) return parsedCache.get(rel)
     const txt = readCached(rel)
-    const res = extractMarkdownLinksAndRefs(root, rel, txt, vitePressRoots)
+    const res = extractMarkdownLinksAndRefs(root, rel, txt, vitePressRoots, resolver)
     parsedCache.set(rel, res)
     return res
   }
@@ -512,6 +557,7 @@ export function accountActiveDocs(repoRoot, options = {}) {
     entrySet,
     reachableFromEntry,
     vitePressRoots,
+    resolver,
   }
 }
 
@@ -573,7 +619,7 @@ export function buildDocGraph(repoRoot, options = {}) {
     const relStem = normalizeAuthorityStem(rel)
     const fmMeta = acc.fmMetaByRel.get(rel) ?? classifyFrontmatterMeta(acc.readCached(rel))
     for (const ptr of fmMeta.pointers) {
-      const res = resolveFileCandidate(root, rel, ptr, acc.vitePressRoots)
+      const res = resolveFileCandidate(root, rel, ptr, acc.vitePressRoots, acc.resolver)
       if (res.exists) {
         outSet.add(res.resolvedRel)
         addPointerEdge(rel, res.resolvedRel)

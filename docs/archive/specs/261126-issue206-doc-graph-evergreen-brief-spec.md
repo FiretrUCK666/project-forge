@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Universal Doc Graph, Evergreen Hygiene, Case 5 and Brief UX"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-26
 updated: 2026-11-26
@@ -11,9 +11,9 @@ branch: feat/doc-graph-evergreen-brief
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-governance-cohesion-r1, round=1, sha=eceb3a57b87a, summary=Round 1 PASS: acyclic doc-graph.mjs leaf boundary, I217/I218/I934 and fixtures-r8-bugfixes:379 anchors verified, Wave 1 scope_files disjoint, C1..C4 consistent across PRD/SPEC/Todo.)"
-related_prd: ../prd/261126-suite-cohesion-v2-prd.md
+related_prd: ../../prd/261126-suite-cohesion-v2-prd.md
 related_todo: ../todo/261126-issue206-doc-graph-evergreen-brief-todo.md
 high_risk_paths: [kit/, SKILL.md]
 task_id: doc-graph-evergreen-brief
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skil
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块文档图谱内核、勘察与规划简报契约改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
 | 分支 / Issue / PR | `feat/doc-graph-evergreen-brief` / #206 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界与不变量已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/todo/261126-issue206-doc-graph-evergreen-brief-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/archive/todo/261126-issue206-doc-graph-evergreen-brief-todo.md` |
 
 - **变更一句话**：新增纯结构叶子模块 `kit/skills/lib/doc-graph.mjs` (new) 取代硬编码常青词表与自然语言正则，统一驱动治理、勘察与工具审计，并打通 Case 5、Case 3 与 `tdd` 的 Living Visual Brief 与 CLI 输出体验。
 

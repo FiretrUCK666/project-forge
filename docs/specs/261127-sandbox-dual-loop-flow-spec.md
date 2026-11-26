@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 隔离沙箱双环工作树与真实差分晋升流水线
-status: draft
+status: approved
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
@@ -10,10 +10,10 @@ pr: null
 branch: feat/sandbox-dual-loop-v1
 owner: plan-sandbox-v1
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: "rejected (reviewer=critic-sandbox-r2, round=2, sha=4d5caa87418c, summary=Round 1 F1-F4 主体已修复（含新增沙箱 Issue 绑定方案），但第 134 行新增的 Case 5 判定引用了不存在的 parity.tddConflict 且漏登记 --conflicts-tdd 至 flow.mjs booleanFlags/printHelp()，将导致 C7 Case 5 死分支或 cli-parity 失败。)"
-related_prd: ../prd/261127-sandbox-dual-loop-v1-prd.md
+plan_critique: "passed (reviewer=critic-sandbox-r3, round=3, sha=2ebbe93e2645, summary=Round 2 F5 已完整闭环：Step A 改用 checkTddSyncParity 真实返回字段 (parity?.staleModulesInTdd?.length ?? 0) > 0（明确不误触 missingModulesInTdd）或 Boolean(opts['conflicts-tdd'])，--conflicts-tdd 已在 flow.mjs booleanFlags/printHelp() 及 SPEC/Todo 全部选项清单同步一致。)"
+related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
 related_todo: ../todo/261127-sandbox-dual-loop-flow-todo.md
 high_risk_paths: [kit/skills/lib/sandbox-scope.mjs, kit/skills/lib/ledger.mjs, kit/skills/lib/harness-context.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/dev-flow/scripts/flow-sandbox.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs]
 depends_on: [single-source-policy-core]
@@ -26,13 +26,13 @@ scope_files: [kit/skills/lib/sandbox-scope.mjs, kit/skills/dev-flow/scripts/flow
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（新增隔离沙箱工作树生命周期、多代理登记与真实差分晋升流水线；Wave 2，依赖 `single-source-policy-core`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-sandbox-v1 / `pending` |
+| 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
-| 关联 PRD / Todo | `docs/prd/261127-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-sandbox-dual-loop-flow-todo.md` |
+| 关联 PRD / Todo | `../prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `../todo/261127-sandbox-dual-loop-flow-todo.md` |
 
 - **变更一句话**：通过新增 `sandbox-scope.mjs` (new) 与 `flow-sandbox.mjs` (new) 在 `dev-flow` 落地 `.worktrees/sandbox-<id>/` 隔离沙箱工作树、账本 `implementers[]`（支持单常驻或互不重叠 `writeScope` 并行子代理并锁死改审分离）以及基于真实 `git diff <baseRef>...HEAD` 的确定性 `flow.mjs promote` 晋升分类器。
 

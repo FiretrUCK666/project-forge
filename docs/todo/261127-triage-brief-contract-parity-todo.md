@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 确定性入口分流、契约对拍与异构仓库双向实证
-status: draft
+status: active
 created: 2026-11-27
 updated: 2026-11-27
 issue: null
@@ -13,7 +13,7 @@ approved: false
 done_at: null
 task_id: triage-brief-contract-parity
 planned_at: 5feb0dbff6d86a217c45d74e44fe6949a35f912c
-related_prd: ../prd/261127-sandbox-dual-loop-v1-prd.md
+related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
 related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 ---
 
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / 基线 | `feat/sandbox-dual-loop-v1` @ `5feb0db` |
 | 任务编号 | `triage-brief-contract-parity` |
 | 负责人 / 审批 | plan-sandbox-v1 / `false` |
 | 规划态 | `interactive`（架构决策已拍板，待 Critique 与审批） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/specs/261127-triage-brief-contract-parity-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261127-triage-brief-contract-parity-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -79,13 +79,13 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`draft`（Wave 3 收口切片，依赖切片 1 与切片 2）
+- **当前状态**：`进行中`（Wave 3 收口切片，依赖切片 1 与切片 2）
 - **待拍板事项**：无
 - **下一步第一件事**：待 Wave 1、Wave 2 合入 `main` 且本 SPEC 获 `approve` 后，派独立实施子代理在隔离 worktree 启动步骤 1。
 
 ## 澄清与补充记录
 
-- 已确认：本切片合入时同时完成总控 PRD `261127-sandbox-dual-loop-v1-prd.md` 的最后收口与自动归档闭环。
+- 已确认：本切片合入时同时完成总控 PRD `261127-issue214-sandbox-dual-loop-v1-prd.md` 的最后收口与自动归档闭环。
 
 ## 完成后的记录
 

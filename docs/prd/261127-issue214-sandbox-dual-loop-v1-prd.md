@@ -1,14 +1,14 @@
 ---
 kind: prd
 title: 沙箱双环与单源三轴策略重构
-status: draft
+status: active
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 214
 pr: null
 owner: plan-sandbox-v1
 plan_mode: interactive
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-sandbox-r2, round=2, sha=abdb5af90f6b, summary=Round 1 F1/F2 均已闭环：逐波独立全绿合门、feature-map/architecture-map 每波自登记、Wave 1->2->3 串行拓扑与 C1..C12 1:1 覆盖清晰无遗漏。)"
 related_spec: null
 related_todo: null
 multi_spec: true
@@ -20,9 +20,9 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 关联 Issue / PR | 未关联 / 未关联 |
+| 关联 Issue / PR | #214 / 未关联 |
 | 提出方 / 负责人 | plan-sandbox-v1 |
 | 规划态 | `interactive`（本轮 `/grill-me` 7 项架构决策已全部拍板清零） |
 | 关联设计 / 任务单 | 1:N 总控 PRD，拆分为 3 组严格顺序依赖切片（Wave 1 -> Wave 2 -> Wave 3），每波独立全绿合入 |

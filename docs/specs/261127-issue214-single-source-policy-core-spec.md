@@ -1,52 +1,23 @@
 ---
 kind: spec
 title: 单源三轴正交策略、去重收口与静默防刷屏
-status: draft
+status: approved
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 214
 pr: null
 branch: feat/sandbox-dual-loop-v1
 owner: plan-sandbox-v1
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
-related_prd: ../prd/261127-sandbox-dual-loop-v1-prd.md
-related_todo: ../todo/261127-single-source-policy-core-todo.md
-high_risk_paths:
-  - kit/skills/lib/workflow-policy.mjs
-  - kit/skills/lib/gate-receipt.mjs
-  - kit/skills/dev-review/scripts/review-empirical.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
+plan_critique: "passed (reviewer=critic-sandbox-r2, round=2, sha=0c7acee93e0c, summary=Round 1 F1/F2/F3 均已闭环：Wave 1 既有夹具与 I502 注入、iterate.mjs:67 帮助、gate-receipt 六维键/headless/唯一生产者/I962-I963 保活、isLow 排视觉、smokeExplicitNone 对齐与 <=800L 预算均与源码吻合。)"
+related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
+related_todo: ../todo/261127-issue214-single-source-policy-core-todo.md
+high_risk_paths: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/gate-receipt.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs]
 depends_on: []
-scope_files:
-  - kit/skills/lib/gate-receipt.mjs
-  - kit/skills/lib/workflow-policy.mjs
-  - kit/skills/dev-review/scripts/review-empirical.mjs
-  - kit/skills/dev-review/scripts/review-empirical-state.mjs
-  - kit/skills/dev-review/scripts/review-locks.mjs
-  - kit/skills/dev-review/scripts/review-gates.mjs
-  - kit/skills/dev-edit/scripts/edit-gate.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs
-  - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
-  - kit/skills/dev-iterate/scripts/iterate.mjs
-  - kit/skills/dev-govern/scripts/govern-checks.mjs
-  - docs/feature-map.json
-  - docs/architecture-map.html
-  - scripts/dev/fixtures-policy-axes.mjs
-  - scripts/dev/injections-data-policy-axes.mjs
-  - scripts/dev/fixtures.mjs
-  - scripts/dev/injections-data.mjs
-  - scripts/dev/fixtures-r6c-gates.mjs
-  - scripts/dev/injections-data-r6c.mjs
-  - scripts/dev/fixtures-e2e-gate.mjs
-  - scripts/dev/fixtures-w4-harness.mjs
-  - scripts/dev/fixtures-r8-bugfixes.mjs
-  - scripts/dev/fixtures-review-empirical.mjs
-  - scripts/dev/fixtures-iterate-evolution.mjs
+scope_files: [kit/skills/lib/gate-receipt.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-review/scripts/review-empirical-state.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-edit/scripts/edit-gate.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-iterate/scripts/iterate.mjs, kit/skills/dev-govern/scripts/govern-checks.mjs, docs/feature-map.json, docs/architecture-map.html, scripts/dev/fixtures-policy-axes.mjs, scripts/dev/injections-data-policy-axes.mjs, scripts/dev/fixtures.mjs, scripts/dev/injections-data.mjs, scripts/dev/fixtures-r6c-gates.mjs, scripts/dev/injections-data-r6c.mjs, scripts/dev/fixtures-e2e-gate.mjs, scripts/dev/fixtures-w4-harness.mjs, scripts/dev/fixtures-r8-bugfixes.mjs, scripts/dev/fixtures-review-empirical.mjs, scripts/dev/fixtures-iterate-evolution.mjs]
 ---
 
 # 单源三轴正交策略、去重收口与静默防刷屏 — 功能设计规范（SPEC）
@@ -55,13 +26,13 @@ scope_files:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块策略核心重构，属高风险 `kit/` 路径；Wave 1，零上游依赖；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-sandbox-v1 / `pending` |
+| 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / #214 / 未关联 |
+| 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
-| 关联 PRD / Todo | `docs/prd/261127-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-single-source-policy-core-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-issue214-single-source-policy-core-todo.md` |
 
 - **变更一句话**：将 `workflow-policy.mjs` 收敛为三轴正交唯一策略真源，硬拒内环 `inner: true` 证据偷渡外环，引入支持任务态与 headless 态的干净 HEAD 门禁回执缓存消除重复扫描与 `verifyArchitectureMapSync` 双跑，并消除探索/内环失败对远端工单的自动刷屏。
 

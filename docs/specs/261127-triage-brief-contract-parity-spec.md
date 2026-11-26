@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 确定性入口分流、契约对拍与异构仓库双向实证
-status: draft
+status: approved
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
@@ -10,52 +10,14 @@ pr: null
 branch: feat/sandbox-dual-loop-v1
 owner: plan-sandbox-v1
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
-related_prd: ../prd/261127-sandbox-dual-loop-v1-prd.md
+plan_critique: "passed (reviewer=critic-sandbox-r2, round=2, sha=7dbd821f5565, summary=Round 1 F1/F2 均已闭环：全路径展开无幻觉、fixtures-r6d-contracts 等补齐 scope_files、doc-plan-brief 两处触发统筹兼容多轮 note、doc-audit 仅去 fileCount>=6 悬崖并保留 fileCount>=12 prdNeed 且严守 <=800L。)"
+related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
 related_todo: ../todo/261127-triage-brief-contract-parity-todo.md
-high_risk_paths:
-  - kit/skills/dev-plan/scripts/doc-audit.mjs
-  - templates/agents-project.md
-  - templates/pull-request-template.md
-  - AGENTS.md
-  - kit/skills/dev-plan/SKILL.md
-  - kit/skills/dev-flow/SKILL.md
-  - kit/skills/dev-review/SKILL.md
-  - scripts/dev/preflight-contract-rules.mjs
-  - scripts/dev/preflight-contracts.mjs
-  - scripts/dev/preflight-suite.mjs
+high_risk_paths: [kit/skills/dev-plan/scripts/doc-audit.mjs, templates/agents-project.md, templates/pull-request-template.md, AGENTS.md, kit/skills/dev-plan/SKILL.md, kit/skills/dev-flow/SKILL.md, kit/skills/dev-review/SKILL.md, scripts/dev/preflight-contract-rules.mjs, scripts/dev/preflight-contracts.mjs, scripts/dev/preflight-suite.mjs]
 depends_on: [single-source-policy-core, sandbox-dual-loop-flow]
-scope_files:
-  - kit/skills/dev-plan/scripts/triage-rules.mjs
-  - kit/skills/dev-plan/scripts/doc-audit.mjs
-  - kit/skills/dev-plan/scripts/doc-plan-brief.mjs
-  - references/collaboration.md
-  - templates/agents-project.md
-  - templates/pull-request-template.md
-  - .github/pull_request_template.md
-  - AGENTS.md
-  - kit/skills/dev-plan/SKILL.md
-  - kit/skills/dev-flow/SKILL.md
-  - kit/skills/dev-review/SKILL.md
-  - kit/skills/dev-edit/SKILL.md
-  - kit/skills/dev-iterate/SKILL.md
-  - scripts/dev/preflight-contract-rules.mjs
-  - scripts/dev/preflight-contracts.mjs
-  - scripts/dev/preflight-suite.mjs
-  - scripts/dev/fixtures-heterogeneous-dual-loop.mjs
-  - scripts/dev/injections-data-triage-parity.mjs
-  - scripts/dev/fixtures.mjs
-  - scripts/dev/injections-data.mjs
-  - scripts/dev/fixtures-doc-triage.mjs
-  - scripts/dev/fixtures-living-brief.mjs
-  - scripts/dev/fixtures-r6d-contracts.mjs
-  - docs/TDD.md
-  - docs/feature-map.json
-  - docs/architecture-map.html
-  - README.md
-  - README.en.md
+scope_files: [kit/skills/dev-plan/scripts/triage-rules.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan/scripts/doc-plan-brief.mjs, references/collaboration.md, templates/agents-project.md, templates/pull-request-template.md, .github/pull_request_template.md, AGENTS.md, kit/skills/dev-plan/SKILL.md, kit/skills/dev-flow/SKILL.md, kit/skills/dev-review/SKILL.md, kit/skills/dev-edit/SKILL.md, kit/skills/dev-iterate/SKILL.md, scripts/dev/preflight-contract-rules.mjs, scripts/dev/preflight-contracts.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/fixtures-heterogeneous-dual-loop.mjs, scripts/dev/injections-data-triage-parity.mjs, scripts/dev/fixtures.mjs, scripts/dev/injections-data.mjs, scripts/dev/fixtures-doc-triage.mjs, scripts/dev/fixtures-living-brief.mjs, scripts/dev/fixtures-r6d-contracts.mjs, docs/TDD.md, docs/feature-map.json, docs/architecture-map.html, README.md, README.en.md]
 ---
 
 # 确定性入口分流、契约对拍与异构仓库双向实证 — 功能设计规范（SPEC）
@@ -64,13 +26,13 @@ scope_files:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（入口分流算法、全仓契约/模板/技能同构与 7 类异构栈 E2E 验证；Wave 3，依赖切片 1 与切片 2） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | plan-sandbox-v1 / `pending` |
+| 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
-| 关联 PRD / Todo | `docs/prd/261127-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-triage-brief-contract-parity-todo.md` |
+| 关联 PRD / Todo | `../prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `../todo/261127-triage-brief-contract-parity-todo.md` |
 
 - **变更一句话**：升级 `doc-plan.mjs triage` 输出确定性三出口 `recommendedEntry` 并仅移除 `fileCount >= 6` 钝化悬崖（保留 `fileCount >= 12` PRD 判据），统筹 `doc-plan-brief.mjs` 两处按需 Brief 触发，完成全仓模板、契约、文档、5 份技能说明与自举门禁同构对拍，并在 7 类异构仿真仓库上完成全链路双向实证。
 

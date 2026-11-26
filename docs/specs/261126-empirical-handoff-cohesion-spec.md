@@ -12,7 +12,7 @@ owner: planner-arch
 plan_mode: interactive
 approved: true
 implemented: false
-plan_critique: "passed (reviewer=critic-governance-cohesion-r3, round=3, sha=c00e10a5d085, summary=Round 3 PASS: F2/F4 (exit-codes.mjs:133 FACT_CODES->HUMAN_CODES parity with exit-code-parity.mjs:152 and flow-merge.mjs:501-503 EXIT.HUMAN) and minor F5 (flow-lifecycle-helpers.mjs:620, static-gates.mjs:383 untrustedSurface <=800L, flow-merge.mjs:657-722 !mergeRes guard) verified.)"
+plan_critique: "passed (reviewer=critic-governance-cohesion-r4, round=4, sha=c0c41e1f7305, summary=Verified mechanical lint/naming fixes at 6e6f870; all design invariants and C1..C12 remain intact.)"
 related_prd: ../prd/261126-suite-cohesion-v2-prd.md
 related_todo: ../todo/261126-empirical-handoff-cohesion-todo.md
 high_risk_paths: [kit/, SKILL.md]

@@ -8,7 +8,7 @@ issue: null
 pr: null
 owner: planner-arch
 plan_mode: interactive
-plan_critique: "passed (reviewer=critic-governance-cohesion-r3, round=3, sha=4bc03457b5dc, summary=Round 3 PASS: F2/F4 (exit-codes.mjs:133 parity + narrowed mergeAuthority + !mergeRes guard) and F5 (acyclic plan-sync.mjs extraction keeping review-gates.mjs < 780L + I247) verified; Wave 1 scope_files disjoint and C1..C12 consistent.)"
+plan_critique: "passed (reviewer=critic-governance-cohesion-r4, round=4, sha=11cecd318bb7, summary=Verified mechanical lint/naming fixes at 6e6f870; all design invariants and C1..C12 remain intact.)"
 related_spec: null
 related_todo: null
 multi_spec: true

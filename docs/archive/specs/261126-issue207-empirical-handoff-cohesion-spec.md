@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Empirical Gate Cohesion, UI Artifact Parity and Merge Safety"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-26
 updated: 2026-11-26
@@ -11,9 +11,9 @@ branch: feat/empirical-handoff-cohesion
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-governance-cohesion-r4, round=4, sha=c0c41e1f7305, summary=Verified mechanical lint/naming fixes at 6e6f870; all design invariants and C1..C12 remain intact.)"
-related_prd: ../prd/261126-suite-cohesion-v2-prd.md
+related_prd: ../../prd/261126-suite-cohesion-v2-prd.md
 related_todo: ../todo/261126-issue207-empirical-handoff-cohesion-todo.md
 high_risk_paths: [kit/, SKILL.md]
 task_id: empirical-handoff-cohesion
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helper
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（实证门禁策略、UI 产物判据、合并安全与流转工具契约对齐；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
 | 分支 / Issue / PR | `feat/empirical-handoff-cohesion` / #207 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（策略边界与退出码已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/todo/261126-issue207-empirical-handoff-cohesion-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261126-suite-cohesion-v2-prd.md` / `docs/archive/todo/261126-issue207-empirical-handoff-cohesion-todo.md` |
 
 - **变更一句话**：消除 `check-empirical`/`check-fault` 死锁与过严拦截，落地 `review-ledger` 回执自动复用与单一实质判据，修复 UI 产物校验链、`mergeAuthority` 边界、`mcp-delegate`/`generic-git` 合并漏洞及多处流转工具缺陷。
 

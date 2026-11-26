@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: "Empirical Gate Cohesion, UI Artifact Parity and Merge Safety"
-status: active
+status: done
 created: 2026-11-26
 updated: 2026-11-26
 issue: 207
@@ -10,10 +10,10 @@ branch: feat/empirical-handoff-cohesion
 owner: planner-arch
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-26
 task_id: empirical-handoff-cohesion
 planned_at: ff2c31b7e9e6762e233fecc57486ddfe04aa085d
-related_prd: ../prd/261126-suite-cohesion-v2-prd.md
+related_prd: ../../prd/261126-suite-cohesion-v2-prd.md
 related_spec: ../specs/261126-issue207-empirical-handoff-cohesion-spec.md
 depends_on: []
 scope_files: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helpers.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/empirical-artifacts.mjs, kit/skills/lib/exit-codes.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/task-backend-local.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/lib/verify-state.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-review/scripts/review-empirical-state.mjs, kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-locks.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-flow/scripts/flow-next.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs, scripts/lib/agents-defaults.mjs, scripts/dev/fixtures-govern.mjs]
@@ -25,15 +25,15 @@ scope_files: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helper
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-26` / `2026-11-26` |
 | 分支 / 基线 | `feat/empirical-handoff-cohesion` @ `ff2c31b` |
 | 任务编号 | `empirical-handoff-cohesion` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与退出码已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #207 / 未关联 / `docs/specs/261126-issue207-empirical-handoff-cohesion-spec.md` |
+| 关联 Issue / PR / SPEC | #207 / 未关联 / `docs/archive/specs/261126-issue207-empirical-handoff-cohesion-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261126-issue207-empirical-handoff-cohesion-spec.md`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261126-issue207-empirical-handoff-cohesion-spec.md`。
 
 ## 任务范围与验证基准
 
@@ -75,7 +75,7 @@ scope_files: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helper
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（等待总控 PRD 与本 SPEC 独立 Critique 及 `approve`）
+- **当前状态**：`已完成 (done)`（等待总控 PRD 与本 SPEC 独立 Critique 及 `approve`）
 - **待拍板事项**：无
 - **下一步第一件事**：完成总控 PRD 与本切片 SPEC 的独立 Critique，再经 `approve` 启动实施工作区。
 

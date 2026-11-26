@@ -33,7 +33,7 @@ scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skil
 | 分支 / Issue / PR | `feat/governance-cohesion-v2` / 未关联 / 未关联 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（边界与不变量已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261126-governance-cohesion-v2-prd.md` / `../todo/261126-doc-graph-evergreen-brief-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261126-governance-cohesion-v2-prd.md` / `docs/todo/261126-doc-graph-evergreen-brief-todo.md` |
 
 - **变更一句话**：新增纯结构叶子模块 `kit/skills/lib/doc-graph.mjs` (new) 取代硬编码常青词表与自然语言正则，统一驱动治理、勘察与工具审计，并打通 Case 5、Case 3 与 `tdd` 的 Living Visual Brief 与 CLI 输出体验。
 

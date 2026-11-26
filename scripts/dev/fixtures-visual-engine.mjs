@@ -25,6 +25,57 @@ import { survey } from '../survey.mjs'
 import { reviewProject } from '../review.mjs'
 import { gitCommitFast, gitInit, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
+function findUndefinedCssVars(html) {
+  const styleMatch = /<style>([\s\S]*?)<\/style>/i.exec(html)
+  const css = styleMatch ? styleMatch[1] : ''
+  const defined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((m) => m[1]))
+  const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+  const missing = new Set()
+  for (const m of markup.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)) {
+    if (!defined.has(m[1])) missing.add(m[1])
+  }
+  return [...missing]
+}
+
+function parseFlatCssRules(css) {
+  const rules = []
+  let i = 0
+  const n = css.length
+  while (i < n) {
+    const open = css.indexOf('{', i)
+    if (open < 0) break
+    const sel = css.slice(i, open).trim()
+    let depth = 1
+    let j = open + 1
+    while (j < n && depth > 0) {
+      if (css[j] === '{') depth += 1
+      else if (css[j] === '}') depth -= 1
+      j += 1
+    }
+    const body = css.slice(open + 1, j - 1)
+    if (sel.startsWith('@')) rules.push(...parseFlatCssRules(body))
+    else if (sel) rules.push({ sel, body })
+    i = j
+  }
+  return rules
+}
+
+function hasSegBtnHoverOverridingActive(html) {
+  const styleMatch = /<style>([\s\S]*?)<\/style>/i.exec(html)
+  const rules = parseFlatCssRules(styleMatch ? styleMatch[1] : '')
+  let lastActiveIdx = -1
+  const unguardedHoverIdxs = []
+  rules.forEach((r, idx) => {
+    const parts = r.sel.split(',').map((s) => s.trim())
+    if (!/(?:^|;)\s*(?:background(?:-color)?|color)\s*:/i.test(r.body)) return
+    if (parts.some((p) => /(?:^|[\s>+~])\.pf-seg-btn\.is-active(?::hover)?$/.test(p))) lastActiveIdx = idx
+    if (parts.some((p) => /\.pf-seg-btn:hover(?![\w-])/.test(p) && !/:not\(\.is-active\)/.test(p) && !/\.pf-seg-btn:hover[^\s]*\s/.test(p))) {
+      unguardedHoverIdxs.push(idx)
+    }
+  })
+  return lastActiveIdx < 0 || unguardedHoverIdxs.some((idx) => idx > lastActiveIdx)
+}
+
 export function registerVisualEngineCases(cases) {
   cases.push(['Visual Engine C5：布局/单文件 HTML 渲染、25-60KB 预算、幂等重写、XSS/URL 防护与 file:// 离线韧性（正反双向）', async () => {
     const xssPayload = '<script>alert("xss")</script>'
@@ -98,6 +149,18 @@ export function registerVisualEngineCases(cases) {
     const briefRender = renderVisualHtml({ visualModel: model, featureMapSha256: sha, mode: 'visual-brief' })
     if (!briefRender.html.split('\n')[0].includes('project-forge visual-brief; DO NOT EDIT')) {
       return `visual-brief 模式头未切换：${briefRender.html.split('\n')[0]}`
+    }
+    for (const [label, doc] of [['arch', r1.html], ['brief', briefRender.html]]) {
+      const undefVars = findUndefinedCssVars(doc)
+      if (undefVars.length > 0) return `${label} 渲染产物引用未定义 CSS 变量：${undefVars.join(', ')}`
+      if (hasSegBtnHoverOverridingActive(doc)) return `${label} 渲染产物中 .pf-seg-btn:hover 覆写了更早的 .pf-seg-btn.is-active`
+    }
+    // 反向自证：注入失效 CSS 变量或无防护的延后 :hover 规则必须被断言拦截
+    if (!findUndefinedCssVars(`${briefRender.html}<span style="--dc:var(--added)"></span>`).includes('--added')) {
+      return 'CSS 变量完整性探针未拦截未定义 token --added'
+    }
+    if (!hasSegBtnHoverOverridingActive('<style>.pf-seg-btn.is-active{background:var(--accent-solid)}.pf-seg-btn:hover{background:var(--sf)}</style>')) {
+      return '.pf-seg-btn:hover 覆写探针未拦截同权重后置覆写'
     }
     if (/<script[^>]+src=/i.test(r1.html) || /<link[^>]+href=["']https?:/i.test(r1.html)) {
       return '自包含 HTML 不得引用外部 script/CSS CDN'

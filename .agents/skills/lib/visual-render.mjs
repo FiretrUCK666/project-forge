@@ -207,7 +207,7 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
     `<div class="pf-controls"><button id="btn-cmdk" class="pf-btn pf-btn-subtle" type="button">搜索模块 ⌘K</button><button id="btn-walk-start" class="pf-btn pf-btn-ghost" type="button"${(model.walkthrough || []).length === 0 ? ' hidden' : ''}>分步导览</button><button id="btn-theme" class="pf-btn pf-btn-ghost" type="button">外观：跟随系统</button><button id="btn-followup-ctx" class="pf-btn pf-btn-primary" type="button" data-followup-panel="${defaultFollowup}">向 AI 提问</button></div>`,
     '</header>',
     '<section class="pf-workspace">',
-    isBrief ? `<article class="pf-panel" data-tab-panel="brief">${renderBlueprintLandingHtml(model, verdict, verdictLabel)}</article>` : '',
+    isBrief ? `<article class="pf-panel" data-tab-panel="brief">${renderBlueprintLandingHtml(model, verdict)}</article>` : '',
     `<article class="pf-panel" data-tab-panel="tree"${defaultTab === 'tree' ? '' : ' hidden'}>${renderFocusBarHtml(tree, Boolean(model.hasActiveDiff))}<div class="pf-canvas-wrap"><div id="vp-tree" class="pf-viewport">\n${renderDomainTreeStage(tree)}\n</div>${renderZoomFloatHtml('vp-tree')}</div></article>`,
     `<article class="pf-panel" data-tab-panel="flow" hidden>${renderFlowBarHtml(flowsList)}<div class="pf-canvas-wrap"><div id="vp-flow" class="pf-viewport">\n${renderFlowDagStage(flow)}\n</div>${renderZoomFloatHtml('vp-flow')}</div></article>`,
     showDiffTab ? `<article class="pf-panel" data-tab-panel="diff" hidden><div class="pf-scroll-panel"><div class="pf-chg-grid">${renderDiffRowsHtml(tree.nodes, tree.edges)}</div></div></article>` : '',

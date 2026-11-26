@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-26T13:31:54.221Z",
+  "installedAt": "2026-11-26T15:07:53.653Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
@@ -481,13 +481,13 @@
       "sha256": "2c7bf0df196bcaf5b6f01063a0ead91574acb8d67d008a3d4c5049aa68a1a71b"
     },
     "lib/visual-render-assets.mjs": {
-      "sha256": "bf4471fce35d3358c90591ec1e47f81ab5f274989a8286de5fcd52e179928acf"
+      "sha256": "c7522132561f2e41e0f81f3a38a3aed200c9352c3ac94f8c020037058719444f"
     },
     "lib/visual-render-panels.mjs": {
-      "sha256": "37af041dd89b5003a100965698b2fd8e17d913ef7bd7726c4001c75232d975e4"
+      "sha256": "94ef1426d018323c8242af28a8628612bfba7a047c6be90d5adf942ba8a7658c"
     },
     "lib/visual-render.mjs": {
-      "sha256": "7acd0c599b8334f63bb8515a476b3eb3e242413fce7660fd4d0eb2f0debdd50d"
+      "sha256": "3f687348c8835a24db705c3fa8f5171330cef6435b7794f872d9ba9e01d90616"
     },
     "lib/workflow-helpers.mjs": {
       "sha256": "3a13249912a9d650ae3ce2a6f6e85bf891514b146f1fbfb2e9c0b05d12fc50a2"

@@ -94,10 +94,10 @@ export function renderBlueprintLandingHtml(model, verdict) {
   }
 
   const filterBarHtml = [
-    ['added', '新增', counts.added || 0, 'var(--added)'],
-    ['modified', '修改', counts.modified || 0, 'var(--modified)'],
-    ['removed', '拟移除', counts.removed || 0, 'var(--removed)'],
-    ['impacted', '受波及', counts.impacted || 0, 'var(--impacted)'],
+    ['added', '新增', counts.added || 0, 'var(--ad)'],
+    ['modified', '修改', counts.modified || 0, 'var(--mo)'],
+    ['removed', '拟移除', counts.removed || 0, 'var(--rm)'],
+    ['impacted', '受波及', counts.impacted || 0, 'var(--im)'],
   ].map(([st, lbl, num, col]) => `<button type="button" class="pf-seg-btn pf-stat-${st}" data-diff-filter="${st}" title="点击筛选「${lbl}」，再次点击清除"><span class="pf-dot" style="--dc:${col}"></span><span>${lbl}</span><strong class="pf-stat-num">${num}</strong></button>`).join('')
 
   const headline = bd?.verdict || verdict?.summary || ''

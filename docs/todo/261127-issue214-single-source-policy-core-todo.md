@@ -85,6 +85,6 @@ related_spec: ../specs/261127-issue214-single-source-policy-core-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：将在本地运行 `equip.mjs . --check`、`edit-gate.mjs --final --json`、`merge-gate.mjs`（12/12）与 `verify-injections.mjs --jobs 4` 全量实证通过后随本分支提审。
-- **文档同步检查**：已登记 `kit/skills/lib/gate-receipt.mjs` 至 `docs/feature-map.json`，已运行 `verify-tools.mjs render` 更新 `docs/architecture-map.html`，已运行 `equip.mjs .` 同步 `.agents/skills/`，并在 SPEC 补齐 `## 实现说明`。
+- **实际验证命令与结果**：`node scripts/equip.mjs . --check` PASS、`node .agents/skills/dev-edit/scripts/edit-gate.mjs --final --json` `ok: true`（0 blockers）、`node scripts/dev/merge-gate.mjs` 12/12 PASS（含 `fixtures` 594/594 PASS、`verify-injections` 476/476 PASS）、`node scripts/dev/verify-injections.mjs --jobs 4` 476/476 PASS（0 failures）。
+- **文档同步检查**：已更新 `docs/TDD.md`（登记 `kit/skills/lib/gate-receipt.mjs`、`scripts/dev/fixtures-policy-axes.mjs`、`scripts/dev/injections-data-policy-axes.mjs`），已登记 `kit/skills/lib/gate-receipt.mjs` 至 `docs/feature-map.json`，已运行 `verify-tools.mjs render` 更新 `docs/architecture-map.html`，已运行 `equip.mjs .` 同步 `.agents/skills/`，并在 SPEC 补齐 `## 实现说明`。
 - **遗留问题**：无（Wave 2 `sandbox-dual-loop-flow` 与 Wave 3 `triage-brief-contract-parity` 按主 PRD 拓扑串行推进）。

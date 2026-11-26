@@ -180,16 +180,21 @@ export function registerR6cGatesCases(cases) {
         return `放行场景被误拦：nonGit=${nonGitOk.status} unborn=${unbornOk.status} wt=${wtOk.status}`
       }
 
-      // 4. A2 run default escalate=true & --no-escalate opt-out
-      const noEsc = await runAbsAsync(ITER_SCRIPT, ['run', dir, '--targets', 'tests/integration/broken.test.mjs', '--no-escalate', '--no-signals', '--json'])
+      // 4. A2 run default silent (escalate=false), explicit --escalate opt-in & --no-escalate override
+      const defSilent = await runAbsAsync(ITER_SCRIPT, ['run', dir, '--targets', 'tests/integration/broken.test.mjs', '--no-signals', '--json'])
+      const defSilentJson = JSON.parse(defSilent.stdout)
+      if (defSilent.status === 0 || defSilentJson.escalations.length !== 0) {
+        return `run 默认未保持静默防刷屏：${defSilent.stdout}`
+      }
+      const noEsc = await runAbsAsync(ITER_SCRIPT, ['run', dir, '--targets', 'tests/integration/broken.test.mjs', '--escalate', '--no-escalate', '--no-signals', '--json'])
       const noEscJson = JSON.parse(noEsc.stdout)
       if (noEsc.status === 0 || noEscJson.escalations.length !== 0) {
-        return `--no-escalate 未关闭建单：${noEsc.stdout}`
+        return `--no-escalate 未覆盖关闭建单：${noEsc.stdout}`
       }
-      const defEsc = await runAbsAsync(ITER_SCRIPT, ['run', dir, '--targets', 'tests/integration/broken.test.mjs', '--no-signals', '--json'])
-      const defEscJson = JSON.parse(defEsc.stdout)
-      if (defEsc.status === 0 || defEscJson.escalations.length !== 1 || !defEscJson.escalations[0]?.ok) {
-        return `run 默认未自动建单：${defEsc.stdout}`
+      const expEsc = await runAbsAsync(ITER_SCRIPT, ['run', dir, '--targets', 'tests/integration/broken.test.mjs', '--escalate', '--no-signals', '--json'])
+      const expEscJson = JSON.parse(expEsc.stdout)
+      if (expEsc.status === 0 || expEscJson.escalations.length !== 1 || !expEscJson.escalations[0]?.ok) {
+        return `run 显式 --escalate 未触发建单：${expEsc.stdout}`
       }
 
       // 5. cycle accumulates across calls, hits NO_PROGRESS_STALL -> exit 4 + escalation, resets with --reset

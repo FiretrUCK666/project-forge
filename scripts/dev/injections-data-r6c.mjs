@@ -23,11 +23,11 @@ export const INJECTIONS_R6C = [
   },
   {
     id: 'I502',
-    what: 'A2 iterate.mjs run 将默认 --escalate 回退为 false',
+    what: 'A2 iterate.mjs run 将静默默认错误改回默认自动建单',
     file: 'kit/skills/dev-iterate/scripts/iterate.mjs',
     alsoDropIn: ['.agents/skills/dev-iterate/scripts/iterate.mjs'],
-    from: "      escalate: opts['no-escalate'] ? false : (opts.escalate === undefined ? true : Boolean(opts.escalate)),",
-    to: '      escalate: Boolean(opts.escalate),',
+    from: "      escalate: shouldAutoEscalateFailure({ stage: 'iterate', mode: 'run', ledger: runtimeOpts._ledger ?? null, opts }).escalate,",
+    to: "      escalate: opts['no-escalate'] ? false : true,",
     expect: '[C10+A2]',
   },
   {

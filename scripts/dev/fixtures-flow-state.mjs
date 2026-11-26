@@ -45,8 +45,9 @@ export function registerFlowStateCases(cases) {
       const pNon = determineWorkflowPolicy({ changedFiles: [nonLow], caseType: 1 })
       if (pNon.riskTier === 'low') return `高敏感/结构文件 ${nonLow} 误判为 low`
     }
-    if (determineWorkflowPolicy({ changedFiles: ['src/App.tsx'], caseType: 1 }).riskTier !== 'high') {
-      return '视觉文件 src/App.tsx 未判为 high'
+    const pUi = determineWorkflowPolicy({ changedFiles: ['src/App.tsx'], caseType: 1 })
+    if (pUi.riskTier !== 'medium' || pUi.visualCheckRequired !== true || pUi.faultInjectionRequired !== false) {
+      return `视觉文件 src/App.tsx 应为 medium + visualCheckRequired=true + faultInjectionRequired=false：${JSON.stringify(pUi)}`
     }
 
     // 2. runLowRiskDocStaticCheck 正反双向（死链 / 明文凭据 / 合法围栏与 Mermaid）

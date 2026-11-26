@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path'
 
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { ARCHITECTURE_MAP_REL, isArchitectureMapOptedOut, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
+import { canReuseArchitectureMapReceipt } from '../../lib/gate-receipt.mjs'
 import { execSafe, execShellCommand, gitDiffNameStatusZ, gitStatusPorcelainZ, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { enforceSlotBoundary, resolveHostMode, resolveNonEmptyActor } from '../../lib/harness-context.mjs'
 import { hasExploredEvidence, rememberPreviousImplementer, verifyPlanningProvenance } from '../../lib/ledger.mjs'
@@ -416,7 +417,7 @@ export async function runPreVerifyEditGateHook({ mainRoot, implRoot, taskId, led
  * 支持 `--skip-govern` 记账，在 `finalize` 同步核对 `docs/feature-map.json`，
  * 并按 `.agents/forge-hooks.json` 触发声明式自定义钩子或轻量治理检查/复盘。
  */
-export async function checkArchitectureMapSyncOnVerify({ implRoot, mainRoot, ledger, changedFiles = null } = {}) {
+export async function checkArchitectureMapSyncOnVerify({ implRoot, mainRoot, gitDir = null, ledger, changedFiles = null } = {}) {
   const root = implRoot || mainRoot
   if (!root || !existsSync(join(root, FEATURE_MAP_REL))) return { ok: true, skipped: true, reason: 'feature-map-absent' }
   if (isArchitectureMapOptedOut(root)) return { ok: true, skipped: true, reason: 'opted-out' }
@@ -434,6 +435,9 @@ export async function checkArchitectureMapSyncOnVerify({ implRoot, mainRoot, led
   const touchesMapFiles = touched.includes(FEATURE_MAP_REL) || touched.includes(ARCHITECTURE_MAP_REL)
   if (!hasHtml && !touchesMapFiles) {
     return { ok: true, skipped: true, reason: 'architecture-map-not-activated' }
+  }
+  if (await canReuseArchitectureMapReceipt({ workTreeRoot: root, gitCommonDir: gitDir, taskId: ledger?.taskId ?? null, ledger })) {
+    return { ok: true, skipped: true, reason: 'reused-gate-receipt', relPath: ARCHITECTURE_MAP_REL }
   }
   const syncRes = verifyArchitectureMapSync(root)
   if (!syncRes.ok) {

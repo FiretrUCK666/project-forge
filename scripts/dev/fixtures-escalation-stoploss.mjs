@@ -190,7 +190,7 @@ export function registerStageBLoopB4bCases(cases) {
   cases.push(['C13/C22：全历史换人锁、excludedReviewers、stopLossPacket、low 可选 record、切片 C* 与 faultRecord', async () => {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
-      'AGENTS.md': '# c13\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: exit 0\nmerge-gate: exit 0\n```\n',
+      'AGENTS.md': '# c13\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: exit 0\nmerge-gate: exit 0\nhigh-risk: src/app.mjs\n```\n',
       'src/app.mjs': 'export const x = 1\n',
       'docs/notes.md': '# notes\n',
       'docs/prd/261118-master-prd.md': '---\nkind: prd\ntitle: "M"\nstatus: active\ncreated: 2026-11-18\nupdated: 2026-11-18\nowner: p\nrelated_spec: null\nrelated_todo: null\n---\n\n# M\n\n## 五、验收标准\n- [ ] C1: S1\n- [ ] C9: Future\n',

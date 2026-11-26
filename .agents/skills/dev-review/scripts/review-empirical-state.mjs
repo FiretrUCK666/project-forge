@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { escalateToBackend } from '../../lib/escalation.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { artifactPathsOf, evaluateObservationSubstance, validateArtifactsAndVisual } from '../../lib/empirical-artifacts.mjs'
+import { shouldAutoEscalateFailure } from '../../lib/gate-receipt.mjs'
 import {
   canonicalPath, execShellCommand, gitStatusPorcelainZ, isInsideDir,
   posixPath, readJsonSafe, samePath, sha256File, sha256Text, writeJsonAtomic,
@@ -627,36 +628,41 @@ export async function handleEmpiricalE2eFailure({
     '## NextSteps',
     ...diagnostic.NextSteps.map((l) => `- ${l}`),
   ].join('\n')
+  const escPolicy = shouldAutoEscalateFailure({ stage: 'review', mode, ledger: task, opts })
   let escalation = null
-  try {
-    escalation = await escalateToBackend({
-      repoRoot: mainRoot,
-      item: {
-        source: 'review-check-empirical',
-        category: 'e2e',
-        severity: 'high',
-        caseType: task?.caseType ?? 3,
-        e2eBlocking: true,
-        title: `Empirical E2E failure (${task?.taskId ?? mode})`,
-        summary: diagnostic.Evidence.slice(0, 2).join(' | '),
-        body,
-        rootCause: diagnostic.Unknowns.join('；'),
-        nextStep: diagnostic.NextSteps[0] ?? 'Fix runtime issue and re-run check-empirical',
-        files: changedFiles.slice(0, 10),
-        taskId: task?.taskId ?? null,
-        labels: ['e2e-fail'],
-        // 建单正文带上最小失败复现与可独立重放的命令，接手的人不必先猜怎么复现。
-        reproEvidence: [
-          `exit=${failedCmdRes?.exitCode ?? 1}`,
-          ...(failedCmdRes?.stderrExcerpt ? [`stderr=${String(failedCmdRes.stderrExcerpt).slice(0, 200)}`] : []),
-        ].join('；'),
-        ...(failedCmdRes?.cmd ? { pocCommand: failedCmdRes.cmd } : {}),
-      },
-      _ghProbe: opts._ghProbe ?? null,
-      _ghClient: opts._ghClient ?? null,
-    })
-  } catch (err) {
-    escalation = { ok: false, error: err instanceof Error ? err.message : String(err) }
+  if (!escPolicy.escalate) {
+    escalation = { ok: true, skipped: true, reason: escPolicy.reason }
+  } else {
+    try {
+      escalation = await escalateToBackend({
+        repoRoot: mainRoot,
+        item: {
+          source: 'review-check-empirical',
+          category: 'e2e',
+          severity: 'high',
+          caseType: task?.caseType ?? 3,
+          e2eBlocking: true,
+          title: `Empirical E2E failure (${task?.taskId ?? mode})`,
+          summary: diagnostic.Evidence.slice(0, 2).join(' | '),
+          body,
+          rootCause: diagnostic.Unknowns.join('；'),
+          nextStep: diagnostic.NextSteps[0] ?? 'Fix runtime issue and re-run check-empirical',
+          files: changedFiles.slice(0, 10),
+          taskId: task?.taskId ?? null,
+          labels: ['e2e-fail'],
+          // 建单正文带上最小失败复现与可独立重放的命令，接手的人不必先猜怎么复现。
+          reproEvidence: [
+            `exit=${failedCmdRes?.exitCode ?? 1}`,
+            ...(failedCmdRes?.stderrExcerpt ? [`stderr=${String(failedCmdRes.stderrExcerpt).slice(0, 200)}`] : []),
+          ].join('；'),
+          ...(failedCmdRes?.cmd ? { pocCommand: failedCmdRes.cmd } : {}),
+        },
+        _ghProbe: opts._ghProbe ?? null,
+        _ghClient: opts._ghClient ?? null,
+      })
+    } catch (err) {
+      escalation = { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   }
   return { diagnostic, escalation }
 }

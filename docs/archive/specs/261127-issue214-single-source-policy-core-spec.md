@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: 单源三轴正交策略、去重收口与静默防刷屏
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
 issue: 214
 pr: null
-branch: feat/sandbox-dual-loop-v1
+branch: feat/single-source-policy-core
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-sandbox-r2, round=2, sha=0c7acee93e0c, summary=Round 1 F1/F2/F3 均已闭环：Wave 1 既有夹具与 I502 注入、iterate.mjs:67 帮助、gate-receipt 六维键/headless/唯一生产者/I962-I963 保活、isLow 排视觉、smokeExplicitNone 对齐与 <=800L 预算均与源码吻合。)"
-related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
+related_prd: ../../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
 related_todo: ../todo/261127-issue214-single-source-policy-core-todo.md
 high_risk_paths: [kit/skills/lib/workflow-policy.mjs, kit/skills/lib/gate-receipt.mjs, kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs, kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs]
 depends_on: []
@@ -26,13 +26,13 @@ scope_files: [kit/skills/lib/gate-receipt.mjs, kit/skills/lib/workflow-policy.mj
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块策略核心重构，属高风险 `kit/` 路径；Wave 1，零上游依赖；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / #214 / 未关联 |
+| 分支 / Issue / PR | `feat/single-source-policy-core` / #214 / 未关联 |
 | 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
-| 关联 PRD / Todo | `docs/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-issue214-single-source-policy-core-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/archive/todo/261127-issue214-single-source-policy-core-todo.md` |
 
 - **变更一句话**：将 `workflow-policy.mjs` 收敛为三轴正交唯一策略真源，硬拒内环 `inner: true` 证据偷渡外环，引入支持任务态与 headless 态的干净 HEAD 门禁回执缓存消除重复扫描与 `verifyArchitectureMapSync` 双跑，并消除探索/内环失败对远端工单的自动刷屏。
 
@@ -159,10 +159,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `determineWorkflowPolicy` 对仅改 UI 渲染文件（`.tsx`/`.css`/`.html` 仿真用例）且未触及 `high-risk`/`one-way`/`Case>=4` 的改动返回 `riskTier === 'medium'`（非 `high` 且非 `low`）、`visualCheckRequired === true`、`faultInjectionRequired === false`；对触及 `high-risk`/`one-way`/`Case>=4` 返回 `riskTier === 'high'` 且 `faultInjectionRequired === true`；`review-empirical.mjs` 的 `computeEmpiricalRequirements`（含 `smokeExplicitNone` 边界）与之完全一致（由 `fixtures-policy-axes.mjs` 与更新后的既有夹具正反双向实证）。
-- [ ] C2: `recordVerifyEvidenceForFlow` 在内环/沙箱模式下写入 `inner: true`；外环 `validateVerificationEvidence` 遇到顶层 `evidence.inner === true` 或单门禁项 `gates[k].inner === true` 时返回 `ok: false`、`code: 'BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER'`、`exitCode: 3`，外环全量验证覆写为 `inner: false` 后正常放行（由 `fixtures-policy-axes.mjs` 正反双向实证）。
-- [ ] C3: 单次 `flow verify` 中 `edit-gate --final` 写入干净 HEAD 的 `gate-receipt.json` 后，`flow-lifecycle-hooks.mjs` 的 `checkArchitectureMapSyncOnVerify` 命中回执返回 `reused-gate-receipt`（实测 `verifyArchitectureMapSync` 仅执行 1 次）；headless 无 `taskId` 场景（独立 `edit-gate` / `govern-audit --changed`）正常读写 `cache/gate-receipt-<hash>.json`；修改源码/配置文件/架构图或工作区变脏后回执立即失效重扫，且 `I962`/`I963` 故障注入 100% 捕获（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 实证）。
-- [ ] C4: 沙箱/内环/`quick`/`--local` 验证或 `iterate run` 失败时，本地诊断包与治理信号正常落盘，Mock 远端客户端 `createIssue` 调用次数为 `0`；外环 `smoke`/`gate`/`task`/`pr` 失败或显式 `--escalate` 时仍按分级策略正常建单；`iterate.mjs` 帮助文案、`fixtures-r6c-gates.mjs` 与 `injections-data-r6c.mjs` (`I502`) 当波同步全绿（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 双向实证）。
+- [x] C1: `determineWorkflowPolicy` 对仅改 UI 渲染文件（`.tsx`/`.css`/`.html` 仿真用例）且未触及 `high-risk`/`one-way`/`Case>=4` 的改动返回 `riskTier === 'medium'`（非 `high` 且非 `low`）、`visualCheckRequired === true`、`faultInjectionRequired === false`；对触及 `high-risk`/`one-way`/`Case>=4` 返回 `riskTier === 'high'` 且 `faultInjectionRequired === true`；`review-empirical.mjs` 的 `computeEmpiricalRequirements`（含 `smokeExplicitNone` 边界）与之完全一致（由 `fixtures-policy-axes.mjs` 与更新后的既有夹具正反双向实证）。
+- [x] C2: `recordVerifyEvidenceForFlow` 在内环/沙箱模式下写入 `inner: true`；外环 `validateVerificationEvidence` 遇到顶层 `evidence.inner === true` 或单门禁项 `gates[k].inner === true` 时返回 `ok: false`、`code: 'BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER'`、`exitCode: 3`，外环全量验证覆写为 `inner: false` 后正常放行（由 `fixtures-policy-axes.mjs` 正反双向实证）。
+- [x] C3: 单次 `flow verify` 中 `edit-gate --final` 写入干净 HEAD 的 `gate-receipt.json` 后，`flow-lifecycle-hooks.mjs` 的 `checkArchitectureMapSyncOnVerify` 命中回执返回 `reused-gate-receipt`（实测 `verifyArchitectureMapSync` 仅执行 1 次）；headless 无 `taskId` 场景（独立 `edit-gate` / `govern-audit --changed`）正常读写 `cache/gate-receipt-<hash>.json`；修改源码/配置文件/架构图或工作区变脏后回执立即失效重扫，且 `I962`/`I963` 故障注入 100% 捕获（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 实证）。
+- [x] C4: 沙箱/内环/`quick`/`--local` 验证或 `iterate run` 失败时，本地诊断包与治理信号正常落盘，Mock 远端客户端 `createIssue` 调用次数为 `0`；外环 `smoke`/`gate`/`task`/`pr` 失败或显式 `--escalate` 时仍按分级策略正常建单；`iterate.mjs` 帮助文案、`fixtures-r6c-gates.mjs` 与 `injections-data-r6c.mjs` (`I502`) 当波同步全绿（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 双向实证）。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -176,6 +176,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：新增 `kit/skills/lib/gate-receipt.mjs`（371L）实现六维干净 HEAD 回执缓存（支持任务态与 headless `cache/gate-receipt-<hash>.json`）及 `shouldAutoEscalateFailure` 统一升级静默判定；改造 `workflow-policy.mjs`（769L）完成三轴正交解耦（`visualCheckRequired` 独立、`isLow` 显式排除视觉、`faultInjectionRequired` 仅绑定 `high`/`one-way`/`Case>=4`）与外环 `validateVerificationEvidence` 对顶层及单门禁 `inner: true` 的硬拒；原地对齐 `review-empirical.mjs`（796L，0 净增行）并接入 `review-empirical-state.mjs`、`review-locks.mjs`、`review-gates.mjs`、`edit-gate.mjs`（保 `I963`）、`flow-lifecycle-hooks.mjs`（保 `I962`）、`flow-lifecycle-helpers.mjs`、`iterate.mjs`（同步 `printHelp()` 第 67-68 行）与 `govern-checks.mjs`。
+- **与草案的差异**：同步在 `kit/skills/lib/exit-codes.mjs` `FACT_CODES` 登记新增阻断码 `BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER`（满足 `preflight` 退出码档位全登记门禁），并同步更新了受三轴解耦影响的三处既有夹具（`scripts/dev/fixtures-flow-state.mjs` 第 48 行、`scripts/dev/fixtures-onboarding.mjs` `C5/C6a` `visual` 独立视觉轴放行合并、`scripts/dev/fixtures-escalation-stoploss.mjs` `c13-t` 显式声明 `high-risk: src/app.mjs` 触发 `faultRecord`）；`fixtures.mjs` 与 `injections-data.mjs` 已具备自动发现机制，无需修改索引源码。
+- **关联同步文件**：`docs/TDD.md`（同步登记 `kit/skills/lib/gate-receipt.mjs`、`scripts/dev/fixtures-policy-axes.mjs` 与 `scripts/dev/injections-data-policy-axes.mjs`）、`docs/feature-map.json`（登记 `kit/skills/lib/gate-receipt.mjs` 与新增夹具/注入）、`docs/architecture-map.html`（`verify-tools render` 单点重渲）、`.agents/skills/`（`equip.mjs .` 全量同步）。

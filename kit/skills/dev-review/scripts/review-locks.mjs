@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path'
 import { hasSkillSupport } from '../../lib/cli.mjs'
 import { evaluateStoredVisualEvidence } from '../../lib/empirical-artifacts.mjs'
 import { DEFAULT_ENFORCE_GATES } from '../../lib/gate-enforcement.mjs'
+import { collectGateReceiptKey, hasReusableGateCheck, writeGateReceipt } from '../../lib/gate-receipt.mjs'
 import {
   checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId,
 } from '../../lib/critique-rounds.mjs'
@@ -614,16 +615,27 @@ export async function evaluatePassBlockers({
       blockers.push(`--enforce-gates: verifiedHead (${String(ledger?.verifiedHead ?? 'null').slice(0, 7)}) 与当前 HEAD (${String(headSha ?? '').slice(0, 7)}) 不一致`)
     }
     if (targetRoot && filesRes) {
+      const rcptKey = gitDir && headSha && headSha !== 'UNBORN'
+        ? await collectGateReceiptKey({ workTreeRoot: targetRoot, gitCommonDir: gitDir, ledger, headSha, profile })
+        : { valid: false }
       if (profile?.archRules?.length && changedFiles.length > 0) {
-        const arch = evaluateArchRules(targetRoot, changedFiles, profile.archRules)
-        if (!arch.ok) blockers.push(`--enforce-gates: 存在 ${arch.violations.length} 处 arch-rules 禁引违规`)
+        const cachedArch = rcptKey.valid ? hasReusableGateCheck({ gitCommonDir: gitDir, taskId, key: rcptKey, checkName: 'archRules' }) : null
+        if (!cachedArch) {
+          const arch = evaluateArchRules(targetRoot, changedFiles, profile.archRules)
+          if (!arch.ok) blockers.push(`--enforce-gates: 存在 ${arch.violations.length} 处 arch-rules 禁引违规`)
+          else if (rcptKey.valid) writeGateReceipt({ gitCommonDir: gitDir, taskId, key: rcptKey, producer: 'review-locks', checks: { archRules: { ok: true, violations: 0 } } })
+        }
       }
       if (!humanApproved && !ledger?.humanApprovedStopLoss) {
-        const gw = await detectGateWeakening(targetRoot, ledger?.baseSha, ledger?.baseBranch, {
-          headSha,
-          nameStatusEntries: filesRes.ok ? filesRes.entries : undefined,
-        })
-        if (gw.length > 0) blockers.push(`--enforce-gates: 检测到未授权的门禁弱化改动（${gw.map((h) => h.file).join(', ')}）`)
+        const cachedGw = rcptKey.valid ? hasReusableGateCheck({ gitCommonDir: gitDir, taskId, key: rcptKey, checkName: 'gateWeakening' }) : null
+        if (!cachedGw) {
+          const gw = await detectGateWeakening(targetRoot, ledger?.baseSha, ledger?.baseBranch, {
+            headSha,
+            nameStatusEntries: filesRes.ok ? filesRes.entries : undefined,
+          })
+          if (gw.length > 0) blockers.push(`--enforce-gates: 检测到未授权的门禁弱化改动（${gw.map((h) => h.file).join(', ')}）`)
+          else if (rcptKey.valid) writeGateReceipt({ gitCommonDir: gitDir, taskId, key: rcptKey, producer: 'review-locks', checks: { gateWeakening: { ok: true, count: 0 } } })
+        }
       }
     }
   }

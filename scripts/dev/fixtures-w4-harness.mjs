@@ -491,7 +491,7 @@ export function registerW4HarnessCases(cases) {
   }])
 
   cases.push(['[C3] UI 改动强制 --artifact/--visual-blocked-reason、--cmd 追加与 check-fault 注释 diff 拦截', async () => {
-    const dir = tmpProject({ 'AGENTS.md': makeCleanAgentsMd(), 'src/app.tsx': 'export const App = () => null\n' })
+    const dir = tmpProject({ 'AGENTS.md': makeCleanAgentsMd().replace('high-risk: none', 'high-risk: src/app.tsx'), 'src/app.tsx': 'export const App = () => null\n' })
     try {
       gitInit(dir)
       const { validateArtifactsAndVisual } = await import('../../kit/skills/lib/empirical-artifacts.mjs')

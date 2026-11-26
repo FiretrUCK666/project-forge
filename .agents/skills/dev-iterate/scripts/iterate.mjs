@@ -18,6 +18,7 @@ import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
+import { shouldAutoEscalateFailure } from '../../lib/gate-receipt.mjs'
 import {
   execSafe, isMacOsJunkPath, isMainModule, posixPath, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
@@ -64,8 +65,8 @@ function printHelp() {
     '  --concurrency <N>        并发 worker 数量（默认 min(4, CPU核数)）',
     '  --timeout-ms <ms>        单测执行超时毫秒（默认 30000）',
     '  --perf-budget-ms <ms>    性能预算阈值毫秒（超阈视为退化并升级）',
-    '  --escalate               运行失败/越阈时经 escalation.mjs 建单转入正流修复（默认开启）',
-    '  --no-escalate            关闭运行失败自动升级建单（需配合外部理由或本地调试）',
+    '  --escalate               运行失败/越阈时显式开启经 escalation.mjs 建单转入正流修复（run 探索期默认静默不建单）',
+    '  --no-escalate            强制关闭运行失败或 cycle 停损的自动升级建单',
     '  --reset                  重置已持久化的 cycle 状态重新开始',
     '  --no-signals             不写入 signals.jsonl（测试预演用）',
     '  --json                   输出结构化 JSON',
@@ -203,14 +204,14 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
   }
 }
 
-/** 分片并发执行目标测试集；遇失败/超时/性能越阈不改业务源码，写 signals.jsonl 并默认按分级策略经 escalation.mjs 建单。 */
+/** 分片并发执行目标测试集；遇失败/超时/性能越阈不改业务源码，写 signals.jsonl 并仅在显式开启 escalate 时经 escalation.mjs 建单。 */
 export async function runIterationSuites(repoRoot, {
   targets = [],
   tier = 'integration',
   concurrency = Math.min(4, Math.max(1, cpus().length)),
   timeoutMs = 30000,
   perfBudgetMs = 0,
-  escalate = true,
+  escalate = false,
   writeSignals = true,
   isGit = true,
   gitDir = null,
@@ -438,7 +439,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       concurrency: opts.concurrency ? Number(opts.concurrency) : undefined,
       timeoutMs: opts['timeout-ms'] ? Number(opts['timeout-ms']) : 30000,
       perfBudgetMs: opts['perf-budget-ms'] ? Number(opts['perf-budget-ms']) : 0,
-      escalate: opts['no-escalate'] ? false : (opts.escalate === undefined ? true : Boolean(opts.escalate)),
+      escalate: shouldAutoEscalateFailure({ stage: 'iterate', mode: 'run', ledger: runtimeOpts._ledger ?? null, opts }).escalate,
       writeSignals: !opts['no-signals'],
       isGit: roots.isGit,
       gitDir: roots.gitDir,

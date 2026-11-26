@@ -13,6 +13,7 @@ import { evaluateMasterPrdClosureState } from '../../lib/doc-substantive.mjs'
 import { evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
 import { mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
+import { computeGateReceiptKey, hasReusableGateCheck, shouldAutoEscalateFailure, writeGateReceipt } from '../../lib/gate-receipt.mjs'
 import {
   detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ,
   inspectBranchMergeState, posixPath, readTextSafe, resolveDefaultBranch, syncDetachedWorktree, writeAtomic,
@@ -328,30 +329,35 @@ export async function handleVerifyE2eFailure({
     '## NextSteps',
     ...diagnostic.NextSteps.map((l) => `- ${l}`),
   ].join('\n')
+  const escPolicy = shouldAutoEscalateFailure({ stage: 'verify', mode, ledger, opts })
   let escalation = null
-  try {
-    escalation = await escalateToBackend({
-      repoRoot: roots.mainRoot,
-      item: {
-        source: 'flow-verify',
-        category: 'e2e',
-        severity: 'high',
-        caseType: ledger?.caseType ?? 3,
-        e2eBlocking: true,
-        title: `E2E verification failed (${taskId ?? mode})`,
-        summary: diagnostic.Evidence.slice(0, 2).join(' | '),
-        body,
-        rootCause: diagnostic.Unknowns.join('；'),
-        nextStep: diagnostic.NextSteps[0] ?? 'Fix runtime failure and re-run smoke verify with --e2e-evidence',
-        files: changedFiles.slice(0, 10),
-        taskId,
-        labels: ['e2e-fail'],
-      },
-      _ghProbe: opts._ghProbe ?? null,
-      _ghClient: opts._ghClient ?? null,
-    })
-  } catch (err) {
-    escalation = { ok: false, error: err instanceof Error ? err.message : String(err) }
+  if (!escPolicy.escalate) {
+    escalation = { ok: true, skipped: true, reason: escPolicy.reason }
+  } else {
+    try {
+      escalation = await escalateToBackend({
+        repoRoot: roots.mainRoot,
+        item: {
+          source: 'flow-verify',
+          category: 'e2e',
+          severity: 'high',
+          caseType: ledger?.caseType ?? 3,
+          e2eBlocking: true,
+          title: `E2E verification failed (${taskId ?? mode})`,
+          summary: diagnostic.Evidence.slice(0, 2).join(' | '),
+          body,
+          rootCause: diagnostic.Unknowns.join('；'),
+          nextStep: diagnostic.NextSteps[0] ?? 'Fix runtime failure and re-run smoke verify with --e2e-evidence',
+          files: changedFiles.slice(0, 10),
+          taskId,
+          labels: ['e2e-fail'],
+        },
+        _ghProbe: opts._ghProbe ?? null,
+        _ghClient: opts._ghClient ?? null,
+      })
+    } catch (err) {
+      escalation = { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   }
   return { diagnostic, escalation }
 }
@@ -363,7 +369,9 @@ export function recordVerifyEvidenceForFlow({
   durationMs = null, smokeDurationMs = null,
   smokeCmd = null, smokeExitCode = null, smokeExecuted = false, smokeErrorOnly = false,
   artifacts = [], visualCheckedRaw = false, visualBlockedReason = '', precheckResult = undefined,
+  inner = Boolean(ledger?.sandboxMode === true),
 }) {
+  const isInner = Boolean(inner)
   const precheck = precheckResult !== undefined
     ? precheckResult
     : runVerifyPrecheck({
@@ -380,7 +388,7 @@ export function recordVerifyEvidenceForFlow({
     return { overallExit: precheck.exitCode ?? 3, smokeVerifiedOnHead: false, e2eObservation: null, shallowE2eEvidence: null, precheck }
   }
   const prev = readVerificationEvidence(roots.gitDir, taskId)
-  const sameClean = Boolean(prev && prev.headSha === currentHead && !dirty && !prev.dirty)
+  const sameClean = Boolean(prev && prev.headSha === currentHead && !dirty && !prev.dirty && Boolean(prev.inner) === isInner)
   const gates = sameClean ? { ...(prev.gates ?? {}) } : {}
   const skipped = new Set(sameClean && Array.isArray(prev.skipped) ? prev.skipped : [])
   const now = new Date().toISOString()
@@ -388,7 +396,7 @@ export function recordVerifyEvidenceForFlow({
     ? { executed: false, succeeded: true, errorOnly: false }
     : scoreExecutionResult({ executed, exitCode, errorOnly })
   gates[modeName] = {
-    headSha: currentHead, dirty, mode: modeName, target: targetVal,
+    headSha: currentHead, dirty, inner: isInner, mode: modeName, target: targetVal,
     partial: modeName === 'quick' && Boolean(targetVal),
     exitCode, cmd: cmdStr, customCmd,
     ...(Number.isFinite(Number(durationMs)) ? { durationMs: Math.max(0, Math.round(Number(durationMs))) } : {}),
@@ -401,7 +409,7 @@ export function recordVerifyEvidenceForFlow({
   if (smokeCmd !== null && smokeExitCode !== null && modeName !== 'smoke') {
     const sScore = scoreExecutionResult({ executed: smokeExecuted, exitCode: smokeExitCode, errorOnly: smokeErrorOnly })
     gates.smoke = {
-      headSha: currentHead, dirty, mode: 'smoke', target: null, partial: false,
+      headSha: currentHead, dirty, inner: isInner, mode: 'smoke', target: null, partial: false,
       exitCode: smokeExitCode, cmd: smokeCmd, customCmd: false,
       ...(Number.isFinite(Number(smokeDurationMs)) ? { durationMs: Math.max(0, Math.round(Number(smokeDurationMs))) } : {}),
       executed: sScore.executed, succeeded: sScore.succeeded, errorOnly: sScore.errorOnly,
@@ -475,7 +483,7 @@ export function recordVerifyEvidenceForFlow({
   const carriedArtifacts = mergeArtifactRecords(baseArtifacts, precheckRecords)
   const carriedVisual = precheckVisual ?? (sameClean ? (prev?.visual ?? null) : null)
   writeVerificationEvidence(roots.gitDir, taskId, {
-    taskId, baseSha: ledger.baseSha, headSha: currentHead, dirty,
+    taskId, baseSha: ledger.baseSha, headSha: currentHead, dirty, inner: isInner,
     riskTier: policy.riskTier, mode: modeName, target: targetVal, exitCode: finalOverallExit,
     executed: !explicitNoneSkipped,
     succeeded: finalOverallExit === 0 && !errorOnly,
@@ -650,13 +658,23 @@ export async function collectTaskRuntimeSnapshot({
     : [{ ok: true, entries: [] }, { ok: false, stdout: '' }, null]
   const headSha = headRes.ok ? headRes.stdout.trim() : null
   const sharedEntries = diffRawRes?.ok ? diffRawRes.entries : undefined
+  const snapRcptKey = exists && stZ.entries.length === 0 && headSha && effectiveGitDir
+    ? computeGateReceiptKey({ workTreeRoot: implRoot, dirty: false, headSha, baseSha: effectiveBaseSha ?? '', changedFiles: (sharedEntries ?? []).map((e) => e.file), diffText: diffRawRes?.ok ? (diffRawRes.diffText ?? '') : '', profile })
+    : { valid: false }
+  const cachedGw = snapRcptKey.valid && !Array.isArray(gateFindingsOverride)
+    ? hasReusableGateCheck({ gitCommonDir: effectiveGitDir, taskId: ledger?.taskId ?? null, key: snapRcptKey, checkName: 'gateWeakening' })
+    : null
   const [op, changedFiles, gateHits] = exists
     ? await Promise.all([
         detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
         collectSnapshotChangedFiles(implRoot, effectiveBaseSha, stZ.entries, sharedEntries),
-        Array.isArray(gateFindingsOverride) ? Promise.resolve(gateFindingsOverride) : detectGateWeakening(implRoot, effectiveBaseSha, ledger?.baseBranch, { headSha, nameStatusEntries: sharedEntries }),
+        Array.isArray(gateFindingsOverride) ? Promise.resolve(gateFindingsOverride)
+          : (cachedGw ? Promise.resolve([]) : detectGateWeakening(implRoot, effectiveBaseSha, ledger?.baseBranch, { headSha, nameStatusEntries: sharedEntries })),
       ])
     : [{ inProgress: false, op: null }, [], []]
+  if (snapRcptKey.valid && !cachedGw && !Array.isArray(gateFindingsOverride) && gateHits.length === 0) {
+    writeGateReceipt({ gitCommonDir: effectiveGitDir, taskId: ledger?.taskId ?? null, key: snapRcptKey, producer: 'flow-lifecycle-helpers', checks: { gateWeakening: { ok: true, count: 0 } } })
+  }
   const ownArchived = [ledger?.archivedTodoFile, ledger?.archivedSpecFile, ledger?.archivedPrdFile].filter(Boolean)
   const policyRoot = exists ? implRoot : mainRoot
   const policy = determineWorkflowPolicy({

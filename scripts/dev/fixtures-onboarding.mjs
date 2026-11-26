@@ -691,6 +691,10 @@ export function registerOnboardingCases(cases) {
         if (nx.exitCode !== 0) return `next(${label}) 失败`
 
         const mNoApprove = await handleMerge({ task: taskId }, roots)
+        if (label === 'visual') {
+          if (mNoApprove.exitCode !== 0) return `no-dev-review visual 已与 high 解耦（独立视觉轴），已过视觉实证不应误触发退出码 4：exit=${mNoApprove.exitCode}`
+          continue
+        }
         if (mNoApprove.exitCode !== 4) return `no-dev-review ${label} 无 --human-approved 未返回退出码 4：exit=${mNoApprove.exitCode}`
         const mNoReason = await handleMerge({ task: taskId, 'human-approved': true }, roots)
         if (mNoReason.exitCode !== 4) return `no-dev-review ${label} 缺 --reason 未返回退出码 4：exit=${mNoReason.exitCode}`

@@ -62,7 +62,16 @@ export function registerLivingBriefCases(cases) {
       const c2 = await runAbsAsync(DOC_PLAN, ['triage', '--summary', 'fix null login bug', '--bugfix', '--files', '1', '--json'], { cwd: dir })
       if (c2.status !== 0) return `Case 2 triage 失败：${c2.stderr}`
       const j2 = JSON.parse(c2.stdout)
-      if (j2.visualBrief) return 'Case 2 不应生成 visualBrief'
+      if (j2.visualBrief || j2.briefRecommended !== false) return 'Case 2 不应生成 visualBrief'
+
+      // 局部可逆 Case 3 默认零 Brief 开销（直接进沙箱看真效果）
+      const c3Local = await runAbsAsync(DOC_PLAN, ['triage', '--summary', '调整登录表单按钮间距', '--files', '2', '--json'], { cwd: dir })
+      if (c3Local.status !== 0) return `Case 3 triage 失败：${c3Local.stderr}`
+      const j3Local = JSON.parse(c3Local.stdout)
+      if (j3Local.caseType !== 3 || j3Local.recommendedEntry !== 'sandbox' || j3Local.briefRecommended !== false || j3Local.visualBrief) {
+        return `局部可逆 Case 3 默认不应生成 visualBrief：${c3Local.stdout}`
+      }
+      if (existsSync(resolveBriefsDir(dir))) return '局部可逆 Case 3 不应创建仓外 briefs 目录'
 
       // 单轮 note 不触发，多轮 note 自动触发
       const n1 = await runAbsAsync(DOC_PLAN, ['note', '--topic', 'multi-turn', '--decision', 'Use token bucket', '--open', 'Rate limit?', '--json'], { cwd: dir })

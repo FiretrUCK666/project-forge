@@ -242,6 +242,24 @@ export function registerDocTriageCases(cases) {
         return `evaluatePureDocCheck 未在代码路径信号下返回 passed=false: ${JSON.stringify(directBlocked)}`
       }
 
+      // C9: 确定性三出口（direct / sandbox / plan-first）、去 fileCount>=6 悬崖（保留 fileCount>=12 prdNeed）与 Case 5/PRD 正交
+      const sevenReversible = triageTask({
+        summary: '调整 7 个按钮组件圆角与悬浮样式',
+        files: 7,
+        paths: ['src/ui/a.tsx', 'src/ui/b.tsx', 'src/ui/c.tsx', 'src/ui/d.tsx', 'src/ui/e.tsx', 'src/ui/f.tsx', 'src/ui/g.tsx'],
+      })
+      if (sevenReversible.caseType !== 3 || sevenReversible.recommendedEntry !== 'sandbox' || sevenReversible.briefRecommended !== false) {
+        return `7 文件局部可逆改动不应因 fileCount>=6 钝化升 Case 4：${JSON.stringify({ caseType: sevenReversible.caseType, recommendedEntry: sevenReversible.recommendedEntry, briefRecommended: sevenReversible.briefRecommended })}`
+      }
+      const twelveFiles = triageTask({ summary: '调整 12 个模块页面', files: 12 })
+      if (twelveFiles.caseType !== 4 || twelveFiles.prdRequired !== true || twelveFiles.recommendedEntry !== 'plan-first') {
+        return `fileCount>=12 必须保留 prdNeed 触发 Case 4 / plan-first：${JSON.stringify({ caseType: twelveFiles.caseType, prdRequired: twelveFiles.prdRequired, recommendedEntry: twelveFiles.recommendedEntry })}`
+      }
+      const case5Orthogonal = triageTask({ summary: '拆成三批推翻 TDD 架构重构全部核心模块', files: 14, conflictsTdd: true })
+      if (case5Orthogonal.caseType !== 5 || case5Orthogonal.prdRequired !== false || case5Orthogonal.recommendedEntry !== 'plan-first') {
+        return `Case 5 必须保持与 PRD 严格正交（prdRequired=false）：${JSON.stringify({ caseType: case5Orthogonal.caseType, prdRequired: case5Orthogonal.prdRequired, recommendedEntry: case5Orthogonal.recommendedEntry })}`
+      }
+
       return true
     } finally {
       rmTree(dir)

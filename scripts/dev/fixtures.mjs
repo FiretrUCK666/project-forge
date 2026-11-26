@@ -17,7 +17,7 @@ initTestBackupDir()
 
 // 重型测试域靠前调度以均衡并发子进程耗时；其余按文件名升序自动发现注册
 const PRIORITY_DOMAINS = [
-  'flow', 'flow-cleanup', 'flow-state', 'flow-parallel', 'lifecycle', 'sandbox-dual-loop',
+  'flow', 'flow-cleanup', 'flow-state', 'flow-parallel', 'lifecycle', 'sandbox-dual-loop', 'heterogeneous-dual-loop',
   'review-govern', 'review-empirical', 'govern', 'claims', 'flow-docs',
   'doc-rules', 'doc-shapes', 'doc-depth', 'doc-triage', 'handoff-review',
   'equip', 'onboarding', 'docs', 'platform', 'explore', 'contracts',

@@ -206,9 +206,11 @@ const FORBIDDEN_E2E_TOOLS_RE = /\b(?:playwright|cypress|puppeteer|selenium|webdr
 const GENERIC_E2E_CONTRACT_PATHS = [
   'kit/skills/lib/workflow-policy.mjs',
   'kit/skills/dev-flow/scripts/flow.mjs',
+  'kit/skills/dev-flow/scripts/flow-sandbox.mjs',
   'kit/skills/dev-flow/scripts/flow-lifecycle.mjs',
   'kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs',
   'kit/skills/dev-flow/scripts/flow-merge.mjs',
+  'kit/skills/dev-plan/scripts/doc-plan-brief.mjs',
   'kit/skills/dev-review/scripts/review-gates.mjs',
   'kit/skills/dev-review/scripts/review-empirical.mjs',
   'kit/skills/dev-review/scripts/review-empirical-state.mjs',
@@ -461,4 +463,38 @@ export function checkProcessArtifactFilenames({ ROOT, rel, walk, fail, note }) {
   if (violations.length === 0) {
     note(`功能域文件名门禁：扫描 ${files.length} 个文件，零过程编号/阶段命名违规`)
   }
+}
+
+export const DUAL_LOOP_CONTRACT_SITES = Object.freeze([
+  'references/collaboration.md',
+  'templates/agents-project.md',
+  'AGENTS.md',
+])
+
+const DUAL_LOOP_RULES = Object.freeze([
+  { what: '隔离沙箱不污染主仓', re: /sandbox[^\n]{0,80}不污染主仓|隔离沙箱[^\n]{0,80}不污染主仓/i },
+  { what: '外环硬拒内环 inner: true 实证', re: /inner:\s*true`?[^\n]{0,24}外环硬拒|外环硬拒[^\n]{0,24}`?inner:\s*true/ },
+  { what: '三轴正交策略', re: /三轴正交/ },
+  { what: 'promote 真实差分路由', re: /\bpromote\b[^\n]{0,60}(?:真实|差分|diff|路由)/i },
+])
+
+/** 校验沙箱双环契约同构：subcommand-meta 注册 promote，且三处核心契约文档同步沙箱双环不变量。 */
+export function checkDualLoopContracts({ ROOT, readText, fail, note }) {
+  const subMetaPath = join(ROOT, 'kit/skills/lib/subcommand-meta.mjs')
+  if (!existsSync(subMetaPath)) {
+    fail('双环契约同构：缺少 kit/skills/lib/subcommand-meta.mjs')
+  } else if (!/entry\('promote',\s*true\)/.test(readText(subMetaPath))) {
+    fail('双环契约同构：kit/skills/lib/subcommand-meta.mjs 缺少 flow 的 promote 子命令注册')
+  }
+  for (const relPath of DUAL_LOOP_CONTRACT_SITES) {
+    const abs = join(ROOT, relPath)
+    if (!existsSync(abs)) { fail(`双环契约同构：缺少 ${relPath}`); continue }
+    const text = readText(abs)
+    for (const rule of DUAL_LOOP_RULES) {
+      if (!rule.re.test(text)) {
+        fail(`双环契约同构（${relPath}）：缺少「${rule.what}」——三处核心契约文档必须与双环内核保持同构`)
+      }
+    }
+  }
+  note(`双环契约同构：subcommand-meta 与 ${DUAL_LOOP_CONTRACT_SITES.length} 处核心契约文档完整对齐 ${DUAL_LOOP_RULES.length} 项沙箱双环不变量`)
 }

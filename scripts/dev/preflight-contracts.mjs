@@ -25,6 +25,7 @@ import {
   SINGLE_SOURCE_RULES,
   STALE_DAILY_END,
   acceptanceIdMissing,
+  checkDualLoopContracts,
   checkGenericE2eContracts,
   checkProcessArtifactFilenames,
   completionRecordBeforeMerge,
@@ -543,6 +544,7 @@ export async function runContractChecks(ctx) {
   checkReviewContract(ctx)
   checkStarterLanguageCoverage(ctx)
   checkWorkflowLifecycleContracts(ctx)
+  checkDualLoopContracts(ctx)
   checkGenericE2eContracts(ctx)
   checkProcessArtifactFilenames(ctx)
 }

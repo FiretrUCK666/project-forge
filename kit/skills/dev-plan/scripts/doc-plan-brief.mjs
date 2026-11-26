@@ -21,6 +21,7 @@ import {
   upsertVisualBrief,
 } from '../../lib/visual-brief.mjs'
 import { triageTask } from './doc-audit.mjs'
+import { shouldAutoTriggerBrief } from './triage-rules.mjs'
 
 function openInBrowser(uri) {
   try {
@@ -46,7 +47,16 @@ export async function handleNoteSubcommand({ opts, cli, repoRoot, mainRoot }) {
   const prevSess = readSessionState(mainRoot)
   const candTopicId = normalizeTopicId(opts.topic || prevSess?.activeTopic || 'default')
   const prevTopic = prevSess?.topics?.[candTopicId] ?? null
-  const hadPriorTurn = Boolean(prevTopic && !prevTopic.consumedByTaskId && prevTopic.updatedAt)
+  const hasPriorNoteContent = Boolean(
+    prevTopic && !prevTopic.consumedByTaskId && (
+      Object.keys(prevTopic.facts ?? {}).length > 0
+      || (prevTopic.decisions?.length ?? 0) > 0
+      || (prevTopic.nonGoals?.length ?? 0) > 0
+      || (prevTopic.anchors?.length ?? 0) > 0
+      || (prevTopic.open?.length ?? 0) > 0
+    ),
+  )
+  const hadPriorTurn = Boolean(prevTopic && !prevTopic.consumedByTaskId && prevTopic.updatedAt && (hasPriorNoteContent || !prevTopic.triage))
 
   const noteRes = appendPreInitNote(mainRoot, {
     topic: opts.topic ?? null,
@@ -60,14 +70,19 @@ export async function handleNoteSubcommand({ opts, cli, repoRoot, mainRoot }) {
     openQuestions: opts.open ?? [],
   })
 
-  // 仅对 Case 3/4 或多轮讨论主题自动触发仓外 Living Visual Brief，Case 1/2 零开销
+  // 统一经 shouldAutoTriggerBrief 判定：Case 4/one-way/原型/已有关联或多轮讨论自动触发，局部可逆单轮零开销
   const topicTriage = noteRes.topicState?.triage
   const exactTopicCase = (topicTriage && topicTriage.topic === noteRes.topicId) ? Number(topicTriage.caseType ?? 0) : 0
-  const shouldTriggerBrief = Boolean(
-    Number(topicTriage?.caseType ?? 0) >= 3
-    || noteRes.topicState?.briefKey
-    || (hadPriorTurn && exactTopicCase !== 1 && exactTopicCase !== 2),
-  )
+  const shouldTriggerBrief = shouldAutoTriggerBrief({
+    caseType: exactTopicCase || Number(topicTriage?.caseType ?? 0),
+    doorType: topicTriage?.doorType ?? 'two-way',
+    prdRequired: Boolean(topicTriage?.prdRequired),
+    summary: [opts.topic, opts.decision, ...(opts.open ?? [])].filter(Boolean).join(' '),
+    hasPrototype: false,
+    isMultiTurnNote: hadPriorTurn,
+    hasExistingBrief: Boolean(noteRes.topicState?.briefKey),
+    exactTopicCase,
+  })
   let visualBrief = null
   if (shouldTriggerBrief) {
     try {
@@ -165,8 +180,14 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
     })
   } catch { /* non-fatal on non-writable root */ }
 
-  // 对 Case 3/4/5 自动刷新仓外 Living Visual Brief；Case 1/2 保持零开销
-  if (result.caseType >= 3) {
+  // 统一经 shouldAutoTriggerBrief 按需触发仓外 Living Visual Brief；局部可逆默认零 Brief 开销
+  if (shouldAutoTriggerBrief({
+    caseType: result.caseType,
+    doorType: result.doorType,
+    prdRequired: result.prdRequired,
+    summary,
+    hasExistingBrief: Boolean(noteRes?.topicState?.briefKey),
+  })) {
     try {
       const briefTopic = opts.topic ? normalizeTopicId(opts.topic) : (noteRes?.topicId ?? null)
       const briefKey = briefTopic || sanitizeBriefKey(summary.slice(0, 48))
@@ -188,25 +209,22 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
   }
 
   const steps = result.caseType === 5
-    ? [
-        { skill: 'dev-plan', text: '已阻断直接拆解！先更新 docs/TDD.md：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind tdd --slug tdd --title "<项目名>"' },
-        { skill: 'dev-plan', text: '完成 docs/TDD.md 更新并经独立确认后，再重新执行 doc-plan.mjs triage 或 init 拆解实施。' },
-      ]
-    : result.caseType === 4
+    ? [{ skill: 'dev-plan', text: '已阻断直接拆解！先更新 docs/TDD.md 并经独立确认后再拆解：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind tdd --slug tdd --title "<项目名>"' }]
+    : result.recommendedEntry === 'plan-first'
       ? [{
           skill: 'dev-plan',
           text: result.prdRequired
-            ? '创建 PRD+SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind all --slug <slug> --title "<标题>" --agent <id>'
+            ? '创建总控 PRD（1:N 多切片，亦可用 --kind all 一次建齐）：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind prd --multi-spec --slug <slug> --title "<标题>" --agent <id>'
             : '创建 SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug <slug> --title "<标题>" --agent <id>',
         }]
-      : result.caseType === 3
-        ? [{ skill: 'dev-plan', text: '创建 Todo 冻结 C1..Cn：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind todo --slug <slug> --title "<标题>" --agent <id>' }]
-        : [{ skill: 'dev-flow', text: `启动任务流转：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case ${result.caseType} --slug <slug> --agent <id>` }]
+      : result.recommendedEntry === 'sandbox'
+        ? [{ skill: 'dev-flow', text: '进入隔离沙箱高频迭代：node ".agents/skills/dev-flow/scripts/flow.mjs" start --sandbox --task <id> --slug <slug> --agent <id>' }]
+        : [{ skill: 'dev-flow', text: '低风险原地微调（或按需建位）：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case 1 --slug <slug> --agent <id>' }]
 
   if (cli.json) {
     process.stdout.write(`${JSON.stringify(withNextSteps(result, steps, { repoRoot: mainRoot }), null, 2)}\n`)
   } else {
-    process.stdout.write(`分流结论：Case ${result.caseType} (${result.action})${result.blocked ? ' [BLOCKED]' : ''}\n`)
+    process.stdout.write(`分流结论：Case ${result.caseType} (${result.action}) | 推荐入口: ${result.recommendedEntry}${result.sandboxPocAllowed ? ' (可 --sandbox 探路)' : ''}${result.blocked ? ' [BLOCKED]' : ''}\n`)
     process.stdout.write(`- 门型: ${result.doorType} | 规划内审档位: ${result.critiqueTier} | 规划态: ${result.planMode}\n- 理由: ${result.reason}\n`)
     process.stdout.write(`- 必建文档: ${result.docsRequired.join(', ') || '无 (0 文档)'}\n`)
     process.stdout.write(`- Red-Green 回归测试: ${result.redGreenRequired ? '强制' : '不需要'} | 独立审查: ${result.needsReview ? '需要' : '低风险免除'}\n`)

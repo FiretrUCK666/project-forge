@@ -169,13 +169,13 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
 - **第一步：双轴五态身份判定与入站分诊**——
 <!-- project-forge: if has-remote -->
-  先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（推 fork 向 `upstream` 开 PR，禁自合与提前删分支，私有单留隔离区/fork 侧，标签 403 降级）；只读为 **clone-readonly**；未注册主机退化 `generic-git`（手工 MR，merge 按四态核验，核不到则阻断仅人类签字放行）；新增 Issue/PR 先经 `flow.mjs intake` 分诊（已 `approve` 豁免）。
+  先核对远端与源仓库：`origin` 一致且有写权为 **maintainer**（分支开 PR，禁直推主干）。多协作者团队：① 新成员先 `flow.mjs inspect --probe-auth` 验写权；② `flow.mjs claim` 防撞车，接管须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 守 `CODEOWNERS`/Merge Queue；④ 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（推 fork 向 `upstream` 开 PR，禁自合与提前删分支，标签 403 降级）；只读为 **clone-readonly**；未注册主机退化 `generic-git`（手工 MR，merge 四态核验）；新增单经 `flow.mjs intake` 分诊。
 <!-- project-forge: endif -->
 <!-- project-forge: if no-remote -->
-  还没有远端时按 `local-only` 运作，通过本地特性分支与临时 `--detach` 试合推进主干；高风险或 `one-way` 变更仍须独立审查，新增提案可走 `flow.mjs intake` 离线分诊。
+  还没有远端时按 `local-only` 运作，走本地特性分支与 `--detach` 试合推进主干；高风险或 `one-way` 仍须独立审查，新增提案走 `flow.mjs intake` 离线分诊。
 <!-- project-forge: endif -->
 
-- **第二步：纯调度分波、五档分流与三正交策略**——主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查均派独立隔离代理（**`--host-mode single-session --human-approved` 仅限无子代理能力单会话宿主且经人授权时使用，多代理宿主严禁借此绕过**）。跑 `flow.mjs next --handoff`（`Wave 1 >= 2` 就绪 `docs/specs/*.md` 并行）或 `doc-plan.mjs triage`；**弹性探索与外部调研**：目标收敛且不污染主上下文时直接跑 `doc-locate`/`repo-map`，广度高或不确定性强时派并行只读 `explore`；需要澄清/选型时允许外部调研（注明来源），但写入文档的仓内路径、符号与命令必经本地验真。在 `commits > 0` 默认分支上 `doc-plan.mjs init` 默认自动隔离到 `.worktrees/impl-<taskId>/`（若先 `flow.mjs start --planning` 则同位复用，无需建双工作树）：
+- **第二步：纯调度分波、确定性三出口与三轴正交双环**——主调度**只调度与验收，不改业务源码、不代提合入单**，探索/规划/实施/审查均派独立隔离代理（`--host-mode single-session --human-approved` 仅限无子代理单会话宿主且经人授权）。跑 `flow.mjs next --handoff`（`Wave 1 >= 2` 并行）或 `doc-plan.mjs triage`（确定性输出 `recommendedEntry: direct | sandbox | plan-first` 与单一 `[NEXT STEP]`，按需投影 Living Visual Brief）；弹性探索按范围选直跑 `doc-locate`/`repo-map` 或并行 `explore`，外部调研注明来源且仓内路径/符号/命令必经本地验真。`commits > 0` 默认分支 `doc-plan.mjs init` 自动隔离进 `.worktrees/impl-<taskId>/`（先 `flow.mjs start --planning` 则同位复用）：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |
@@ -185,14 +185,14 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
   | **Case 4** | `L3` 跨模块/契约变更或高风险 | `docs/specs/` + `{{WORK_DIR}}` Todo；经 `audit` + 3 轮 Critique（禁自审）-> `approve` |
   | **Case 5** | 与 `docs/TDD.md`（若存在）或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**（若存在），内审获批后继续 |
 
-  风险定级：`low`（非可执行文本，走 `runLowRiskDocStaticCheck`）/ `medium` / `high`（高风险/`one-way`/Case>=4 须独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量；Case 2-4 在隔离 `impl` 位派 `impl` 代理（Case 1 允许原地微调）。
+  三轴正交策略：`riskTier`（`low` 纯文本排除视觉 / `medium` 常规与局部 UI / `high` 高风险、`one-way`、弱化门禁或 `Case>=4`）、`visualCheckRequired`（视觉独立于 `high`）、`faultInjectionRequired`（仅绑 `high`/`one-way`/`Case>=4`）；`evidence.json` 拦 `quick --target` 顶替全量并由外环硬拒内环 `inner: true`；Case 2-4 在隔离 `impl` 位派 `impl` 代理（Case 1 允许原地微调）。
 
-- **第三步：全量 Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 允许原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），一律建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。**只读探索转任何非 `Case 1` 文件写改（含仅补测试归 Case 2/3、治理修复与归档校准）必先 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack`。**
+- **第三步：隔离沙箱双环、Worktree 隔离与共享依赖**——`commits === 0` 且非 `--parallel` 或 `Case 1` 允许原地微调；**`commits > 0` 的 `Case >= 2`** 禁在脏主仓原地开工（`BLOCKED_MAIN_SLOT_VIOLATION`），可逆探索走 `flow.mjs start --sandbox` 入 `.worktrees/sandbox-<taskId>/`（隔离沙箱不污染主仓、记 `implementers[]` 与互不重叠 `writeScope`、内环快检标 `inner: true` 且失败不刷远端 Issue），拍板后 `flow.mjs promote` 按真实差分路由（`Case 2/3` 原地晋升 / `Case 4` PoC 转规划 / `Case 5` 阻断）；常规外环建 `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`。卸 worktree 前先 `worktree-deps.mjs` 解绑链接，禁递归直删。**只读探索转非 `Case 1` 写改必先 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack`。**
 
 <!-- project-forge: if has-remote -->
-- **第四步：认领、确定性 Issue 绑定与 PR 前文档同步**——`flow.mjs start` 对 `Case >= 2` 先复用已有单据，非豁免（豁免含 `no-auto-issue` 取舍与 `--no-issue --reason`）时 `Case 3/4` 由验真文档自动建单回链、`Case 2` 无单且缺合规 `--body`/`--body-file` 报 `BLOCKED_MISSING_ISSUE_BINDING`。**谁改代码谁认领（`Case >= 2` 校 `claimedAt`）并负责 `finalize`/`verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）/`submit --agent <id>`**（禁协调/审查者代提，仅 `single-session + --human-approved` 豁免）；同名作者拦截 `BLOCKED_AUTHOR_IS_IMPLEMENTER`；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危；PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对归档，`1:N` PRD 走四态），`submit` 零写回跟踪文件。
+- **第四步：认领、确定性 Issue 绑定与 PR 前文档同步**——`flow.mjs start` 对 `Case >= 2` 先复用已有单据，非豁免（`no-auto-issue` / `--no-issue --reason`）时 `Case 3/4` 由验真文档自动建单回链、`Case 2` 无单且缺合规 `--body`/`--body-file` 报 `BLOCKED_MISSING_ISSUE_BINDING`。**谁改代码谁认领并负责 `finalize`/`verify`（前置 `edit-gate --final` 且禁 `--skip-edit-gate`）/`submit --agent <id>`**（禁协调/审查者代提，同名作者拦 `BLOCKED_AUTHOR_IS_IMPLEMENTER`）；外部 PR 入 `.worktrees/review-pr-<M>/` 先扫高危；PR 前跑 `flow.mjs finalize`（全勾 `[x]`、成对归档，`1:N` PRD 走四态），`submit` 零写回跟踪文件。
 
-- **第五步：独立审查与合并**——**独立审查通过（`--enforce-gates`、`reviewToken` 绑定、`fail` 为空、`reviewPassedHead === HEAD`）后由审查者直接合（A3 亦允许由调度者执行 `flow.mjs merge`，仍严禁实施者自合）**（Round 2+ 换全新上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮停损约束；UI 变更缺真实 `--artifact`/`--visual-blocked-reason` 阻断；触高风险须故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR，merge 核四态）。合前强校三方 `headSha` 与干净工作区。
+- **第五步：独立审查与合并**——**独立审查通过（`--enforce-gates`、`reviewToken` 绑定、`fail` 为空、`reviewPassedHead === HEAD`）后由审查者直接合（A3 允许调度者执行 `flow.mjs merge`，严禁实施者自合）**（Round 2+ 换全新上下文，受同 `HEAD`/增量视野/全历史换人与 3 轮停损约束；UI 缺真实 `--artifact`/`--visual-blocked-reason` 阻断；触高风险须故障注入；**仅弱化门禁须人点头**，退出码 4；「取舍」写 `merge-authority: human` 收回人合；`contributor-fork` 禁自合；`generic-git` 推分支交手工 MR，merge 核四态）。合前强校三方 `headSha` 与干净工作区。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo 完成记录与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、随同分支提交；

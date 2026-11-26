@@ -256,12 +256,12 @@ export function registerDocGraphCases(cases) {
         return `Case 5 nextSteps 缺少 init --kind tdd 指引：${JSON.stringify(j5.nextSteps)}`
       }
 
-      // 2. Case 3 triage 路由至 doc-plan.mjs init --kind todo
+      // 2. 局部可逆 Case 3 triage 确定性路由至 sandbox（flow.mjs start --sandbox）
       const c3 = await runAbsAsync(DOC_PLAN, ['triage', '--summary', '新增 CSV 导出参数', '--files', '2', '--json'], { cwd: dir })
       if (c3.status !== 0) return `Case 3 triage 失败：${c3.stderr}`
       const j3 = JSON.parse(c3.stdout || '{}')
-      if (j3.caseType !== 3 || !j3.nextSteps?.some((s) => String(s?.text ?? s).includes('doc-plan.mjs" init --kind todo'))) {
-        return `Case 3 triage 未路由至 doc-plan.mjs init --kind todo：${JSON.stringify(j3.nextSteps)}`
+      if (j3.caseType !== 3 || j3.recommendedEntry !== 'sandbox' || !j3.nextSteps?.some((s) => String(s?.text ?? s).includes('flow.mjs" start --sandbox'))) {
+        return `局部可逆 Case 3 triage 未路由至 flow.mjs start --sandbox：${JSON.stringify({ recommendedEntry: j3.recommendedEntry, nextSteps: j3.nextSteps })}`
       }
 
       // 3. init --kind tdd 刷新 visualBrief 且 init 文本输出打印 Living Visual Brief htmlUri

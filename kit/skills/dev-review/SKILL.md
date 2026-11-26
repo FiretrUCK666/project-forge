@@ -38,9 +38,9 @@ node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> |
 ```
 
 注：未传 `--include-diff` 时仅输出 `diff.hunkIndex`、业务流/邻域切片与摘要（防撑爆上下文）。解锁 `--include-diff` 前须完成当前 `round`/`headSha`/`workspaceFingerprint` 的以下闭环，否则以退出码 `3` 返回 `BLOCKED_EMPIRICAL_FIRST` 或 `BLOCKED_DIRTY_FAULT_RESIDUE`：
-- 跑通 `check-empirical` 与 `check-fault`（`fail` + `restore`）；空 diff 或 `low` 级纯文档（0 运行时文件且无测试命令）免故障注入；
-- 附真实 `--e2e-evidence`（写清入口与观察输出，拒填 `"ok"`/`"pass"`/`"lgtm"`/`"done"`/`"已验证"` 等水话，违者 `BLOCKED_SHALLOW_E2E_EVIDENCE`）；E2E 失败自动写入 `signals.jsonl`（`e2e.runtime-fail`）并输出诊断包与分级建单；
-- `check-empirical`/`check-fault` 跳过槽同步以保护在测故障与 `--local` 未提交改动；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直阻断。
+- 跑通 `check-empirical`；故障注入（`check-fault` `fail` + `restore`）单源对齐 `workflow-policy.mjs` 三轴策略，**仅在 `high` / `one-way` / `Case >= 4`（且非 `smoke-verify: none`）时强制**，普通 `medium` 改动与空 diff/`low` 级纯文档免故障注入；
+- 附真实 `--e2e-evidence`（写清入口与观察输出，拒填 `"ok"`/`"pass"`/`"lgtm"`/`"done"`/`"已验证"` 等水话，违者 `BLOCKED_SHALLOW_E2E_EVIDENCE`）；`--local`/探索期失败默认仅写本地诊断与 `signals.jsonl` 不刷远端工单（外环阻断或显式 `--escalate` 才升级建单）；
+- `check-empirical`/`check-fault` 跳过槽同步以保护在测故障与 `--local` 未提交改动；干净 HEAD 自动复用 `gate-receipt.json` 避免重复静态重扫；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直阻断。
 
 ## 零预设工具分级实证策略与上下文装配
 
@@ -61,7 +61,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> |
 1. **Behavioral Gate（行为与实证门）**：
    - 形式验证（类型/Schema/`arch-rules`/静态门禁）与实证验证（真启运行、E2E、渲染/交互与浅深色截图、CLI 实测）优先于纯读代码挑刺。
    - 核对 `verifiedHead === HEAD` 与 `AGENTS.md` Dev Profile；涉及运行态且配了 `smoke-verify` 时，在审查 worktree 跑通并附 `--e2e-evidence`，解锁 `--include-diff` 后核查 `business-flows` 与冻结 `C*` 实质落地，禁转交人肉代测。
-   - `empiricalVisualCheckRequired === true`（含 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`）须实开渲染界面走通交互并核浅深色截图，禁纯读代码下结论。
+   - `visualCheckRequired`（`empiricalVisualCheckRequired === true`，含 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`）独立于 `riskTier='high'`，须实开渲染界面走通交互并核浅深色截图，禁纯读代码下结论。
 2. **Structural Gate（结构与边界门）**：拦截 diff 新增行中的履历墓碑注释、借口/压制标记（`@ts-ignore`/`@ts-nocheck`/`eslint-disable`/`# noqa`/`# type: ignore`/`#[allow(`/`HACK`/`WORKAROUND`/`TEMP`），校验 `arch-rules:` 跨层引用，并对触碰 `>800`（高危 `1500`）行源码预警拆分。
 3. **Door Assessment（门型评估）**：判 `two-way` 或 `one-way`（弱化门禁/工作流/发版锁文件/安全与 Schema 迁移/`do-not-edit`/声明 `merge-authority: human`）；`gateWeakened: true` 或不可逆边界锁定 `mergeAuthority = human-required`。
 
@@ -77,7 +77,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> |
 4. **R2+ 换人、增量视野与 `A4` 基线**：
    - Round 1 审 `base...head`；Round 2+ 必新建独立 `review` 子代理并由 `review-locks.mjs` 拦截——复用历史审稿人报 `BLOCKED_SAME_REVIEWER_REREVIEW`（`3`，`next` 输出 `excludedReviewers`），同 `HEAD` 报 `BLOCKED_SAME_HEAD_REREVIEW`，代码指纹未变报 `BLOCKED_NO_REWORK_CHANGES`（`3`）；
    - `flow.mjs sync` 变基后自动用 `git range-diff` 提取 `!`/`>` 新提交限定视野；Round 2+ 只核未关 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`，越界报 `BLOCKED_OUT_OF_SCOPE_MUST_FIX`；`pass` 前核门禁阻断 `BLOCKED_PASS_WITH_OPEN_BLOCKERS`。
-5. **独立性与指纹硬锁**：`--reviewer-id === implementerId` 报 `SELF_REVIEW_REJECTED`（`3`）；未决比对按 `(file, summary)` 完整 `fingerprint`，不因不同文件同标 `C*` 误触发停损。
+5. **独立性与指纹硬锁**：`--reviewer-id ∈ implementers[]` 或等于 `implementerId` 报 `SELF_REVIEW_REJECTED`（`3`）；未决比对按 `(file, summary)` 完整 `fingerprint`，不因不同文件同标 `C*` 误触发停损。
 6. **停损熔断与记账双写**：历史已触发停损未解锁时禁 Round 4+ 绕过（退出码 `4` `STOP_LOSS_ESCALATE`，写 `stopLossPacket` 并经 `escalation.mjs` 建追踪单），仅人类 `override` 解锁；支持 `--disposition` 记四类处置统计：
 
 ```sh

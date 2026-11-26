@@ -1,9 +1,9 @@
 /**
- * fixtures-review-contracts.mjs —— 审查栏四字段与收尾七步判据本体夹具。
+ * fixtures-review-contracts.mjs —— 审查栏三字段与收尾七步判据本体及 Case 2 条款/评论瘦身双向夹具。
  */
 
 import { join } from 'node:path'
-import { loadPreflight } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, loadPreflight, rmTree, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerReviewContractsCases(cases) {
 // ── 审查栏与收尾步骤：判据本体（不是复刻一份循环） ──────────────────────
@@ -13,40 +13,37 @@ export function registerReviewContractsCases(cases) {
 // 反面用例同样重要：判据如果会误伤正常写法，修的人第一件事是把判据放宽，而放宽之后
 // 它就再也拦不住真问题了。
 
-cases.push(['审查栏：四个字段必须排在同一段里', async () => {
+cases.push(['审查栏：三个字段必须排在同一段里', async () => {
   const { reviewBlockMissing } = await loadPreflight()
   const block = [
-    '- **审查来源**：子代理',
     '- **逐条标准状态**：fail: 无',
     '- **故障注入记录**：删了一行，红了',
-    '- **止损记录**：未触发',
+    '- **实证核验**：preflight 与 fixtures 退出码 0',
   ].join('\n')
-  if (reviewBlockMissing(block).length !== 0) return '四行排在一起却仍报缺'
+  if (reviewBlockMissing(block).length !== 0) return '三行排在一起却仍报缺'
 
   // 正面：删掉一行，那一块就不完整了。
-  for (const drop of [0, 1, 2, 3]) {
+  for (const drop of [0, 1, 2]) {
     const lines = block.split('\n')
     lines.splice(drop, 1)
     if (reviewBlockMissing(lines.join('\n')).length === 0) return `删掉第 ${drop + 1} 行仍被判成完整`
   }
 
-  // 正面（这是这次修的形状）：同样的四个词散落在不相邻的段落里，不算一块。
+  // 正面（这是这次修的形状）：同样的三个词散落在不相邻的段落里，不算一块。
   // 「出现过就算」的判据在这里会假绿——而正文里解释这些字段时本来就会用到这些词。
   const scattered = [
-    '- **审查来源**：子代理',
+    '- **逐条标准状态**：fail: 无',
     '',
-    '这段正文解释什么叫逐条标准状态。',
+    '这段正文解释什么叫故障注入记录。',
     '',
-    '这段正文又提到故障注入记录。',
-    '',
-    '- **止损记录**：未触发',
+    '这段正文又提到实证核验。',
   ].join('\n')
   if (reviewBlockMissing(scattered).length === 0) {
     return '分散在正文里的同名文字被当成了一个字段块——这正是「出现过就算」的假绿形状'
   }
 
-  // 反面：一条都没有时，四项全报，不许说齐了。
-  if (reviewBlockMissing('## 独立审查\n\n什么都没写\n').length !== 4) return '一条都没有时应当四项全缺'
+  // 反面：一条都没有时，三项全报，不许说齐了。
+  if (reviewBlockMissing('## 独立审查\n\n什么都没写\n').length !== 3) return '一条都没有时应当三项全缺'
   return true
 }])
 
@@ -382,5 +379,195 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
   }
 
   return true
+}])
+
+cases.push(['Case 2 条款截断/全角/跨端回退与单源评论瘦身去噪双向夹具', async () => {
+  const { summarizeContextBody } = await import('../../kit/skills/dev-flow/scripts/flow-context.mjs')
+  const { extractCriteriaFromBodyText } = await import('../../kit/skills/lib/plan-sync.mjs')
+  const { parseAcceptanceCriteria } = await import('../../kit/skills/dev-review/scripts/review-gates.mjs')
+  const { syncReviewToGitHub } = await import('../../kit/skills/dev-review/scripts/review-sync.mjs')
+  const { buildReviewComments, renderReviewSection } = await import('../../kit/skills/lib/review-comment-render.mjs')
+  const { buildIntakeDecisionComments, buildMergeComments } = await import('../../kit/skills/lib/doc-comments.mjs')
+  const { createLocalIssue } = await import('../../kit/skills/lib/local-issues.mjs')
+
+  // 1) summarizeContextBody 超 1200 字符截断仍完整保留 C* 清单行（且跳过代码块内假条款）
+  const filler = '背景描述说明段落。'.repeat(180)
+  const longBody = [
+    filler,
+    '```md',
+    '- [ ] C99: 代码块示例不应被提取',
+    '```',
+    '- [ ] C1：全角冒号条款在截断区之外仍应完整保留',
+    '- [x] C2: 半角冒号已完成条款同样保留',
+  ].join('\n')
+  const summary = summarizeContextBody(longBody, 1200)
+  if (!summary.includes('- [ ] C1：全角冒号条款在截断区之外仍应完整保留')
+    || !summary.includes('- [x] C2: 半角冒号已完成条款同样保留')
+    || summary.includes('C99: 代码块示例')) {
+    return `summarizeContextBody 截断保留 C* 异常：\n${summary.slice(-400)}`
+  }
+  const parsedFromSummary = extractCriteriaFromBodyText(summary, 'issue#1')
+  if (parsedFromSummary.length !== 2 || parsedFromSummary[0].id !== 'C1' || parsedFromSummary[1].id !== 'C2') {
+    return `截断摘要未能无损解析 C1/C2：${JSON.stringify(parsedFromSummary)}`
+  }
+
+  // 反面：边界切在 C1 行中间时不留半截 C1 覆盖完整条款
+  const boundaryPrefix = 'a'.repeat(1192)
+  const midCutBody = `${boundaryPrefix}\n- [ ] C1：跨截断边界的完整验收条件文本`
+  const midSummary = summarizeContextBody(midCutBody, 1200)
+  const midParsed = extractCriteriaFromBodyText(midSummary, 'issue#2')
+  if (midParsed.length !== 1 || midParsed[0].text !== '跨截断边界的完整验收条件文本') {
+    return `跨边界截断导致 C1 文本不完整：${JSON.stringify(midParsed)}`
+  }
+
+  // 2) 全角冒号 + 同步 getLocalIssue 回退 + 异步 backend.getIssue 回退（含离线负例）
+  const dir = tmpProject({
+    'README.md': '# parity\n',
+    'src/app.mjs': 'export const ok = 1\n',
+  })
+  try {
+    gitInit(dir, { branch: 'main', name: 'Dev', email: 'dev@example.com' })
+    gitCommitFast(dir, 'init')
+    const locIss = await createLocalIssue({
+      mainRoot: dir,
+      title: 'Local Case 2 Issue',
+      body: '## 验收标准\n- [ ] C1：本地工单全角条款\n- [x] **C2**：本地工单加粗条款\n',
+    })
+    if (!locIss.ok) return `createLocalIssue 失败：${JSON.stringify(locIss)}`
+
+    const localFallback = parseAcceptanceCriteria(dir, dir, { linkedIssues: [locIss.number], issueContext: [] })
+    if (localFallback.length !== 2 || localFallback[0].id !== 'C1' || localFallback[0].text !== '本地工单全角条款' || localFallback[1].id !== 'C2') {
+      return `同步 getLocalIssue 回退解析失败：${JSON.stringify(localFallback)}`
+    }
+    const missingLocal = parseAcceptanceCriteria(dir, dir, { linkedIssues: [9999], issueContext: [] })
+    if (missingLocal.length !== 0) {
+      return `不存在的本地工单应 Fail-Soft 返回空数组：${JSON.stringify(missingLocal)}`
+    }
+
+    // 异步 backend.getIssue 回退（在线）与离线不发请求（反面）
+    gitSync(dir, ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'])
+    let getIssueCalls = 0
+    const postedRemote = []
+    const mockOnlineClient = {
+      tier: 'gh-cli',
+      async getIssue(repo, num) {
+        getIssueCalls += 1
+        return { ok: true, number: num, body: '## 验收标准\n- [ ] C1：远端异步条款一\n- [x] C2: 远端异步条款二' }
+      },
+      async postComment(p) { postedRemote.push(p); return { ok: true, id: postedRemote.length } },
+      async addLabels() { return { ok: true } },
+      async removeLabel() { return { ok: true } },
+    }
+    const syncOnline = await syncReviewToGitHub({
+      mainRoot: dir,
+      workTreeRoot: dir,
+      ledger: { taskId: 'c2-remote', role: 'maintainer', providerId: 'github', prNumber: 50, linkedIssues: [60], baseSha: '1111111' },
+      round: 1,
+      verdict: 'pass',
+      headSha: '2222222',
+      reviewerId: 'rev-c9',
+      implementerId: 'impl-c9',
+      empiricalSummary: 'node scripts/dev/fixtures.mjs 退出码 0',
+      stopLoss: false,
+      stopReasons: [],
+      mustFixList: [],
+      shouldFixList: [],
+      nextSteps: ['node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task c2-remote'],
+      opts: { _ghClient: mockOnlineClient, _ghProbe: { env: { providerId: 'github', trackB: { tier: 'gh-cli', login: 'rev-user' } }, client: mockOnlineClient } },
+    })
+    const remotePrBody = postedRemote.find((c) => c.number === 50)?.body ?? ''
+    const remoteIssBody = postedRemote.find((c) => c.number === 60)?.body ?? ''
+    if (!syncOnline.synced || getIssueCalls !== 1
+      || !remotePrBody.includes('#### 验收标准逐条核对')
+      || !remotePrBody.includes('远端异步条款一')
+      || remotePrBody.includes('node ".agents/')
+      || remotePrBody.includes('审查来源')
+      || remotePrBody.includes('对比基线')
+      || remotePrBody.includes('止损记录')
+      || remoteIssBody.includes('#### 验收标准逐条核对')
+      || !remoteIssBody.includes('PR #50')) {
+      return `远端 backend.getIssue 回退或单源瘦身断言失败：calls=${getIssueCalls}\nPR:\n${remotePrBody}\nISS:\n${remoteIssBody}`
+    }
+
+    let offlineCalls = 0
+    const mockOfflineClient = {
+      tier: 'offline',
+      async getIssue() { offlineCalls += 1; return { ok: true, body: '- [ ] C1: should not run' } },
+    }
+    const syncOffline = await syncReviewToGitHub({
+      mainRoot: dir,
+      workTreeRoot: dir,
+      ledger: { taskId: 'c2-off', role: 'maintainer', providerId: 'github', prNumber: 51, linkedIssues: [61], baseSha: '1111111' },
+      round: 1,
+      verdict: 'pass',
+      headSha: '2222222',
+      reviewerId: 'rev-off',
+      implementerId: 'impl-off',
+      empiricalSummary: 'offline check',
+      stopLoss: false,
+      stopReasons: [],
+      mustFixList: [],
+      shouldFixList: [],
+      opts: { _ghClient: mockOfflineClient, _ghProbe: { env: { providerId: 'github', trackB: { tier: 'offline' } }, client: mockOfflineClient } },
+    })
+    if (!syncOffline.offlineOrNoCreds || offlineCalls !== 0) {
+      return `离线路径不应触发远端 getIssue 或改变离线短路语义：calls=${offlineCalls}, res=${JSON.stringify(syncOffline)}`
+    }
+
+    // 3) renderReviewSection({ isFull }) 无 PR 工单渲染全量核对表 + 条件止损 + 清除内部 CLI 泄漏
+    const noPrBuilt = buildReviewComments({
+      round: 2,
+      verdict: 'changes',
+      baseSha: 'aaaaaaa',
+      headSha: 'bbbbbbb',
+      reviewerDisplay: '`rev-local`',
+      implementerDisplay: '`impl-local`',
+      empiricalSummary: 'preflight + fixtures 实测通过',
+      criteria: [{ id: 'C1', checked: false, text: '无 PR 工单也应输出完整核对表' }],
+      criteriaStatusText: 'fail: C1',
+      faultInjectionText: '故障注入变红、还原复绿',
+      stopLoss: true,
+      stopReasons: ['达到 3 轮上限'],
+      mustFixList: [{ id: 'M1', fingerprint: 'fp-m1', criterion: 'C1', file: 'src/app.mjs', line: 1, summary: '修复 C1' }],
+      shouldFixList: ['补充注释'],
+      preExistingList: ['存量观察'],
+      prNum: null,
+      nextSteps: ['node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task demo'],
+    })
+    if (!noPrBuilt.issueCommentBody.includes('#### 验收标准逐条核对')
+      || !noPrBuilt.issueCommentBody.includes('- **故障注入记录**：')
+      || !noPrBuilt.issueCommentBody.includes('- **止损记录**：已触发（达到 3 轮上限）')
+      || !noPrBuilt.issueCommentBody.includes('#### Should Fix')
+      || noPrBuilt.issueCommentBody.includes('审查来源')
+      || noPrBuilt.issueCommentBody.includes('对比基线')
+      || noPrBuilt.issueCommentBody.includes('node ".agents/')) {
+      return `无 PR 工单全量渲染或条件止损异常：\n${noPrBuilt.issueCommentBody}`
+    }
+    const compactDirect = renderReviewSection({
+      isFull: false,
+      isIssue: true,
+      round: 1,
+      verdict: 'pass',
+      headSha: 'bbbbbbb',
+      criteriaStatusText: 'fail: 无 / pass: C1',
+      empiricalSummary: '实测退出码 0',
+      prNum: 88,
+    })
+    if (compactDirect.includes('#### 验收标准逐条核对') || !compactDirect.includes('PR #88') || compactDirect.includes('止损记录')) {
+      return `renderReviewSection({ isFull: false }) 紧凑指针摘要异常：\n${compactDirect}`
+    }
+
+    const mergeCom = buildMergeComments({ prNumber: 88, branch: 'feat/x', baseBranch: 'main', headSha: '1234567', reviewerDisplay: '`rev-1`' })
+    const intakeCom = buildIntakeDecisionComments({
+      targetType: 'issue', targetNumber: 9, decision: 'defer',
+      rollbackHint: '运行 `node ".agents/skills/dev-flow/scripts/flow.mjs" close --issue 9`',
+    })
+    if (mergeCom.prCommentBody.includes('flow.mjs') || intakeCom.commentBody.includes('node ".agents/')) {
+      return `doc-comments 仍泄漏内部 CLI 命令：\n${mergeCom.prCommentBody}\n${intakeCom.commentBody}`
+    }
+    return true
+  } finally {
+    rmTree(dir)
+  }
 }])
 }

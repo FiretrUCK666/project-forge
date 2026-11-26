@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: "Review Comment Slimming, Case 2 C1..Cn Parity and Noise Removal"
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-26
 updated: 2026-11-26
-issue: null
-pr: null
-branch: feat/governance-cohesion-v2
+issue: 210
+pr: 211
+branch: feat/review-comment-case2-parity
 owner: planner-arch
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-governance-cohesion-r4, round=4, sha=cf09b3f1614e, summary=Verified mechanical lint/naming fixes at 6e6f870; all design invariants and C1..C12 remain intact.)"
 related_prd: ../prd/261126-suite-cohesion-v2-prd.md
-related_todo: ../todo/261126-review-comment-case2-parity-todo.md
+related_todo: ../todo/261126-issue210-review-comment-case2-parity-todo.md
 high_risk_paths: [kit/, templates/]
 task_id: review-comment-case2-parity
 depends_on: [empirical-handoff-cohesion]
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/review-comment-render.mjs, kit/skills/lib/doc-comme
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块评论契约瘦身、Case 2 `C1..Cn` 跨后端无损提取与契约规则锁步改造；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-26` / `2026-11-26` |
-| 分支 / Issue / PR | `feat/governance-cohesion-v2` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/review-comment-case2-parity` / #210 / #211 |
 | 负责人 / 内审状态 | planner-arch / `passed` |
 | 规划态 | `interactive`（评论字段契约与依赖顺序已由总控 PRD 冻结，待拍板为零） |
-| 关联 PRD / Todo | `../prd/261126-suite-cohesion-v2-prd.md` / `../todo/261126-review-comment-case2-parity-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261126-suite-cohesion-v2-prd.md` / `docs/archive/todo/261126-issue210-review-comment-case2-parity-todo.md` |
 
 - **变更一句话**：保障 Case 2 `C1..Cn` 在截断、全角冒号与本地/远端工单回退下全量不丢，单源瘦身 PR/Issue 审查评论并清除噪音、冗余首评与内部 CLI 命令泄漏，锁步对齐新三字段 `REVIEW_FIELDS`、PR 模板、契约脚本、技能说明、夹具与故障注入。
 
@@ -133,10 +133,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C9: `flow-context.mjs:76` `summarizeContextBody` 在超 1200 字符截断时完整保留 `- [ ] C*` 行；将纯条款解析（含全角 `C1：`）与同步 `getLocalIssue` 回退辅助抽入无环模块 `kit/skills/lib/plan-sync.mjs`（避免与 `review-sync.mjs:18` 循环导入），`review-gates.mjs` 保留 `parseAcceptanceCriteria` 与 L256 `I247` 锚点并委托调用（控 `< 780` 行）；将 `review-sync.mjs` `backend` 实例化上移至 L369 前使异步 `backend.getIssue` 回退在渲染前真实执行，经正反夹具验证通过。
-- [ ] C10: `kit/skills/lib/review-comment-render.mjs` 通过单一 `renderReviewSection({ isFull })` 渲染，PR 与无 PR 工单（`!prNum`）输出完整结构含 `#### 验收标准逐条核对`，有 `prNum` 时关联 Issue 输出指向 `PR #N` 的紧凑摘要，且 `I248` 保持拦截。
-- [ ] C11: 清除冗余 `对比基线` 行、默认 `止损记录：未触发`、固定 `审查来源`（`REVIEW_FIELDS = ['逐条标准状态', '故障注入记录', '实证核验']` 且仅 `stopLoss === true` 渲染 `止损记录`）及 `doc-comments.mjs` / `review-comment-render.mjs` 中内部 `node ".agents/..."` 命令泄漏；取消 `flow-lifecycle.mjs:713-717` `createPr` 后立即发送的冗余 `"提交待审"` PR 评论并同步 `fixtures-flow.mjs:641` 与 `fixtures-trace-sync.mjs:422-430`，复验 `injections-data-trace-sync.mjs:33-47`（`I413`/`I414`）通过。
-- [ ] C12: 锁步更新 `scripts/dev/preflight-contract-rules.mjs`、`scripts/dev/preflight-contracts.mjs:407-419`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`references/collaboration.md`、`kit/skills/dev-review/SKILL.md:95`（`<= 14336` B、`<= 180` 行）、`scripts/dev/fixtures-review-contracts.mjs:16-51`、`scripts/dev/fixtures-flow.mjs:210`、`scripts/dev/injections-data-core.mjs:56-71`（`I7`/`I8`，保 `I247`/`I248`）与 `node scripts/equip.mjs .`，全绿通过 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4` 与 `merge-gate.mjs`。
+- [x] C9: `flow-context.mjs:76` `summarizeContextBody` 在超 1200 字符截断时完整保留 `- [ ] C*` 行；将纯条款解析（含全角 `C1：`）与同步 `getLocalIssue` 回退辅助抽入无环模块 `kit/skills/lib/plan-sync.mjs`（避免与 `review-sync.mjs:18` 循环导入），`review-gates.mjs` 保留 `parseAcceptanceCriteria` 与 L256 `I247` 锚点并委托调用（控 `< 780` 行）；将 `review-sync.mjs` `backend` 实例化上移至 L369 前使异步 `backend.getIssue` 回退在渲染前真实执行，经正反夹具验证通过。
+- [x] C10: `kit/skills/lib/review-comment-render.mjs` 通过单一 `renderReviewSection({ isFull })` 渲染，PR 与无 PR 工单（`!prNum`）输出完整结构含 `#### 验收标准逐条核对`，有 `prNum` 时关联 Issue 输出指向 `PR #N` 的紧凑摘要，且 `I248` 保持拦截。
+- [x] C11: 清除冗余 `对比基线` 行、默认 `止损记录：未触发`、固定 `审查来源`（`REVIEW_FIELDS = ['逐条标准状态', '故障注入记录', '实证核验']` 且仅 `stopLoss === true` 渲染 `止损记录`）及 `doc-comments.mjs` / `review-comment-render.mjs` 中内部 `node ".agents/..."` 命令泄漏；取消 `flow-lifecycle.mjs:713-717` `createPr` 后立即发送的冗余 `"提交待审"` PR 评论并同步 `fixtures-flow.mjs:641` 与 `fixtures-trace-sync.mjs:422-430`，复验 `injections-data-trace-sync.mjs:33-47`（`I413`/`I414`）通过。
+- [x] C12: 锁步更新 `scripts/dev/preflight-contract-rules.mjs`、`scripts/dev/preflight-contracts.mjs:407-419`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`references/collaboration.md`、`kit/skills/dev-review/SKILL.md:95`（`<= 14336` B、`<= 180` 行）、`scripts/dev/fixtures-review-contracts.mjs:16-51`、`scripts/dev/fixtures-flow.mjs:210`、`scripts/dev/injections-data-core.mjs:56-71`（`I7`/`I8`，保 `I247`/`I248`）与 `node scripts/equip.mjs .`，全绿通过 `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4` 与 `merge-gate.mjs`。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -151,5 +151,8 @@ flowchart LR
 ## 实现说明
 
 - **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+  - C9：在 `kit/skills/dev-flow/scripts/flow-context.mjs` 的 `summarizeContextBody` 中支持超 1200 字符截断时完整保留 `- [ ] C*` 行并修剪落在清单行中段的截断残尾；将纯条款解析 `extractCriteriaFromBodyText`（兼容全角 `C1：`、加粗与未编号复选框，跳过围栏代码块）及同步 `getLocalIssue` 回退辅助 `appendFallbackCriteriaFromTask` 抽入无环模块 `kit/skills/lib/plan-sync.mjs`（657 行）；`kit/skills/dev-review/scripts/review-gates.mjs` 缩减至 762 行（`< 780`）并完整保留 `I247` 锚点；`kit/skills/dev-review/scripts/review-sync.mjs` 将 `backend` 实例化前置至 `parseAcceptanceCriteria` 前，在线凭据有效时异步回退 `backend.getIssue` 补全条款且保持离线短路语义不变。
+  - C10-C11：在 `kit/skills/lib/review-comment-render.mjs` 落地单源 `renderReviewSection({ isFull })`（PR 与无 PR 工单 `!prNum` 全量输出含 `#### 验收标准逐条核对`，关联 PR 的 Issue 输出紧凑指针摘要，保留 `I248` 锚点），去除 `对比基线`、默认 `止损记录：未触发` 与 `审查来源`（仅 `stopLoss === true` 条件渲染 `止损记录`），清理 `review-comment-render.mjs` 与 `doc-comments.mjs` 中对外暴露的内部 `node ".agents/..."` / `.mjs` CLI 命令；取消 `kit/skills/dev-flow/scripts/flow-lifecycle.mjs` 中 `createPr` 后立即发送的冗余 `"提交待审"` PR 评论（保留关联 Issue 的 `已提 PR #N` 与复用 PR 的 `提交更新`/`返工已提交`）。
+  - C12：锁步同步 `REVIEW_FIELDS = ['逐条标准状态', '故障注入记录', '实证核验']` 至 `scripts/dev/preflight-contract-rules.mjs`、`scripts/dev/preflight-contracts.mjs`、双 PR 模板、`references/collaboration.md`、`kit/skills/dev-review/SKILL.md`（105 行 / 11,977 B）、`scripts/dev/fixtures-review-contracts.mjs`、`scripts/dev/fixtures-flow.mjs`、`scripts/dev/fixtures-trace-sync.mjs` 与 `scripts/dev/injections-data-core.mjs`（`I7`/`I8`），复验 `I247`/`I248`/`I413`/`I414` 并运行 `node scripts/equip.mjs .`。
+- **与草案的差异**：无核心差异；`summarizeContextBody` 额外处理了截断边界恰落在清单行中段（如 `- [ ] C` 处）的场景，避免半截行遮蔽完整 `C*` 条款；`flow-lifecycle.mjs` 因切片二合入后行号平移至 L753-763，对应改动保持一致。
+- **关联同步文件**：`.agents/skills/`（经 `node scripts/equip.mjs .` 同步）、`docs/TDD.md`、`.github/pull_request_template.md`、`templates/pull-request-template.md`、`references/collaboration.md`。

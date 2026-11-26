@@ -13,6 +13,7 @@ import {
   detectDeclaredRepo, getHostingProvider, githubRepoFull,
   parsePrNumber, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
+import { extractCriteriaFromBodyText } from '../../lib/plan-sync.mjs'
 import { computeSignalFingerprint, inferDefectClass, inferSignalModule } from '../../lib/signals.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { parseAcceptanceCriteria } from './review-gates.mjs'
@@ -232,6 +233,20 @@ export function buildCriteriaStatusSummary({ workTreeRoot, mainRoot, ledger, ver
   return `fail: ${failList.join(', ')}${passIds.length > 0 ? ` / pass: ${passIds.join(', ')}` : ''}`
 }
 
+async function hydrateCriteriaFromBackend(criteria, { backend, repo = null, issueNums = [] } = {}) {
+  if (criteria.length > 0 || !backend || typeof backend.getIssue !== 'function') return criteria
+  const out = [...criteria]
+  const seen = new Set(out.map((c) => c.id))
+  for (const num of issueNums) {
+    const res = await Promise.resolve(backend.getIssue({ ...(repo ? { repo } : {}), number: num })).catch(() => null)
+    if (!res?.ok || !res.body) continue
+    for (const item of extractCriteriaFromBodyText(res.body, `issue#${num}`, { seen, allowUnnumbered: true })) {
+      out.push(item)
+    }
+  }
+  return out
+}
+
 function resolveFaultInjectionSummary(opts = {}, ledger = {}) {
   const explicit = String(opts['fault-injection'] ?? '').trim()
   if (explicit) return explicit
@@ -278,7 +293,8 @@ export async function syncReviewToGitHub({
     })
     const reviewerDisplay = formatAttribution({ ...revLayers, capabilities: backend.capabilities })
     const implementerDisplay = formatAttribution({ ...implLayers, capabilities: backend.capabilities })
-    const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
+    const parsedCriteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger, { gitDir: opts.gitDir })
+    const criteria = await hydrateCriteriaFromBackend(parsedCriteria, { backend, issueNums })
     const criteriaStatusText = buildCriteriaStatusSummary({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
@@ -289,14 +305,14 @@ export async function syncReviewToGitHub({
     const statePayload = {
       taskId: ledger.taskId, action: 'review', round, verdict, headSha, reviewerId, stopLossTriggered: stopLoss,
     }
-    const { issueCommentBody } = buildReviewComments({
+    const builtLocal = buildReviewComments({
       round, verdict, baseSha: ledger.baseSha, headSha,
-      sourceLine: '独立审查上下文（隔离 worktree 复核）',
       reviewerDisplay, implementerDisplay, empiricalSummary, summary: reviewSummary,
       criteria, criteriaStatusText, faultInjectionText, stopLoss, stopReasons,
       mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems,
       prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })
+    const issueCommentBody = formatReviewCriteriaTable(builtLocal.issueCommentBody)
     const results = []
     const syncFailures = []
     for (const num of issueNums) {
@@ -364,9 +380,21 @@ export async function syncReviewToGitHub({
     })
     const reviewerDisplay = formatAttribution({ ...revLayers, capabilities: providerCaps })
     const implementerDisplay = formatAttribution({ ...implLayers, capabilities: providerCaps })
-    const sourceLine = '独立审查上下文（隔离 worktree 复核）'
+    const backend = createTaskBackend({
+      role: ledger.role, providerId: ledger.providerId, targetRepo,
+      client: ghClient, mainRoot, gitDir: opts.gitDir,
+    })
 
-    const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
+    const canFetchRemoteIssue = Boolean(
+      hasRemote
+      && targetRepo
+      && (opts._ghClient || ghProbe?.env?.providerId === 'github')
+      && (tier === 'gh-cli' || tier === 'node-https-token'),
+    )
+    const parsedCriteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger, { gitDir: opts.gitDir })
+    const criteria = canFetchRemoteIssue
+      ? await hydrateCriteriaFromBackend(parsedCriteria, { backend, repo: targetRepo, issueNums })
+      : parsedCriteria
     const criteriaStatusText = buildCriteriaStatusSummary({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
@@ -381,13 +409,14 @@ export async function syncReviewToGitHub({
     }
 
     const built = buildReviewComments({
-      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine,
+      round, verdict, baseSha: ledger.baseSha, headSha,
       reviewerDisplay, implementerDisplay, empiricalSummary, summary: reviewSummary, criteria, criteriaStatusText,
       faultInjectionText, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList,
       rebuttedItems, resolvedItems, prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })
     const prCommentBody = formatReviewCriteriaTable(built.prCommentBody)
-    const { issueCommentBody, stateTag } = built
+    const issueCommentBody = formatReviewCriteriaTable(built.issueCommentBody)
+    const { stateTag } = built
     const targets = [
       ...(prNum ? [{ kind: 'pr', number: prNum }] : []),
       ...issueNums.filter((n) => n !== prNum).map((n) => ({ kind: 'issue', number: n })),
@@ -427,10 +456,6 @@ export async function syncReviewToGitHub({
       }
     }
 
-    const backend = createTaskBackend({
-      role: ledger.role, providerId: ledger.providerId, targetRepo,
-      client: ghClient, mainRoot, gitDir: opts.gitDir,
-    })
     const results = []
     const syncFailures = []
     for (const t of targets) {

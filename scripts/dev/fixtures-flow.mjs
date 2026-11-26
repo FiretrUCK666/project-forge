@@ -207,11 +207,14 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
       return `record changes 未双写 PR/Issue 或未贴 changes-requested：code=${recChangesCode}, labels88=${[...(labelsByNum.get(88) ?? [])]}`
     }
     const lastPrCom = (commentsByNum.get(88) ?? []).at(-1)?.body ?? ''
-    for (const kw of ['### 审核不通过（退回） · Round 1', '审查来源', '逐条标准状态', '故障注入记录', '止损记录', '"action":"review"', '#### 验收标准逐条核对', '| C1 | FAIL |', '| C2 | PASS |', 'src/app.mjs:1', '缺少空值守卫', '先判空再返回', '#### Should Fix', '#### Pre-existing', 'src/legacy.mjs:3 历史遗留告警']) {
+    for (const kw of ['### 审核不通过（退回） · Round 1', '逐条标准状态', '故障注入记录', '实证核验', '"action":"review"', '#### 验收标准逐条核对', '| C1 | FAIL |', '| C2 | PASS |', 'src/app.mjs:1', '缺少空值守卫', '先判空再返回', '#### Should Fix', '#### Pre-existing', 'src/legacy.mjs:3 历史遗留告警']) {
       if (!lastPrCom.includes(kw)) return `PR 评论缺关键字段 ${kw}：\n${lastPrCom}`
     }
+    if (lastPrCom.includes('审查来源') || lastPrCom.includes('对比基线') || lastPrCom.includes('止损记录')) {
+      return `非停损 PR 评论不应含冗余噪音字段：\n${lastPrCom}`
+    }
     const lastIssueCom = (commentsByNum.get(77) ?? []).at(-1)?.body ?? ''
-    for (const kw of ['### 审核不通过（退回） · Round 1', 'PR #88', '逐条状态与标签', 'src/app.mjs:1', '缺少空值守卫', 'Pre-existing 1 项']) {
+    for (const kw of ['### 审核不通过（退回） · Round 1', 'PR #88', '逐条状态与标签', '实证核验', 'src/app.mjs:1', '缺少空值守卫', 'Pre-existing 1 项']) {
       if (!lastIssueCom.includes(kw)) return `Issue 摘要评论缺关键字段 ${kw}：\n${lastIssueCom}`
     }
     if (lastIssueCom.includes('#### 验收标准逐条核对')) {
@@ -582,7 +585,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     if (rpBad.status !== 2) return `review-pack --pr 未拒绝 Issue URL：status=${rpBad.status}`
 
     // finalize 实现说明：大写占位词阻断，合法 Todo / docs/todo/ 放行
-    const { resolveRepoRoots: resUrlRoots, readTaskLedger: readUrlLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots: resUrlRoots, readTaskLedger: readUrlLedger, updateTaskLedger: updUrlLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart: startUrl } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleFinalize: finUrl, handleVerify: verUrl, handleSubmit: subUrl } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim: claimUrl, handleCleanup: clUrl } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -635,11 +638,14 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
         async createPr({ title }) { return { ok: true, number: 99, url: 'https://github.com/acme/demo/pull/99', title } },
         async postComment(p) { postedComments.push(p); return { ok: true, id: postedComments.length, verifiedReadback: true } },
       }
+      await updUrlLedger(urlDir, 'note-case', (cur) => ({ ...cur, linkedIssues: [42] }))
       const subRes = await subUrl({ task: 'note-case', agent: 'url-dev', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'url-dev' } }, client: mockSubmitClient } }, urlRoots)
       const noteLedger = readUrlLedger(urlDir, 'note-case')
       const noteDirtyAfterPush = gitSync(implNote, ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim()
-      if (subRes.exitCode !== 0 || noteLedger?.prNumber !== 99 || noteDirtyAfterPush !== '' || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev') && c.body.includes('### 提交待审'))) {
-        return `handleSubmit 零脏文件/账本 prNumber 或首提 PR 评论失败：code=${subRes.exitCode}, pr=${noteLedger?.prNumber}, dirty="${noteDirtyAfterPush}"`
+      if (subRes.exitCode !== 0 || noteLedger?.prNumber !== 99 || noteDirtyAfterPush !== ''
+        || postedComments.some((c) => c.number === 99)
+        || !postedComments.some((c) => c.number === 42 && c.body.includes('@url-dev') && c.body.includes('已提 PR #99'))) {
+        return `handleSubmit 零脏文件/新建 PR 去冗余首评或 Issue 评论失败：code=${subRes.exitCode}, pr=${noteLedger?.prNumber}, dirty="${noteDirtyAfterPush}", comments=${JSON.stringify(postedComments)}`
       }
     } finally { rmTree(bareRem) }
 

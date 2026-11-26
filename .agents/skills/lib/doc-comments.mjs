@@ -4,9 +4,15 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 doc-templates.mjs / docs.mjs / shared.mjs 汇总导出。
  */
 
-import { buildReviewComments, cleanMdCell } from './review-comment-render.mjs'
+import { buildReviewComments, cleanMdCell, renderReviewSection } from './review-comment-render.mjs'
 
-export { buildReviewComments }
+export { buildReviewComments, renderReviewSection }
+
+const INTERNAL_CLI_CMD_RE = /`?node\s+["']?\.agents\/[^`\n]+`?/gi
+
+function sanitizeExternalCommentText(text) {
+  return String(text ?? '').replace(INTERNAL_CLI_CMD_RE, '对应工作流命令').trim()
+}
 
 const VALID_HANDLE_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/
 
@@ -239,7 +245,7 @@ export function buildMergeComments({
       ? `- **来源分支 / 实施人**：\`${branch}\`${shortHead ? ` @ \`${shortHead}\`` : ''} · ${cleanImpl}`
       : `- **来源分支**：\`${branch}\`${shortHead ? ` @ \`${shortHead}\`` : ''}`,
     ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
-    '- **下一步**：核对待清理 Worktree 与分支清单后由维护者确认执行 `flow.mjs cleanup --confirm`。',
+    '- **下一步**：核对待清理 Worktree 与分支清单，经维护者确认后执行清理收尾。',
   ].join('\n')
   const issueCommentBody = [
     `### 已合并 · PR #${prNumber}（\`${branch}\` -> \`${baseBranch}\`）`,
@@ -345,7 +351,7 @@ export function buildIntakeDecisionComments({
   const narrative = String(rationale || humanExplanation || reason || summary || '已完成五维业务边界与契约核对。').trim()
   lines.push(narrative)
   if (rollbackHint) {
-    lines.push('', `- **撤销与恢复路径**：${rollbackHint}`)
+    lines.push('', `- **撤销与恢复路径**：${sanitizeExternalCommentText(rollbackHint)}`)
   }
   lines.push('', stateTag)
 

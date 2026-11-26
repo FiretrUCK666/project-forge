@@ -422,11 +422,11 @@ export function registerTraceSyncCases(cases) {
       const srvState = await srv.getState()
       const prCmts = srvState.comments[prNum] ?? []
       const issCmts = srvState.comments[ghIss.number] ?? []
-      if (!prCmts.some((c) => c.body.includes('### 提交待审（Round 1'))
+      if (prCmts.some((c) => c.body.includes('### 提交待审'))
         || !prCmts.some((c) => c.body.includes('### 提交更新（Round 1 · HEAD 更新 @'))
-        || prCmts.filter((c) => c.body.includes('### 提交待审')).length !== 1
+        || !issCmts.some((c) => c.body.includes(`已提 PR #${prNum}`))
         || !issCmts.some((c) => c.body.includes('### 提交更新（Round 1 · HEAD 更新 @'))) {
-        return `同轮二次提交未区分提交更新或重复发提交待审：${JSON.stringify({ prCmts, issCmts })}`
+        return `首次新建 PR 应省略冗余首评且同轮二次提交应区分提交更新：${JSON.stringify({ prCmts, issCmts })}`
       }
 
       // 3) C3：buildIssueCloseComment 与 flow.mjs close 正反双向（GitHub + local-only）

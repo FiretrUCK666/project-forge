@@ -475,16 +475,16 @@
       "sha256": "38113fa665935a721726402caa070d54a4126133e5a43c74e6cff685bf5d1164"
     },
     "lib/visual-layout.mjs": {
-      "sha256": "063c471c91e0258b06355849d4b2cb25d23d445e03982b7eed9f5ac601a98f53"
+      "sha256": "da87d0ee4a4e18a95c5a214974c34624fb27775ba622b9d863927913c21190ba"
     },
     "lib/visual-render-assets.mjs": {
-      "sha256": "efeee2f19b318fd200a359fdefa3fd16465f1e18dac079e62d5b575363011a39"
+      "sha256": "9558bd9d91a4094a8565d359a3ba3f1a18d742a643951459f4d41ce5f87d3111"
     },
     "lib/visual-render-panels.mjs": {
-      "sha256": "461a08a9c54dc0c37da8edf485c0e1d24def87ae0bb6ec3c5352befc8c95517b"
+      "sha256": "93572b9f812e42980f4cea6662185d89985fa3ed6c4bc934bbecdaa9f112e05f"
     },
     "lib/visual-render.mjs": {
-      "sha256": "76989bf8b45b7f4486ec5f3cf13ce646c5c40d4395cc4d24ee8dd72ec0ab53d1"
+      "sha256": "b3e6dbfaabc86eb4d05f0d6e24b4fdf99c1b3aeaa34b269d3593568ea9e4b151"
     },
     "lib/workflow-helpers.mjs": {
       "sha256": "85b90f25b2b0df8a8aad37ee813b46ea5efa3d1a8e187ce751a2fc974bff1b40"

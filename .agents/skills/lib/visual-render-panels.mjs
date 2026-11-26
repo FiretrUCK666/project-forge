@@ -72,7 +72,7 @@ function renderChangeCardHtml({ item, downstream = [] }) {
   const nestedHtml = downstream.length > 0
     ? `<div class="pf-impact-nest"><span class="pf-impact-lbl">波及下游 (${downstream.length})</span><div class="pf-chip-row">${downstream.map((imp) => `<button type="button" class="pf-chip-btn" data-target-id="${escapeXml(imp.id)}">${escapeHtml(imp.title)}</button>`).join('')}</div></div>`
     : ''
-  return `<div class="pf-chg-card pf-chg-${escapeXml(st)}"><button type="button" class="pf-chg-main" data-target-id="${escapeXml(item.id)}"><div class="pf-chg-head"><strong${titleCls}>${escapeHtml(item.title)}</strong><span class="pf-pill pf-pill-${escapeXml(st)}">${escapeXml(label)}</span></div><span class="pf-muted-note">${escapeHtml(item.domainTitle || item.domain)}</span>${detailHtml}</button>${nestedHtml}</div>`
+  return `<div class="pf-chg-card pf-chg-${escapeXml(st)}" data-diff-state="${escapeXml(st)}"><button type="button" class="pf-chg-main" data-target-id="${escapeXml(item.id)}"><div class="pf-chg-head"><strong${titleCls}>${escapeHtml(item.title)}</strong><span class="pf-pill pf-pill-${escapeXml(st)}">${escapeXml(label)}</span></div><span class="pf-muted-note">${escapeHtml(item.domainTitle || item.domain)}</span>${detailHtml}</button>${nestedHtml}</div>`
 }
 
 export function renderBlueprintLandingHtml(model, verdict, verdictLabel) {
@@ -92,7 +92,7 @@ export function renderBlueprintLandingHtml(model, verdict, verdictLabel) {
     ['modified', '修改模块', counts.modified || 0],
     ['removed', '拟移除', counts.removed || 0],
     ['impacted', '受波及下游', counts.impacted || 0],
-  ].map(([st, lbl, num]) => `<div class="pf-stat-box"><span class="pf-stat-num">${num}</span><span class="pf-stat-lbl">${lbl}</span></div>`).join('')
+  ].map(([st, lbl, num]) => `<button type="button" class="pf-stat-box pf-stat-${st}" data-diff-filter="${st}" title="点击筛选「${lbl}」，再次点击清除"><span class="pf-stat-num">${num}</span><span class="pf-stat-lbl">${lbl}</span></button>`).join('')
 
   const changesHtml = entries.length > 0
     ? `<div class="pf-chg-grid">${entries.map(renderChangeCardHtml).join('')}</div>`
@@ -174,7 +174,7 @@ export function renderDiffRowsHtml(nodes, edges = []) {
 export function renderFocusCardHtml() {
   return [
     '<aside id="pf-focus-card" class="pf-focus-card" aria-live="polite" hidden>',
-    '<div class="pf-fc-head"><div class="pf-fc-meta"><span id="fc-domain" class="pf-pill"></span><span id="fc-diff" class="pf-pill" hidden></span><span id="fc-risk" class="pf-pill"></span></div><div class="pf-fc-actions"><button id="fc-detail" class="pf-btn pf-btn-primary pf-btn-sm" type="button">完整档案 (Space)</button><button id="fc-center" class="pf-btn pf-btn-sm" type="button">画布居中</button><button id="fc-close" class="pf-btn pf-btn-sm" type="button">关闭</button></div></div>',
+    '<div class="pf-fc-head"><div class="pf-fc-meta"><span id="fc-domain" class="pf-pill"></span><span id="fc-diff" class="pf-pill" hidden></span><span id="fc-risk" class="pf-pill"></span></div><div class="pf-fc-actions"><button id="fc-detail" class="pf-btn pf-btn-primary pf-btn-sm" type="button">查看详情 (Space)</button><button id="fc-center" class="pf-btn pf-btn-sm" type="button">居中定位</button><button id="fc-ask" class="pf-btn pf-btn-sm" type="button">问 AI</button><button id="fc-close" class="pf-btn pf-btn-sm" type="button">关闭</button></div></div>',
     '<h3 id="fc-title" class="pf-fc-title"></h3>',
     '<div id="fc-change" class="pf-change-box" hidden></div>',
     '<div class="pf-fc-rels"><div class="pf-fc-rel"><span class="pf-inspector-label">← 上游</span><div id="fc-up" class="pf-chip-row"></div></div><div class="pf-fc-rel"><span class="pf-inspector-label">下游 →</span><div id="fc-down" class="pf-chip-row"></div></div></div>',
@@ -186,7 +186,7 @@ export function renderQuickLookModalHtml() {
   return [
     '<div id="pf-quicklook" class="pf-dialog" role="dialog" aria-modal="true" aria-labelledby="ql-title" hidden>',
     '<div class="pf-dialog-card pf-ql-card">',
-    '<div class="pf-dlg-head"><div class="pf-chip-row"><span id="ql-domain" class="pf-pill"></span><span id="ql-diff" class="pf-pill" hidden></span><span id="ql-risk" class="pf-pill"></span></div><div class="pf-chip-row"><button id="ql-center" class="pf-btn pf-btn-sm" type="button">画布居中</button><button id="ql-close" class="pf-btn pf-btn-sm" type="button">关闭 (Esc)</button></div></div>',
+    '<div class="pf-dlg-head"><div class="pf-chip-row"><span id="ql-domain" class="pf-pill"></span><span id="ql-diff" class="pf-pill" hidden></span><span id="ql-risk" class="pf-pill"></span></div><div class="pf-chip-row"><button id="ql-center" class="pf-btn pf-btn-sm" type="button">居中定位</button><button id="ql-close" class="pf-btn pf-btn-sm" type="button">关闭 (Esc)</button></div></div>',
     '<h3 id="ql-title" class="pf-inspector-title">模块详情</h3>',
     '<div id="ql-change" class="pf-change-box" hidden></div>',
     '<p id="ql-desc" class="pf-inspector-desc"></p>',
@@ -197,12 +197,12 @@ export function renderQuickLookModalHtml() {
   ].join('')
 }
 
-export function renderCommandPaletteHtml(tree) {
+export function renderCommandPaletteHtml(tree, hasActiveDiff = true) {
   return [
-    '<div id="pf-cmdk" class="pf-dialog" role="dialog" aria-modal="true" aria-label="命令与模块目录" hidden>',
+    '<div id="pf-cmdk" class="pf-dialog" role="dialog" aria-modal="true" aria-label="搜索模块与快捷操作" hidden>',
     '<div class="pf-dialog-card pf-cmdk-card">',
     '<div class="pf-cmdk-top"><input id="pf-search" class="pf-search" type="search" placeholder="搜索模块、域、源码路径..." aria-label="搜索模块、域或路径" /><button id="cmdk-close" class="pf-btn pf-btn-sm" type="button">Esc</button></div>',
-    '<div class="pf-cmdk-toggles"><button id="cmdk-only-diff" class="pf-seg-btn" type="button">仅看本次变更</button><button id="cmdk-edge-mode" class="pf-seg-btn" type="button">连线：全部</button><button id="cmdk-walk" class="pf-seg-btn" type="button">分步导览</button><button id="cmdk-followup" class="pf-seg-btn" type="button">复制追问</button><button id="cmdk-theme" class="pf-seg-btn" type="button">切换主题</button></div>',
+    `<div class="pf-cmdk-toggles"><button id="cmdk-only-diff" class="pf-seg-btn" type="button"${hasActiveDiff ? '' : ' hidden disabled'}>只看改动</button><button id="cmdk-edge-mode" class="pf-seg-btn" type="button">连线：标准</button><button id="cmdk-walk" class="pf-seg-btn" type="button">分步导览</button><button id="cmdk-followup" class="pf-seg-btn" type="button">向 AI 提问</button><button id="cmdk-theme" class="pf-seg-btn" type="button">切换外观</button></div>`,
     `<div id="pf-cmdk-catalog" class="pf-catalog">${renderCatalogHtml(tree)}</div>`,
     '</div></div>',
   ].join('')
@@ -259,8 +259,8 @@ export function renderPrototypeSwitcher(prototypes = []) {
 export function renderDialogsHtml() {
   return [
     '<div id="walk-bar" class="walk-bar" hidden><button id="walk-prev" class="pf-btn pf-btn-sm" type="button">上一步</button><span id="walk-step-label" class="walk-bar-text"></span><button id="walk-next" class="pf-btn pf-btn-sm" type="button">下一步</button><button id="walk-close" class="pf-btn pf-btn-sm" type="button">退出导览</button></div>',
-    '<div id="prompt-dialog" class="pf-dialog" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-title" hidden><div class="pf-dialog-card"><div class="pf-dlg-head"><h3 id="prompt-dialog-title">继续追问</h3><button id="prompt-close-btn" class="pf-btn pf-btn-sm" type="button">关闭</button></div><textarea id="prompt-dialog-text" class="pf-dialog-area" readonly></textarea><div id="clipboard-fallback" class="pf-clipboard-fallback" hidden><span class="pf-subtitle">当前环境不支持自动复制，请全选下方内容复制：</span><textarea id="clipboard-fallback-text" class="pf-dialog-area pf-dialog-area-sm" readonly></textarea></div><div class="pf-dlg-foot"><button id="prompt-copy-btn" class="pf-btn pf-btn-primary" type="button">复制追问内容</button></div></div></div>',
-    '<button id="pf-selection-float" class="pf-btn pf-btn-primary pf-selection-float" type="button" hidden>追问选中内容</button>',
+    '<div id="prompt-dialog" class="pf-dialog" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-title" hidden><div class="pf-dialog-card"><div class="pf-dlg-head"><h3 id="prompt-dialog-title">向 AI 提问</h3><button id="prompt-close-btn" class="pf-btn pf-btn-sm" type="button">关闭</button></div><textarea id="prompt-dialog-text" class="pf-dialog-area" readonly></textarea><div id="clipboard-fallback" class="pf-clipboard-fallback" hidden><span class="pf-subtitle">当前环境不支持自动复制，请全选下方内容复制：</span><textarea id="clipboard-fallback-text" class="pf-dialog-area pf-dialog-area-sm" readonly></textarea></div><div class="pf-dlg-foot"><button id="prompt-copy-btn" class="pf-btn pf-btn-primary" type="button">复制提问内容</button></div></div></div>',
+    '<button id="pf-selection-float" class="pf-btn pf-btn-primary pf-selection-float" type="button" hidden>提问选中内容</button>',
     '<div id="pf-toast" class="pf-toast" hidden></div>',
   ].join('\n')
 }

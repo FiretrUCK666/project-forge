@@ -4,12 +4,12 @@ import { buildFallbackDomains } from './feature-map-graph.mjs'
 export const DIFF_STATES = Object.freeze(['added', 'modified', 'removed', 'impacted', 'context'])
 
 const DOMAIN_PALETTES = Object.freeze([
-  { id: 'teal', stroke: '#1b5e6b', fill: 'rgba(27,94,107,0.045)', badge: '#1b5e6b' },
-  { id: 'moss', stroke: '#3f6a4f', fill: 'rgba(63,106,79,0.045)', badge: '#3f6a4f' },
-  { id: 'ochre', stroke: '#8c6239', fill: 'rgba(140,98,57,0.045)', badge: '#8c6239' },
-  { id: 'steel', stroke: '#355c7d', fill: 'rgba(53,92,125,0.045)', badge: '#355c7d' },
-  { id: 'plum', stroke: '#6b4c5b', fill: 'rgba(107,76,91,0.045)', badge: '#6b4c5b' },
-  { id: 'sage', stroke: '#4b5c58', fill: 'rgba(75,92,88,0.045)', badge: '#4b5c58' },
+  { id: 'indigo', stroke: '#4338CA', fill: 'rgba(67,56,202,0.055)', badge: '#4338CA' },
+  { id: 'teal', stroke: '#0F766E', fill: 'rgba(15,118,110,0.055)', badge: '#0F766E' },
+  { id: 'amber', stroke: '#B45309', fill: 'rgba(180,83,9,0.055)', badge: '#B45309' },
+  { id: 'sky', stroke: '#0369A1', fill: 'rgba(3,105,161,0.055)', badge: '#0369A1' },
+  { id: 'rose', stroke: '#BE123C', fill: 'rgba(190,18,60,0.055)', badge: '#BE123C' },
+  { id: 'emerald', stroke: '#047857', fill: 'rgba(4,120,87,0.055)', badge: '#047857' },
 ])
 
 function pickDomainPalette(id) {
@@ -524,6 +524,9 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
   for (let r = 0; r < rowHeights.length; r++) { rowOffsets[r] = accY; accY += rowHeights[r] + domGapY }
 
   const totalW = Math.max(680, accX - domGapX + canvasPad)
+  if (domCols === 1 && colWidths[0] < totalW - canvasPad * 2) {
+    colOffsets[0] = Math.round((totalW - colWidths[0]) / 2)
+  }
   const bottomGutterY = (rowOffsets[rowHeights.length - 1] || canvasPad) + (rowHeights[rowHeights.length - 1] || 200) + domGapY / 2
   const totalH = Math.max(400, accY - domGapY + canvasPad + 16)
   const domBoxById = new Map()
@@ -537,7 +540,7 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
     const h = rowHeights[row] || pd.h
     const corridorMidY = y + h + domGapY / 2
     const topCorridorY = row === 0 ? Math.max(14, canvasPad / 2) : (rowOffsets[row - 1] + rowHeights[row - 1] + domGapY / 2)
-    const leftAisleX = col === 0 ? Math.max(16, canvasPad / 2) : (x - domGapX / 2)
+    const leftAisleX = col === 0 ? Math.max(16, x - 20) : (x - domGapX / 2)
     const rightAisleX = col === domCols - 1 ? (x + w + Math.min(28, domGapX / 2)) : (x + w + domGapX / 2)
     const domBox = {
       id: pd.dom.id, title: pd.dom.title, shortTitle: truncateLabel(pd.dom.title, 34),
@@ -557,9 +560,9 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
       const fx = startX + fCol * (cardW + cardGapX), fy = y + pd.domHeaderH + fRow * (cardH + cardGapY)
       const diffState = stateMap.get(feat.id) || 'context'
       const primaryAnchor = feat.entrypoints[0] || feat.modules[0] || feat.tests[0] || ''
-      const summarySrc = feat.description || feat.businessFlows[0] || toRelPath(primaryAnchor) || feat.id
+      const summarySrc = feat.description || feat.businessFlows[0] || ''
       const box = {
-        ...feat, shortTitle: truncateLabel(feat.title, 34), shortSummary: truncateLabel(summarySrc, 38),
+        ...feat, shortTitle: truncateLabel(feat.title, 34), shortSummary: truncateLabel(summarySrc, 30),
         shortAnchor: truncateLabel(toRelPath(primaryAnchor) || feat.id, 36), domainTitle: pd.dom.title,
         x: fx, y: fy, w: cardW, h: cardH, cx: fx + cardW / 2, cy: fy + cardH / 2,
         gridRow: fRow, gridCol: fCol,
@@ -589,7 +592,7 @@ export function layoutFlowDag(featureMap, overlay, _opts = {}) {
   const detailMap = overlay?.changeDetails instanceof Map ? overlay.changeDetails : new Map()
   const rawFlows = Array.isArray(featureMap?.flows) ? featureMap.flows : []
 
-  const laneSpecs = [], flowSummaries = []
+  const laneSpecs = [], flowSummaries = [], stepActorByFeature = new Map()
   if (rawFlows.length > 0) {
     const laneNames = new Map()
     for (const fl of rawFlows) {
@@ -598,6 +601,9 @@ export function layoutFlowDag(featureMap, overlay, _opts = {}) {
       const steps = Array.isArray(fl.steps) ? fl.steps : []
       const cleanSteps = steps.map((step, sIdx) => ({ stepIndex: sIdx + 1, feature: String(step?.feature || '').trim(), actor: String(step?.actor || step?.lane || 'system').trim(), action: String(step?.action || '').trim() })).filter((s) => s.feature)
       flowSummaries.push({ id: flowId, title: String(fl.title || fl.name || flowId).trim(), description: String(fl.description || '').trim(), stepCount: cleanSteps.length, actors: normArray(fl.actors), featureIds: normArray(fl.features), steps: cleanSteps })
+      for (const s of cleanSteps) {
+        if (!stepActorByFeature.has(s.feature)) stepActorByFeature.set(s.feature, s.actor)
+      }
       for (const step of steps) {
         const actor = String(step?.actor || step?.lane || 'system').trim()
         if (!laneNames.has(actor)) laneNames.set(actor, { id: actor, title: formatActorTitle(actor), palette: pickDomainPalette(actor) })
@@ -614,16 +620,16 @@ export function layoutFlowDag(featureMap, overlay, _opts = {}) {
   const { rank: ranks } = kahnTopoSort(features.map((f) => f.id), edgePairs, (a, b) => a.localeCompare(b))
   const maxRank = Math.max(0, ...Array.from(ranks.values()))
 
-  const labelColW = 168, nodeW = 228, nodeH = 82, colGap = 64, nodeGapY = 20, lanePadY = 22, pad = 28, stageHeadH = 38
+  const labelColW = 168, nodeW = 236, nodeH = 96, colGap = 64, nodeGapY = 20, lanePadY = 22, pad = 28, stageHeadH = 38
   const laneBuckets = new Map(laneSpecs.map((l) => [l.id, []])), fallbackLaneId = laneSpecs[0].id
   for (const f of features) {
-    const preferredActor = f.actors[0]
+    const preferredActor = f.actors[0] || stepActorByFeature.get(f.id) || ''
     laneBuckets.get((preferredActor && laneBuckets.has(preferredActor)) ? preferredActor : (laneBuckets.has(f.domain) ? f.domain : fallbackLaneId)).push(f)
   }
   const stages = Array.from({ length: maxRank + 1 }, (_, r) => ({ index: r, title: `阶段 ${r + 1}`, x: pad + labelColW + 24 + r * (nodeW + colGap), y: pad, w: nodeW }))
   const lanes = [], flowNodes = [], flowNodeMap = new Map()
   let curY = pad + stageHeadH
-  const totalW = labelColW + 24 + (maxRank + 1) * nodeW + maxRank * colGap + pad * 2
+  const totalW = Math.max(680, labelColW + 24 + (maxRank + 1) * nodeW + maxRank * colGap + pad * 2)
 
   laneSpecs.forEach((lane) => {
     const items = laneBuckets.get(lane.id) || [], byRank = new Map()
@@ -638,7 +644,8 @@ export function layoutFlowDag(featureMap, overlay, _opts = {}) {
     for (const [r, group] of byRank.entries()) {
       group.forEach((feat, stackIdx) => {
         const nx = pad + labelColW + 24 + r * (nodeW + colGap), ny = curY + lanePadY + stackIdx * (nodeH + nodeGapY)
-        const node = { id: feat.id, title: feat.title, shortTitle: truncateLabel(feat.title, 24), laneId: lane.id, rank: r, x: nx, y: ny, w: nodeW, h: nodeH, cx: nx + nodeW / 2, cy: ny + nodeH / 2, diffState: stateMap.get(feat.id) || 'context', isVirtual: Boolean(feat.isVirtual), changeDetail: detailMap.get(feat.id) || null, palette }
+        const summarySrc = feat.description || feat.businessFlows[0] || ''
+        const node = { id: feat.id, title: feat.title, shortTitle: truncateLabel(feat.title, 24), description: feat.description || '', shortSummary: truncateLabel(summarySrc, 30), domain: feat.domain, modules: feat.modules, tests: feat.tests, laneId: lane.id, rank: r, x: nx, y: ny, w: nodeW, h: nodeH, cx: nx + nodeW / 2, cy: ny + nodeH / 2, diffState: stateMap.get(feat.id) || 'context', isVirtual: Boolean(feat.isVirtual), changeDetail: detailMap.get(feat.id) || null, palette }
         flowNodes.push(node); flowNodeMap.set(feat.id, node)
       })
     }
@@ -653,7 +660,7 @@ export function layoutFlowDag(featureMap, overlay, _opts = {}) {
     const edgeState = resolveEdgeState(src, dst)
     flowEdges.push({ id: `flow:${fromId}->${toId}`, fromId, toId, pathD: `M ${x1} ${src.cy} C ${lr ? x1 + dx : x1 - dx} ${src.cy}, ${lr ? x2 - dx : x2 + dx} ${dst.cy}, ${x2} ${dst.cy}`, edgeState, isVirtual: Boolean(src.isVirtual || dst.isVirtual), impacted: edgeState !== 'context' })
   }
-  return { width: Math.max(680, totalW), height: Math.max(320, curY + pad), lanes, stages, nodes: flowNodes, edges: flowEdges, flows: flowSummaries }
+  return { width: totalW, height: Math.max(320, curY + pad), lanes, stages, nodes: flowNodes, edges: flowEdges, flows: flowSummaries }
 }
 
 export function buildVisualModel({ featureMap = {}, diffOverlay = {}, mode = 'architecture-map', title = '', briefSpec = null } = {}) {

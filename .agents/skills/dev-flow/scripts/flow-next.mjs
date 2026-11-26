@@ -343,7 +343,7 @@ export async function handleNext(opts, roots) {
       ...out,
       reviewToken: token,
       excludedReviewers,
-      command: `${out.command} --reviewer-id <新审查子代理名> --review-token ${token}`,
+      recordCommand: `node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${selectedTask.taskId} --round ${round} --verdict <pass|changes> --reviewer-id <新审查子代理名> --review-token ${token}`,
     }
   } else if (selectedTask && (selectedTask.rounds?.length > 0 || selectedTask.implementerId)) {
     out = {

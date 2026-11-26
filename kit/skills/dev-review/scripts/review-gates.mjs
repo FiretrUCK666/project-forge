@@ -553,6 +553,7 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
     agentsText,
     task,
     diffBytes: diff.bytes,
+    untrustedSurface,
   })
 
   const isOneWay = oneWayReasons.length > 0 || (baseDoor.doorType === 'one-way' && !allFiles.every((f) => isExemptArchive(f)))
@@ -565,9 +566,9 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
   }
 
   let mergeAuthority = 'reviewer-direct'
-  if (gateWeakened || hasHumanMergeAuthority || untrustedSurface || doorType === 'one-way') {
+  if (gateWeakened || hasHumanMergeAuthority || untrustedSurface) {
     mergeAuthority = 'human-required'
-  } else if (hrHits.length > 0) {
+  } else if (doorType === 'one-way' || hrHits.length > 0) {
     mergeAuthority = 'reviewer-with-fault-injection'
   }
 
@@ -616,8 +617,8 @@ export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untruste
       nextSteps.push('实证与故障注入已就绪（或当前无需额外阻断），可按需传 `--include-diff` 取全文并核对：')
     }
     nextSteps.push('')
-    nextSteps.push('记结论（--evidence 必填，写你实际跑的命令与输出摘要）：')
-    nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id> --review-token <flow next 输出的令牌> --evidence "<跑了什么、结果如何>"`)
+    nextSteps.push('记结论（--evidence 省略时自动复用同 HEAD 有效 check-empirical 回执；否则写实际跑的命令与输出摘要）：')
+    nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id> --review-token <flow next 输出的令牌> [--evidence "<跑了什么、结果如何>"]`)
     if (task.role === 'contributor-fork') {
       nextSteps.push('Contributor-fork note: after PASS, wait for upstream maintainer merge; do NOT run `flow.mjs merge` or delete fork branch.')
     } else if (!skills.has('dev-flow')) {

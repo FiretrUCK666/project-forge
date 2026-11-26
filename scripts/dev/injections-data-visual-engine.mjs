@@ -5,11 +5,11 @@
 export const INJECTIONS_VISUAL_ENGINE = [
   {
     id: 'I961',
-    what: 'C6 static-gates: 放行未校验 SHA256 的 docs/architecture-map.html 豁免 UI 实证门禁',
-    file: 'kit/skills/lib/static-gates.mjs',
-    alsoDropIn: ['.agents/skills/lib/static-gates.mjs'],
-    from: "  if (p === 'docs/architecture-map.html' && repoRoot) {\n    const check = verifyArchitectureMapHeader(repoRoot, p)\n    if (check.ok) return false\n  }",
-    to: "  if (p === 'docs/architecture-map.html') {\n    return false\n  }",
+    what: 'C6 empirical-artifacts: 放行未校验 SHA256 的 docs/architecture-map.html 豁免 UI 实证门禁',
+    file: 'kit/skills/lib/empirical-artifacts.mjs',
+    alsoDropIn: ['.agents/skills/lib/empirical-artifacts.mjs'],
+    from: "  if (p === 'docs/architecture-map.html' && repoRoot && verifyArchitectureMapHeader(repoRoot, p).ok) return true",
+    to: "  if (p === 'docs/architecture-map.html') return true",
     expect: 'Visual Engine C6：isUiVisualFile 单源豁免校验（有效图豁免 vs 篡改图与业务 HTML 拦截）',
   },
   {

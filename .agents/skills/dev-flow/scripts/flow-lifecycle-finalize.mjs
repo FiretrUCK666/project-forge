@@ -226,7 +226,7 @@ export async function handleFinalize(opts, roots) {
         || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
         || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
       if (fmChanged) {
-        const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: preCheck.changedFiles })
+        const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: changed })
         if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)
       }
     }
@@ -240,7 +240,7 @@ export async function handleFinalize(opts, roots) {
       || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
       || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
     if (fmChanged) {
-      const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: preCheck.changedFiles })
+      const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: changed })
       if (archRes.ok && !archRes.optedOut && !archRes.skipped && roots.isGit) {
         await gitRun(implRoot, ['add', '-A', '--', ARCHITECTURE_MAP_REL])
       }

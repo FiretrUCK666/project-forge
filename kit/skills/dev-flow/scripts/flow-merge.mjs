@@ -500,7 +500,7 @@ export async function assertPreMergeGates({
 
   if (profile.mergeAuthority === 'human' && !opts['human-approved']) {
     process.stderr.write('BLOCKED_HUMAN_MERGE_AUTHORITY: 项目「取舍」声明了 merge-authority: human，请经人类确认后附加 --human-approved。\n')
-    return { ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_HUMAN_MERGE_AUTHORITY' }
+    return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_HUMAN_MERGE_AUTHORITY' }
   }
 
   const shaGate = validatePreMergeShaAndWorktree({
@@ -531,6 +531,19 @@ export async function assertPreMergeGates({
   }
 
   return { ok: true, implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer, stopLossActive, gateFindings }
+}
+
+function isConfirmedMergeResult(res) {
+  if (!res || typeof res !== 'object') return false
+  if (res.delegated === true || res.blocked === true || res.ok === false || res.merged === false) return false
+  return Boolean(
+    res.merged === true
+    || res.trialMerged === true
+    || res.localMerge === true
+    || res.alreadyMerged === true
+    || res.localBranchMissing === true
+    || res.localBranchCurrent === true
+  )
 }
 
 export async function handleMerge(opts, roots) {
@@ -654,11 +667,12 @@ export async function handleMerge(opts, roots) {
       syncFailures,
       issueCloseDecisions,
     })
-  } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
+  } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git' || backend?.kind === 'local-only') {
     const isGenericRemote = ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git'
     if (isGenericRemote) {
       mergeRes = await backend.mergePr({
         humanApproved: Boolean(opts['human-approved']),
+        reason: opts.reason ?? '',
         ledger,
         branch: ledger.branch,
         baseBranch,
@@ -690,7 +704,8 @@ export async function handleMerge(opts, roots) {
         fetch: Boolean(mergeRes?.fetched),
       })
     }
-    if (mergeRes?.merged !== false) {
+    const mergedConfirmed = isConfirmedMergeResult(mergeRes)
+    if (mergedConfirmed) {
       await syncVerifyCacheOnMerge({
         gitCommonDir: roots.gitDir,
         mainRoot: roots.mainRoot,
@@ -698,7 +713,7 @@ export async function handleMerge(opts, roots) {
         verifiedSha: currentHead,
       }).catch(() => null)
     }
-    if (((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0) && mergeRes?.merged !== false) {
+    if (((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0) && mergedConfirmed) {
       await syncPostMergeTargets({
         backend,
         mainRoot: roots.mainRoot,
@@ -717,6 +732,14 @@ export async function handleMerge(opts, roots) {
         issueCloseDecisions,
       })
     }
+  }
+
+  if (!isConfirmedMergeResult(mergeRes)) {
+    const failCode = mergeRes?.code || (mergeRes?.delegated ? 'BLOCKED_MERGE_MCP_DELEGATE' : 'BLOCKED_REMOTE_NOT_MERGED')
+    const failMsg = mergeRes?.message || `${failCode}: 未确认目标分支/PR 已完成实际合并（status=${mergeRes?.state ?? 'unknown'}），拒绝将账本标记为 merged。`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: failCode, ...(mergeRes && typeof mergeRes === 'object' ? mergeRes : {}) }, null, 2)}\n`)
+    process.stderr.write(`${failMsg}\n`)
+    return { exitCode: mergeRes?.exitCode ?? EXIT.FACT, code: failCode }
   }
 
   ledger.status = 'merged'

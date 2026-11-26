@@ -165,8 +165,8 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
     })
   } catch { /* non-fatal on non-writable root */ }
 
-  // 仅对 Case 3/4 自动刷新仓外 Living Visual Brief；Case 1/2 保持零开销
-  if (result.caseType === 3 || result.caseType === 4) {
+  // 对 Case 3/4/5 自动刷新仓外 Living Visual Brief；Case 1/2 保持零开销
+  if (result.caseType >= 3) {
     try {
       const briefTopic = opts.topic ? normalizeTopicId(opts.topic) : (noteRes?.topicId ?? null)
       const briefKey = briefTopic || sanitizeBriefKey(summary.slice(0, 48))
@@ -188,7 +188,10 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
   }
 
   const steps = result.caseType === 5
-    ? ['已阻断直接拆解！请先更新 docs/TDD.md 解决冲突并经独立确认。']
+    ? [
+        { skill: 'dev-plan', text: '已阻断直接拆解！先更新 docs/TDD.md：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind tdd --slug tdd --title "<项目名>"' },
+        { skill: 'dev-plan', text: '完成 docs/TDD.md 更新并经独立确认后，再重新执行 doc-plan.mjs triage 或 init 拆解实施。' },
+      ]
     : result.caseType === 4
       ? [{
           skill: 'dev-plan',
@@ -197,7 +200,7 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
             : '创建 SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug <slug> --title "<标题>" --agent <id>',
         }]
       : result.caseType === 3
-        ? [{ skill: 'dev-flow', text: '启动任务隔离：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case 3 --slug <slug> --agent <id>' }]
+        ? [{ skill: 'dev-plan', text: '创建 Todo 冻结 C1..Cn：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind todo --slug <slug> --title "<标题>" --agent <id>' }]
         : [{ skill: 'dev-flow', text: `启动任务流转：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case ${result.caseType} --slug <slug> --agent <id>` }]
 
   if (cli.json) {

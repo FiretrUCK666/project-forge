@@ -25,7 +25,7 @@ import { parseIssueNumbers } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { buildDuplicatePlanDocError, findDuplicatePlanDocs, indexPlanDocs } from '../../lib/plan-index.mjs'
 import { consumePreInitNotes, readPreInitState, resolveInheritedTriagePlanMode } from '../../lib/session-state.mjs'
-import { migrateVisualBriefOnInit, refreshVisualBriefForDoc } from '../../lib/visual-brief.mjs'
+import { migrateVisualBriefOnInit, refreshVisualBriefForDoc, sanitizeBriefKey, upsertVisualBrief } from '../../lib/visual-brief.mjs'
 import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
 import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
@@ -466,6 +466,7 @@ export async function initDoc({
   }
 
   let briefMigration = null
+  let tddVisualBrief = null
   if (effectiveKind !== 'tdd' && mainRoot) {
     try {
       const prdItem = planned.find((p) => p.kind === 'prd')
@@ -483,6 +484,24 @@ export async function initDoc({
         relatedPrdRel: resolvedRelPrd,
         title,
       })
+    } catch { /* non-fatal */ }
+  } else if (effectiveKind === 'tdd' && mainRoot) {
+    try {
+      const tddFile = planned[0]?.file ?? 'docs/TDD.md'
+      const refreshed = refreshVisualBriefForDoc({ mainRoot, workRoot: writeRoot, file: tddFile, taskId: effTaskId })
+      if (refreshed?.summary) {
+        tddVisualBrief = refreshed.summary
+      } else {
+        const tddTopic = topic ?? (effTaskId || safeSlug || 'tdd')
+        tddVisualBrief = upsertVisualBrief(mainRoot, {
+          workRoot: writeRoot,
+          briefKey: sanitizeBriefKey(tddTopic),
+          kind: 'topic',
+          topicId: tddTopic,
+          title: title || 'Architecture TDD',
+          verdict: `TDD refreshed (${tddFile})`,
+        }).summary
+      }
     } catch { /* non-fatal */ }
   }
 
@@ -547,6 +566,7 @@ export async function initDoc({
     planMode: planMode ?? null,
     absorbedPreInit,
     ...(briefMigration ? { briefMigration, visualBrief: briefMigration.summary } : {}),
+    ...(!briefMigration && tddVisualBrief ? { visualBrief: tddVisualBrief } : {}),
   }
 }
 

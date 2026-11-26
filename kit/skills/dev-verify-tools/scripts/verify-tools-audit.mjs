@@ -7,7 +7,8 @@
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { isInsideDir } from '../../lib/git.mjs'
+import { resolveDocAnchor } from '../../lib/doc-graph.mjs'
+import { isInsideDir, posixPath } from '../../lib/git.mjs'
 import { renderArchitectureMapFromRepo } from '../../lib/architecture-map.mjs'
 
 import {
@@ -53,9 +54,11 @@ export async function handleAudit(opts, roots) {
   const map = exists && !st.corrupt ? (readFeatureMap(workRoot) ?? { version: 1, features: [] }) : { version: 1, features: [] }
 
   const zombies = []
+  const anchorWarnings = []
   const staleTools = []
   const duplicateFlows = []
   const flowOwner = new Map()
+  const slugCache = new Map()
 
   const selfRefreshId = String(process.env.PF_VERIFY_SELF_REFRESH_TOOL_ID ?? '').trim()
   for (const f of map.features) {
@@ -65,9 +68,11 @@ export async function handleAudit(opts, roots) {
       }
     }
     for (const anchor of f.docAnchors ?? []) {
-      const targetRel = String(anchor ?? '').split('#')[0].trim()
-      if (targetRel && !targetRel.endsWith('/') && !existsSync(join(workRoot, targetRel))) {
+      const res = resolveDocAnchor(workRoot, anchor, slugCache)
+      if (!res.exists) {
         zombies.push({ kind: 'missing-doc-anchor', featureId: f.id, path: anchor })
+      } else if (res.fragment && !res.headingFound) {
+        anchorWarnings.push({ kind: 'missing-doc-anchor-heading', featureId: f.id, path: anchor, targetRel: res.targetRel, fragment: res.fragment })
       }
     }
     for (const fl of f.businessFlows ?? []) {
@@ -106,11 +111,14 @@ export async function handleAudit(opts, roots) {
   }
 
   const repoMap = await generateRepoMap(workRoot)
-  const coveredPaths = new Set(map.features.flatMap((f) => [...f.entrypoints, ...f.modules]))
+  const coveredPrefixes = [...new Set(map.features.flatMap((f) => [...f.entrypoints, ...f.modules])
+    .map((p) => posixPath(p).replace(/^\.\//, '').replace(/\/+$/, ''))
+    .filter(Boolean))]
   const blindSpots = []
   for (const ep of repoMap.entrypoints ?? []) {
     if (!CODE_EXT_RE.test(ep) || isTestOrFixtureFile(ep)) continue
-    if (!coveredPaths.has(ep)) {
+    const normEp = posixPath(ep).replace(/^\.\//, '')
+    if (!coveredPrefixes.some((cp) => normEp === cp || normEp.startsWith(`${cp}/`))) {
       blindSpots.push({ kind: 'unmapped-entrypoint', path: ep, reason: '核心入口未登记在 docs/feature-map.json' })
     }
   }
@@ -138,15 +146,16 @@ export async function handleAudit(opts, roots) {
     featureCount: map.features.length,
     toolCount,
     schema, topologyErrors: topology.errors, topologyCycles: topology.cycles,
-    zombies, staleTools, duplicateFlows, blindSpots, solidificationHints, scratchDirs, orphanScratchDirs,
+    zombies, anchorWarnings, staleTools, duplicateFlows, blindSpots, solidificationHints, scratchDirs, orphanScratchDirs,
   }
   const lines = [
     `=== VERIFY-TOOLS AUDIT (${FEATURE_MAP_REL}) ===`,
     `Status: ${status} | Features: ${payload.featureCount} | Tools: ${payload.toolCount} | SchemaOk: ${schema.ok}`,
-    `Zombies: ${zombies.length} | StaleTools: ${staleTools.length} | BlindSpots: ${blindSpots.length} | OrphanScratch: ${orphanScratchDirs.length}`,
+    `Zombies: ${zombies.length} | AnchorWarnings: ${anchorWarnings.length} | StaleTools: ${staleTools.length} | BlindSpots: ${blindSpots.length} | OrphanScratch: ${orphanScratchDirs.length}`,
   ]
   for (const err of schema.errors) lines.push(`  - [SCHEMA_ERR] ${err}`)
   for (const z of zombies.slice(0, 12)) lines.push(`  - [ZOMBIE:${z.kind}] ${z.featureId}: ${z.path}`)
+  for (const aw of anchorWarnings.slice(0, 12)) lines.push(`  - [ANCHOR_WARN:${aw.kind}] ${aw.featureId}: ${aw.path}`)
   for (const s of staleTools.slice(0, 12)) lines.push(`  - [STALE:${s.riskLevel}/${s.code}] ${s.featureId}/${s.toolId}: ${s.reasons.join('; ')}`)
   for (const b of blindSpots.slice(0, 10)) lines.push(`  - [BLIND_SPOT:${b.kind}] ${b.path ?? b.featureId}: ${b.reason}`)
   for (const h of solidificationHints) lines.push(`  - [${h.code}] ${h.suggestion}`)

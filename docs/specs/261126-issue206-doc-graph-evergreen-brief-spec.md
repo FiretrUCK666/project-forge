@@ -124,10 +124,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `kit/skills/lib/doc-graph.mjs` (new) 仅依赖 `node:fs`、`node:path`、`./git.mjs`、`./markdown-scan.mjs`、`./doc-frontmatter.mjs`，实现 `accountActiveDocs` 与 4 项纯图谱校验（`brokenLinks`/`brokenAnchors` 含 `anchorWarnings`、`cycles`、`redirectChains`、`entryDivergenceAndOrphans`），支持非 Markdown 权威对象，移除 `CLASSIC_EVERGREEN_RE` 与 `profile.mjs:717` 自然语言正则，修复 `profile.mjs:378` `activeRawKey` 并保留 L537 `I217`。
-- [ ] C2: `govern-evergreen.mjs`（保留 L136 `I218`）、`govern-audit.mjs`（含 L395 目录前缀匹配）、`govern-docs.mjs`、`verify-tools-audit.mjs`（`resolveDocAnchor` + 目录前缀匹配）、`review-context.mjs`、`context-brief.mjs` 及 `scripts/survey.mjs`/`scripts/lib/survey-scan.mjs`/`scripts/lib/survey-plan.mjs`（S1 注入且 `survey-docs.mjs <= 791` 行）完成单源接入，由正反夹具验证通过。
-- [ ] C3: `doc-plan-brief.mjs` L169 支持 `result.caseType >= 3`、Case 5 输出结构化 `nextSteps`、保留 L197 `I934`、Case 3 路由至 `doc-plan.mjs init --kind todo`；`doc-plan-ops.mjs` 支持 `tdd` 刷新简报；`doc-plan.mjs` `init` 输出 `htmlUri` 与 Case 4 `approve` 带 `--agent`；`kit/skills/dev-plan/SKILL.md <= 14336` B 且 `<= 180` 行。
-- [ ] C4: 执行 `node scripts/equip.mjs .` 同步，补充图谱与 Brief 正反双向夹具（`fixtures-r8-bugfixes.mjs:379` 通过），全绿通过 `node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4`。
+- [x] C1: `kit/skills/lib/doc-graph.mjs` (new) 仅依赖 `node:fs`、`node:path`、`./git.mjs`、`./markdown-scan.mjs`、`./doc-frontmatter.mjs`，实现 `accountActiveDocs` 与 4 项纯图谱校验（`brokenLinks`/`brokenAnchors` 含 `anchorWarnings`、`cycles`、`redirectChains`、`entryDivergenceAndOrphans`），支持非 Markdown 权威对象，移除 `CLASSIC_EVERGREEN_RE` 与 `profile.mjs:717` 自然语言正则，修复 `profile.mjs:378` `activeRawKey` 并保留 L537 `I217`。
+- [x] C2: `govern-evergreen.mjs`（保留 L136 `I218`）、`govern-audit.mjs`（含 L395 目录前缀匹配）、`govern-docs.mjs`、`verify-tools-audit.mjs`（`resolveDocAnchor` + 目录前缀匹配）、`review-context.mjs`、`context-brief.mjs` 及 `scripts/survey.mjs`/`scripts/lib/survey-scan.mjs`/`scripts/lib/survey-plan.mjs`（S1 注入且 `survey-docs.mjs <= 791` 行）完成单源接入，由正反夹具验证通过。
+- [x] C3: `doc-plan-brief.mjs` L169 支持 `result.caseType >= 3`、Case 5 输出结构化 `nextSteps`、保留 L197 `I934`、Case 3 路由至 `doc-plan.mjs init --kind todo`；`doc-plan-ops.mjs` 支持 `tdd` 刷新简报；`doc-plan.mjs` `init` 输出 `htmlUri` 与 Case 4 `approve` 带 `--agent`；`kit/skills/dev-plan/SKILL.md <= 14336` B 且 `<= 180` 行。
+- [x] C4: 执行 `node scripts/equip.mjs .` 同步，补充图谱与 Brief 正反双向夹具（`fixtures-r8-bugfixes.mjs:379` 通过），全绿通过 `node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4`。
 
 ## 六、高风险点、门型与回滚路径
 

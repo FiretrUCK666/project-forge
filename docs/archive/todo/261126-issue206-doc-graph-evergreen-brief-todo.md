@@ -5,7 +5,7 @@ status: done
 created: 2026-11-26
 updated: 2026-11-26
 issue: 206
-pr: null
+pr: 208
 branch: feat/doc-graph-evergreen-brief
 owner: planner-arch
 plan_mode: interactive
@@ -31,7 +31,7 @@ scope_files: [kit/skills/lib/doc-graph.mjs, kit/skills/lib/profile.mjs, kit/skil
 | 任务编号 | `doc-graph-evergreen-brief` |
 | 负责人 / 审批 | planner-arch / `false` |
 | 规划态 | `interactive`（边界与不变量已定案，待拍板为零） |
-| 关联 Issue / PR / SPEC | #206 / 未关联 / `docs/archive/specs/261126-issue206-doc-graph-evergreen-brief-spec.md` |
+| 关联 Issue / PR / SPEC | #206 / #208 / `docs/archive/specs/261126-issue206-doc-graph-evergreen-brief-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261126-issue206-doc-graph-evergreen-brief-spec.md`。
 

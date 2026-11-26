@@ -266,3 +266,50 @@ export function evaluatePureDocCheck({
     pathsVerifiedDocOnly,
   }
 }
+
+export const BRIEF_PROTOTYPE_RE = /(?:多方向|原型对比|visual\s*brief|prototype)/i
+
+/** 确定性三出口入口路由：direct（Case 1）| sandbox（可逆 Case 2/3）| plan-first（Case 4/5/one-way/PRD）。 */
+export function resolveRecommendedEntry({
+  caseType = 3,
+  doorType = 'two-way',
+  prdRequired = false,
+  isConflict = false,
+} = {}) {
+  const c = Number(caseType)
+  if (isConflict || c === 5) {
+    return { recommendedEntry: 'plan-first', sandboxPocAllowed: false }
+  }
+  if (c === 4 || doorType === 'one-way' || Boolean(prdRequired)) {
+    return { recommendedEntry: 'plan-first', sandboxPocAllowed: true }
+  }
+  if (c === 1) {
+    return { recommendedEntry: 'direct', sandboxPocAllowed: false }
+  }
+  return { recommendedEntry: 'sandbox', sandboxPocAllowed: true }
+}
+
+/**
+ * 统一判定是否自动触发仓外 Living Visual Brief（统筹 triage 与 note 两处入口）：
+ * - 已关联 briefKey、命中 Case >= 4 / one-way / prdRequired / 原型对比意图时触发；
+ * - 多轮讨论 note（isMultiTurnNote=true 且未锁定低档 Case 1/2）自动触发；
+ * - 普通单轮局部可逆 Case 2/3 默认返回 false（零 Brief 开销，直接进沙箱看真效果）。
+ */
+export function shouldAutoTriggerBrief({
+  caseType = 0,
+  doorType = 'two-way',
+  prdRequired = false,
+  summary = '',
+  hasPrototype = false,
+  isMultiTurnNote = false,
+  hasExistingBrief = false,
+  exactTopicCase = 0,
+} = {}) {
+  if (hasExistingBrief) return true
+  const c = Number(caseType ?? 0)
+  if (c >= 4 || doorType === 'one-way' || Boolean(prdRequired) || Boolean(hasPrototype)) return true
+  if (BRIEF_PROTOTYPE_RE.test(String(summary ?? ''))) return true
+  const lockedCase = Number(exactTopicCase ?? 0)
+  if (isMultiTurnNote && lockedCase !== 1 && lockedCase !== 2) return true
+  return false
+}

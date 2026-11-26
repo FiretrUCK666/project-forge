@@ -1,20 +1,20 @@
 ---
 kind: todo
 title: 确定性入口分流、契约对拍与异构仓库双向实证
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 214
 pr: null
-branch: feat/sandbox-dual-loop-v1
+branch: feat/triage-brief-contract-parity
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-27
 task_id: triage-brief-contract-parity
 planned_at: 5feb0dbff6d86a217c45d74e44fe6949a35f912c
 related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
-related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
+related_spec: ../specs/261127-issue214-triage-brief-contract-parity-spec.md
 ---
 
 # 确定性入口分流、契约对拍与异构仓库双向实证
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / 基线 | `feat/sandbox-dual-loop-v1` @ `5feb0db` |
+| 分支 / 基线 | `feat/triage-brief-contract-parity` @ `5feb0db` |
 | 任务编号 | `triage-brief-contract-parity` |
 | 负责人 / 审批 | plan-sandbox-v1 / `false` |
 | 规划态 | `interactive`（架构决策已拍板，待 Critique 与审批） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261127-triage-brief-contract-parity-spec.md` |
+| 关联 Issue / PR / SPEC | #214 / 未关联 / `docs/archive/specs/261127-issue214-triage-brief-contract-parity-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -43,10 +43,10 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C9: `doc-plan.mjs triage` 确定性输出 `recommendedEntry: 'direct' | 'sandbox' | 'plan-first'` 与单一 `[NEXT STEP]`，仅移除 `doc-audit.mjs:165` `fileCount >= 6 -> Case 4` 钝化悬崖（保留 `:86,161,169` `fileCount >= 12` PRD 判据），保持 `Case 5` 与 `PRD` 严格正交，且统筹 `doc-plan-brief.mjs` 两处（`handleNoteSubcommand` 与 `handleTriageSubcommand`）按需触发 Living Visual Brief / Prototype（局部可逆默认零 Brief 开销，兼容多轮讨论 `fixtures-living-brief.mjs`）。
-- [ ] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份受影响 `kit/skills/*/SKILL.md` 及 `scripts/dev/preflight*`（含同步 `fixtures-r6d-contracts.mjs`）完成同构同步，严守 `SKILL.md <= 14,336 B / <= 180 L`、`AGENTS.md <= 30 KB`、`equip.mjs . --check` 字节一致与零特定 E2E 驱动硬编码。
-- [ ] C11: 新增 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 覆盖 7 类异构仿真仓库（空/极简仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、UI 前端、无清单非 JS 通用、`generic-git`），双向验证完整双环流转零项目定制补丁。
-- [ ] C12: 补齐并更新本里程碑全部双向故障注入样本，完成 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md` 与 `README.en.md` 最终全局对齐，运行全部 10 项全仓门禁、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs` 与 `git archive` 用户包校验全部退出码 `0`。
+- [x] C9: `doc-plan.mjs triage` 确定性输出 `recommendedEntry: 'direct' | 'sandbox' | 'plan-first'` 与单一 `[NEXT STEP]`，仅移除 `doc-audit.mjs:165` `fileCount >= 6 -> Case 4` 钝化悬崖（保留 `:86,161,169` `fileCount >= 12` PRD 判据），保持 `Case 5` 与 `PRD` 严格正交，且统筹 `doc-plan-brief.mjs` 两处（`handleNoteSubcommand` 与 `handleTriageSubcommand`）按需触发 Living Visual Brief / Prototype（局部可逆默认零 Brief 开销，兼容多轮讨论 `fixtures-living-brief.mjs`）。
+- [x] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份受影响 `kit/skills/*/SKILL.md` 及 `scripts/dev/preflight*`（含同步 `fixtures-r6d-contracts.mjs`）完成同构同步，严守 `SKILL.md <= 14,336 B / <= 180 L`、`AGENTS.md <= 30 KB`、`equip.mjs . --check` 字节一致与零特定 E2E 驱动硬编码。
+- [x] C11: 新增 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 覆盖 7 类异构仿真仓库（空/极简仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、UI 前端、无清单非 JS 通用、`generic-git`），双向验证完整双环流转零项目定制补丁。
+- [x] C12: 补齐并更新本里程碑全部双向故障注入样本，完成 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md` 与 `README.en.md` 最终全局对齐，运行全部 10 项全仓门禁、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs` 与 `git archive` 用户包校验全部退出码 `0`。
 
 ## 执行步骤
 
@@ -79,9 +79,9 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（Wave 3 收口切片，依赖切片 1 与切片 2）
+- **当前状态**：`已完成 (done)`（Wave 3 收口切片及 Master Issue #214 `C1..C12` 全部闭环）
 - **待拍板事项**：无
-- **下一步第一件事**：待 Wave 1、Wave 2 合入 `main` 且本 SPEC 获 `approve` 后，派独立实施子代理在隔离 worktree 启动步骤 1。
+- **下一步第一件事**：经 `flow.mjs finalize` 成对归档 Wave 3 SPEC/Todo 与总控 PRD，跑通外环 `verify` 与 `submit` 提审。
 
 ## 澄清与补充记录
 
@@ -91,6 +91,6 @@ related_spec: ../specs/261127-triage-brief-contract-parity-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node .agents/skills/dev-edit/scripts/edit-gate.mjs --final --json`（`ok: true`, 0 blockers）、`node scripts/dev/merge-gate.mjs`（12/12 PASS，含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs` 602/602、`bench.mjs`、`e2e-zip-harness.mjs`、`verify-injections.mjs --jobs 4` 488/488、`review.mjs .`、`govern-audit.mjs audit .`、`git archive` 导出包 `preflight --package`）全部退出 `0`。
+- **文档同步检查**：已同步 `references/collaboration.md`、`templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`（`< 24 KB`）、5 份 `kit/skills/*/SKILL.md`（全部 `<= 12.6 KB / <= 105 行`）、`docs/TDD.md`、`docs/feature-map.json`、洁净常青 `docs/architecture-map.html`（22 节点、0 `modified`/`impacted` 节点）、`README.md` 与 `README.en.md`。
+- **遗留问题**：无。

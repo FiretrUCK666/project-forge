@@ -51,6 +51,7 @@ metadata:
 - 结合 `kit/skills/lib/profile-sniffer.mjs` 仅探测目标仓实际存在的原生配置（如 `eslint.config.*`、`tsconfig.json`、`ruff.toml`、`Cargo.toml`、`go.mod` 与 `package.json` 声明脚本）。
 - 传 `--with-native` 时仅在目标仓已声明对应命令时按需调用；工具或配置不存在时安全跳过并记录，绝不要求全局安装第三方外部 linter 二进制。
 - 支持 `--skip-edit-gate --reason "<原因>"` 显式记账写入 `signals.jsonl` 留痕；终检传 `--final` 时硬禁 `--skip-edit-gate`（`BLOCKED_SKIP_EDIT_GATE_FORBIDDEN_ON_FINAL`），且 `edit.do-not-edit` 恒为阻断项。
+- **干净 HEAD 回执去重（`gate-receipt.json`）**：在干净工作区下完成 `scanStructuralHygiene`/`evaluateArchRules`/`detectGateWeakening`/`verifyArchitectureMapSync` 后，按 `{ repoRoot, dirty: false, headSha, baseSha, diffFingerprint, profileHash }` 写入仓外回执供同 HEAD 下 `flow verify`/`review-pack` 单点复用；脏树、HEAD 或配置任一变化即刻失效重扫。沙箱内环与外环统一过同一词法门禁，不降级静态拦截规则。
 
 ## 注释与架构决策记录边界
 

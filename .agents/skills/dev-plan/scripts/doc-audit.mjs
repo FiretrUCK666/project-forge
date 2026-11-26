@@ -28,7 +28,8 @@ import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
 import {
   CONCERN_FACES, DOC_CUE_RE, EXPLICIT_FEATURE_RE, FIX_VERB_RE, RUNTIME_BUG_RE,
-  evaluatePureDocCheck, extractTriageSignals, facesOf as resolveTriageFaces, normalizeTriageInputs,
+  evaluatePureDocCheck, extractTriageSignals, facesOf as resolveTriageFaces,
+  normalizeTriageInputs, resolveRecommendedEntry, shouldAutoTriggerBrief,
 } from './triage-rules.mjs'
 import { collectMarkdownFiles, listDocs, runRepoDocsAudit } from './doc-audit-repo.mjs'
 import {
@@ -162,7 +163,6 @@ export function triageTask({
 
   const isConflict = conflictsTdd || conflictRe.test(text)
   const isContract = touchesContract
-    || (!docOnly && fileCount !== undefined && fileCount >= 6)
     || contractRe.test(text)
     || isCrossCutting
     || isGovernance
@@ -210,17 +210,23 @@ export function triageTask({
     activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext, contextBrief,
   })
 
+  const attachEntry = (res) => ({
+    ...res,
+    ...resolveRecommendedEntry({ caseType: res.caseType, doorType: res.doorType, prdRequired: res.prdRequired, isConflict: res.caseType === 5 }),
+    briefRecommended: shouldAutoTriggerBrief({ caseType: res.caseType, doorType: res.doorType, prdRequired: res.prdRequired, summary: text }),
+  })
+
   if (isConflict) {
-    return {
+    return attachEntry({
       caseType: 5, tier: 3, blocked: true, action: 'BLOCK_UPDATE_TDD_FIRST',
       doorType: 'one-way', doorDetails: { ...door, doorType: 'one-way' }, critiqueTier: 'independent-critique',
       reason: '该需求与 docs/TDD.md 或生效 SPEC 存在架构/契约冲突，必须先更新 TDD.md 并获人类确认后再拆解。',
       docsRequired: ['docs/TDD.md (先更新并确认)'], redGreenRequired: true, needsReview: true, specApprovalRequired: true,
       prdRequired: false, prdReasons: [], prdAdvice: null, faces, activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext, contextBrief,
-    }
+    })
   }
   if (isContract) {
-    return {
+    return attachEntry({
       caseType: 4, tier: 2, blocked: false, action: 'SPEC_AND_TODO',
       doorType: door.doorType, doorDetails: door, critiqueTier: 'independent-critique',
       reason: '涉及跨模块协作或外部契约变更（L3），需先编写 SPEC 经内审 Critique 与批准后，再落地 Todo 与实现。',
@@ -230,7 +236,7 @@ export function triageTask({
       prdReasons: prdNeed.reasons,
       prdAdvice: prdNeed.advice,
       redGreenRequired: true, needsReview: true, specApprovalRequired: true, faces, activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext, contextBrief,
-    }
+    })
   }
   if (looksDocOnly) {
     const pureDocCheck = evaluatePureDocCheck({
@@ -247,17 +253,17 @@ export function triageTask({
       fileCount,
     })
     if (pureDocCheck.passed) {
-      return {
+      return attachEntry({
         caseType: 1, tier: 1, blocked: false, action: 'NO_DOC_DIRECT',
         doorType: door.doorType, doorDetails: door, critiqueTier: 'none',
         reason: '属于文档完善或问答/错别字修正（Case 1），无需新增规划文档。',
         docsRequired: [], redGreenRequired: false, needsReview: door.doorType === 'one-way', specApprovalRequired: false,
         prdRequired: false, prdReasons: [], prdAdvice: null,
         faces, pureDocCheck, activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext, contextBrief,
-      }
+      })
     }
     const rejectToBugfix = bugfix || hasRuntimeBug || (FIX_VERB_RE.test(signals.maskedText) && !hasExplicitFeature && !isCrossCutting && !isGovernance)
-    return rejectToBugfix ? buildCase2(pureDocCheck) : buildCase3(pureDocCheck)
+    return attachEntry(rejectToBugfix ? buildCase2(pureDocCheck) : buildCase3(pureDocCheck))
   }
   const rejectedCheck = (pureDocCue || signals.nonDocPaths.length > 0)
     ? evaluatePureDocCheck({
@@ -265,8 +271,8 @@ export function triageTask({
         touchesContract, conflictsTdd, isCrossCutting, isGovernance, fileCount,
       })
     : null
-  if (isBugfix) return buildCase2(rejectedCheck)
-  return buildCase3(rejectedCheck)
+  if (isBugfix) return attachEntry(buildCase2(rejectedCheck))
+  return attachEntry(buildCase3(rejectedCheck))
 }
 
 export function detectDocType(relPath, text) {

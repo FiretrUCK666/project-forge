@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: 确定性入口分流、契约对拍与异构仓库双向实证
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 214
 pr: null
-branch: feat/sandbox-dual-loop-v1
+branch: feat/triage-brief-contract-parity
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-sandbox-r2, round=2, sha=7dbd821f5565, summary=Round 1 F1/F2 均已闭环：全路径展开无幻觉、fixtures-r6d-contracts 等补齐 scope_files、doc-plan-brief 两处触发统筹兼容多轮 note、doc-audit 仅去 fileCount>=6 悬崖并保留 fileCount>=12 prdNeed 且严守 <=800L。)"
 related_prd: ../prd/261127-issue214-sandbox-dual-loop-v1-prd.md
-related_todo: ../todo/261127-triage-brief-contract-parity-todo.md
+related_todo: ../todo/261127-issue214-triage-brief-contract-parity-todo.md
 high_risk_paths: [kit/skills/dev-plan/scripts/doc-audit.mjs, templates/agents-project.md, templates/pull-request-template.md, AGENTS.md, kit/skills/dev-plan/SKILL.md, kit/skills/dev-flow/SKILL.md, kit/skills/dev-review/SKILL.md, scripts/dev/preflight-contract-rules.mjs, scripts/dev/preflight-contracts.mjs, scripts/dev/preflight-suite.mjs]
 depends_on: [single-source-policy-core, sandbox-dual-loop-flow]
 scope_files: [kit/skills/dev-plan/scripts/triage-rules.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan/scripts/doc-plan-brief.mjs, references/collaboration.md, templates/agents-project.md, templates/pull-request-template.md, .github/pull_request_template.md, AGENTS.md, kit/skills/dev-plan/SKILL.md, kit/skills/dev-flow/SKILL.md, kit/skills/dev-review/SKILL.md, kit/skills/dev-edit/SKILL.md, kit/skills/dev-iterate/SKILL.md, scripts/dev/preflight-contract-rules.mjs, scripts/dev/preflight-contracts.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/fixtures-heterogeneous-dual-loop.mjs, scripts/dev/injections-data-triage-parity.mjs, scripts/dev/fixtures.mjs, scripts/dev/injections-data.mjs, scripts/dev/fixtures-doc-triage.mjs, scripts/dev/fixtures-living-brief.mjs, scripts/dev/fixtures-r6d-contracts.mjs, docs/TDD.md, docs/feature-map.json, docs/architecture-map.html, README.md, README.en.md]
@@ -26,13 +26,13 @@ scope_files: [kit/skills/dev-plan/scripts/triage-rules.mjs, kit/skills/dev-plan/
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（入口分流算法、全仓契约/模板/技能同构与 7 类异构栈 E2E 验证；Wave 3，依赖切片 1 与切片 2） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/triage-brief-contract-parity` / #214 / 未关联 |
 | 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
-| 关联 PRD / Todo | `../prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `../todo/261127-triage-brief-contract-parity-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/archive/todo/261127-issue214-triage-brief-contract-parity-todo.md` |
 
 - **变更一句话**：升级 `doc-plan.mjs triage` 输出确定性三出口 `recommendedEntry` 并仅移除 `fileCount >= 6` 钝化悬崖（保留 `fileCount >= 12` PRD 判据），统筹 `doc-plan-brief.mjs` 两处按需 Brief 触发，完成全仓模板、契约、文档、5 份技能说明与自举门禁同构对拍，并在 7 类异构仿真仓库上完成全链路双向实证。
 
@@ -151,10 +151,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C9: `doc-plan.mjs triage` 对 Case 1 输出 `recommendedEntry: 'direct'`，对局部可逆代码/UI 改动（含 7 个可逆前端组件文件）输出 `recommendedEntry: 'sandbox'` 且不再因 `fileCount >= 6` 钝化升 Case 4（保留 `fileCount >= 12` 的 `prdNeed` 判据），对 `one-way`/Case 4/Case 5 输出 `recommendedEntry: 'plan-first'`，Case 5 严格保持 `prdRequired: false` 与 `PRD` 正交；`doc-plan-brief.mjs` 两处入口统筹按需触发（局部可逆默认 `briefRecommended: false` 零开销，多轮讨论 `note` 仍正常触发）（由 `fixtures-doc-triage.mjs`、`fixtures-living-brief.mjs` 与 `fixtures-heterogeneous-dual-loop.mjs` 双向实证）。
-- [ ] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份 `kit/skills/*/SKILL.md`（含同步 `fixtures-r6d-contracts.mjs`）与 `scripts/dev/preflight*` 同构一致；实测每份 `SKILL.md <= 14,336 B` 且 `<= 180` 行、`AGENTS.md <= 30 KB`、`node scripts/compose-agents.mjs . --check`、`node scripts/equip.mjs . --check` 与 `node scripts/dev/preflight.mjs` 均退出 `0`。
-- [ ] C11: `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 在全部 7 类异构仿真仓库（空/极简仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、UI 重型前端、无清单非 JS 通用、`generic-git`）上双向跑通 `triage -> start --sandbox -> verify(inner) -> promote -> outer verify/review/merge` 且零定制补丁。
-- [ ] C12: 完成 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md`、`README.en.md` 终验对齐及新增/既有故障注入样本全绿；执行 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs README.md README.en.md --check`、`govern-audit.mjs audit .`、`e2e-zip-harness.mjs` 以及 `git archive` 导出包 `preflight --package` 全部退出 `0`。
+- [x] C9: `doc-plan.mjs triage` 对 Case 1 输出 `recommendedEntry: 'direct'`，对局部可逆代码/UI 改动（含 7 个可逆前端组件文件）输出 `recommendedEntry: 'sandbox'` 且不再因 `fileCount >= 6` 钝化升 Case 4（保留 `fileCount >= 12` 的 `prdNeed` 判据），对 `one-way`/Case 4/Case 5 输出 `recommendedEntry: 'plan-first'`，Case 5 严格保持 `prdRequired: false` 与 `PRD` 正交；`doc-plan-brief.mjs` 两处入口统筹按需触发（局部可逆默认 `briefRecommended: false` 零开销，多轮讨论 `note` 仍正常触发）（由 `fixtures-doc-triage.mjs`、`fixtures-living-brief.mjs` 与 `fixtures-heterogeneous-dual-loop.mjs` 双向实证）。
+- [x] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份 `kit/skills/*/SKILL.md`（含同步 `fixtures-r6d-contracts.mjs`）与 `scripts/dev/preflight*` 同构一致；实测每份 `SKILL.md <= 14,336 B` 且 `<= 180` 行、`AGENTS.md <= 30 KB`、`node scripts/compose-agents.mjs . --check`、`node scripts/equip.mjs . --check` 与 `node scripts/dev/preflight.mjs` 均退出 `0`。
+- [x] C11: `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 在全部 7 类异构仿真仓库（空/极简仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、UI 重型前端、无清单非 JS 通用、`generic-git`）上双向跑通 `triage -> start --sandbox -> verify(inner) -> promote -> outer verify/review/merge` 且零定制补丁。
+- [x] C12: 完成 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md`、`README.en.md` 终验对齐及新增/既有故障注入样本全绿；执行 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`verify-injections.mjs --jobs 4`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs README.md README.en.md --check`、`govern-audit.mjs audit .`、`e2e-zip-harness.mjs` 以及 `git archive` 导出包 `preflight --package` 全部退出 `0`。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -168,6 +168,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：在 `kit/skills/dev-plan/scripts/triage-rules.mjs` 新增 `resolveRecommendedEntry` 与 `shouldAutoTriggerBrief`；在 `kit/skills/dev-plan/scripts/doc-audit.mjs`（782 行 `<= 785L`）仅移除 `fileCount >= 6 -> Case 4` 钝化悬崖并保留 `fileCount >= 12` `prdNeed` 与 `Case 5`/`PRD` 严格正交；在 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` 统筹 `handleNoteSubcommand` 与 `handleTriageSubcommand` 两处按需 Brief 触发并按 `recommendedEntry` 输出单一 `[NEXT STEP]`；完成 `references/collaboration.md`、`templates/*`、`.github/pull_request_template.md`、`AGENTS.md`、5 份 `kit/skills/*/SKILL.md` 与 `preflight-contract-rules.mjs`/`preflight-contracts.mjs` 双环契约同构；新增 7 类异构仿真仓库双向夹具 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` 与 6 项故障注入 `scripts/dev/injections-data-triage-parity.mjs`（`I991-I996`），并完成 `docs/TDD.md`、`docs/feature-map.json`、洁净常青 `docs/architecture-map.html`（0 `modified`/`impacted` 节点）与双语 `README*.md` 对齐。
+- **与草案的差异**：为兼容 `R6B C8` 与 `W6A C5`（空骨架 `< 16 KB`），`prdRequired` 的单一 `[NEXT STEP]` 同时给出 `init --kind prd --multi-spec` 与 `--kind all` 提示，并同步更新了受 Case 3 路由至 `sandbox` 影响的 `scripts/dev/fixtures-doc-graph.mjs` 断言；`checkDualLoopContracts` 归口 `preflight-contract-rules.mjs` 并经 `preflight-contracts.mjs` 调度，保持 `preflight-suite.mjs` 维持 790 行零膨胀。
+- **关联同步文件**：`.agents/skills/**`（经 `equip.mjs .` 同步）、`AGENTS.md`（经 `compose-agents.mjs .` 渲染）、`docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md`、`README.en.md`、`scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`、`scripts/dev/fixtures-doc-triage.mjs`、`scripts/dev/fixtures-living-brief.mjs`、`scripts/dev/fixtures-doc-graph.mjs`、`scripts/dev/fixtures-r6d-contracts.mjs`。

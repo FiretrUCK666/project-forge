@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: 沙箱双环与单源三轴策略重构
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
 issue: 214
@@ -20,12 +20,12 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 关联 Issue / PR | #214 / 未关联 |
 | 提出方 / 负责人 | plan-sandbox-v1 |
 | 规划态 | `interactive`（本轮 `/grill-me` 7 项架构决策已全部拍板清零） |
-| 关联设计 / 任务单 | 1:N 总控 PRD，拆分为 3 组严格顺序依赖切片（Wave 1 -> Wave 2 -> Wave 3），每波独立全绿合入 |
+| 关联设计 / 任务单 | `docs/archive/specs/261127-issue214-triage-brief-contract-parity-spec.md` / `docs/archive/todo/261127-issue214-triage-brief-contract-parity-todo.md` |
 
 - **目标读者**：实现子代理、独立 Critique 审稿人、独立代码审查者与后续接手维护者
 
@@ -134,18 +134,18 @@ multi_spec: true
 
 ### 冻结条款清单（C1..C12）
 
-- [ ] C1: `determineWorkflowPolicy` 将 UI 视觉实证（`visualCheckRequired`）与 `riskTier='high'` 解耦（且 `isLow` 显式要求 `effectiveVisual.length === 0`），不再因仅改前端样式/组件文件而强抬为 `high`；`faultInjectionRequired` 与 `review-empirical.mjs` 的 `faultRequired`（含 `smokeExplicitNone` 对齐 `review-locks.mjs:601`）单源统一精确绑定至 `high`/`one-way`/`Case >= 4`，经 `fixtures-policy-axes.mjs` 与更新后的 Wave 1 既有夹具正反双向断言通过。
-- [ ] C2: 沙箱/内环快检在 `evidence.json` 记录 `inner: true`；外环 `validateVerificationEvidence` 对顶层或门禁项带 `inner === true` 的实证硬拒并返回 `BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER`（退出码 `3`），经正反双向断言通过。
-- [ ] C3: 新增 `kit/skills/lib/gate-receipt.mjs` (new)（当波登记入 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`）实现 `{ repoRoot, dirty: false, headSha, baseSha, diffFingerprint, profileHash }` 绑定的干净 HEAD 回执复用（支持有 `taskId` 与 headless 无 `taskId` 场景，明确各门禁唯一生产者并保活 `I962/I963`），使单次 `flow verify` 中 `verifyArchitectureMapSync` 仅执行 1 次并消除 `scanStructuralHygiene`/`evaluateArchRules`/`detectGateWeakening` 重复重算，且脏树或配置/HEAD 变化时立即失效重扫。
-- [ ] C4: `flow-lifecycle-helpers.mjs`、`review-empirical-state.mjs` 与 `iterate.mjs`（同步更新 `printHelp()` 第 67 行说明及 `fixtures-r6c-gates.mjs`/`injections-data-r6c.mjs` `I502`）在探索/内环/`quick`/沙箱失败时默认仅记本地诊断包与治理信号而不向远端托管平台自动建单；仅外环阻断或显式 `--escalate` 才触发远端建单。
-- [ ] C5: `flow.mjs start --sandbox`（经 `kit/skills/dev-flow/scripts/flow-sandbox.mjs` (new) 与 `kit/skills/lib/sandbox-scope.mjs` (new)，当波登记 `feature-map`、重渲 `architecture-map.html` 并同步 `flow.mjs` 子命令头与 `printHelp()`）创建 `.worktrees/sandbox-<id>/` 隔离工作树，保护 `main` 干净（`BLOCKED_MAIN_SLOT_VIOLATION` 保持生效）；显式传入 `--issue`/`--issues` 时保留并记为 `reused`（未传时才记 `exempt(sandbox)` 豁免预建 Issue），且对未晋升沙箱执行 `finalize`/`submit` 硬拒 `BLOCKED_SANDBOX_PROMOTE_REQUIRED`（不提前 `git mv` 归档文档）。
-- [ ] C6: `ledger.mjs` 新增 `implementers[]` 及沙箱态登记入 `OPEN_TASK_STATUSES`/`PRE_SUBMIT_STATUSES`，写域校验与登记抽入 `sandbox-scope.mjs` (new)（支持单常驻或互不重叠 `writeScope` 多子代理并行登记，写域冲突硬拒 `BLOCKED_SANDBOX_WRITE_SCOPE_OVERLAP`），`collectImplementerHistory` 自动聚合 `implementers[]` 并在外环审查与合并强制执行 `reviewerId ∉ implementers[]`（`SELF_REVIEW_REJECTED`）与防自合（`BLOCKED_SELF_MERGE`）。
-- [ ] C7: `flow.mjs promote --task <id>`（支持 `--issue`/`--issues`/`--body`/`--body-file`/`--todo`/`--no-issue`/`--reason` 及参数化 `commandName: 'promote'` 指引）按真实 `git diff <baseRef>...HEAD` 经单源 `determineWorkflowPolicy` 与 `checkTddSyncParity` 确定性路由：`docs/TDD.md` 冲突阻断 `BLOCKED_CASE_5_TDD_CONFLICT`；`Case 2/3`（含纯 UI 局部改）原地晋升、自动衔接 `claimedAt`/`explored` 并完成单一 Issue 绑定（保留已有 `--issue`，无绑定非豁免且缺正文/Todo 时从真实 `git diff` 自动合成合规 Issue 正文经 `buildAndValidateIssueBody` 建单，零 `BLOCKED_MISSING_ISSUE_BINDING` 死锁；`Case 3` 补建非实施者署名 `docs/todo/` 复用该 Issue 并通过 `BLOCKED_AUTHOR_IS_IMPLEMENTER`）；命中 `Case 4` 输出 `SANDBOX_PROMOTE_NEEDS_SPEC` 标记为已验证 PoC 且不提前新建 Issue，引导走 `SPEC`/`1:N PRD` + 独立 Critic + `approve`。
-- [ ] C8: `workflow-policy-next.mjs` 完整支持 `sandbox-iterating`、`sandbox-ready-to-promote`、`sandbox-needs-spec` 状态路由与单一可执行命令；`flow-lifecycle-hooks.mjs` 对沙箱内环 `flow verify` 豁免外环前置认领/探索阻塞且不放宽外环校验；沙箱内 `flow verify` 自动打标 `inner: true`，晋升后无缝接入外环 `finalize -> verify -> submit -> review -> merge -> cleanup --confirm --preview-hash`。
-- [ ] C9: `doc-plan.mjs triage` 确定性输出 `recommendedEntry: 'direct' | 'sandbox' | 'plan-first'` 与单一 `[NEXT STEP]`，仅移除 `doc-audit.mjs:165` `fileCount >= 6 -> Case 4` 钝化悬崖（保留 `:86,161,169` `fileCount >= 12` PRD 判据），保持 `Case 5` 与 `PRD` 严格正交，且统筹 `doc-plan-brief.mjs` 两处（`handleNoteSubcommand` 与 `handleTriageSubcommand`）按需触发 Living Visual Brief / Prototype（局部可逆默认零 Brief 开销，兼容多轮讨论 `fixtures-living-brief.mjs`）。
-- [ ] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份受影响 `kit/skills/*/SKILL.md` 及 `scripts/dev/preflight*`（含同步 `fixtures-r6d-contracts.mjs`）完成同构同步，严守 `SKILL.md <= 14,336 B / <= 180 L`、`AGENTS.md <= 30 KB`、`equip.mjs . --check` 字节一致与零特定 E2E 驱动硬编码。
-- [ ] C11: 新增 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 覆盖 7 类异构仿真仓库（空/极简仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、UI 前端、无清单非 JS 通用、`generic-git`），双向验证完整双环流转零项目定制补丁。
-- [ ] C12: 补齐并更新本里程碑全部双向故障注入样本，完成 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md` 与 `README.en.md` 最终全局对齐，运行全部 10 项全仓门禁、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs` 与 `git archive` 用户包校验全部退出码 `0`。
+- [x] C1: `determineWorkflowPolicy` 将 UI 视觉实证（`visualCheckRequired`）与 `riskTier='high'` 解耦（且 `isLow` 显式要求 `effectiveVisual.length === 0`），不再因仅改前端样式/组件文件而强抬为 `high`；`faultInjectionRequired` 与 `review-empirical.mjs` 的 `faultRequired`（含 `smokeExplicitNone` 对齐 `review-locks.mjs:601`）单源统一精确绑定至 `high`/`one-way`/`Case >= 4`，经 `fixtures-policy-axes.mjs` 与更新后的 Wave 1 既有夹具正反双向断言通过。
+- [x] C2: 沙箱/内环快检在 `evidence.json` 记录 `inner: true`；外环 `validateVerificationEvidence` 对顶层或门禁项带 `inner === true` 的实证硬拒并返回 `BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER`（退出码 `3`），经正反双向断言通过。
+- [x] C3: 新增 `kit/skills/lib/gate-receipt.mjs` (new)（当波登记入 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`）实现 `{ repoRoot, dirty: false, headSha, baseSha, diffFingerprint, profileHash }` 绑定的干净 HEAD 回执复用（支持有 `taskId` 与 headless 无 `taskId` 场景，明确各门禁唯一生产者并保活 `I962/I963`），使单次 `flow verify` 中 `verifyArchitectureMapSync` 仅执行 1 次并消除 `scanStructuralHygiene`/`evaluateArchRules`/`detectGateWeakening` 重复重算，且脏树或配置/HEAD 变化时立即失效重扫。
+- [x] C4: `flow-lifecycle-helpers.mjs`、`review-empirical-state.mjs` 与 `iterate.mjs`（同步更新 `printHelp()` 第 67 行说明及 `fixtures-r6c-gates.mjs`/`injections-data-r6c.mjs` `I502`）在探索/内环/`quick`/沙箱失败时默认仅记本地诊断包与治理信号而不向远端托管平台自动建单；仅外环阻断或显式 `--escalate` 才触发远端建单。
+- [x] C5: `flow.mjs start --sandbox`（经 `kit/skills/dev-flow/scripts/flow-sandbox.mjs` (new) 与 `kit/skills/lib/sandbox-scope.mjs` (new)，当波登记 `feature-map`、重渲 `architecture-map.html` 并同步 `flow.mjs` 子命令头与 `printHelp()`）创建 `.worktrees/sandbox-<id>/` 隔离工作树，保护 `main` 干净（`BLOCKED_MAIN_SLOT_VIOLATION` 保持生效）；显式传入 `--issue`/`--issues` 时保留并记为 `reused`（未传时才记 `exempt(sandbox)` 豁免预建 Issue），且对未晋升沙箱执行 `finalize`/`submit` 硬拒 `BLOCKED_SANDBOX_PROMOTE_REQUIRED`（不提前 `git mv` 归档文档）。
+- [x] C6: `ledger.mjs` 新增 `implementers[]` 及沙箱态登记入 `OPEN_TASK_STATUSES`/`PRE_SUBMIT_STATUSES`，写域校验与登记抽入 `sandbox-scope.mjs` (new)（支持单常驻或互不重叠 `writeScope` 多子代理并行登记，写域冲突硬拒 `BLOCKED_SANDBOX_WRITE_SCOPE_OVERLAP`），`collectImplementerHistory` 自动聚合 `implementers[]` 并在外环审查与合并强制执行 `reviewerId ∉ implementers[]`（`SELF_REVIEW_REJECTED`）与防自合（`BLOCKED_SELF_MERGE`）。
+- [x] C7: `flow.mjs promote --task <id>`（支持 `--issue`/`--issues`/`--body`/`--body-file`/`--todo`/`--no-issue`/`--reason` 及参数化 `commandName: 'promote'` 指引）按真实 `git diff <baseRef>...HEAD` 经单源 `determineWorkflowPolicy` 与 `checkTddSyncParity` 确定性路由：`docs/TDD.md` 冲突阻断 `BLOCKED_CASE_5_TDD_CONFLICT`；`Case 2/3`（含纯 UI 局部改）原地晋升、自动衔接 `claimedAt`/`explored` 并完成单一 Issue 绑定（保留已有 `--issue`，无绑定非豁免且缺正文/Todo 时从真实 `git diff` 自动合成合规 Issue 正文经 `buildAndValidateIssueBody` 建单，零 `BLOCKED_MISSING_ISSUE_BINDING` 死锁；`Case 3` 补建非实施者署名 `docs/todo/` 复用该 Issue 并通过 `BLOCKED_AUTHOR_IS_IMPLEMENTER`）；命中 `Case 4` 输出 `SANDBOX_PROMOTE_NEEDS_SPEC` 标记为已验证 PoC 且不提前新建 Issue，引导走 `SPEC`/`1:N PRD` + 独立 Critic + `approve`。
+- [x] C8: `workflow-policy-next.mjs` 完整支持 `sandbox-iterating`、`sandbox-ready-to-promote`、`sandbox-needs-spec` 状态路由与单一可执行命令；`flow-lifecycle-hooks.mjs` 对沙箱内环 `flow verify` 豁免外环前置认领/探索阻塞且不放宽外环校验；沙箱内 `flow verify` 自动打标 `inner: true`，晋升后无缝接入外环 `finalize -> verify -> submit -> review -> merge -> cleanup --confirm --preview-hash`。
+- [x] C9: `doc-plan.mjs triage` 确定性输出 `recommendedEntry: 'direct' | 'sandbox' | 'plan-first'` 与单一 `[NEXT STEP]`，仅移除 `doc-audit.mjs:165` `fileCount >= 6 -> Case 4` 钝化悬崖（保留 `:86,161,169` `fileCount >= 12` PRD 判据），保持 `Case 5` 与 `PRD` 严格正交，且统筹 `doc-plan-brief.mjs` 两处（`handleNoteSubcommand` 与 `handleTriageSubcommand`）按需触发 Living Visual Brief / Prototype（局部可逆默认零 Brief 开销，兼容多轮讨论 `fixtures-living-brief.mjs`）。
+- [x] C10: `templates/agents-project.md`、`templates/pull-request-template.md`、`.github/pull_request_template.md`、`AGENTS.md`、`references/collaboration.md`、5 份受影响 `kit/skills/*/SKILL.md` 及 `scripts/dev/preflight*`（含同步 `fixtures-r6d-contracts.mjs`）完成同构同步，严守 `SKILL.md <= 14,336 B / <= 180 L`、`AGENTS.md <= 30 KB`、`equip.mjs . --check` 字节一致与零特定 E2E 驱动硬编码。
+- [x] C11: 新增 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` (new) 覆盖 7 类异构仿真仓库（空/极简仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、UI 前端、无清单非 JS 通用、`generic-git`），双向验证完整双环流转零项目定制补丁。
+- [x] C12: 补齐并更新本里程碑全部双向故障注入样本，完成 `docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md` 与 `README.en.md` 最终全局对齐，运行全部 10 项全仓门禁、`verify-injections.mjs --jobs 4`、`e2e-zip-harness.mjs` 与 `git archive` 用户包校验全部退出码 `0`。
 
 ## 九、待拍板问题
 

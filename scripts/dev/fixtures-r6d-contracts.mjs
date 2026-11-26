@@ -249,9 +249,9 @@ export function registerR6dContractsCases(cases) {
     if (/非平凡\s*`?todo`?\s*强制/.test(docsSetRef)) {
       return 'references/docs-set.md 仍残留「非平凡 todo 强制 Critique」，未对齐 A1'
     }
-    // A2: dev-iterate/SKILL.md 同步 --no-escalate 与默认开启说明
-    if (!iterateSkill.includes('--no-escalate')) {
-      return 'kit/skills/dev-iterate/SKILL.md 未同步 A2 --no-escalate 参数'
+    // A2 + Wave 1 C4: dev-iterate/SKILL.md 同步 --escalate / --no-escalate 与探索期默认静默说明
+    if (!iterateSkill.includes('--no-escalate') || !iterateSkill.includes('--escalate')) {
+      return 'kit/skills/dev-iterate/SKILL.md 未同步 --escalate / --no-escalate 参数'
     }
     // A3: 独立审查通过后允许独立审查者或调度者 merge
     if (!/审查者或调度者/.test(collabRef) || !/审查者或调度者/.test(reviewSkill)) {

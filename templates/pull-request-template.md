@@ -22,12 +22,12 @@
 
 ## 影响面、风险与回滚方式
 
-- **门型与风险**：`two-way` / `one-way`，是否触及 `AGENTS.md` 高风险路径。
+- **三轴策略与门型**：`two-way` / `one-way`，风险档（`low` / `medium` / `high`），UI 视觉实证独立于 `high`，故障注入仅适用 `high` / `one-way` / `Case >= 4`（且非 `smoke-verify: none`）；外环门禁硬拒内环 `inner: true` 实证。
 - **回滚方式**：`git revert <merge-commit>`（已推送历史不强推）。
 
 ## 合并授权
 
-独立审查 `fail` 为空时由**审查者直接合**（碰高风险路径须独立上下文加故障注入）；`contributor-fork` 禁止自合，由上游维护者/独立审查合入；若 `AGENTS.md`「## 取舍」设 `merge-authority: human`，仅出具通过结论交人类合入；**弱化门禁必须人点头**；发版、改可见性与改写历史永不自动。
+独立审查 `fail` 为空时由**审查者直接合**（`reviewerId ∉ implementers[]`；命中 `high` / `one-way` / `Case >= 4` 须独立上下文加故障注入）；`contributor-fork` 禁止自合，由上游维护者/独立审查合入；若 `AGENTS.md`「## 取舍」设 `merge-authority: human`，仅出具通过结论交人类合入；**弱化门禁必须人点头**；发版、改可见性与改写历史永不自动。
 
 ## 独立审查与故障注入
 

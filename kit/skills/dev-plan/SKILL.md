@@ -30,34 +30,28 @@ metadata:
    - **三件必答**：真实痛点与目标、本期明确不做（防膨胀）、可运行/可断言的 `C1..Cn`——这三件与项目形态无关，任何项目都得写。**其余章节按形态取舍**：有状态的业务才写状态规则，有身份的才写权限，有门的才标 `two-way`/`one-way`；没门的项目写个门型只是编。
    - **三不写**：不写空泛废话（如「提高质量」「确保稳定」「优化体验」）、不写假路径、不在文档里贴大段实现代码。
 
-## 全场景五档分流（轻重恰当，绝不臃肿）
+## 全场景五档分流与确定性三出口
 
-| 场景 / 档位 | 文档产物 | 规划内审与执行硬门禁 |
+| 场景 / 档位 | 确定性出口 & 产物 | 规划内审与执行硬门禁 |
 | --- | --- | --- |
 | **外部 PR 审查** | 0 文档 | 直接移交 `dev-flow` + `dev-review` 只读隔离扫描 |
-| **Case 1**（问答 / 错别字 / 单行） | **0 文档** | 不写多余文档，直接转交执行并跑对应校验 |
-| **Case 2**（明确局部 Bugfix，不改契约） | **0 文档** | 强制 **Red-Green**：先补失败复现回归测试再修绿；触及高风险须独立审查 |
-| **Case 3**（L2 局部功能，不改外部契约） | 只建 `docs/todo/` | 澄清并冻结 `C1..Cn`，跑 `doc-plan.mjs audit` **自净化直通（Critique 仅建议，不强制）** |
-| **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`；**一份 SPEC 装不下时再加 `docs/prd/`** | 跑 `audit` -> **独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审；全历史换人 + 3 轮硬停损 `STOP_LOSS_ESCALATE`，支持 `critique-reject`/`critique-override`）-> 交人 `approve` |
-| **Case 5**（与 `docs/TDD.md` 或生效 SPEC 冲突） | **阻断拆解** | 先修订 `docs/TDD.md` 并经独立确认后再续 |
+| **Case 1**（问答 / 错别字 / 单行） | `direct`（0 文档） | 不写多余文档，允许原地微调并跑对应校验 |
+| **Case 2**（明确局部 Bugfix） | `sandbox`（0 文档） | 先进 `.worktrees/sandbox-*` 写失败回归测试再修绿（Red-Green），`promote` 晋升外环 |
+| **Case 3**（L2 局部功能，不改契约） | `sandbox`（晋升后补 `docs/todo/`） | 不因裸 `fileCount >= 6` 钝化升 Case 4；沙箱看真效果后 `promote` 补 Todo 跑 `audit` 自净化直通（Critique 仅建议） |
+| **Case 4**（L3 跨模块 / 契约 / `one-way`） | `plan-first`（`docs/specs/` + `docs/todo/`，装不下加 `docs/prd/`） | 允许 `--sandbox` 先探路 PoC；合并前须过 `audit` -> **独立 Critique**（`SELF_CRITIQUE_REJECTED` + 全历史换人 + 3 轮停损 `STOP_LOSS_ESCALATE`）-> 交人 `approve` |
+| **Case 5**（与 `docs/TDD.md` 或生效 SPEC 冲突） | `plan-first`（阻断拆解，`prdRequired: false`） | 与 PRD 严格正交；先修订 `docs/TDD.md` 并经独立确认后再续 |
 
-说明：`contributor-fork` 若上游仓未接入 `docs/`，私有草案绝不混入 PR diff。
+说明：`doc-plan.mjs triage` 确定性输出 `recommendedEntry: direct | sandbox | plan-first`、`sandboxPocAllowed`、`briefRecommended` 与单一 `[NEXT STEP]`；`contributor-fork` 若上游无 `docs/`，私有草案绝不混入 PR diff。
 
-**为什么「一份 SPEC 装不下」是判据、而不是「这件事大不大」**：大小是形容词，量不出来；能问的是
-一个结构问题——这份需求的验收清单，一份 SPEC 装得下吗？装不下就必须拆，拆了就需要一个上层容器
-记「整体算不算做完」，那个容器就是总控 PRD。三条机械信号任一条成立就够（同时碰四面以上、需求
-自己说了要分批、声明要动 12 个以上文件），`doc-plan.mjs triage` 会输出 `prdRequired` 与依据。
-**反向同样要守住**：只碰一两面的小需求不许被判进来，否则每件小事都要求先写 PRD，人会直接绕过
-整套流程。事后兜底由 `audit` 的 `ORPHAN_SLICES_NO_MASTER_PRD` 负责——两份以上生效 SPEC 没有
-共同认领的 PRD 时会报出来。
+**「一份 SPEC 装不下」的 PRD 结构判据**：三条机械信号任一成立即触发 `prdRequired: true`（同时碰四面以上、需求说了要分批、声明动 `>= 12` 个文件）；不以裸 `fileCount >= 6` 误抬局部可逆改动，且 `Case 5` 严格保持 `prdRequired: false`。事后由 `audit` 的 `ORPHAN_SLICES_NO_MASTER_PRD` 兜底多份无主 SPEC。
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 
 - **不可自审与全历史换人**：禁用 `owner: null`（`INVALID_OWNER`），禁跨轮把 `triage` 高档降回低档（`BLOCKED_TRIAGE_DOWNGRADE`）；`interactive` 模式 `clarify` 须带 `--by user` 消解全部待决小节。`critique-pass`/`critique-reject` 写入 `ledger.planCritique`，拒 `SELF_CRITIQUE_REJECTED`（同 `owner`）、`BLOCKED_CRITIQUE_SAME_REVIEWER`（R2+ 复用审稿人）、`BLOCKED_CRITIQUE_ROUND_GAP`（跳轮）与 `BLOCKED_CRITIQUE_SAME_SHA`（未改稿）。
 - **严重度分层与 R2+ 收敛**：仅 `[minor]` 禁 `critique-reject`（`BLOCKED_NON_BLOCKING_REJECT`），改走 `critique-pass --should-fix`；R2+ 新增阻塞须命中未闭环项（可配 `--resolved`/`--rebut-accepted`）或落入改动行/章节内（越界报 `BLOCKED_OUT_OF_SCOPE_CRITIQUE`）；连轮同阻或第 3 轮退回触发 `STOP_LOSS_ESCALATE`（`4`），仅人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后由维护者 `approve`（`--host-mode single-session --human-approved` 配 `--skip-critique-reason` 仅限无子代理宿主且经人授权，多代理宿主严禁借此绕过；`link --approve` 报 `BLOCKED_APPROVAL_HAS_SINGLE_ENTRY`），支持 `--multi-spec` 与活跃 SPEC 反查总控 PRD。
 - **抗压缩恢复、隔离与 Repo-Path Grounding**：随时可跑 `doc-plan.mjs next --handoff` 无损恢复 `1:N` 总控 PRD/切片、`findings`、半成品工作树归属、Living Visual Brief 与三态拍板出口（含 `--plan-only`）。`commits > 0` 默认分支 `init` 自动建 `.worktrees/impl-<taskId>/`（若先 `flow.mjs start --planning --task <id>` 则复用同树）；`planner` 返工优先续聊原写手，只读探索不建树；**允许在澄清/选型/用户要求时用 `webfetch`/`websearch` 做外部调研（注明来源），但写入文档的仓内路径、符号与命令必经 `doc-locate`/`repo-map`/`verifyDocClaims` 在本仓验真**。
-- **Living Visual Brief 与宿主中立 UI 原型挂载**：Case 3/4/5 `triage`、`init --kind tdd` 与多轮 `note` 自动在仓外 `<gitCommonDir>/project-forge-flow/briefs/` 实时投影交互式 HTML 简报（`workRoot` 的 `docs/feature-map.json` 优先，单源聚合 1:N 切片与待拍板状态，不污染 `git status`）；**每次创建或刷新简报后（含 `triage`、`note`、`brief`、`init`、`clarify`、`approve`）必须直接向用户呈递可点击的 `htmlUri` 链接**。`brief` 支持四态变更表达：`--affected-feature` 兼容 `id`、`id=说明` 与 `id=改前 -> 改后`（或 `=>` / `::`），`--add-feature` 声明新增模块，`--remove-feature` 声明拟移除与替代模块；涉及界面或交互原型时，先调用当前环境可用的前端/UI 原型能力产出静态单文件原型（`<= 512 KB`）或安全链接（仅 `http:`/`https:`/`file:`），通过 `doc-plan.mjs brief --prototype "<标题>=<路径或URL>" --source-skill "<名称>"` 挂载对比并用 `--select-prototype <id>` 选定方向；确认简报快照（`brief --confirm`）后再派发规划或实现，确认后若经 `note`/`clarify` 发生改动则自动降级为 `confirmedState: stale` 提醒重核。`init` 自动迁移 `topic -> task` 或 `1:N master-prd`（子切片确定性记录 `parentBriefKey` 且不覆写总控 PRD 简报）。
-- **波次移交 `dev-flow`**：单任务 `audit`/`approve` 后按 `[NEXT STEP]`（`--json` 输出 `nextSteps`）移交 `flow.mjs start`；多切片配合 `flow.mjs start --after <parent>` 或 `flow.mjs batch plan`，未装配兄弟技能退化原生 Git 指引。
+- **按需 Living Visual Brief 与原型挂载**：`triage` 与 `note` 统一经 `shouldAutoTriggerBrief` 触发仓外 `<gitCommonDir>/project-forge-flow/briefs/` 简报——仅 `Case >= 4` / `one-way` / `prdRequired` / 原型对比意图或多轮 `note` 自动投影，局部可逆单轮 `Case 2/3` 零 Brief 开销；**每次创建或刷新简报后必向用户呈递可点击 `htmlUri`**。`brief` 支持 `--affected-feature`（`id` / `id=说明` / `id=改前 -> 改后`）、`--add-feature`、`--remove-feature`、`--prototype "<标题>=<路径或URL>"`（`<= 512 KB` 及 `http`/`https`/`file` 白名单）、`--select-prototype` 与 `--confirm`（确认后变更置 `confirmedState: stale`）；`init` 迁移 `topic -> task` 或 `1:N master-prd`（子切片记 `parentBriefKey` 不覆写总控）。
+- **波次移交 `dev-flow`**：按 `[NEXT STEP]`（`--json` `nextSteps`）移交 `flow.mjs start`（可逆进 `--sandbox`，已批 Case 4 进外环）；多切片配合 `--after` 或 `flow.mjs batch plan`。
 
 ## 标准命令流
 

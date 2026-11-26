@@ -91,4 +91,28 @@ export const INJECTIONS_CONV_S1 = [
     to: '      const labelsToRemove = MERGE_STALE_LABELS',
     expect: 'Conv-S1Merge',
   },
+  {
+    id: 'I912',
+    what: 'syncIssueCriteriaCheckboxes 在 markAllCriteriaDone 为 true 时跳过勾选剩余 C* 验收标准',
+    file: 'kit/skills/lib/plan-sync.mjs',
+    from: '      else if (markAllCriteriaDone === true) nextChecked = true',
+    to: '      else if (false && markAllCriteriaDone === true) nextChecked = true',
+    expect: 'IssueChecklistSync',
+  },
+  {
+    id: 'I913',
+    what: 'flow-batch merge-queue 合并成功后跳过 syncPostMergeTargets 回写 Issue 勾选与关单',
+    file: 'kit/skills/dev-flow/scripts/flow-batch.mjs',
+    from: '      if (mergeRes?.merged !== false\n        && ((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0 || (needsOnlineRemoteMerge && ledger.prNumber))) {',
+    to: '      if (false && mergeRes?.merged !== false\n        && ((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0 || (needsOnlineRemoteMerge && ledger.prNumber))) {',
+    expect: 'IssueChecklistSync',
+  },
+  {
+    id: 'I914',
+    what: 'syncIssueSummaryBody 将 delegated/失败响应误判为 true 导致漏记 syncFailures',
+    file: 'kit/skills/lib/plan-sync.mjs',
+    from: '  return upd?.ok === true',
+    to: '  return upd?.ok !== false',
+    expect: 'IssueChecklistSync',
+  },
 ]

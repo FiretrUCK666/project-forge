@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-26T00:17:37.813Z",
+  "installedAt": "2026-11-26T03:21:21.661Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
@@ -22,10 +22,10 @@
       "sha256": "999867938593c719194411fb35c7224cdd6a4b4b298ed40539407694e6598551"
     },
     "dev-flow/SKILL.md": {
-      "sha256": "b1ccdb4ed9f115ada91279440d8aee4d4bde51bc9ef8422f6aac992d20c4f6ae"
+      "sha256": "69e6c8664d112ddde0f51c5267d3c0c206d2d6098bcc5823dd89e017bd16f22f"
     },
     "dev-flow/scripts/flow-batch.mjs": {
-      "sha256": "a94e0bacc3043e18d917112cc8ebd56dd9a8c9e0282efefee1e41a4ff1b81ec3"
+      "sha256": "3f0d137340c2d272096ea8e8a3615f279e7848c8586aaf6675d3f532f1bea898"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
       "sha256": "f2153d971a65c03abd7e206689f6b060b6427234ee5e898eb138f24b211113c5"
@@ -49,19 +49,19 @@
       "sha256": "9ae5bd92448a3af0a7e227447510914888781ba60f143f0dddf280d9ac76c09e"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
-      "sha256": "7dbc9fd075e0ae8a3a4abd0d9b6c715a135b231eb877aed39d11ba43e06129ae"
+      "sha256": "f1b82ab55c339a090fd2d250f99effc974a9adfaf71eeb5e74769edd30f7b723"
     },
     "dev-flow/scripts/flow-lifecycle-hooks.mjs": {
       "sha256": "2dd3af1549ab3eb1b4a85f69da87a6bd9bd34fb369dcfe2363b984ac74090e8c"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "3e8ee4dc9dcd4ecf9173e3b5cbde94a039d21443477d9ca40b841a8fb18ca72c"
+      "sha256": "76b9db390c80739141ff658a86d2fd9eac250b6f4a3f6a45ed92e76d1ee5962f"
     },
     "dev-flow/scripts/flow-merge-claim.mjs": {
-      "sha256": "0d7cd266bfcc612731e390069009ea58cbb5d94ff1cc9d7832bd7fbdfef9bcc4"
+      "sha256": "07b793cbf8601ab4e8fbe9f17fd03ff1479123e15bb89ef103fde3a9861e31a1"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "651d16acf7e083372b0f84bbf6d86cf49878a215a10a9ccdefae129c924a78d3"
+      "sha256": "95b78168c2b86a6ef5f19eaf2fee046ff67f0344af634c3adcc0a01baf7af505"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "468a51417c25421aa7d7b145c3a2dc2b1923300096aa4a690f560c077972b1aa"
@@ -376,7 +376,7 @@
       "sha256": "7de14afc6bdc3e31994b774f33bbad683d1629b65eda3ed9a7a643e2a68eee0b"
     },
     "lib/plan-sync.mjs": {
-      "sha256": "3a4641d7eb723c51e76f98563aafb4994a757d955ab98f4b219a54e6e260c700"
+      "sha256": "37b88dec4086db459a319ee0b165db8fb5396838cbac45ec808ab6e914e49c14"
     },
     "lib/platform-probe.mjs": {
       "sha256": "b8e9a712b0e067c724e618509453bf9b15e32e4183ad523c2936096a81bf9e7c"

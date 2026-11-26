@@ -632,7 +632,9 @@ export function layoutFlowDag(featureMap, overlay, _opts = {}) {
   const totalW = Math.max(680, labelColW + 24 + (maxRank + 1) * nodeW + maxRank * colGap + pad * 2)
 
   laneSpecs.forEach((lane) => {
-    const items = laneBuckets.get(lane.id) || [], byRank = new Map()
+    const items = laneBuckets.get(lane.id) || []
+    if (items.length === 0) return
+    const byRank = new Map()
     for (const item of items) {
       const r = ranks.get(item.id) || 0
       if (!byRank.has(r)) byRank.set(r, [])

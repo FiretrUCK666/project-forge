@@ -44,7 +44,7 @@ export function buildGeneratedHeaderLine({ mode = 'architecture-map', featureMap
 }
 
 function renderZoomFloatHtml(vpId) {
-  return `<div class="pf-zoom-float"><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="out" data-zoom-target="${vpId}" aria-label="缩小">-</button><button class="pf-btn pf-btn-sm pf-zoom-readout" type="button" data-zoom-action="reset" data-zoom-target="${vpId}" data-zoom-label>100%</button><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="in" data-zoom-target="${vpId}" aria-label="放大">+</button><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="fit" data-zoom-target="${vpId}">适配画布</button><span class="pf-zoom-hint">拖拽 · 滚轮缩放</span></div>`
+  return `<div class="pf-zoom-float"><button class="pf-btn pf-btn-sm pf-btn-ghost" type="button" data-zoom-action="out" data-zoom-target="${vpId}" aria-label="缩小">-</button><button class="pf-btn pf-btn-sm pf-btn-ghost pf-zoom-readout" type="button" data-zoom-action="reset" data-zoom-target="${vpId}" data-zoom-label>100%</button><button class="pf-btn pf-btn-sm pf-btn-ghost" type="button" data-zoom-action="in" data-zoom-target="${vpId}" aria-label="放大">+</button><button class="pf-btn pf-btn-sm pf-btn-ghost" type="button" data-zoom-action="fit" data-zoom-target="${vpId}">适配画布</button><button class="pf-btn pf-btn-sm pf-btn-ghost" type="button" data-zoom-action="reset-layout" data-zoom-target="${vpId}" hidden>重置布局</button><span class="pf-zoom-hint">拖拽 · 滚轮缩放</span></div>`
 }
 
 function renderFocusBarHtml(tree, hasActiveDiff) {
@@ -135,7 +135,7 @@ function renderFlowBarHtml(flows = []) {
   if (!Array.isArray(flows) || flows.length === 0) return ''
   const allBtn = '<button type="button" class="pf-seg-btn is-active" data-flow-select="">全部泳道总图</button>'
   const flowBtns = flows.map((f) => `<button type="button" class="pf-seg-btn" data-flow-select="${escapeHtml(f.id)}">${escapeHtml(f.title)}</button>`).join('')
-  return `<div id="pf-flow-bar" class="pf-flow-bar"><div class="pf-flow-bar-left"><span class="pf-inspector-label">主流程：</span><div class="pf-seg">${allBtn}${flowBtns}</div></div><button id="btn-flow-ribbon-toggle" class="pf-btn pf-btn-sm" type="button" hidden>收起步骤</button></div><div id="pf-flow-ribbon" class="pf-flow-ribbon" hidden></div>`
+  return `<div id="pf-flow-bar" class="pf-flow-bar"><div class="pf-flow-bar-left"><span class="pf-inspector-label">主流程：</span><div class="pf-seg">${allBtn}${flowBtns}</div></div><button id="btn-flow-ribbon-toggle" class="pf-btn pf-btn-sm pf-btn-ghost" type="button" hidden>收起步骤</button></div><div id="pf-flow-ribbon" class="pf-flow-ribbon" hidden></div>`
 }
 
 export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'architecture-map' } = {}) {
@@ -203,8 +203,8 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
     '<body>',
     '<main class="pf-shell">',
     '<header class="pf-topbar">',
-    `<div class="pf-top-left"><h1 class="pf-title">${title}</h1><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span><nav class="pf-tabs" aria-label="视图切换">${tabsHtml}</nav></div>`,
-    `<div class="pf-controls"><button id="btn-cmdk" class="pf-btn" type="button">搜索模块 ⌘K</button><button id="btn-walk-start" class="pf-btn" type="button"${(model.walkthrough || []).length === 0 ? ' hidden' : ''}>分步导览</button><button id="btn-theme" class="pf-btn" type="button">外观：跟随系统</button><button id="btn-followup-ctx" class="pf-btn pf-btn-primary" type="button" data-followup-panel="${defaultFollowup}">向 AI 提问</button></div>`,
+    `<div class="pf-top-left"><h1 class="pf-title" title="${title}">${title}</h1><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span><nav class="pf-tabs" aria-label="视图切换">${tabsHtml}</nav></div>`,
+    `<div class="pf-controls"><button id="btn-cmdk" class="pf-btn pf-btn-subtle" type="button">搜索模块 ⌘K</button><button id="btn-walk-start" class="pf-btn pf-btn-ghost" type="button"${(model.walkthrough || []).length === 0 ? ' hidden' : ''}>分步导览</button><button id="btn-theme" class="pf-btn pf-btn-ghost" type="button">外观：跟随系统</button><button id="btn-followup-ctx" class="pf-btn pf-btn-primary" type="button" data-followup-panel="${defaultFollowup}">向 AI 提问</button></div>`,
     '</header>',
     '<section class="pf-workspace">',
     isBrief ? `<article class="pf-panel" data-tab-panel="brief">${renderBlueprintLandingHtml(model, verdict, verdictLabel)}</article>` : '',

@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { Script } from 'node:vm'
 
 import {
@@ -512,6 +512,133 @@ export function registerVisualEngineCases(cases) {
         if (/type=["']application\/json["']/i.test(m[0])) continue
         try { new Script(m[1]) } catch (err) { return `${label} 内联 <script> 解析失败：${err.message}` }
       }
+    }
+    return true
+  }])
+
+  cases.push(['Visual UX v5 C1-C3：60fps GPU 拖拽、去边框墙蓝图、空泳道省略、repoName 回退与焦点/遮罩交互（正反双向）', async () => {
+    const flowMap = {
+      version: 2,
+      domains: [{ id: 'core', name: 'Core' }],
+      features: [
+        { id: 'f1', name: 'Planner', domain: 'core', actors: ['planner'], modules: ['src/p.mjs'], tests: [] },
+        { id: 'f2', name: 'Runner', domain: 'core', actors: ['implementer'], dependsOn: ['f1'], modules: ['src/r.mjs'], tests: [] },
+        { id: 'f3', name: 'Downstream', domain: 'core', actors: ['implementer'], dependsOn: ['f2'], modules: ['src/d.mjs'], tests: [] },
+      ],
+      flows: [
+        {
+          id: 'fl1',
+          name: '主流程',
+          steps: [
+            { feature: 'f1', actor: 'planner', action: '规划' },
+            { feature: 'f2', actor: 'implementer', action: '实施' },
+            { feature: 'f2', actor: 'critic', action: '评审' },
+          ],
+        },
+      ],
+    }
+    const model = buildVisualModel({
+      featureMap: flowMap,
+      mode: 'visual-brief',
+      diffOverlay: {
+        featureChanges: { f1: { state: 'modified', before: '旧方案', after: '新方案' } },
+      },
+      briefSpec: {
+        briefData: {
+          verdict: '单行结论摘要',
+          goals: ['目标 1', '目标 2', '目标 3', '目标 4'],
+          nonGoals: ['不做项 1'],
+          flowDeltas: ['流程变化 1'],
+          mergedDecisions: ['决策 1'],
+          mergedOpen: [],
+          pendingDecisions: [],
+          childSlices: [],
+          activeWorktrees: [],
+        },
+      },
+    })
+
+    // 正反双向：空泳道 critic 必须被省略，非空泳道 planner/implementer 必须保留
+    const laneIds = model.flow.lanes.map((l) => l.id)
+    if (laneIds.includes('critic')) return `空泳道 critic 未被省略：${JSON.stringify(laneIds)}`
+    if (!laneIds.includes('planner') || !laneIds.includes('implementer')) {
+      return `非空泳道 planner/implementer 被误删：${JSON.stringify(laneIds)}`
+    }
+
+    const briefHtml = renderVisualHtml({ visualModel: model, featureMapSha256: 'd'.repeat(64), mode: 'visual-brief' }).html
+    const archHtml = renderVisualHtml({ visualModel: model, featureMapSha256: 'd'.repeat(64), mode: 'architecture-map' }).html
+
+    // C1 正反：.pf-node 严禁全属性 transition:.14s；须含属性级 transition、is-dragging-node、touch-action:none、translate3d、requestAnimationFrame、edgesByNode、setPointerCapture、reset-layout
+    if (/\.pf-node\{[^}]*transition:\s*\.14s(?=[;}])/i.test(archHtml)) {
+      return '.pf-node 仍残留全属性 transition:.14s 导致拖拽滞后'
+    }
+    if (!/\.pf-node\{[^}]*transition:border-color/i.test(archHtml) || !/\.pf-node\.is-dragging-node\{[^}]*transition:none!important;will-change:transform/i.test(archHtml)) {
+      return '缺少属性级 .pf-node transition 或 .is-dragging-node 零过渡 GPU 加速规则'
+    }
+    if (!archHtml.includes('touch-action:none') || !archHtml.includes('content-visibility:auto') || !archHtml.includes('@supports not (content-visibility:auto)')) {
+      return '缺少 touch-action:none 或带 @supports 降级的 content-visibility:auto'
+    }
+    if (/\.pf-node[^{]*content-visibility/i.test(archHtml)) {
+      return '严禁对绝对定位的 .pf-node 施加 content-visibility:auto'
+    }
+    for (const token of ['translate3d(', 'requestAnimationFrame', 'edgesByNode', 'setPointerCapture', 'data-zoom-action="reset-layout"', '重置布局']) {
+      if (!archHtml.includes(token)) return `客户端拖拽脚本缺少关键机制：${token}`
+    }
+    const rrtMatch = /rrt=\(vId,nid\)=>\{[^}]*\}/.exec(archHtml)
+    if (!rrtMatch || rrtMatch[0].includes('querySelectorAll')) {
+      return '拖拽热路径 rrt() 不得执行 querySelectorAll 扫描'
+    }
+
+    // C2 正反：无重复 verdict-pill、有 #btn-jump-diff-tree、有 .pf-impact-fold、超 3 项折叠 .pf-more-fold、title 全称属性
+    const heroMatch = /<div class="pf-verdict-hero">[\s\S]*?<\/div><section class="pf-bp-sec">/.exec(briefHtml)
+    if (heroMatch && heroMatch[0].includes('pf-verdict-pill')) {
+      return '.pf-verdict-hero 内仍存在与顶栏重复的 pf-verdict-pill'
+    }
+    if (!briefHtml.includes('id="btn-jump-diff-tree"') || !briefHtml.includes('class="pf-impact-fold"') || !briefHtml.includes('class="pf-more-fold"')) {
+      return '变更蓝图缺少快捷跳转按钮、下游波及折叠或超 3 条台账折叠'
+    }
+    if (!/<h1 class="pf-title" title="/.test(briefHtml)) {
+      return '.pf-title 缺少完整标题 title 属性'
+    }
+
+    // C3 正反：暗色 WCAG 对比度色值、禁 .pf-node.is-dimmed opacity:.55、焦点卡互斥与遮罩点击关闭
+    if (!archHtml.includes('--accent-solid:#4F46E5') || !archHtml.includes('--muted:#A8B8CD')) {
+      return '暗色模式对比度 token 未更新为 #4F46E5 / #A8B8CD'
+    }
+    if (/\.pf-node\.is-dimmed[^{]*\{[^}]*opacity:\s*\.55/i.test(archHtml)) {
+      return '.pf-node.is-dimmed 仍使用 opacity:.55 导致文字对比度低于 4.5:1'
+    }
+    if (!archHtml.includes('syncFc') || !archHtml.includes('ev.target===m')) {
+      return '缺少弹窗打开时隐藏焦点卡（syncFc）或点击遮罩背景关闭弹窗逻辑'
+    }
+
+    // C3 architecture-map.mjs repoName 回退 basename(root)（正反双向）
+    const dirFallback = tmpProject({
+      'docs/feature-map.json': JSON.stringify({
+        version: 2,
+        features: [{ id: 'core', title: 'Core', modules: ['src/a.mjs'], entrypoints: ['src/a.mjs'], tests: [] }],
+      }, null, 2),
+    })
+    const dirExplicit = tmpProject({
+      'docs/feature-map.json': JSON.stringify({
+        version: 2,
+        repoName: 'CustomExplicitRepo',
+        features: [{ id: 'core', title: 'Core', modules: ['src/a.mjs'], entrypoints: ['src/a.mjs'], tests: [] }],
+      }, null, 2),
+    })
+    try {
+      const rFb = renderArchitectureMapFromRepo(dirFallback, { write: false })
+      const expectedName = basename(dirFallback)
+      if (!rFb.ok || !rFb.html.includes(`${expectedName} — 架构全景图`) || rFb.html.includes('项目仓库 — 架构全景图')) {
+        return `缺省 repoName 未回退至 basename(root) (${expectedName})`
+      }
+      const rEx = renderArchitectureMapFromRepo(dirExplicit, { write: false })
+      if (!rEx.ok || !rEx.html.includes('CustomExplicitRepo — 架构全景图')) {
+        return '显式 repoName 被 basename(root) 错误覆盖'
+      }
+    } finally {
+      rmTree(dirFallback)
+      rmTree(dirExplicit)
     }
     return true
   }])

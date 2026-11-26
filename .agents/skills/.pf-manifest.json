@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-26T07:19:21.433Z",
+  "installedAt": "2026-11-26T07:50:36.258Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "951e9fc8773d7edc8e5f435087f182b08e8f875bec35bda8ded109c104909a36"
@@ -88,7 +88,7 @@
       "sha256": "fbaa2b38a60fc1512862a90a1e8e879ebbf124221fa930f6fbc0c5a5a4f128d4"
     },
     "dev-govern/scripts/govern-audit.mjs": {
-      "sha256": "7208979a5b5404da0e2025e0016677b550481926bede0d1b6cf8798af10727c6"
+      "sha256": "3041eb223af19b21d3d7ff0dc3762666fc6cfce17328a34dfb6b7f2dabff8de3"
     },
     "dev-govern/scripts/govern-checks-hygiene.mjs": {
       "sha256": "8fa0a3276a40d73e3d522d3eaf7d65e4fe5f57cc88e4f5c973fdfa2dc4f9b260"
@@ -238,7 +238,7 @@
       "sha256": "a6cf4669614bfa7ffcf52f32fd3d987c3ca7588585ff3d3b2e100ac5b3feea9f"
     },
     "lib/doc-graph.mjs": {
-      "sha256": "ce29248eeb9873fc0a05abf4b74da8c9c225516f851362e6f9d8fcf035a2f61a"
+      "sha256": "0754c8fafde94caadd3c6ec77c588ace2cd129ae761f8527b7ceed5fdb69816c"
     },
     "lib/doc-locator.mjs": {
       "sha256": "f8d1ec5d9f81a9a7b43d819e8e3c37b007b2bbfcba8bdbf947bade449ef0ef0f"

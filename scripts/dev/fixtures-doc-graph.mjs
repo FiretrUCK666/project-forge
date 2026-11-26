@@ -292,4 +292,63 @@ export function registerDocGraphCases(cases) {
       return true
     } finally { rmTree(dir) }
   }])
+
+  cases.push(['DocGraph C2 回归：洁净仓库 govern-audit reconcile 无 docGraphSummary TDZ 崩溃', async () => {
+    const dir = tmpProject({
+      'package.json': JSON.stringify({ name: 'clean-reconcile-demo', version: '1.0.0', type: 'module' }, null, 2),
+      'AGENTS.md': [
+        '# Clean Demo',
+        '',
+        '## Dev Profile',
+        '',
+        '```yaml',
+        'quick-test: node --test',
+        'full-test: node --test',
+        'smoke-verify: none',
+        'merge-gate: none',
+        'arch-rules: none',
+        'high-risk: none',
+        'do-not-edit: none',
+        '```',
+        '',
+        '## 取舍',
+        '',
+        '- `no-tdd`: 最小单域示例',
+        '- `no-architecture-html`: 无离线地图',
+        '',
+      ].join('\n'),
+      'README.md': '# Clean Demo\n\nSee [Guide](docs/guide.md#overview).\n',
+      'docs/guide.md': '# Guide\n\n## Overview\n\nMain module: `src/app.mjs`.\n',
+      'src/app.mjs': 'export const run = () => 1\n',
+      'tests/app.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(1, 1)\n',
+      'scripts/verify-app.mjs': 'console.log("ok")\n',
+      'docs/feature-map.json': JSON.stringify({
+        version: 2,
+        domains: [{ id: 'core', name: 'Core', docAnchors: ['docs/guide.md#overview'] }],
+        features: [{
+          id: 'app',
+          name: 'App',
+          domain: 'core',
+          sourceModules: ['src/app.mjs'],
+          docAnchors: ['docs/guide.md#overview'],
+          verificationTools: ['scripts/verify-app.mjs'],
+          testRefs: ['tests/app.test.mjs'],
+        }],
+      }, null, 2),
+    })
+    try {
+      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+      gitCommitFast(dir, 'chore: init clean repo')
+      const rec = await runAbsAsync(GOVERN_AUDIT, ['reconcile', dir, '--json'], { cwd: dir })
+      if (rec.status !== 0) {
+        return `洁净仓库 govern-audit reconcile 崩溃：exit=${rec.status} stderr=${rec.stderr} stdout=${rec.stdout}`
+      }
+      const parsed = JSON.parse(rec.stdout || '{}')
+      const summary = parsed.reconcileSummary
+      if (!summary || !summary.docGraph || summary.docGraph.unaccountedCount !== 0) {
+        return `reconcileSummary.docGraph 异常：${JSON.stringify(summary)}`
+      }
+      return true
+    } finally { rmTree(dir) }
+  }])
 }

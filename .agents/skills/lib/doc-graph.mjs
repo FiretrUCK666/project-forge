@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join, posix, resolve } from 'node:path'
+import { join, posix, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { COMMON_SKIP_DIRS, isInsideDir, isMacOsJunkPath, posixPath, readTextSafe } from './git.mjs'

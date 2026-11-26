@@ -418,6 +418,21 @@ async function finishAudit({
       .filter((f) => String(f.id ?? '').startsWith('docs.stale-vs-churn'))
       .map((f) => f.file || f.title)
       .slice(0, 10)
+    const dg = evDiscovery.docGraph
+    const docGraphSummary = dg ? {
+      entryCount: dg.accounted.entry.length,
+      registeredAuthorityCount: dg.accounted.registeredAuthority.length,
+      unaccountedCount: dg.accounted.unaccounted.length,
+      unaccountedDocs: dg.unaccountedDocs.map((d) => d.path),
+      nonMarkdownAuthorities: dg.nonMarkdownDocs.map((d) => d.path),
+      brokenLinksCount: dg.brokenLinks.length,
+      brokenAnchorsCount: dg.brokenAnchors.length,
+      anchorWarningsCount: dg.anchorWarnings.length,
+      cyclesCount: dg.cycles.length,
+      redirectChainsCount: dg.redirectChains.length,
+      orphansCount: dg.orphans.length,
+      entryDivergenceCount: dg.entryDivergence.length,
+    } : null
     const docGapOrDrift = findings.some((f) => f.category === 'docs')
       || duplicateGroups.length > 0
       || missingEntryPaths.length > 0
@@ -444,21 +459,6 @@ async function finishAudit({
           ...evDiscovery.markdownDocs.slice(0, 6).map((d) => `node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --file "${d.path}"`),
         ]
       : []
-    const dg = evDiscovery.docGraph
-    const docGraphSummary = dg ? {
-      entryCount: dg.accounted.entry.length,
-      registeredAuthorityCount: dg.accounted.registeredAuthority.length,
-      unaccountedCount: dg.accounted.unaccounted.length,
-      unaccountedDocs: dg.unaccountedDocs.map((d) => d.path),
-      nonMarkdownAuthorities: dg.nonMarkdownDocs.map((d) => d.path),
-      brokenLinksCount: dg.brokenLinks.length,
-      brokenAnchorsCount: dg.brokenAnchors.length,
-      anchorWarningsCount: dg.anchorWarnings.length,
-      cyclesCount: dg.cycles.length,
-      redirectChainsCount: dg.redirectChains.length,
-      orphansCount: dg.orphans.length,
-      entryDivergenceCount: dg.entryDivergence.length,
-    } : null
     reconcileSummary = {
       agentsBytes: agentsInfo?.text ? Buffer.byteLength(agentsInfo.text, 'utf8') : null,
       tddPresent: existsSync(join(workTreeRoot, 'docs', 'TDD.md')),

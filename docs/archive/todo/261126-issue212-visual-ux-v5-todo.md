@@ -5,7 +5,7 @@ status: done
 created: 2026-11-26
 updated: 2026-11-26
 issue: 212
-pr: null
+pr: 213
 branch: feat/visual-ux-v5-polish
 owner: coordinator
 plan_mode: autonomous
@@ -29,7 +29,7 @@ related_spec: null
 | 任务编号 | `visual-ux-v5` |
 | 负责人 / 审批 | coordinator / `false` |
 | 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
-| 关联 Issue / PR / SPEC | #212 / 未关联 / 按需关联 |
+| 关联 Issue / PR / SPEC | #212 / #213 / 按需关联 |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 

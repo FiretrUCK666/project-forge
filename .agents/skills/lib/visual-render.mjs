@@ -44,13 +44,13 @@ export function buildGeneratedHeaderLine({ mode = 'architecture-map', featureMap
 }
 
 function renderZoomFloatHtml(vpId) {
-  return `<div class="pf-zoom-float"><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="out" data-zoom-target="${vpId}" aria-label="缩小">-</button><button class="pf-btn pf-btn-sm pf-zoom-readout" type="button" data-zoom-action="reset" data-zoom-target="${vpId}" data-zoom-label>100%</button><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="in" data-zoom-target="${vpId}" aria-label="放大">+</button><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="fit" data-zoom-target="${vpId}">适配</button></div>`
+  return `<div class="pf-zoom-float"><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="out" data-zoom-target="${vpId}" aria-label="缩小">-</button><button class="pf-btn pf-btn-sm pf-zoom-readout" type="button" data-zoom-action="reset" data-zoom-target="${vpId}" data-zoom-label>100%</button><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="in" data-zoom-target="${vpId}" aria-label="放大">+</button><button class="pf-btn pf-btn-sm" type="button" data-zoom-action="fit" data-zoom-target="${vpId}">适配画布</button><span class="pf-zoom-hint">拖拽 · 滚轮缩放</span></div>`
 }
 
 function renderFocusBarHtml(tree, hasActiveDiff) {
-  const domBtns = (tree.domains || []).map((d) => `<button type="button" class="pf-seg-btn" data-domain-filter="${escapeHtml(d.id)}">${escapeHtml(d.shortTitle)}</button>`).join('')
-  const diffBtn = `<button id="btn-only-diff" type="button" class="pf-seg-btn"${hasActiveDiff ? '' : ' disabled title="当前无活跃变更"'}>仅看本次变更</button>`
-  const edgeBtn = `<button id="btn-edge-mode" type="button" class="pf-seg-btn">连线：全部</button>`
+  const domBtns = (tree.domains || []).map((d) => `<button type="button" class="pf-seg-btn" data-domain-filter="${escapeHtml(d.id)}"><span class="pf-dot" style="--dc:${escapeXml(d.palette?.stroke || '#64748B')}"></span>${escapeHtml(d.shortTitle)}</button>`).join('')
+  const diffBtn = `<button id="btn-only-diff" type="button" class="pf-seg-btn"${hasActiveDiff ? '' : ' hidden disabled'}>只看改动</button>`
+  const edgeBtn = `<button id="btn-edge-mode" type="button" class="pf-seg-btn">连线：标准</button>`
   return `<div id="pf-focus-bar" class="pf-focus-bar"><div class="pf-seg"><button type="button" class="pf-seg-btn is-active" data-domain-filter="">全部域</button>${domBtns}</div><div class="pf-seg">${diffBtn}${edgeBtn}</div></div>`
 }
 
@@ -64,27 +64,38 @@ function formatNodeCue(node) {
   return node.shortSummary || ''
 }
 
+function formatNodeSubtitle(node) {
+  const st = node.diffState || 'context'
+  if (st === 'added' || st === 'modified' || st === 'removed') return formatNodeCue(node)
+  const summary = truncateLabel(node.shortSummary || '', 30)
+  if (summary) return summary
+  return `${(node.modules || []).length} 模块 · ${(node.tests || []).length} 测试`
+}
+
+function renderNodeCardHtml(node) {
+  const st = node.diffState || 'context'
+  const diffText = DIFF_LABELS[st] || ''
+  const pill = diffText ? `<span class="pf-pill pf-pill-${escapeXml(st)}">${escapeXml(diffText)}</span>` : ''
+  const titleCls = st === 'removed' ? 'pf-node-title pf-node-title-removed' : 'pf-node-title'
+  const sub = formatNodeSubtitle(node)
+  const cueHtml = sub ? `<div class="pf-node-cue">${escapeHtml(sub)}</div>` : ''
+  return `<div class="pf-node pf-diff-${escapeXml(st)}" tabindex="0" role="button" title="${escapeHtml(node.title)}" data-node-id="${escapeXml(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px">${pill}<div class="${titleCls}">${escapeHtml(node.shortTitle)}</div>${cueHtml}</div>`
+}
+
 function renderDomainTreeStage(tree) {
   const zonesHtml = tree.domains.map((dom) => {
     const desc = dom.shortDescription ? `<div class="pf-domain-desc">${escapeHtml(dom.shortDescription)}</div>` : ''
-    return `<div class="pf-domain-box" data-domain-id="${escapeXml(dom.id)}" style="left:${dom.x}px;top:${dom.y}px;width:${dom.w}px;height:${dom.h}px"><div class="pf-domain-head" style="min-height:${dom.domHeaderH}px"><div class="pf-domain-title-row"><span class="pf-domain-title">${escapeHtml(dom.shortTitle)}</span><span class="pf-domain-meta">${dom.featureCount}</span></div>${desc}</div></div>`
+    const dc = escapeXml(dom.palette?.stroke || '#64748B')
+    return `<div class="pf-domain-box" data-domain-id="${escapeXml(dom.id)}" style="left:${dom.x}px;top:${dom.y}px;width:${dom.w}px;height:${dom.h}px;--dc:${dc}"><div class="pf-domain-head" style="min-height:${dom.domHeaderH}px"><div class="pf-domain-title-row"><span class="pf-dot"></span><span class="pf-domain-title">${escapeHtml(dom.shortTitle)}</span><span class="pf-domain-meta">${dom.featureCount}</span></div>${desc}</div></div>`
   }).join('')
 
   const edgeXml = tree.edges.map((edge) => {
     const st = edge.edgeState || (edge.impacted ? 'impacted' : 'context')
     const cls = st !== 'context' ? `pf-edge pf-edge-${escapeXml(st)}` : 'pf-edge'
-    return `<path class="${cls}" data-edge-id="${escapeXml(edge.id)}" data-from-id="${escapeXml(edge.fromId)}" data-to-id="${escapeXml(edge.toId)}" data-edge-state="${escapeXml(st)}" d="${escapeXml(edge.pathD)}" marker-end="url(#pf-arrow)" />`
+    return `<path class="${cls}" data-from-id="${escapeXml(edge.fromId)}" data-to-id="${escapeXml(edge.toId)}" d="${escapeXml(edge.pathD)}" marker-end="url(#pf-arrow)" />`
   }).join('\n')
 
-  const nodesHtml = tree.nodes.map((node) => {
-    const st = node.diffState || 'context'
-    const diffText = DIFF_LABELS[st] || ''
-    const pill = diffText ? `<span class="pf-pill pf-pill-${escapeXml(st)}">${escapeXml(diffText)}</span>` : ''
-    const titleCls = st === 'removed' ? 'pf-node-title pf-node-title-removed' : 'pf-node-title'
-    const cue = formatNodeCue(node)
-    const cueHtml = cue ? `<div class="pf-node-cue">${escapeHtml(cue)}</div>` : ''
-    return `<div class="pf-node pf-diff-${escapeXml(st)}" tabindex="0" role="button" data-node-id="${escapeXml(node.id)}" data-node-label="${escapeXml(node.title)}" data-domain-id="${escapeXml(node.domain)}" data-diff-state="${escapeXml(st)}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px">${pill}<div class="${titleCls}">${escapeHtml(node.shortTitle)}</div>${cueHtml}</div>`
-  }).join('\n')
+  const nodesHtml = tree.nodes.map((node) => renderNodeCardHtml(node)).join('\n')
 
   return [
     `<div id="stage-tree" class="pf-stage" style="width:${tree.width}px;height:${tree.height}px">`,
@@ -97,21 +108,18 @@ function renderDomainTreeStage(tree) {
 
 function renderFlowDagStage(flow) {
   const stageHeads = (flow.stages || []).map((st) => `<div class="pf-stage-head" style="left:${st.x}px;top:${st.y}px;width:${st.w}px">${escapeHtml(st.title)}</div>`).join('')
-  const lanesHtml = flow.lanes.map((lane) => `<div class="pf-lane" data-lane-id="${escapeXml(lane.id)}" style="left:${lane.x}px;top:${lane.y}px;width:${lane.w}px;height:${lane.h}px"><div class="pf-lane-head" style="width:${lane.labelW}px">${escapeHtml(lane.shortTitle)}</div></div>`).join('')
+  const lanesHtml = flow.lanes.map((lane) => {
+    const dc = escapeXml(lane.palette?.stroke || '#64748B')
+    return `<div class="pf-lane" data-lane-id="${escapeXml(lane.id)}" style="left:${lane.x}px;top:${lane.y}px;width:${lane.w}px;height:${lane.h}px;--dc:${dc}"><div class="pf-lane-head" style="width:${lane.labelW}px"><span class="pf-dot"></span><span>${escapeHtml(lane.shortTitle)}</span></div></div>`
+  }).join('')
 
   const edgeXml = flow.edges.map((edge) => {
     const st = edge.edgeState || (edge.impacted ? 'impacted' : 'context')
     const cls = st !== 'context' ? `pf-edge pf-edge-${escapeXml(st)}` : 'pf-edge'
-    return `<path class="${cls}" data-edge-id="${escapeXml(edge.id)}" data-from-id="${escapeXml(edge.fromId)}" data-to-id="${escapeXml(edge.toId)}" data-edge-state="${escapeXml(st)}" d="${escapeXml(edge.pathD)}" marker-end="url(#pf-flow-arrow)" />`
+    return `<path class="${cls}" data-from-id="${escapeXml(edge.fromId)}" data-to-id="${escapeXml(edge.toId)}" d="${escapeXml(edge.pathD)}" marker-end="url(#pf-flow-arrow)" />`
   }).join('\n')
 
-  const nodesHtml = flow.nodes.map((node) => {
-    const st = node.diffState || 'context'
-    const diffText = DIFF_LABELS[st] || ''
-    const pill = diffText ? `<span class="pf-pill pf-pill-${escapeXml(st)}">${escapeXml(diffText)}</span>` : ''
-    const titleCls = st === 'removed' ? 'pf-node-title pf-node-title-removed' : 'pf-node-title'
-    return `<div class="pf-node pf-diff-${escapeXml(st)}" tabindex="0" role="button" data-node-id="${escapeXml(node.id)}" data-node-label="${escapeXml(node.title)}" data-diff-state="${escapeXml(st)}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px">${pill}<div class="${titleCls}">${escapeHtml(node.shortTitle)}</div><div class="pf-node-cue">阶段 ${node.rank + 1}</div></div>`
-  }).join('\n')
+  const nodesHtml = flow.nodes.map((node) => renderNodeCardHtml(node)).join('\n')
 
   return [
     `<div id="stage-flow" class="pf-stage" style="width:${flow.width}px;height:${flow.height}px">`,
@@ -125,9 +133,9 @@ function renderFlowDagStage(flow) {
 
 function renderFlowBarHtml(flows = []) {
   if (!Array.isArray(flows) || flows.length === 0) return ''
-  const flowBtns = flows.map((f, idx) => `<button type="button" class="pf-seg-btn${idx === 0 ? ' is-active' : ''}" data-flow-select="${escapeHtml(f.id)}">${escapeHtml(f.title)}</button>`).join('')
-  const allBtn = '<button type="button" class="pf-seg-btn" data-flow-select="">全部泳道总图</button>'
-  return `<div id="pf-flow-bar" class="pf-flow-bar"><span class="pf-inspector-label">主流程：</span><div class="pf-seg">${flowBtns}${allBtn}</div></div><div id="pf-flow-ribbon" class="pf-flow-ribbon" hidden></div>`
+  const allBtn = '<button type="button" class="pf-seg-btn is-active" data-flow-select="">全部泳道总图</button>'
+  const flowBtns = flows.map((f) => `<button type="button" class="pf-seg-btn" data-flow-select="${escapeHtml(f.id)}">${escapeHtml(f.title)}</button>`).join('')
+  return `<div id="pf-flow-bar" class="pf-flow-bar"><div class="pf-flow-bar-left"><span class="pf-inspector-label">主流程：</span><div class="pf-seg">${allBtn}${flowBtns}</div></div><button id="btn-flow-ribbon-toggle" class="pf-btn pf-btn-sm" type="button" hidden>收起步骤</button></div><div id="pf-flow-ribbon" class="pf-flow-ribbon" hidden></div>`
 }
 
 export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'architecture-map' } = {}) {
@@ -152,25 +160,23 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
     title: model.title || (isBrief ? '实时规划简报' : '架构全景图'),
     tree: {
       domains: tree.domains.map((d) => ({
-        id: d.id, x: d.x, y: d.y, w: d.w, h: d.h, row: d.row, col: d.col,
-        innerCols: d.innerCols, innerRows: d.innerRows,
+        id: d.id, row: d.row, col: d.col, innerCols: d.innerCols,
         corridorMidY: d.corridorMidY, topCorridorY: d.topCorridorY,
         leftAisleX: d.leftAisleX, rightAisleX: d.rightAisleX,
       })),
       nodes: tree.nodes.map((n) => ({
         id: n.id, title: n.title, domain: n.domain, domainTitle: n.domainTitle || n.domain,
-        diffState: n.diffState, isVirtual: Boolean(n.isVirtual), changeDetail: n.changeDetail || null,
+        diffState: n.diffState, changeDetail: n.changeDetail || null,
         impactReasons: n.impactReasons || [], risk: n.risk, description: n.description || '',
-        x: n.x, y: n.y, w: n.w, h: n.h, cx: n.cx, cy: n.cy, gridRow: n.gridRow, gridCol: n.gridCol,
+        x: n.x, y: n.y, w: n.w, h: n.h, cx: n.cx, cy: n.cy,
         entrypoints: (n.entrypoints || []).slice(0, 3), modules: [...(n.modules || [])],
         tests: (n.tests || []).slice(0, 8), verifyTools: (n.verifyTools || []).slice(0, 6),
         docAnchors: (n.docAnchors || []).slice(0, 6),
       })),
-      edges: tree.edges.map((e) => ({ id: e.id, fromId: e.fromId, toId: e.toId, edgeState: e.edgeState })),
+      edges: tree.edges.map((e) => ({ fromId: e.fromId, toId: e.toId })),
     },
     flow: {
       nodes: flow.nodes.map((n) => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, cx: n.cx, cy: n.cy })),
-      edges: flow.edges.map((e) => ({ id: e.id, fromId: e.fromId, toId: e.toId })),
       flows: flowsList.map((fl) => ({ id: fl.id, title: fl.title, featureIds: fl.featureIds || [], steps: fl.steps || [] })),
     },
     walkthrough: (model.walkthrough || []).map((w) => ({ targetId: w.targetId, title: w.title, detail: w.detail })),
@@ -198,7 +204,7 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
     '<main class="pf-shell">',
     '<header class="pf-topbar">',
     `<div class="pf-top-left"><h1 class="pf-title">${title}</h1><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span><nav class="pf-tabs" aria-label="视图切换">${tabsHtml}</nav></div>`,
-    `<div class="pf-controls"><button id="btn-cmdk" class="pf-btn" type="button">⌘K 命令与目录</button><button id="btn-walk-start" class="pf-btn" type="button">分步导览</button><button id="btn-theme" class="pf-btn" type="button">主题：跟随系统</button><button id="btn-followup-ctx" class="pf-btn pf-btn-primary" type="button" data-followup-panel="${defaultFollowup}">复制追问</button></div>`,
+    `<div class="pf-controls"><button id="btn-cmdk" class="pf-btn" type="button">搜索模块 ⌘K</button><button id="btn-walk-start" class="pf-btn" type="button"${(model.walkthrough || []).length === 0 ? ' hidden' : ''}>分步导览</button><button id="btn-theme" class="pf-btn" type="button">外观：跟随系统</button><button id="btn-followup-ctx" class="pf-btn pf-btn-primary" type="button" data-followup-panel="${defaultFollowup}">向 AI 提问</button></div>`,
     '</header>',
     '<section class="pf-workspace">',
     isBrief ? `<article class="pf-panel" data-tab-panel="brief">${renderBlueprintLandingHtml(model, verdict, verdictLabel)}</article>` : '',
@@ -210,7 +216,7 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
     '</main>',
     renderFocusCardHtml(),
     renderQuickLookModalHtml(),
-    renderCommandPaletteHtml(tree),
+    renderCommandPaletteHtml(tree, Boolean(model.hasActiveDiff)),
     renderDialogsHtml(),
     `<script id="pf-visual-data" type="application/json">${escapeJsonForScript(compactClientModel)}</script>`,
     `<script>\n${buildClientScript()}\n</script>`,

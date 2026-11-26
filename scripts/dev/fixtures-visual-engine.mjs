@@ -436,8 +436,68 @@ export function registerVisualEngineCases(cases) {
     }
     if (archHtml.includes('data-tab-panel="brief"')) return 'architecture-map 模式应省略 brief 专属 DOM 以控体积'
     const flowBtns = [...archHtml.matchAll(/data-flow-select="([^"]*)"/g)].map((m) => m[1])
-    if (flowBtns[0] !== 'main-flow' || flowBtns[flowBtns.length - 1] !== '') {
-      return `业务流转应默认主流程在前、全部泳道总图在末，实得 ${JSON.stringify(flowBtns)}`
+    if (flowBtns[0] !== '' || flowBtns[1] !== 'main-flow') {
+      return `业务流转应默认全部泳道总图在最左、主流程随后，实得 ${JSON.stringify(flowBtns)}`
+    }
+    if (!archHtml.includes('--dc:#') || !archHtml.includes('pf-dot')) {
+      return '缺少基于 --dc 的领域色点与淡色分区样式'
+    }
+    if (!archHtml.includes('id="btn-flow-ribbon-toggle"')) {
+      return '缺少泳道步骤折叠按钮 #btn-flow-ribbon-toggle'
+    }
+    if (!/\.pf-node\.is-selected\{[^}]*opacity:\s*1!important/i.test(archHtml)) {
+      return '缺少泳道跨流选中强制取消淡化规则 (.pf-node.is-selected opacity:1!important)'
+    }
+    if (!briefHtml.includes('data-diff-filter="added"') || !briefHtml.includes('data-diff-filter="impacted"')) {
+      return '变更蓝图缺少可点击的四态统计筛选按钮 data-diff-filter'
+    }
+    if (!briefHtml.includes('id="fc-ask"') || !archHtml.includes('搜索模块 ⌘K')) {
+      return '缺少焦点卡问 AI 按钮或平实命令搜索按钮文案'
+    }
+
+    // 多尺度无 NaN / 无重叠冒烟：极简 2 节点 0 流程 + 36 节点 8 域超大仓
+    const tinyMap = {
+      version: 2,
+      repoName: 'Tiny',
+      domains: [{ id: 'core', name: 'Core' }],
+      features: [
+        { id: 't1', name: 'Entry', domain: 'core', modules: ['src/a.mjs'], tests: [] },
+        { id: 't2', name: 'Worker', domain: 'core', dependsOn: ['t1'], modules: ['src/b.mjs'], tests: [] },
+      ],
+      flows: [],
+    }
+    const bigDomains = Array.from({ length: 8 }, (_, i) => ({ id: `dom-${i}`, name: `Domain ${i}` }))
+    const bigFeatures = Array.from({ length: 36 }, (_, i) => ({
+      id: `f-${i}`,
+      name: `Feature ${i}`,
+      domain: `dom-${i % 8}`,
+      dependsOn: i > 0 ? [`f-${i - 1}`] : [],
+      modules: [`src/m${i}.mjs`],
+      tests: [`test/m${i}.test.mjs`],
+    }))
+    for (const [tag, fmap] of [['tiny', tinyMap], ['large', { version: 2, repoName: 'Large', domains: bigDomains, features: bigFeatures, flows: [] }]]) {
+      const m = buildVisualModel({ featureMap: fmap, mode: 'architecture-map' })
+      for (const box of [...m.tree.domains, ...m.tree.nodes, ...m.flow.lanes, ...m.flow.nodes]) {
+        if (![box.x, box.y, box.w, box.h].every(Number.isFinite)) return `${tag} 尺度出现非有限坐标：${JSON.stringify(box)}`
+      }
+      for (let i = 0; i < m.tree.domains.length; i++) {
+        for (let j = i + 1; j < m.tree.domains.length; j++) {
+          const a = m.tree.domains[i], b = m.tree.domains[j]
+          if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) {
+            return `${tag} 尺度域框发生重叠：${a.id} vs ${b.id}`
+          }
+        }
+      }
+      for (let i = 0; i < m.flow.lanes.length; i++) {
+        for (let j = i + 1; j < m.flow.lanes.length; j++) {
+          const a = m.flow.lanes[i], b = m.flow.lanes[j]
+          if (a.y < b.y + b.h && a.y + a.h > b.y) return `${tag} 尺度泳道发生重叠：${a.id} vs ${b.id}`
+        }
+      }
+      const rendered = renderVisualHtml({ visualModel: m, featureMapSha256: 'c'.repeat(64) })
+      if (!rendered.html.includes('btn-only-diff') || !rendered.html.includes('hidden')) {
+        return `${tag} 尺度渲染异常`
+      }
     }
     const dataMatch = /<script id="pf-visual-data" type="application\/json">([\s\S]*?)<\/script>/i.exec(briefHtml)
     const clientJson = dataMatch ? JSON.parse(dataMatch[1]) : null

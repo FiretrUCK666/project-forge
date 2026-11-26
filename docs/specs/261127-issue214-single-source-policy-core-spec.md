@@ -7,7 +7,7 @@ created: 2026-11-27
 updated: 2026-11-27
 issue: 214
 pr: null
-branch: feat/sandbox-dual-loop-v1
+branch: feat/single-source-policy-core
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: true
@@ -29,7 +29,7 @@ scope_files: [kit/skills/lib/gate-receipt.mjs, kit/skills/lib/workflow-policy.mj
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块策略核心重构，属高风险 `kit/` 路径；Wave 1，零上游依赖；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/sandbox-dual-loop-v1` / #214 / 未关联 |
+| 分支 / Issue / PR | `feat/single-source-policy-core` / #214 / 未关联 |
 | 负责人 / 内审状态 | plan-sandbox-v1 / `passed` |
 | 规划态 | `interactive`（架构决策已全部拍板，零待决问题） |
 | 关联 PRD / Todo | `docs/prd/261127-issue214-sandbox-dual-loop-v1-prd.md` / `docs/todo/261127-issue214-single-source-policy-core-todo.md` |
@@ -159,10 +159,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `determineWorkflowPolicy` 对仅改 UI 渲染文件（`.tsx`/`.css`/`.html` 仿真用例）且未触及 `high-risk`/`one-way`/`Case>=4` 的改动返回 `riskTier === 'medium'`（非 `high` 且非 `low`）、`visualCheckRequired === true`、`faultInjectionRequired === false`；对触及 `high-risk`/`one-way`/`Case>=4` 返回 `riskTier === 'high'` 且 `faultInjectionRequired === true`；`review-empirical.mjs` 的 `computeEmpiricalRequirements`（含 `smokeExplicitNone` 边界）与之完全一致（由 `fixtures-policy-axes.mjs` 与更新后的既有夹具正反双向实证）。
-- [ ] C2: `recordVerifyEvidenceForFlow` 在内环/沙箱模式下写入 `inner: true`；外环 `validateVerificationEvidence` 遇到顶层 `evidence.inner === true` 或单门禁项 `gates[k].inner === true` 时返回 `ok: false`、`code: 'BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER'`、`exitCode: 3`，外环全量验证覆写为 `inner: false` 后正常放行（由 `fixtures-policy-axes.mjs` 正反双向实证）。
-- [ ] C3: 单次 `flow verify` 中 `edit-gate --final` 写入干净 HEAD 的 `gate-receipt.json` 后，`flow-lifecycle-hooks.mjs` 的 `checkArchitectureMapSyncOnVerify` 命中回执返回 `reused-gate-receipt`（实测 `verifyArchitectureMapSync` 仅执行 1 次）；headless 无 `taskId` 场景（独立 `edit-gate` / `govern-audit --changed`）正常读写 `cache/gate-receipt-<hash>.json`；修改源码/配置文件/架构图或工作区变脏后回执立即失效重扫，且 `I962`/`I963` 故障注入 100% 捕获（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 实证）。
-- [ ] C4: 沙箱/内环/`quick`/`--local` 验证或 `iterate run` 失败时，本地诊断包与治理信号正常落盘，Mock 远端客户端 `createIssue` 调用次数为 `0`；外环 `smoke`/`gate`/`task`/`pr` 失败或显式 `--escalate` 时仍按分级策略正常建单；`iterate.mjs` 帮助文案、`fixtures-r6c-gates.mjs` 与 `injections-data-r6c.mjs` (`I502`) 当波同步全绿（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 双向实证）。
+- [x] C1: `determineWorkflowPolicy` 对仅改 UI 渲染文件（`.tsx`/`.css`/`.html` 仿真用例）且未触及 `high-risk`/`one-way`/`Case>=4` 的改动返回 `riskTier === 'medium'`（非 `high` 且非 `low`）、`visualCheckRequired === true`、`faultInjectionRequired === false`；对触及 `high-risk`/`one-way`/`Case>=4` 返回 `riskTier === 'high'` 且 `faultInjectionRequired === true`；`review-empirical.mjs` 的 `computeEmpiricalRequirements`（含 `smokeExplicitNone` 边界）与之完全一致（由 `fixtures-policy-axes.mjs` 与更新后的既有夹具正反双向实证）。
+- [x] C2: `recordVerifyEvidenceForFlow` 在内环/沙箱模式下写入 `inner: true`；外环 `validateVerificationEvidence` 遇到顶层 `evidence.inner === true` 或单门禁项 `gates[k].inner === true` 时返回 `ok: false`、`code: 'BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER'`、`exitCode: 3`，外环全量验证覆写为 `inner: false` 后正常放行（由 `fixtures-policy-axes.mjs` 正反双向实证）。
+- [x] C3: 单次 `flow verify` 中 `edit-gate --final` 写入干净 HEAD 的 `gate-receipt.json` 后，`flow-lifecycle-hooks.mjs` 的 `checkArchitectureMapSyncOnVerify` 命中回执返回 `reused-gate-receipt`（实测 `verifyArchitectureMapSync` 仅执行 1 次）；headless 无 `taskId` 场景（独立 `edit-gate` / `govern-audit --changed`）正常读写 `cache/gate-receipt-<hash>.json`；修改源码/配置文件/架构图或工作区变脏后回执立即失效重扫，且 `I962`/`I963` 故障注入 100% 捕获（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 实证）。
+- [x] C4: 沙箱/内环/`quick`/`--local` 验证或 `iterate run` 失败时，本地诊断包与治理信号正常落盘，Mock 远端客户端 `createIssue` 调用次数为 `0`；外环 `smoke`/`gate`/`task`/`pr` 失败或显式 `--escalate` 时仍按分级策略正常建单；`iterate.mjs` 帮助文案、`fixtures-r6c-gates.mjs` 与 `injections-data-r6c.mjs` (`I502`) 当波同步全绿（由 `fixtures-policy-axes.mjs` 与 `verify-injections.mjs` 双向实证）。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -176,6 +176,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：新增 `kit/skills/lib/gate-receipt.mjs`（371L）实现六维干净 HEAD 回执缓存（支持任务态与 headless `cache/gate-receipt-<hash>.json`）及 `shouldAutoEscalateFailure` 统一升级静默判定；改造 `workflow-policy.mjs`（769L）完成三轴正交解耦（`visualCheckRequired` 独立、`isLow` 显式排除视觉、`faultInjectionRequired` 仅绑定 `high`/`one-way`/`Case>=4`）与外环 `validateVerificationEvidence` 对顶层及单门禁 `inner: true` 的硬拒；原地对齐 `review-empirical.mjs`（796L，0 净增行）并接入 `review-empirical-state.mjs`、`review-locks.mjs`、`review-gates.mjs`、`edit-gate.mjs`（保 `I963`）、`flow-lifecycle-hooks.mjs`（保 `I962`）、`flow-lifecycle-helpers.mjs`、`iterate.mjs`（同步 `printHelp()` 第 67-68 行）与 `govern-checks.mjs`。
+- **与草案的差异**：同步更新了草案 `scope_files` 未单独点名但受 UI 视觉解耦影响的 `scripts/dev/fixtures-flow-state.mjs` 第 48 行断言（原断言要求 `src/App.tsx` 判为 `high`，现对齐为 `riskTier === 'medium' && visualCheckRequired === true && faultInjectionRequired === false`）；`fixtures.mjs` 与 `injections-data.mjs` 已具备自动发现机制，无需修改索引源码。
+- **关联同步文件**：`docs/feature-map.json`（登记 `kit/skills/lib/gate-receipt.mjs` 与新增夹具/注入）、`docs/architecture-map.html`（`verify-tools render` 单点重渲）、`.agents/skills/`（`equip.mjs .` 全量同步）。

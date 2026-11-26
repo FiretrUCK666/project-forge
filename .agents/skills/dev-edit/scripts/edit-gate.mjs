@@ -37,6 +37,7 @@ import { extractSymbols } from '../../lib/symbol-index.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { ARCHITECTURE_MAP_REL, isArchitectureMapOptedOut, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
 import { FEATURE_MAP_REL } from '../../lib/feature-map.mjs'
+import { collectGateReceiptKey, writeGateReceipt } from '../../lib/gate-receipt.mjs'
 
 export { EXIT }
 const VALID_MODES = new Set(['verify', 'pre-edit', 'standalone'])
@@ -595,6 +596,7 @@ export async function runEditGate(opts = {}) {
     blockers.push({ ruleId: 'edit.arch-boundary', defectClass: 'arch-boundary', severity: 'high', file: v.file, line: v.line, rule: v.rule, specifier: v.specifier, message: v.message, fixHint: v.fixHint })
   }
 
+  let archMapSyncPassed = false
   if (opts.final && mode !== 'pre-edit' && existsSync(join(workTreeRoot, FEATURE_MAP_REL)) && !isArchitectureMapOptedOut(workTreeRoot)) {
     const touchedFiles = new Set([...checkedFiles, ...deletedFiles])
     const archActive = existsSync(join(workTreeRoot, ARCHITECTURE_MAP_REL))
@@ -612,6 +614,8 @@ export async function runEditGate(opts = {}) {
           message: syncRes.message,
           fixHint: `Run \`node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render\` to regenerate ${ARCHITECTURE_MAP_REL}.`,
         })
+      } else {
+        archMapSyncPassed = true
       }
     }
   }
@@ -656,6 +660,24 @@ export async function runEditGate(opts = {}) {
   }
 
   const ok = blockers.length === 0
+  if (ok && isGit && gitDir && mode !== 'pre-edit' && !opts.files && (opts.final || opts.changed)) {
+    const rcptKey = await collectGateReceiptKey({
+      workTreeRoot, gitCommonDir: gitDir, ledger: taskLedger, baseSha: ratchetInfo.baseRef, profile: devProfile,
+    })
+    if (rcptKey.valid) {
+      writeGateReceipt({
+        gitCommonDir: gitDir,
+        taskId: taskId ?? taskLedger?.taskId ?? null,
+        key: rcptKey,
+        producer: 'edit-gate',
+        checks: {
+          structuralHygiene: { ok: true, checkedFiles: checkedFiles.length },
+          archRules: { ok: true, violations: 0 },
+          ...(archMapSyncPassed ? { architectureMapSync: { ok: true } } : {}),
+        },
+      })
+    }
+  }
   return {
     ok,
     mode,

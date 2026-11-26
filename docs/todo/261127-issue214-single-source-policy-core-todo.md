@@ -6,7 +6,7 @@ created: 2026-11-27
 updated: 2026-11-27
 issue: 214
 pr: null
-branch: feat/sandbox-dual-loop-v1
+branch: feat/single-source-policy-core
 owner: plan-sandbox-v1
 plan_mode: interactive
 approved: false
@@ -25,7 +25,7 @@ related_spec: ../specs/261127-issue214-single-source-policy-core-spec.md
 | --- | --- |
 | 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / 基线 | `feat/sandbox-dual-loop-v1` @ `5feb0db` |
+| 分支 / 基线 | `feat/single-source-policy-core` @ `5feb0db` |
 | 任务编号 | `single-source-policy-core` |
 | 负责人 / 审批 | plan-sandbox-v1 / `false` |
 | 规划态 | `interactive`（架构决策已拍板，待 Critique 与审批） |
@@ -43,10 +43,10 @@ related_spec: ../specs/261127-issue214-single-source-policy-core-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C1: `determineWorkflowPolicy` 将 UI 视觉实证（`visualCheckRequired`）与 `riskTier='high'` 解耦（且 `isLow` 显式要求 `effectiveVisual.length === 0`），不再因仅改前端样式/组件文件而强抬为 `high`；`faultInjectionRequired` 与 `review-empirical.mjs` 的 `faultRequired`（含 `smokeExplicitNone` 对齐 `review-locks.mjs:601`）单源统一精确绑定至 `high`/`one-way`/`Case >= 4`，经 `fixtures-policy-axes.mjs` 与更新后的既有夹具正反双向断言通过。
-- [ ] C2: 沙箱/内环快检在 `evidence.json` 记录 `inner: true`；外环 `validateVerificationEvidence` 对顶层或门禁项带 `inner === true` 的实证硬拒并返回 `BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER`（退出码 `3`），经正反双向断言通过。
-- [ ] C3: 新增 `kit/skills/lib/gate-receipt.mjs` (new)（当波登记入 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`）实现 `{ repoRoot, dirty: false, headSha, baseSha, diffFingerprint, profileHash }` 绑定的干净 HEAD 回执复用（支持有 `taskId` 与 headless 无 `taskId` 场景，明确唯一生产者并保活 `I962/I963`），使单次 `flow verify` 中 `verifyArchitectureMapSync` 仅执行 1 次并消除 `scanStructuralHygiene`/`evaluateArchRules`/`detectGateWeakening` 重复重算，且脏树或配置/HEAD 变化时立即失效重扫。
-- [ ] C4: `flow-lifecycle-helpers.mjs`、`review-empirical-state.mjs` 与 `iterate.mjs`（同步更新 `printHelp()` 第 67 行说明及 `fixtures-r6c-gates.mjs`/`injections-data-r6c.mjs` `I502`）在探索/内环/`quick`/沙箱失败时默认仅记本地诊断包与治理信号而不向远端托管平台自动建单；仅外环阻断或显式 `--escalate` 才触发远端建单。
+- [x] C1: `determineWorkflowPolicy` 将 UI 视觉实证（`visualCheckRequired`）与 `riskTier='high'` 解耦（且 `isLow` 显式要求 `effectiveVisual.length === 0`），不再因仅改前端样式/组件文件而强抬为 `high`；`faultInjectionRequired` 与 `review-empirical.mjs` 的 `faultRequired`（含 `smokeExplicitNone` 对齐 `review-locks.mjs:601`）单源统一精确绑定至 `high`/`one-way`/`Case >= 4`，经 `fixtures-policy-axes.mjs` 与更新后的既有夹具正反双向断言通过。
+- [x] C2: 沙箱/内环快检在 `evidence.json` 记录 `inner: true`；外环 `validateVerificationEvidence` 对顶层或门禁项带 `inner === true` 的实证硬拒并返回 `BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER`（退出码 `3`），经正反双向断言通过。
+- [x] C3: 新增 `kit/skills/lib/gate-receipt.mjs` (new)（当波登记入 `docs/feature-map.json` 并重渲 `docs/architecture-map.html`）实现 `{ repoRoot, dirty: false, headSha, baseSha, diffFingerprint, profileHash }` 绑定的干净 HEAD 回执复用（支持有 `taskId` 与 headless 无 `taskId` 场景，明确唯一生产者并保活 `I962/I963`），使单次 `flow verify` 中 `verifyArchitectureMapSync` 仅执行 1 次并消除 `scanStructuralHygiene`/`evaluateArchRules`/`detectGateWeakening` 重复重算，且脏树或配置/HEAD 变化时立即失效重扫。
+- [x] C4: `flow-lifecycle-helpers.mjs`、`review-empirical-state.mjs` 与 `iterate.mjs`（同步更新 `printHelp()` 第 67 行说明及 `fixtures-r6c-gates.mjs`/`injections-data-r6c.mjs` `I502`）在探索/内环/`quick`/沙箱失败时默认仅记本地诊断包与治理信号而不向远端托管平台自动建单；仅外环阻断或显式 `--escalate` 才触发远端建单。
 
 ## 执行步骤
 
@@ -85,6 +85,6 @@ related_spec: ../specs/261127-issue214-single-source-policy-core-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：将在本地运行 `equip.mjs . --check`、`edit-gate.mjs --final --json`、`merge-gate.mjs`（12/12）与 `verify-injections.mjs --jobs 4` 全量实证通过后随本分支提审。
+- **文档同步检查**：已登记 `kit/skills/lib/gate-receipt.mjs` 至 `docs/feature-map.json`，已运行 `verify-tools.mjs render` 更新 `docs/architecture-map.html`，已运行 `equip.mjs .` 同步 `.agents/skills/`，并在 SPEC 补齐 `## 实现说明`。
+- **遗留问题**：无（Wave 2 `sandbox-dual-loop-flow` 与 Wave 3 `triage-brief-contract-parity` 按主 PRD 拓扑串行推进）。

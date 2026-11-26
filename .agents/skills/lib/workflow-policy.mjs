@@ -184,19 +184,23 @@ export function determineWorkflowPolicy({
   if (highRiskHits.length > 0) reasons.push(`命中 high-risk 路径 (${highRiskHits.slice(0, 3).join(', ')})`)
   if (gwHits.length > 0) reasons.push(`检测到门禁弱化 (${gwHits.length})`)
   if (Number(caseType) >= 4) reasons.push(`Case ${caseType} >= 4`)
-  if (effectiveVisual.length > 0) reasons.push(`包含视觉/UI 文件 (${effectiveVisual.slice(0, 3).join(', ')})`)
   if (oneWayBoundaryHits.length > 0) reasons.push(`触及 one-way 边界 (${oneWayBoundaryHits.slice(0, 3).join(', ')})`)
   if (nonExemptDoNotEdit.length > 0) reasons.push(`触及 do-not-edit 路径 (${nonExemptDoNotEdit.slice(0, 3).join(', ')})`)
 
   const isHigh = reasons.length > 0
   const isLow = !isHigh
+    && effectiveVisual.length === 0
     && files.length > 0
     && Number(caseType) < 4
     && files.every((f) => LOW_RISK_TEXT_EXT_RE.test(f) && !isLowRiskExcluded(f, hrList, dneList, ownSet))
 
   const riskTier = isHigh ? 'high' : (isLow ? 'low' : 'medium')
   if (riskTier === 'low') reasons.push('全部变更命中纯非可执行文档白名单')
-  else if (riskTier === 'medium') reasons.push(files.length === 0 && isDocsOnlyRepo ? '无文件 diff 的文档仓任务按标准校验处理' : '常规源码或非白名单变更')
+  else if (riskTier === 'medium') {
+    reasons.push(effectiveVisual.length > 0
+      ? `包含视觉/UI 文件 (${effectiveVisual.slice(0, 3).join(', ')})`
+      : (files.length === 0 && isDocsOnlyRepo ? '无文件 diff 的文档仓任务按标准校验处理' : '常规源码或非白名单变更'))
+  }
 
   const independentReviewRequired = hasDevReview ? (riskTier !== 'low') : false
   const humanApprovalRequired = !hasDevReview && riskTier === 'high'
@@ -211,6 +215,7 @@ export function determineWorkflowPolicy({
     independentReviewRequired,
     humanApprovalRequired,
     faultInjectionRequired: riskTier === 'high',
+    visualCheckRequired: effectiveVisual.length > 0,
     requiredGates: resolveRequiredGates(riskTier, profile),
     staticDocCheckRequired: riskTier === 'low' && !hasCiWorkflow,
     runtimeFilesTouched,
@@ -439,9 +444,18 @@ function configuredCmdForTier(profile, tierName) {
  * 现场校验分层实证 evidence.json，堵死 `--tier quick --target` 与跳过必填门禁的旁路。
  * 界面资源的实证底线同时守一道：只留下布尔开关自证的不算放行（判据归 `empirical-artifacts.mjs`）。
  */
-export function validateVerificationEvidence({ policy, evidence, headSha, profile = null, explicitCmdUsed = false } = {}) {
+export function validateVerificationEvidence({ policy, evidence, headSha, profile = null, explicitCmdUsed = false, allowInner = false } = {}) {
   if (!evidence || typeof evidence !== 'object' || !evidence.gates || Object.keys(evidence.gates).length === 0) {
     return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT, reason: '缺少当前任务的 verify 实证记录（evidence.json），请先运行 flow.mjs verify。' }
+  }
+  const hasInnerGate = Object.values(evidence.gates).some((g) => g && g.inner === true && (!headSha || !g.headSha || g.headSha === headSha))
+  if (!allowInner && (evidence.inner === true || hasInnerGate)) {
+    return {
+      ok: false,
+      code: 'BLOCKED_INNER_EVIDENCE_FORBIDDEN_IN_OUTER',
+      exitCode: EXIT.FACT,
+      reason: '外环门禁拒收含沙箱/内环标记（inner=true）的验证实证，请在晋升后重新执行外环全量 flow.mjs verify。',
+    }
   }
   const vis = evaluateStoredVisualEvidence({ evidence, policy, headSha })
   if (!vis.ok) return { ok: false, code: vis.code, exitCode: EXIT.FACT, uiFiles: vis.uiFiles, reason: vis.reason }
@@ -483,6 +497,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
   for (const name of ['gate', 'full', 'smoke', 'quick']) {
     const g = evidence.gates?.[name]
     if (!g) continue
+    if (!allowInner && g.inner === true) continue
     if (headSha && g.headSha !== headSha) continue
     if (g.dirty === true || g.exitCode !== 0 || g.partial === true) continue
     if (g.status !== 'skipped-explicit-none' && (g.errorOnly === true || g.executed === false || g.succeeded === false)) continue

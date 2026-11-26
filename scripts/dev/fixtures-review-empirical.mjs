@@ -172,7 +172,15 @@ export function registerReviewEmpiricalCases(cases) {
   }])
 
   cases.push(['实证与故障注入解锁闭环：拦截空突变、套话命令、脏残留并完整解锁 --include-diff', async () => {
+    const highRiskYaml = [
+      'quick-test: node test.mjs',
+      'full-test: node test.mjs',
+      'smoke-verify: node test.mjs',
+      'merge-gate: node test.mjs',
+      'high-risk: src/app.mjs',
+    ].join('\n')
     const dir = makeTestRepo({
+      agentsYaml: highRiskYaml,
       extraFiles: {
         'package.json': '{"name":"c2-app","version":"1.0.0"}\n',
         'package-lock.json': '{"name":"c2-app","lockfileVersion":3}\n',
@@ -194,7 +202,7 @@ export function registerReviewEmpiricalCases(cases) {
       const revWt = join(dir, '.worktrees', 'review-c2-t')
       writeFileSync(join(implWt, 'src/app.mjs'), `// ${sentinel}\nexport const computeVal = () => 2\n`)
       gitCommitFast(implWt, 'feat: c2', { updateOnly: true })
-      if ((await handleVerify({ task: 'c2-t', mode: 'full' }, roots)).exitCode !== 0) return 'c2-t verify 失败'
+      if ((await handleVerify({ task: 'c2-t', mode: 'gate', 'e2e-evidence': '运行 node test.mjs 实测 computeVal() 返回 2 退出 0' }, roots)).exitCode !== 0) return 'c2-t verify 失败'
       await handleSubmit({ task: 'c2-t', agent: 'alice' }, roots)
 
       // Step 1: 机械包 -> exit 0, readyForDiff=false, 无 diffText
@@ -272,13 +280,13 @@ export function registerReviewEmpiricalCases(cases) {
       }
 
       // 同步验证 --local 闭环不破坏原有未提交修改 E0
-      const localDir = makeTestRepo({ extraFiles: { 'notes.txt': 'keep my uncommitted note\n' } })
+      const localDir = makeTestRepo({ agentsYaml: highRiskYaml, extraFiles: { 'notes.txt': 'keep my uncommitted note\n' } })
       try {
         // 先保留一个原有未提交改动 E0
         writeFileSync(join(localDir, 'src/app.mjs'), '// E0_ORIGINAL_UNCOMMITTED\nexport const computeVal = () => 2\n')
         const lp1 = await runRp(['--local', '--json'], localDir)
         if (lp1.status !== 0) return `--local Step 1 失败：${lp1.stderr}`
-        const lemp = await runRp(['check-empirical', '--local', '--cmd', 'node test.mjs', '--json'], localDir)
+        const lemp = await runRp(['check-empirical', '--local', '--cmd', 'node test.mjs', '--e2e-evidence', '运行 node test.mjs 实测 computeVal() 返回 2 退出 0', '--json'], localDir)
         if (lemp.status !== 0) return `--local check-empirical 失败：${lemp.stderr}`
 
         // 注入故障 E1
@@ -307,8 +315,16 @@ export function registerReviewEmpiricalCases(cases) {
   }])
 
   cases.push(['多轮失效、Slot 保护、纯文档免死锁与外部 PR 未扫阻断', async () => {
+    const highRiskYaml = [
+      'quick-test: node test.mjs',
+      'full-test: node test.mjs',
+      'smoke-verify: node test.mjs',
+      'merge-gate: node test.mjs',
+      'high-risk: src/app.mjs',
+    ].join('\n')
     // 1. 多轮失效 + sync range-diff 失效 + Slot 保护
     const dir = makeTestRepo({
+      agentsYaml: highRiskYaml,
       extraFiles: {
         'src/other.mjs': 'export const other = 1\n',
       },
@@ -327,7 +343,7 @@ export function registerReviewEmpiricalCases(cases) {
       const revWt = join(dir, '.worktrees', 'review-r-t')
       writeFileSync(join(implWt, 'src/app.mjs'), 'export const computeVal = () => 2\n')
       gitCommitFast(implWt, 'feat: r1', { updateOnly: true })
-      await handleVerify({ task: 'r-t', mode: 'full' }, roots)
+      await handleVerify({ task: 'r-t', mode: 'gate', 'e2e-evidence': '运行 node test.mjs 实测 computeVal() 返回 2 退出 0' }, roots)
       await handleSubmit({ task: 'r-t', agent: 'alice' }, roots)
 
       // Complete R1 empirical + fault
@@ -347,7 +363,7 @@ export function registerReviewEmpiricalCases(cases) {
       await handleRecord({ task: 'r-t', round: '1', verdict: 'changes', evidence: 'R1 tested', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'r-t', 1), 'must-fix': ['C1: src/app.mjs:1 tweak'] }, roots)
       writeFileSync(join(implWt, 'src/app.mjs'), '// R2 commit\nexport const computeVal = () => 2\n')
       gitCommitFast(implWt, 'fix: r2', { updateOnly: true })
-      await handleVerify({ task: 'r-t', mode: 'full' }, roots)
+      await handleVerify({ task: 'r-t', mode: 'gate', 'e2e-evidence': '运行 node test.mjs 实测 R2 computeVal() 返回 2 退出 0' }, roots)
       await handleSubmit({ task: 'r-t', agent: 'alice' }, roots)
 
       const r2Blocked = await runRp(['--task', 'r-t', '--round', '2', '--include-diff', '--json'], dir)
@@ -374,11 +390,11 @@ export function registerReviewEmpiricalCases(cases) {
       }
 
       // --local 继续改文件后旧凭证失效
-      const locRe = makeTestRepo()
+      const locRe = makeTestRepo({ agentsYaml: highRiskYaml })
       try {
         writeFileSync(join(locRe, 'src/app.mjs'), 'export const computeVal = () => 2\n')
         await runRp(['--local', '--json'], locRe)
-        await runRp(['check-empirical', '--local', '--cmd', 'node test.mjs', '--json'], locRe)
+        await runRp(['check-empirical', '--local', '--cmd', 'node test.mjs', '--e2e-evidence', '运行 node test.mjs 实测 computeVal() 返回 2 退出 0', '--json'], locRe)
         writeFileSync(join(locRe, 'src/app.mjs'), 'export const computeVal = () => 5\n')
         await runRp(['check-fault', '--phase', 'fail', '--local', '--cmd', 'node test.mjs', '--json'], locRe)
         writeFileSync(join(locRe, 'src/app.mjs'), 'export const computeVal = () => 2\n')
@@ -599,7 +615,7 @@ export function registerReviewEmpiricalCases(cases) {
 
     // 1. 省略 smoke-verify 键 + 只改纯单测（TEST_FILE_RE）：check-empirical 不再报 BLOCKED_SMOKE_VERIFY_UNCONFIGURED 且 faultRequired=false
     const omitDir = makeTestRepo({
-      agentsYaml: 'quick-test: node test.mjs\nfull-test: node test.mjs\nmerge-gate: node test.mjs\n',
+      agentsYaml: 'quick-test: node test.mjs\nfull-test: node test.mjs\nmerge-gate: node test.mjs\nhigh-risk: src/app.mjs\n',
       extraFiles: { 'tests/unit.test.mjs': 'export const t = 1\n', 'test.mjs': 'process.exit(0)\n' },
     })
     try {

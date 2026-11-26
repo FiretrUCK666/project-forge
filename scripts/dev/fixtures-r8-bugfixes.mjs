@@ -345,14 +345,23 @@ export function registerR8BugfixesCases(cases) {
     if (reqDocNoCmd.faultRequired !== false) {
       return `无运行时文件且无测试命令的高风险文档改动误要求 faultRequired：${JSON.stringify(reqDocNoCmd)}`
     }
-    const reqRuntime = computeEmpiricalRequirements({
+    const reqRuntimeMed = computeEmpiricalRequirements({
       diff: { files: [{ file: 'src/app.mjs', status: 'M' }], untracked: [], bytes: 10 },
       behavioralGate: { runtimeFilesTouched: ['src/app.mjs'], smokeRequired: false },
       effectiveProfile: { 'quick-test': ['node --test'] },
       task: { caseType: 3 },
     })
-    if (reqRuntime.faultRequired !== true) {
-      return `运行时代码改动未要求 faultRequired：${JSON.stringify(reqRuntime)}`
+    if (reqRuntimeMed.faultRequired !== false) {
+      return `普通 medium 运行时改动不应强制 faultRequired：${JSON.stringify(reqRuntimeMed)}`
+    }
+    const reqRuntimeHigh = computeEmpiricalRequirements({
+      diff: { files: [{ file: 'src/app.mjs', status: 'M' }], untracked: [], bytes: 10 },
+      behavioralGate: { runtimeFilesTouched: ['src/app.mjs'], smokeRequired: false },
+      effectiveProfile: { 'quick-test': ['node --test'], 'high-risk': ['src/app.mjs'] },
+      task: { caseType: 3 },
+    })
+    if (reqRuntimeHigh.faultRequired !== true) {
+      return `高危运行时代码改动未要求 faultRequired：${JSON.stringify(reqRuntimeHigh)}`
     }
 
     // 4. parseCritiqueStamp 支持 summary 内嵌括号

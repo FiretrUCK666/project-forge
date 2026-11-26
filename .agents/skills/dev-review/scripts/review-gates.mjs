@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
 import { formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { checkMermaidLabelWidth, isSharedMasterPrd } from '../../lib/docs.mjs'
+import { hasReusableGateCheck, resolveCleanReceiptKeySync, writeGateReceipt } from '../../lib/gate-receipt.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import { appendFallbackCriteriaFromTask, extractCriteriaFromBodyText } from '../../lib/plan-sync.mjs'
@@ -248,7 +249,9 @@ export function collectHighRiskHits(diff, devProfile) {
   return hits
 }
 
-export function collectGateWeakeningHits(reviewRoot, diff) {
+export function collectGateWeakeningHits(reviewRoot, diff, opts = {}) {
+  const rk = resolveCleanReceiptKeySync({ workTreeRoot: reviewRoot, diff, baseSha: opts.baseSha, headSha: opts.headSha, profile: opts.devProfile, task: opts.task })
+  if (rk.valid && hasReusableGateCheck({ gitCommonDir: rk.gitCommonDir, taskId: opts.task?.taskId ?? null, key: rk, checkName: 'gateWeakening' })) return []
   const chunks = diff.chunks ?? splitDiffByFile(diff.text)
   const hits = []
   for (const entry of [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]) {
@@ -262,6 +265,9 @@ export function collectGateWeakeningHits(reviewRoot, diff) {
     }
     const found = detectGateWeakeningInEntry({ file: entry.file, status: entry.status, added, removed, hunks })
     for (const item of found) hits.push(item)
+  }
+  if (hits.length === 0 && rk.valid) {
+    writeGateReceipt({ gitCommonDir: rk.gitCommonDir, taskId: opts.task?.taskId ?? null, key: rk, producer: 'review-gates', checks: { gateWeakening: { ok: true, count: 0 } } })
   }
   return hits
 }
@@ -376,7 +382,7 @@ export function assessBehavioralGate({
   }
 }
 
-export function assessStructuralGate({ reviewRoot, mainRoot = reviewRoot, diff, devProfile, parity }) {
+export function assessStructuralGate({ reviewRoot, mainRoot = reviewRoot, diff, devProfile, parity, task = null, headSha = null, baseSha = null }) {
   const chunks = diff.chunks ?? splitDiffByFile(diff.text)
   const tombstoneComments = []
   const excuseSuppressions = []
@@ -396,6 +402,13 @@ export function assessStructuralGate({ reviewRoot, mainRoot = reviewRoot, diff, 
       godFiles: [],
       mermaidViolations: [],
     }
+  }
+  const rk = resolveCleanReceiptKeySync({ workTreeRoot: reviewRoot, diff, baseSha, headSha, profile: devProfile, task })
+  const reusedHygiene = rk.valid && Boolean(hasReusableGateCheck({ gitCommonDir: rk.gitCommonDir, taskId: task?.taskId ?? null, key: rk, checkName: 'structuralHygiene' }))
+  const reusedArch = rk.valid && Boolean(hasReusableGateCheck({ gitCommonDir: rk.gitCommonDir, taskId: task?.taskId ?? null, key: rk, checkName: 'archRules' }))
+  if (reusedHygiene && reusedArch) {
+    const mv = parity?.mermaidViolations ?? []
+    return { status: mv.length > 0 ? 'warn' : 'clean', tombstoneComments, excuseSuppressions, archViolations: [], godFiles, mermaidViolations: mv, reusedGateReceipt: true }
   }
   for (const entry of allEntries) {
     const f = entry.file

@@ -12,6 +12,7 @@ import { join, relative } from 'node:path'
 import {
   DEFAULT_WALK_SKIP_DIRS, gitRun, isMacOsJunkPath, posixPath, readTextSafe,
 } from '../../lib/git.mjs'
+import { collectGateReceiptKey, hasReusableGateCheck } from '../../lib/gate-receipt.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, ISSUE_REF_RE, JUSTIFICATION_ANCHOR_RE,
@@ -398,6 +399,9 @@ export function auditPerf(repoRoot, files, findings) {
 
 export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBranch, devProfile, findings, opts = {}) {
   const changedSet = opts?.changedFilesSet instanceof Set ? opts.changedFilesSet : null
+  const rcptKey = (isGit && changedSet) ? await collectGateReceiptKey({ workTreeRoot: workRoot, profile: devProfile }) : { valid: false }
+  const reusedHygiene = rcptKey.valid && Boolean(hasReusableGateCheck({ gitCommonDir: rcptKey.gitCommonDir, key: rcptKey, checkName: 'structuralHygiene' }))
+  const reusedArch = rcptKey.valid && Boolean(hasReusableGateCheck({ gitCommonDir: rcptKey.gitCommonDir, key: rcptKey, checkName: 'archRules' }))
   const home = homedir().replace(/\\/g, '/')
   const homeRe = home.length > 4 ? new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : undefined
   const gitAttributesText = readTextSafe(join(workRoot, '.gitattributes'), 64 * 1024) ?? ''
@@ -442,6 +446,10 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
     }
 
     if (CODE_EXT_RE.test(f.name)) {
+      if (reusedHygiene && changedSet?.has(f.rel)) {
+        codeRelList.push(f.rel)
+        continue
+      }
       const procNameHit = checkProcessArtifactFilename(f.rel)
       if (procNameHit) {
         addFinding(findings, {
@@ -581,7 +589,8 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
     }
   }
 
-  const archRes = evaluateArchRules(workRoot, codeRelList, devProfile['arch-rules'])
+  const archTargets = reusedArch && changedSet ? codeRelList.filter((r) => !changedSet.has(r)) : codeRelList
+  const archRes = archTargets.length > 0 ? evaluateArchRules(workRoot, archTargets, devProfile['arch-rules']) : { ok: true, violations: [] }
   for (const v of archRes.violations) {
     addFinding(findings, {
       id: `hygiene.arch-boundary.${v.file}:${v.line}`,
@@ -630,5 +639,10 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
     })
   }
 
-  return { worktrees: wtReport, manifest: manifestReport, archViolations: archRes.violations }
+  return {
+    worktrees: wtReport,
+    manifest: manifestReport,
+    archViolations: archRes.violations,
+    reusedGateReceipt: { structuralHygiene: reusedHygiene, archRules: reusedArch },
+  }
 }

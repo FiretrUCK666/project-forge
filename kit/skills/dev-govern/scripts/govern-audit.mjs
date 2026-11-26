@@ -377,6 +377,7 @@ async function finishAudit({
     ])]
     const missingEntryPaths = []
     const mappedPaths = new Set()
+    const mappedPrefixes = []
     if (fm.valid) {
       for (const feat of fm.features) {
         for (const p of [
@@ -388,17 +389,20 @@ async function finishAudit({
           const normP = posixPath(p).replace(/^\.\//, '')
           if (!normP) continue
           mappedPaths.add(normP)
+          const cleanPrefix = normP.replace(/\/+$/, '')
+          if (cleanPrefix) mappedPrefixes.push(cleanPrefix)
           if (!existsSync(join(workTreeRoot, normP))) missingEntryPaths.push({ feature: feat.id ?? feat.name, path: normP })
         }
       }
     }
+    const isMappedSource = (rel) => mappedPaths.has(rel) || mappedPrefixes.some((cp) => rel === cp || rel.startsWith(`${cp}/`))
     const unmappedSourceModules = fm.valid
       ? files
           .map((f) => posixPath(f.rel ?? f))
           .filter((rel) => /^(?:src|lib|kit|app|apps|packages|pkg|cmd|internal|services|scripts)\//.test(rel)
             && /\.(?:mjs|cjs|js|ts|tsx|py|go|rs|java|rb|php|cs)$/.test(rel)
             && !/(?:^|\/)(?:test|tests|__tests__|fixtures|dev)\//i.test(rel)
-            && !mappedPaths.has(rel))
+            && !isMappedSource(rel))
           .slice(0, 20)
       : []
     const emptyDocAnchors = fm.valid
@@ -414,6 +418,21 @@ async function finishAudit({
       .filter((f) => String(f.id ?? '').startsWith('docs.stale-vs-churn'))
       .map((f) => f.file || f.title)
       .slice(0, 10)
+    const dg = evDiscovery.docGraph
+    const docGraphSummary = dg ? {
+      entryCount: dg.accounted.entry.length,
+      registeredAuthorityCount: dg.accounted.registeredAuthority.length,
+      unaccountedCount: dg.accounted.unaccounted.length,
+      unaccountedDocs: dg.unaccountedDocs.map((d) => d.path),
+      nonMarkdownAuthorities: dg.nonMarkdownDocs.map((d) => d.path),
+      brokenLinksCount: dg.brokenLinks.length,
+      brokenAnchorsCount: dg.brokenAnchors.length,
+      anchorWarningsCount: dg.anchorWarnings.length,
+      cyclesCount: dg.cycles.length,
+      redirectChainsCount: dg.redirectChains.length,
+      orphansCount: dg.orphans.length,
+      entryDivergenceCount: dg.entryDivergence.length,
+    } : null
     const docGapOrDrift = findings.some((f) => f.category === 'docs')
       || duplicateGroups.length > 0
       || missingEntryPaths.length > 0
@@ -426,6 +445,7 @@ async function finishAudit({
       || emptyToolDomains.length > 0
       || emptyTestRefDomains.length > 0
       || hotDocSkewModules.length > 0
+      || Boolean(docGraphSummary && (docGraphSummary.unaccountedCount > 0 || docGraphSummary.brokenAnchorsCount > 0 || docGraphSummary.cyclesCount > 0))
       || (verifyToolsAudit?.architectureMap && !verifyToolsAudit.architectureMap.ok && !verifyToolsAudit.architectureMap.optedOut)
     const nextCommands = docGapOrDrift
       ? [
@@ -444,6 +464,7 @@ async function finishAudit({
       tddPresent: existsSync(join(workTreeRoot, 'docs', 'TDD.md')),
       evergreenDocs,
       duplicateGroups,
+      docGraph: docGraphSummary,
       emptyDocAnchors,
       emptyToolDomains,
       emptyTestRefDomains,

@@ -334,3 +334,59 @@ export function stripMarkdownCodeSpans(text, { preserveBareAngle = false } = {})
     return ''
   })
 }
+
+/**
+ * 将 Markdown 标题文本归一化为 GitHub 兼容的锚点 slug（保留 Unicode 字母数字、`_` 与 `-`）。
+ */
+export function slugifyHeading(rawTitle) {
+  let s = String(rawTitle ?? '').trim()
+  if (!s) return ''
+  s = s.replace(/\s*\{#([A-Za-z0-9_.-]+)\}\s*$/, '')
+  s = s.replace(/\s+#+\s*$/, '')
+  s = s.replace(/<[^>]+>/g, '')
+  s = cleanInlineMarkdown(s)
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s+/g, '-')
+}
+
+/**
+ * 提取 Markdown 全部有效标题与显式 HTML 锚点的归一化 slug 集合（跳过 YAML Frontmatter 与代码围栏）。
+ *
+ * @param {string} text
+ * @returns {Set<string>}
+ */
+export function extractHeadingSlugs(text) {
+  const src = String(text ?? '')
+  const slugs = new Set()
+  if (!src.trim()) return slugs
+  const lines = scanLines(src)
+  const fmEnd = findFrontmatterEndLine(lines)
+  const seenCounts = new Map()
+
+  for (let i = fmEnd + 1; i < lines.length; i += 1) {
+    const info = lines[i]
+    if (info.inFence) continue
+    if (info.heading !== null) {
+      const raw = info.heading.title
+      const customM = /\s*\{#([A-Za-z0-9_.-]+)\}\s*$/.exec(raw)
+      if (customM) slugs.add(customM[1].toLowerCase())
+      const base = slugifyHeading(raw)
+      if (base) {
+        const cnt = seenCounts.get(base) ?? 0
+        seenCounts.set(base, cnt + 1)
+        const indexed = cnt === 0 ? base : `${base}-${cnt}`
+        slugs.add(indexed)
+        const collapsed = indexed.replace(/-{2,}/g, '-')
+        if (collapsed && collapsed !== indexed) slugs.add(collapsed)
+      }
+    }
+    for (const am of info.line.matchAll(/<a\s+(?:id|name)\s*=\s*["']([^"']+)["']/gi)) {
+      const id = am[1].trim().toLowerCase()
+      if (id) slugs.add(id)
+    }
+  }
+  return slugs
+}

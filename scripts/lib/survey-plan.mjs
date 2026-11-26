@@ -135,19 +135,30 @@ export function computeExplorationStrategy(facts) {
     },
   ]
 
+  const selfFile = facts?.docs?.agents?.file
+  const docGraphTargets = [...new Set([
+    ...(facts?.docGraph?.unaccountedDocs ?? []).map((d) => d?.path ?? d),
+    ...(facts?.docGraph?.brokenLinks ?? []).map((b) => b?.file),
+    ...(facts?.docGraph?.brokenAnchors ?? []).map((b) => b?.file),
+    ...(facts?.docGraph?.cycles ?? []).flatMap((c) => c?.nodes ?? []),
+    ...(facts?.docGraph?.redirectChains ?? []).map((r) => r?.from),
+    ...(facts?.docGraph?.orphans ?? []).map((o) => o?.path ?? o),
+    ...(facts?.docGraph?.duplicateGroups ?? []).flatMap((g) => g?.paths ?? []),
+  ].filter((p) => p && p !== 'AGENTS.md' && p !== selfFile && p !== facts?.docs?.tdd))]
+
   const customSkills = facts?.kit?.customSkills ?? []
-  if (customSkills.length > 0 || otherConventionsCount > 0 || tddDrift || kitDrift || (reentry.unregisteredTopDirs?.length ?? 0) > 0) {
+  const pushConventionsShard = () => {
     // 这一段会被写进 `AGENTS.md` 自己的受管区。所以它**不能把 `AGENTS.md` 列成目标**：
     // 第一次渲染时这个文件还不存在，渲染完它才出现，第二次就多出一项——
     // 于是「生成一次契约」本身把仓从「一致」推成「漂移」，`--check` 每次必红。
     // 判据的输入不得包含判据自己的产物，这条对契约正文同样成立。
-    const selfFile = facts?.docs?.agents?.file
     const convTargets = [...new Set([
       ...(facts?.docs?.tdd ? [facts.docs.tdd] : []),
       ...(facts?.docs?.otherAiConventions ?? []),
       ...customSkills.map((s) => `${s.path}/SKILL.md`),
       ...(reentry.staleTddPaths ?? []),
-    ].filter((p) => p && p !== selfFile))].slice(0, 8)
+      ...docGraphTargets,
+    ].filter((p) => p && p !== selfFile && p !== 'AGENTS.md'))].slice(0, 8)
     if (convTargets.length === 0) convTargets.push('契约自身（AGENTS.md）')
     shards.push({
       id: 'conventions-and-skills',
@@ -155,6 +166,11 @@ export function computeExplorationStrategy(facts) {
       focus: '盘点必须保留的自有技能与人工规则，定位失效路径/脚本以定向校准',
       targets: convTargets,
     })
+  }
+  if (customSkills.length > 0 || otherConventionsCount > 0 || tddDrift || kitDrift || (reentry.unregisteredTopDirs?.length ?? 0) > 0) {
+    pushConventionsShard()
+  } else if (docGraphTargets.length > 0) {
+    pushConventionsShard()
   }
 
   if (isPolyglotOrMonorepo) {

@@ -25,7 +25,7 @@ import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { buildMultiTaskWavePlan, evaluateNextState, hasRepoCiWorkflow, scanUnstartedReadySlices } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
-import { assertPreMergeGates } from './flow-merge.mjs'
+import { assertPreMergeGates, syncPostMergeTargets } from './flow-merge.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
 
 function resolveQueuePaths(mainRoot, gitDir) {
@@ -456,14 +456,48 @@ async function handleMergeQueue(opts, roots) {
         break
       }
 
+      let syncOut = { mergeComments: [], syncFailures: [], issueCloseDecisions: [] }
+      if (mergeRes?.merged !== false
+        && ((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0 || (needsOnlineRemoteMerge && ledger.prNumber))) {
+        syncOut = await syncPostMergeTargets({
+          backend,
+          repo: needsOnlineRemoteMerge ? originFull : null,
+          mainRoot: roots.mainRoot,
+          implRoot: gate.implRoot,
+          ledger,
+          taskId,
+          baseBranch,
+          currentHead: gate.currentHead,
+          mergeRes,
+          effectiveReviewer: gate.effectiveReviewer,
+          stopLossActive: gate.stopLossActive,
+          gateFindings: gate.gateFindings,
+          ghLogin: sharedGhProbe?.env?.trackB?.login,
+          ghTier: sharedGhProbe?.env?.trackB?.tier,
+          includePrComment: Boolean(needsOnlineRemoteMerge && ledger.prNumber),
+        })
+      }
+
       await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({
         ...cur,
         status: 'merged',
+        ...(mergeRes?.state === 'MERGED' || mergeRes?.merged === true ? { prState: 'MERGED' } : {}),
         mergedAt: new Date().toISOString(),
         queueConflict: null,
         mergedIntoSha: mergeRes.mergedSha ?? null,
+        ...(syncOut.mergeComments.length > 0 ? { mergeComments: syncOut.mergeComments } : {}),
+        ...(syncOut.syncFailures.length > 0 ? {
+          syncFailures: [...(Array.isArray(cur?.syncFailures) ? cur.syncFailures : []), ...syncOut.syncFailures],
+        } : {}),
       }))
-      results.push({ taskId, ok: true, status: 'merged', baseDrifted, mergedSha: mergeRes.mergedSha ?? null })
+      results.push({
+        taskId,
+        ok: true,
+        status: 'merged',
+        baseDrifted,
+        mergedSha: mergeRes.mergedSha ?? null,
+        ...(syncOut.issueCloseDecisions.length > 0 ? { issueCloseDecisions: syncOut.issueCloseDecisions } : {}),
+      })
     }
 
     // 这一路同理：只有真处理了东西（或队列发生了变化）才落盘。

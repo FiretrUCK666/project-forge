@@ -567,6 +567,14 @@ export async function handleSubmit(opts, roots) {
   if (ledger.role === 'local-only') {
     const shortHead = currentHead?.slice(0, 7) ?? 'unknown'
     await postLocalLifecycleComments({ actionFallback: 'local-ready' })
+    if (ledger.planBootstrap === true && (ledger.linkedIssues ?? []).length > 0) {
+      const localBackend = createTaskBackend({
+        role: ledger.role, providerId: ledger.providerId ?? 'none', targetRepo: null, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+      })
+      await syncBootstrapMasterIssueArtifacts({
+        backend: localBackend, targetRepo: null, linkedIssues: ledger.linkedIssues ?? [], ledger, changedFiles: changedForVisual,
+      })
+    }
     ledger.lastSubmittedHead = currentHead
     ledger.status = 'local-ready'
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
@@ -610,6 +618,14 @@ export async function handleSubmit(opts, roots) {
 
   if (isGenericGit) {
     await postLocalLifecycleComments({ targetRepo, pushRemote, actionFallback: 'submitted' })
+    if (ledger.planBootstrap === true && (ledger.linkedIssues ?? []).length > 0) {
+      const genericBackend = createTaskBackend({
+        role: ledger.role, providerId: ledger.providerId ?? 'none', targetRepo, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+      })
+      await syncBootstrapMasterIssueArtifacts({
+        backend: genericBackend, targetRepo, linkedIssues: ledger.linkedIssues ?? [], ledger, changedFiles: changedForVisual,
+      })
+    }
     ledger.lastSubmittedHead = currentHead
     ledger.status = ledger.role === 'contributor-fork' ? 'awaiting-upstream-merge' : 'submitted'
     ledger.deferredPush = deferredPush

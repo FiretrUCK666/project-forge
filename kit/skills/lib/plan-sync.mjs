@@ -38,6 +38,89 @@ const ALL_PLAN_LABELS = Object.freeze([
   'planning', 'changes-requested', 'needs-human-decision', 'approved',
 ])
 
+const CRITERIA_SECTION_HEADING_RE = /^(?:验收标准|验收条件|验收清单|验收条目|(?:acceptance\s+criteria|checklist|definition\s+of\s+done)\b)/i
+const NUMBERED_CRITERIA_LINE_RE = /^(\s*[-*]\s*)\[([ xX])\](\s+(?:\*\*)?(C\d+)(?:\*\*)?(?:\s*[:：]|\s|$).*)$/i
+const UNNUMBERED_CRITERIA_LINE_RE = /^(\s*[-*]\s*)\[ \](.+)$/
+
+/** 确定性同步 Issue 正文中 `C<N>` 勾选框及（完成态时）验收章节内未编号勾选框，绝不触碰代码块与托管摘要区。 */
+export function syncIssueCriteriaCheckboxes(existingBody = '', { criteria = [], markAllCriteriaDone = false } = {}) {
+  const criteriaMap = new Map()
+  for (const item of Array.isArray(criteria) ? criteria : []) {
+    const id = String(item?.id ?? '').trim().toUpperCase()
+    if (id) criteriaMap.set(id, Boolean(item.checked))
+  }
+
+  const lines = String(existingBody ?? '').replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  const checkedIds = []
+  const uncheckedIds = []
+  let changed = false
+  let inFence = false
+  let inSummary = false
+  let inCriteriaSection = false
+
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      out.push(line)
+      continue
+    }
+    if (inFence) {
+      out.push(line)
+      continue
+    }
+    if (line.includes(PLAN_SUMMARY_START)) {
+      if (!line.includes(PLAN_SUMMARY_END)) inSummary = true
+      out.push(line)
+      continue
+    }
+    if (inSummary) {
+      if (line.includes(PLAN_SUMMARY_END)) inSummary = false
+      out.push(line)
+      continue
+    }
+
+    const headingMatch = /^\s*#{1,6}\s+(.*)$/.exec(line)
+    if (headingMatch) {
+      inCriteriaSection = CRITERIA_SECTION_HEADING_RE.test(headingMatch[1].trim())
+      out.push(line)
+      continue
+    }
+
+    const numMatch = NUMBERED_CRITERIA_LINE_RE.exec(line)
+    if (numMatch) {
+      const id = numMatch[4].toUpperCase()
+      const curChecked = numMatch[2].toLowerCase() === 'x'
+      let nextChecked = curChecked
+      if (criteriaMap.has(id)) nextChecked = criteriaMap.get(id)
+      else if (markAllCriteriaDone === true) nextChecked = true
+
+      if (nextChecked !== curChecked) {
+        out.push(`${numMatch[1]}[${nextChecked ? 'x' : ' '}]${numMatch[3]}`)
+        changed = true
+        if (nextChecked) checkedIds.push(id)
+        else uncheckedIds.push(id)
+      } else {
+        out.push(line)
+      }
+      continue
+    }
+
+    if (inCriteriaSection && markAllCriteriaDone === true) {
+      const plainMatch = UNNUMBERED_CRITERIA_LINE_RE.exec(line)
+      if (plainMatch) {
+        out.push(`${plainMatch[1]}[x]${plainMatch[2]}`)
+        changed = true
+        continue
+      }
+    }
+
+    out.push(line)
+  }
+
+  return { body: out.join('\n'), changed, checkedIds, uncheckedIds }
+}
+
 export function resolveDocIssueNumber(repoRoot, file, explicitIssue = null) {
   const explicitNum = Number(explicitIssue)
   if (Number.isInteger(explicitNum) && explicitNum > 0) return explicitNum
@@ -101,9 +184,15 @@ export function mergeManagedPlanSummary(existingBody = '', summaryBlock = '') {
   return trimmed ? `${trimmed}\n\n${wrapped}` : wrapped
 }
 
-export function collectPlanSummaryMeta({ repoRoot, mainRoot, ledger, files, phase, round, metaLabel, targetIssueNumber = null }) {
+export function collectPlanSummaryMeta({
+  repoRoot, mainRoot, ledger, files, phase, round, metaLabel, targetIssueNumber = null,
+  criteriaOverride = null, onlyFiles = false,
+}) {
   const allDocs = []
-  for (const extra of [...normalizeSyncFiles(files, ''), ledger?.specFile, ledger?.todoFile, ledger?.prdFile]) {
+  const rawInputs = onlyFiles
+    ? normalizeSyncFiles(files, '')
+    : [...normalizeSyncFiles(files, ''), ledger?.specFile, ledger?.todoFile, ledger?.prdFile]
+  for (const extra of rawInputs) {
     const p = String(extra ?? '').replaceAll('\\', '/').trim()
     if (p && !allDocs.includes(p)) allDocs.push(p)
   }
@@ -167,7 +256,12 @@ export function collectPlanSummaryMeta({ repoRoot, mainRoot, ledger, files, phas
     critiqueText = `${last.verdict ?? 'recorded'} (round=${last.round ?? round})`
   }
   if (!critiqueText) critiqueText = round > 0 ? `Round ${round}` : '未开始'
-  const critList = [...critSeen.values()].sort((a, b) => Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)))
+  const critList = Array.isArray(criteriaOverride)
+    ? [...criteriaOverride]
+      .map((c) => ({ ...c, id: String(c?.id ?? '').trim().toUpperCase(), checked: Boolean(c?.checked) }))
+      .filter((c) => c.id)
+      .sort((a, b) => Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)))
+    : [...critSeen.values()].sort((a, b) => Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)))
   const doneCount = critList.filter((c) => c.checked).length
   const criteriaText = critList.length > 0
     ? `${doneCount}/${critList.length} 已完成（${critList.map((c) => `${c.checked ? '[x]' : '[ ]'} ${c.id}`).join('、')}）`
@@ -187,7 +281,7 @@ export function collectPlanSummaryMeta({ repoRoot, mainRoot, ledger, files, phas
     `- **验收进度**：${criteriaText}`,
   ].join('\n')
 
-  return { docList, statusDisplay, critiqueText, criteriaText, effectiveLabel, summaryBlock }
+  return { docList, statusDisplay, critiqueText, criteriaText, effectiveLabel, summaryBlock, critList }
 }
 
 function buildPlanSyncKey(taskId, relDoc, phase, round, digest = '') {
@@ -252,32 +346,40 @@ async function recordSyncFailuresToLedger(mainRoot, taskId, failures) {
   }))
 }
 
-async function syncLabelsForTarget(backend, { repo, number, targetLabel, isPr = false }) {
-  const addRes = await backend.addLabels({ repo, number, labels: [targetLabel], isPr })
+async function syncLabelsForTarget(backend, { taskId = null, repo, number, targetLabel, isPr = false }) {
+  const addRes = await backend.addLabels({ ...(taskId ? { taskId } : {}), repo, number, labels: [targetLabel], isPr })
   const stale = ALL_PLAN_LABELS.filter((l) => l !== targetLabel)
-  for (const label of stale) {
-    await Promise.resolve(backend.removeLabel({ repo, number, label })).catch(() => ({ ok: false }))
+  if (typeof backend?.removeLabel === 'function') {
+    for (const label of stale) {
+      await Promise.resolve(backend.removeLabel({ ...(taskId ? { taskId } : {}), repo, number, label })).catch(() => ({ ok: false }))
+    }
   }
   return addRes
 }
 
-export async function syncIssueSummaryBody(backend, { repo, number, summaryBlock, renamedPaths = [] }) {
-  if (!summaryBlock || typeof backend?.getIssue !== 'function' || typeof backend?.updateIssueBody !== 'function') {
+export async function syncIssueSummaryBody(backend, {
+  repo, number, summaryBlock = null, renamedPaths = [], criteria = [], markAllCriteriaDone = false,
+}) {
+  const hasCriteria = Array.isArray(criteria) && criteria.length > 0
+  if ((!summaryBlock && !hasCriteria && !markAllCriteriaDone)
+    || typeof backend?.getIssue !== 'function'
+    || typeof backend?.updateIssueBody !== 'function') {
     return null
   }
   const curIss = await Promise.resolve(backend.getIssue({ repo, number })).catch(() => null)
   if (!curIss?.ok) return false
-  let baseBody = String(curIss.body ?? '').replace(/\r\n/g, '\n')
+  const curNorm = String(curIss.body ?? '').replace(/\r\n/g, '\n')
+  let baseBody = curNorm
   for (const item of Array.isArray(renamedPaths) ? renamedPaths : []) {
     if (item?.from && item?.to && item.from !== item.to) {
       baseBody = baseBody.split(item.from).join(item.to)
     }
   }
-  const nextBody = mergeManagedPlanSummary(baseBody, summaryBlock)
-  const curNorm = String(curIss.body ?? '').replace(/\r\n/g, '\n')
+  baseBody = syncIssueCriteriaCheckboxes(baseBody, { criteria, markAllCriteriaDone }).body
+  const nextBody = summaryBlock ? mergeManagedPlanSummary(baseBody, summaryBlock) : baseBody
   if (nextBody === curNorm) return true
   const upd = await Promise.resolve(backend.updateIssueBody({ repo, number, body: nextBody })).catch(() => null)
-  return upd?.ok !== false
+  return upd?.ok === true
 }
 
 /**
@@ -373,21 +475,48 @@ export async function syncPlanPhaseToBackend(opts = {}) {
   const hasApi = Boolean(backend?.capabilities?.api)
   if (!hasApi) {
     let localEvent = null
-    if (taskId || issueNums[0] != null) {
+    if (issueNums.length > 0) {
+      for (const num of issueNums) {
+        const metaNum = planMetaFor(num)
+        const ev = await Promise.resolve(backend.postComment({
+          taskId: taskId ?? undefined,
+          repo: targetRepo ?? 'local',
+          number: num,
+          body,
+          statePayload: { phase, round, label: metaNum.effectiveLabel, file: relDoc, files, syncKey },
+        })).catch(() => null)
+        if (!localEvent && ev?.eventPath) localEvent = ev
+        await syncLabelsForTarget(backend, {
+          taskId: taskId ?? undefined,
+          repo: targetRepo ?? 'local',
+          number: num,
+          targetLabel: metaNum.effectiveLabel,
+          isPr: false,
+        }).catch(() => null)
+        await syncIssueSummaryBody(backend, {
+          repo: targetRepo ?? 'local',
+          number: num,
+          summaryBlock: metaNum.summaryBlock,
+          renamedPaths,
+          criteria: metaNum.critList,
+          markAllCriteriaDone: false,
+        })
+      }
+    } else if (taskId) {
       localEvent = await Promise.resolve(backend.postComment({
-        taskId: taskId ?? undefined,
+        taskId,
         repo: targetRepo ?? 'local',
-        number: issueNums[0] ?? 0,
+        number: 0,
         body,
         statePayload: { phase, round, label: planMeta.effectiveLabel, file: relDoc, files, syncKey },
       })).catch(() => null)
-      await Promise.resolve(backend.addLabels({
-        taskId: taskId ?? undefined, repo: targetRepo ?? 'local', number: issueNums[0] ?? 0, labels: [planMeta.effectiveLabel],
-      })).catch(() => null)
-      for (const num of issueNums) {
-        const metaNum = planMetaFor(num)
-        await syncIssueSummaryBody(backend, { repo: targetRepo ?? 'local', number: num, summaryBlock: metaNum.summaryBlock, renamedPaths })
-      }
+      await syncLabelsForTarget(backend, {
+        taskId,
+        repo: targetRepo ?? 'local',
+        number: 0,
+        targetLabel: planMeta.effectiveLabel,
+        isPr: false,
+      }).catch(() => null)
     }
     await recordPlanSyncKey(mainRoot, gitDir, taskId, syncKey)
     return {
@@ -428,7 +557,14 @@ export async function syncPlanPhaseToBackend(opts = {}) {
       })
       const labelRes = await syncLabelsForTarget(backend, { repo: targetRepo, number: num, targetLabel: metaNum.effectiveLabel, isPr: false })
       if (comment?.ok === false) throw new Error(comment.reason || comment.error || 'postComment failed')
-      const bodyOk = await syncIssueSummaryBody(backend, { repo: targetRepo, number: num, summaryBlock: metaNum.summaryBlock, renamedPaths })
+      const bodyOk = await syncIssueSummaryBody(backend, {
+        repo: targetRepo,
+        number: num,
+        summaryBlock: metaNum.summaryBlock,
+        renamedPaths,
+        criteria: metaNum.critList,
+        markAllCriteriaDone: false,
+      })
       targets.push({ kind: 'issue', number: num, commentOk: true, labelOk: labelRes?.ok !== false, ...(bodyOk !== null ? { bodyOk } : {}) })
     } catch (err) {
       syncFailures.push({ kind: 'issue', number: num, phase, syncKey, error: err?.message ?? String(err) })

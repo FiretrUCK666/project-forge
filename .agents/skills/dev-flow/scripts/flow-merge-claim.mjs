@@ -9,10 +9,11 @@ import { resolve } from 'node:path'
 
 import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { buildContextBrief, extractDocBriefSeeds, formatContextBriefLines } from '../../lib/context-brief.mjs'
+import { extractCriteria } from '../../lib/criteria-lock.mjs'
 import { formatAttribution } from '../../lib/docs.mjs'
-import { buildSliceGraph } from '../../lib/doc-slice-graph.mjs'
+import { buildSliceGraph, extractClaimedCriteria } from '../../lib/doc-slice-graph.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
-import { gitRun, posixPath } from '../../lib/git.mjs'
+import { gitRun, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { readGitConfigFast } from '../../lib/git-fast.mjs'
 import { isNonImplRoleActor, isValidActorName, resolveHostMode } from '../../lib/harness-context.mjs'
 import { rememberPreviousImplementer, resolveTaskContext, sanitizeTaskId, updateTaskLedger, verifyPlanningProvenance } from '../../lib/ledger.mjs'
@@ -204,6 +205,73 @@ export function evaluateMasterIssueCloseGuard({
     remainingSiblings: [],
     progressNote: null,
   }
+}
+
+/** 汇总 1:N 总控 PRD 的验收标准完成态（已完成/归档兄弟切片与当前任务所认领的 `C*` 标为 checked）。 */
+export function collectMasterIssueCriteriaState({
+  mainRoot,
+  implRoot = null,
+  masterPrdRel,
+  ledger = {},
+  taskId = null,
+} = {}) {
+  if (!masterPrdRel) return []
+  const masterNorm = posixPath(masterPrdRel)
+  const implMasterAbs = implRoot ? resolve(implRoot, masterPrdRel) : null
+  const mainMasterAbs = mainRoot ? resolve(mainRoot, masterPrdRel) : null
+  const masterRaw = (implMasterAbs && existsSync(implMasterAbs) ? readTextSafe(implMasterAbs) : null)
+    ?? (mainMasterAbs && existsSync(mainMasterAbs) ? readTextSafe(mainMasterAbs) : null)
+    ?? ''
+  const masterCriteria = extractCriteria(masterRaw)
+  if (masterCriteria.length === 0) return []
+
+  const graph = mainRoot ? buildSliceGraph(mainRoot) : { slices: [] }
+  let implGraph = null
+  const implSliceState = new Map()
+  if (implRoot && existsSync(implRoot)) {
+    try {
+      implGraph = buildSliceGraph(implRoot)
+      for (const s of implGraph.slices ?? []) {
+        if (s.kind === 'spec' && s.key) implSliceState.set(s.key, s)
+      }
+    } catch { /* ignore */ }
+  }
+
+  const ledgerSpecNorm = ledger?.specFile ? posixPath(ledger.specFile) : (ledger?.archivedSpecFile ? posixPath(ledger.archivedSpecFile) : null)
+  const completedIds = new Set()
+  const seenKeys = new Set()
+  const allSlices = [...(graph.slices ?? []), ...(implGraph?.slices ?? [])]
+
+  for (const sib of allSlices) {
+    if (sib.kind !== 'spec' || !sib.masterRel) continue
+    if (posixPath(sib.masterRel) !== masterNorm) continue
+    const dedupKey = sib.key || posixPath(sib.rel)
+    if (seenKeys.has(dedupKey)) continue
+    seenKeys.add(dedupKey)
+
+    const implOverlay = sib.key ? implSliceState.get(sib.key) : null
+    const effective = implOverlay ?? sib
+    const st = String(effective?.status ?? sib.status ?? '').toLowerCase()
+    const isSelf = (taskId && (sib.key === taskId || effective?.key === taskId))
+      || (ledgerSpecNorm && (posixPath(sib.rel) === ledgerSpecNorm || posixPath(sib.rel).split('/').pop() === ledgerSpecNorm.split('/').pop()))
+    const isTerminal = isSelf || Boolean(sib.done || sib.archived || implOverlay?.done || implOverlay?.archived || TERMINAL_SLICE_STATUSES.has(st))
+    if (!isTerminal) continue
+    for (const cid of extractClaimedCriteria(effective?.text ?? sib.text ?? '')) {
+      completedIds.add(String(cid).toUpperCase())
+    }
+  }
+
+  for (const rel of [ledger?.archivedSpecFile, ledger?.specFile, ledger?.archivedTodoFile, ledger?.todoFile].filter(Boolean)) {
+    const abs = (implRoot && existsSync(resolve(implRoot, rel))) ? resolve(implRoot, rel) : (mainRoot ? resolve(mainRoot, rel) : null)
+    const raw = abs && existsSync(abs) ? readTextSafe(abs) : null
+    if (!raw) continue
+    for (const cid of extractClaimedCriteria(raw)) completedIds.add(String(cid).toUpperCase())
+  }
+
+  return masterCriteria.map((c) => {
+    const id = String(c.id).toUpperCase()
+    return { ...c, id, checked: Boolean(c.checked || completedIds.has(id)) }
+  })
 }
 
 const claimRef = (taskId) => `refs/pf/claims/${sanitizeTaskId(taskId)}`

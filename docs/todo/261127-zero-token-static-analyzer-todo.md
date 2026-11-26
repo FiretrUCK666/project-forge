@@ -46,7 +46,7 @@ related_spec: ../specs/261127-zero-token-static-analyzer-spec.md
 <!-- criteria:start -->
 - [ ] C1: `kit/skills/lib/static-analyzer.mjs` (new) 复用 `import-graph.mjs` 与 `doc-graph.mjs` 的 `findSccs`，在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 实现按 `relPath + blobSha/mtime` 的增量缓存，准确输出依赖图、`fanIn`/`fanOut`/cycles 与 Git 热度，工作区 `git status --porcelain` 保持为空（`node scripts/dev/fixtures.mjs --domain static-analyzer` 通过）。
 - [ ] C2: `kit/skills/lib/static-evidence.mjs` (new) 对 10 类图表严格执行 3 层证据门控（Tier 1 常驻，Tier 2 中 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据不激活且返回空 Tab 为 0，Tier 3 `waterfall` 仅真实实测 span 激活），正反双向断言全过。
-- [ ] C3: `kit/skills/lib/diff-materiality.mjs` (new) 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 的 `verifyArchitectureMapSync` 拦截含临时变更脏标的 `docs/architecture-map.html`。
+- [ ] C3: `kit/skills/lib/diff-materiality.mjs` (new) 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 对默认常青 `docs/architecture-map.html` 的脏 overlay 入参 Fail-Closed（`BLOCKED_DIRTY_EVERGREEN_ARCHITECTURE_MAP`，保持 `I986` 有效），且 `verifyArchitectureMapSync` 解析 `pf-visual-data` JSON 并剥离 `<style>` 后精准拦截脏 diff 节点（`reason: 'dirty-diff-overlay'`）。
 - [ ] C4: `scripts/dev/fixtures-static-analyzer.mjs` (new) 与 `scripts/dev/injections-data-static-analyzer.mjs` (new) 覆盖 7 类异构仓库栈正反双向验证并全量捕获注入故障；同步更新 `docs/feature-map.json`、`docs/architecture-map.html` 与 `node scripts/equip.mjs . --check`，`node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs --domain static-analyzer` 退出码 `0`。
 <!-- criteria:end -->
 

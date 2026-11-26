@@ -12,25 +12,13 @@ owner: plan-studio-b
 plan_mode: interactive
 approved: false
 implemented: false
-plan_critique: pending
+plan_critique: "rejected (reviewer=critic-studio-b-r1, round=1, sha=bf079cb4a523, summary=Two CI-breaking evergreen architecture-map contract conflicts found against real repo source (I986 injection deadlock + pf-diff CSS false-positive / missing hasActiveDiff in Wave 1 JSON).)"
 related_prd: ../prd/261127-visual-studio-archify-v2-prd.md
 related_todo: ../todo/261127-zero-token-static-analyzer-todo.md
+high_risk_paths: [kit/]
 task_id: zero-token-static-analyzer
-scope_files:
-  - kit/skills/lib/import-graph.mjs
-  - kit/skills/lib/static-analyzer.mjs
-  - kit/skills/lib/static-evidence.mjs
-  - kit/skills/lib/diff-materiality.mjs
-  - kit/skills/lib/static-gates.mjs
-  - kit/skills/lib/doc-graph.mjs
-  - kit/skills/lib/architecture-map.mjs
-  - scripts/dev/fixtures-static-analyzer.mjs
-  - scripts/dev/injections-data-static-analyzer.mjs
-  - docs/feature-map.json
-  - docs/architecture-map.html
+scope_files: [kit/skills/lib/import-graph.mjs, kit/skills/lib/static-analyzer.mjs, kit/skills/lib/static-evidence.mjs, kit/skills/lib/diff-materiality.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/doc-graph.mjs, kit/skills/lib/architecture-map.mjs, scripts/dev/fixtures-static-analyzer.mjs, scripts/dev/injections-data-static-analyzer.mjs, docs/feature-map.json, docs/architecture-map.html]
 depends_on: []
-high_risk_paths:
-  - kit/
 ---
 
 # 零 Token 增量静态分析与多图证据抽取引擎 — 功能设计规范（SPEC）
@@ -113,9 +101,12 @@ flowchart LR
      - 严格计算 `git merge-base <baseRef> <headRef>` 后以 `<mergeBase>...<headRef>` 3-dot 差异驱动。
      - Materiality 规则：Schema/迁移文件（`*.prisma`、`*.sql`、`migrations/**`、`schema.*`）**必触发**；纯文档（`*.md`/`*.txt`）、锁文件（复用 `LOCKFILE_NAMES`）与 100% 相似度纯重命名（`R100`）自动判为 `non-material` 跳过。
      - 对实质变更文件按导入图与 `feature-map` 依赖求 **1-hop 邻域并集**，附有界 `-`/`+` hunk 摘要。
-5. **`kit/skills/lib/architecture-map.mjs` 洁净门禁**：
-   - `renderArchitectureMapFromRepo` 在 `mode === 'architecture-map'` 且输出默认常青路径 `docs/architecture-map.html` 时默认强制零临时 diff 态（仅显式调试传 `allowDirtyOverlay: true` 外一律清理）。
-   - `verifyArchitectureMapSync` 解析 `docs/architecture-map.html` 内嵌 JSON 或节点标记，若检出 `hasActiveDiff === true` 或 `pf-diff-modified`/`pf-diff-impacted`/`pf-diff-added`/`pf-diff-removed` 脏标，返回 `ok: false` 与 `code: 'BLOCKED_ARCHITECTURE_MAP_DRIFT'`（`reason: 'dirty-diff-overlay'`）。
+5. **`kit/skills/lib/architecture-map.mjs` 洁净门禁（Fail-Closed，兼容既有 `I986` 注入）**：
+   - `renderArchitectureMapFromRepo` 在 `mode === 'architecture-map'` 且目标为默认常青路径 `docs/architecture-map.html` 时，若调用方传入非空 `changedFiles` 或含活跃变更的 `diffOverlay` 且未显式声明 `allowDirtyOverlay: true`，**必须 Fail-Closed 拒绝写入并返回 `{ ok: false, exitCode: EXIT.FACT, code: 'BLOCKED_DIRTY_EVERGREEN_ARCHITECTURE_MAP' }`**（严禁静默剥离参数伪装成功，确保既有 `scripts/dev/injections-data-sandbox-flow.mjs` 的 `I986` 注入在 `scripts/dev/fixtures-sandbox-dual-loop.mjs` `[Sandbox-C8]` 中持续可捕红）。
+   - `verifyArchitectureMapSync` 增加两层常青洁净校验（无视 `<style>` 中静态 CSS 声明，杜绝误报）：
+     1. 解析 `<script id="pf-visual-data" type="application/json">` JSON 负载，若 `data.hasActiveDiff === true` 或 `data.tree?.nodes`（及后续多图 `diagrams.architecture.nodes`）存在任意 `n.diffState && n.diffState !== 'context'` 节点即判脏；
+     2. 剥离全部 `<style>...</style>` 与 `<script>...</script>` 块后，扫描渲染元素属性与类名是否残留 `pf-diff-(added|modified|removed|impacted)` 或 `data-diff-state="(added|modified|removed|impacted)"`。
+     - 任一命中均返回 `{ ok: false, code: 'BLOCKED_ARCHITECTURE_MAP_DRIFT', exitCode: EXIT.FACT, reason: 'dirty-diff-overlay' }`。
 
 ### 数据与状态变更
 
@@ -165,7 +156,7 @@ flowchart LR
 <!-- criteria:start -->
 - [ ] C1: `kit/skills/lib/static-analyzer.mjs` 复用 `import-graph.mjs` 与 `doc-graph.mjs` 的 `findSccs`，在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 实现按 `relPath + blobSha/mtime` 的增量缓存，准确输出依赖图、`fanIn`/`fanOut`/cycles 与 Git 热度，工作区 `git status --porcelain` 保持为空（`node scripts/dev/fixtures.mjs --domain static-analyzer` 通过）。
 - [ ] C2: `kit/skills/lib/static-evidence.mjs` 对 10 类图表严格执行 3 层证据门控（Tier 1 常驻，Tier 2 中 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据不激活且返回空 Tab 为 0，Tier 3 `waterfall` 仅真实实测 span 激活），正反双向断言全过。
-- [ ] C3: `kit/skills/lib/diff-materiality.mjs` 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 的 `verifyArchitectureMapSync` 拦截含临时变更脏标的 `docs/architecture-map.html`。
+- [ ] C3: `kit/skills/lib/diff-materiality.mjs` 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 对默认常青 `docs/architecture-map.html` 的脏 overlay 入参 Fail-Closed（`BLOCKED_DIRTY_EVERGREEN_ARCHITECTURE_MAP`，保持 `I986` 有效），且 `verifyArchitectureMapSync` 解析 `pf-visual-data` JSON 并剥离 `<style>` 后精准拦截脏 diff 节点（`reason: 'dirty-diff-overlay'`）。
 - [ ] C4: `scripts/dev/fixtures-static-analyzer.mjs` 与 `scripts/dev/injections-data-static-analyzer.mjs` 覆盖 7 类异构仓库栈正反双向验证并全量捕获注入故障；同步更新 `docs/feature-map.json`、`docs/architecture-map.html` 与 `node scripts/equip.mjs . --check`，`node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs --domain static-analyzer` 退出码 `0`。
 <!-- criteria:end -->
 

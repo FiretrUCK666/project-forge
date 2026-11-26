@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 
 import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from './doc-slice-graph.mjs'
-import { gitRun, resolveDefaultBranch } from './git.mjs'
+import { gitRun, posixPath, resolveDefaultBranch } from './git.mjs'
 import { resolveRefShaFast } from './git-fast.mjs'
 import { parseBodyRelations } from './platform.mjs'
 import { buildVerificationEvidenceSection, hydratePrTemplateBody, resolveReadablePrTitle, resolveReadablePrTitleWithSource } from './pr-template-hydrate.mjs'

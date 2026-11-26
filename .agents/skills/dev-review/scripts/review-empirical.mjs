@@ -9,6 +9,7 @@ import { printNextStep } from '../../lib/cli.mjs'
 import { computeWorktreeEnv, gitRun, posixPath } from '../../lib/git.mjs'
 import { hasExecutableCodeMutation } from '../../lib/gate-enforcement.mjs'
 import { updateTaskLedger } from '../../lib/ledger.mjs'
+import { CODE_EXT_RE } from '../../lib/static-gates.mjs'
 import {
   determineWorkflowPolicy, buildE2eObservation, hasRepoCiWorkflow, hasValidE2eObservationOnHead,
   readVerificationEvidence, resolveScopedVerificationGate, runLowRiskDocStaticCheck, validateE2eEvidenceText,
@@ -40,6 +41,12 @@ function hasSubstantiveStoredObservation(holder, headSha) {
   return validateE2eEvidenceText(obs?.summary ?? '').ok
 }
 
+function isAllFourDevProfileNone(profile) {
+  const exp = profile?.explicitNone
+  const hasNone = (k) => (exp instanceof Set ? exp.has(k) : (Array.isArray(exp) && exp.includes(k)))
+  return ['quick-test', 'full-test', 'smoke-verify', 'merge-gate'].every(hasNone)
+}
+
 export function computeEmpiricalRequirements({
   diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null, explicitCmds = [], repoRoot = null,
 }) {
@@ -69,6 +76,8 @@ export function computeEmpiricalRequirements({
     },
   })
   const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
+  const hasCodeFiles = allFiles.some((f) => CODE_EXT_RE.test(f))
+  const isPureDocsNoneRepo = !isEmptyDiff && isAllFourDevProfileNone(effectiveProfile) && !hasCodeFiles
   const extraCmds = (Array.isArray(explicitCmds) ? explicitCmds : [explicitCmds]).map((s) => String(s ?? '').trim()).filter(Boolean)
   const scopedGate = isLowRiskPureDoc
     ? { scoped: false, affectedStacks: [], affectedPackages: [] }
@@ -89,7 +98,7 @@ export function computeEmpiricalRequirements({
   const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
 
   const empiricalRequired = !isEmptyDiff && !isLowRiskPureDoc
-  const faultRequired = !isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired || hasDevProfileTestCmds)
+  const faultRequired = !isEmptyDiff && !isLowRiskPureDoc && (runtimeTouched || smokeRequired)
   const visualCheckRequired = !isEmptyDiff && Boolean(behavioralGate?.empiricalVisualCheckRequired)
   const businessFlowEmpiricalRequired = !isEmptyDiff && !isLowRiskPureDoc && runtimeTouched && !policy.smokeExplicitNone
   const e2eObservationRequired = !isEmptyDiff && !isLowRiskPureDoc && (smokeRequired || visualCheckRequired || businessFlowEmpiricalRequired)
@@ -97,7 +106,8 @@ export function computeEmpiricalRequirements({
   return {
     isEmptyDiff,
     isLowRiskPureDoc,
-    staticDocCheckRequired: policy.staticDocCheckRequired,
+    isPureDocsNoneRepo,
+    staticDocCheckRequired: policy.staticDocCheckRequired || isPureDocsNoneRepo,
     changedFiles: allFiles,
     riskTier: policy.riskTier,
     autoCommands,
@@ -267,6 +277,7 @@ export function evaluateIncludeDiffGate({
     : buildUnblockCommands({
         missingSteps, dirtyFaultResidue, mode, task, round, prNo, baseRef, reviewRoot, mainRoot,
         autoCommands: requirements.autoCommands,
+        isPureDocsNoneRepo: Boolean(requirements.isPureDocsNoneRepo),
       })
 
   return {
@@ -401,7 +412,7 @@ export async function handleCheckEmpirical(ctx) {
     })
   }
 
-  if (commandsToRun.length === 0 && !requirements.isEmptyDiff && !requirements.isLowRiskPureDoc) {
+  if (commandsToRun.length === 0 && !requirements.isEmptyDiff && !requirements.isLowRiskPureDoc && !requirements.isPureDocsNoneRepo) {
     const msg = 'BLOCKED_EMPIRICAL_CMD_REQUIRED: 未配置 Dev Profile 测试命令且触及非低风险变更，必须通过 --cmd "<C* 证伪命令>" 实跑验证。'
     return emitGateBlock({
       opts,
@@ -417,14 +428,38 @@ export async function handleCheckEmpirical(ctx) {
   }
 
   const smokeCmdList = (behavioralGate?.smokeVerifyCommands ?? []).map(sanitizeCmdTemplate).filter(Boolean)
-  const smokeExecuted = commandsToRun.length > 0 && (smokeCmdList.some((sc) => commandsToRun.includes(sc)) || explicitCmds.length > 0)
+  const smokeExecuted = commandsToRun.length > 0 && (smokeCmdList.length === 0 || smokeCmdList.some((sc) => commandsToRun.includes(sc)) || explicitCmds.length > 0)
 
   let cmdResults = []
   let statusLabel = 'passed'
   let lowRiskNoRuntimeChecks = false
   if (commandsToRun.length === 0) {
+    if (!requirements.isEmptyDiff && (requirements.staticDocCheckRequired || requirements.isPureDocsNoneRepo) && Array.isArray(requirements.changedFiles) && requirements.changedFiles.length > 0 && reviewRoot) {
+      const staticCheck = runLowRiskDocStaticCheck(reviewRoot, requirements.changedFiles, { diffText: diff?.text ?? null })
+      if (!staticCheck.ok) {
+        const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: ${staticCheck.errors.map((e) => e?.message ?? String(e)).join('；')}`
+        return emitGateBlock({
+          opts,
+          code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
+          payload: {
+            status: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
+            code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
+            exitCode: EXIT.FACT,
+            mode,
+            round,
+            headSha,
+            workspaceFingerprint: currentFingerprint,
+            errors: staticCheck.errors,
+            error: msg,
+          },
+          textLines: ['BLOCKED_STATIC_DOC_CHECK_FAILED', msg],
+        })
+      }
+    }
     lowRiskNoRuntimeChecks = true
-    statusLabel = requirements.isEmptyDiff ? 'empty-diff-no-checks' : 'low-risk-no-runtime-checks'
+    statusLabel = requirements.isEmptyDiff
+      ? 'empty-diff-no-checks'
+      : (requirements.isPureDocsNoneRepo ? 'pure-docs-static-verified' : 'low-risk-no-runtime-checks')
   } else {
     const wtEnv = computeWorktreeEnv({ mainRoot, gitDir, taskId: task?.taskId ?? mode, slotIndex: task?.slotIndex })
     cmdResults = await runCommandList(commandsToRun, { cwd: reviewRoot, env: wtEnv, stopOnFail: true })

@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { createFakeGhEnv, gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { createFakeGhEnv, gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 const RP_SCRIPT = 'kit/skills/dev-review/scripts/review-pack.mjs'
 
@@ -589,5 +589,103 @@ export function registerReviewEmpiricalCases(cases) {
       }
       return true
     } finally { rmTree(dir) }
+  }])
+
+  cases.push(['C5+C6：省略 smoke-verify 不死锁、纯单测免故障注入、全 none 纯文档过审、record 自动复用同 HEAD 实证且不三倍拼接', async () => {
+    const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+    const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { readLocalIssue } = await import('../../kit/skills/lib/local-issues.mjs')
+
+    // 1. 省略 smoke-verify 键 + 只改纯单测（TEST_FILE_RE）：check-empirical 不再报 BLOCKED_SMOKE_VERIFY_UNCONFIGURED 且 faultRequired=false
+    const omitDir = makeTestRepo({
+      agentsYaml: 'quick-test: node test.mjs\nfull-test: node test.mjs\nmerge-gate: node test.mjs\n',
+      extraFiles: { 'tests/unit.test.mjs': 'export const t = 1\n', 'test.mjs': 'process.exit(0)\n' },
+    })
+    try {
+      writeFileSync(join(omitDir, 'tests/unit.test.mjs'), 'export const t = 2\n')
+      const mpTestOnly = await runRp(['--local', '--json'], omitDir)
+      if (mpTestOnly.status !== 0) return `纯单测机械包失败：${mpTestOnly.stderr}`
+      const empTestOnly = await runRp(['check-empirical', '--local', '--cmd', 'node test.mjs', '--json'], omitDir)
+      if (empTestOnly.status !== 0) {
+        return `省略 smoke-verify 且仅改单测被阻断：exit=${empTestOnly.status} out=${empTestOnly.stdout} err=${empTestOnly.stderr}`
+      }
+      const packTestOnly = await runRp(['--local', '--include-diff', '--json'], omitDir)
+      if (packTestOnly.status !== 0) {
+        return `纯单测改动跳过 faultRequired 后 --include-diff 仍被拦：exit=${packTestOnly.status} out=${packTestOnly.stdout}`
+      }
+      // 反面：改为运行时文件 src/app.mjs -> faultRequired 恢复生效并要求 check-fault
+      writeFileSync(join(omitDir, 'src/app.mjs'), 'export const computeVal = () => 99\n')
+      const empRuntime = await runRp(['check-empirical', '--local', '--cmd', 'node test.mjs', '--json'], omitDir)
+      if (empRuntime.status !== 0) return `运行时 check-empirical 失败：${empRuntime.stdout}`
+      const blockedRuntime = await runRp(['--local', '--include-diff', '--json'], omitDir)
+      if (blockedRuntime.status !== 3) {
+        return `修改 src/app.mjs 后未要求 check-fault 故障注入：exit=${blockedRuntime.status}`
+      }
+    } finally { rmTree(omitDir) }
+
+    // 2. 全 4 键 explicit none 纯文档仓：check-empirical 走静态校验通过，含死链失败
+    const docDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# doc\n\n```yaml\nquick-test: none\nfull-test: none\nsmoke-verify: none\nmerge-gate: none\n```\n',
+      'docs/guide.md': '# Guide\n\nClean doc.\n',
+    })
+    gitInit(docDir, { branch: 'main' })
+    try {
+      writeFileSync(join(docDir, 'docs/guide.md'), '# Guide\n\nUpdated doc.\n')
+      const okDoc = await runRp(['check-empirical', '--local', '--json'], docDir)
+      if (okDoc.status !== 0) return `全 none 纯文档仓 check-empirical 未放行：${okDoc.stdout} ${okDoc.stderr}`
+      writeFileSync(join(docDir, 'docs/guide.md'), '# Guide\n\nBroken [link](missing.md).\n')
+      const badDoc = await runRp(['check-empirical', '--local', '--json'], docDir)
+      if (badDoc.status === 0) return '全 none 纯文档仓含死链竟然放行了'
+    } finally { rmTree(docDir) }
+
+    // 3. C6：record 省略 --evidence 时自动复用同 HEAD 有效 check-empirical 回执；无回执且无 --evidence 阻断；回写不三倍拼接 empParts
+    const recDir = makeTestRepo({
+      extraFiles: { 'src/ui.mjs': 'export const ui = 1\n' },
+    })
+    try {
+      const roots = await resolveRepoRoots(recDir)
+      const createIssueRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['inspect'], { cwd: recDir })
+      void createIssueRes
+      await handleStart({ task: 'rec-c6', case: '2', slug: 'rec-c6', implementer: 'alice', 'no-issue': true, reason: '验证 record 回执自动复用与防三倍拼接' }, roots)
+      const wt = join(recDir, '.worktrees', 'impl-rec-c6')
+      writeFileSync(join(wt, 'src/app.mjs'), 'export const computeVal = () => 2\n')
+      gitCommitFast(wt, 'feat: rec-c6', { updateOnly: true })
+      const vRes = await handleVerify({ task: 'rec-c6', mode: 'gate' }, roots)
+      if (vRes.exitCode !== 0) return `rec-c6 verify 失败：${vRes.exitCode}`
+      await handleSubmit({ task: 'rec-c6', agent: 'alice' }, roots)
+
+      const tok = await issueTokenFor(recDir, 'rec-c6', 1)
+      // 反面：未跑 check-empirical 且未传 --evidence -> 必须阻断
+      const noEv = await runRp(['record', '--task', 'rec-c6', '--verdict', 'pass', '--reviewer-id', 'rev-c6', '--review-token', tok, '--json'], recDir)
+      if (noEv.status === 0) return '无 --evidence 且无 check-empirical 回执时 record 竟然放行了'
+
+      // 正向：先在 review slot 跑 check-empirical + check-fault，再省略 --evidence 调用 record -> 自动复用回执并仅拼一次实证摘要
+      const empR = await runRp(['check-empirical', '--task', 'rec-c6', '--cmd', 'node test.mjs', '--json'], recDir)
+      if (empR.status !== 0) return `task check-empirical 失败：${empR.stdout}`
+      const revWt = join(recDir, '.worktrees', 'review-rec-c6')
+      const origRevApp = readFileSync(join(revWt, 'src/app.mjs'), 'utf8')
+      writeFileSync(join(revWt, 'src/app.mjs'), 'export const computeVal = () => 999\n')
+      const fFail = await runRp(['check-fault', '--phase', 'fail', '--task', 'rec-c6', '--cmd', 'node test.mjs', '--json'], recDir)
+      if (fFail.status !== 0) return `fault fail 失败：${fFail.stdout} ${fFail.stderr}`
+      writeFileSync(join(revWt, 'src/app.mjs'), origRevApp)
+      const fRest = await runRp(['check-fault', '--phase', 'restore', '--task', 'rec-c6', '--cmd', 'node test.mjs', '--json'], recDir)
+      if (fRest.status !== 0) return `fault restore 失败：${fRest.stdout} ${fRest.stderr}`
+
+      const recOk = await runRp(['record', '--task', 'rec-c6', '--verdict', 'pass', '--reviewer-id', 'rev-c6', '--review-token', tok, '--json'], recDir)
+      if (recOk.status !== 0) return `同 HEAD 有效 check-empirical 回执下省略 --evidence 未自动复用：exit=${recOk.status} out=${recOk.stdout} err=${recOk.stderr}`
+      const ldg1 = readTaskLedger(recDir, 'rec-c6')
+      const summary = String(ldg1.rounds?.[0]?.reviewEmpirical ?? '')
+      const hits = summary.match(/node test\.mjs/g)?.length ?? 0
+      if (hits > 1 || !summary.includes('node test.mjs')) {
+        return `record 实证摘要出现重复拼接或未记录命令（hits=${hits}）：${summary}`
+      }
+      if (ldg1.linkedIssues?.[0]) {
+        const iss = readLocalIssue({ mainRoot: recDir, gitDir: roots.gitDir, number: ldg1.linkedIssues[0] })
+        void iss
+      }
+      return true
+    } finally { rmTree(recDir) }
   }])
 }

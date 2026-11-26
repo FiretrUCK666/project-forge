@@ -284,9 +284,10 @@ export function buildModeTargetFlags({ mode, task, round, prNo, baseRef, reviewR
   return `--local${dirFlag}`
 }
 
-export function buildUnblockCommands({ missingSteps, dirtyFaultResidue, mode, task, round, prNo, baseRef, reviewRoot, mainRoot, autoCommands }) {
+export function buildUnblockCommands({ missingSteps, dirtyFaultResidue, mode, task, round, prNo, baseRef, reviewRoot, mainRoot, autoCommands, isPureDocsNoneRepo = false }) {
   const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef, reviewRoot, mainRoot })
   const sampleCmd = autoCommands[0] ?? '<可证伪 C* 的验证命令>'
+  const cmdArg = (autoCommands.length > 0 || isPureDocsNoneRepo) ? '' : ` --cmd "${sampleCmd}"`
   const cmds = []
   if (dirtyFaultResidue) {
     if (mode === 'task' || mode === 'pr') {
@@ -300,7 +301,6 @@ export function buildUnblockCommands({ missingSteps, dirtyFaultResidue, mode, ta
     cmds.push(`node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags}`)
   }
   if (missingSteps.includes('check-empirical')) {
-    const cmdArg = autoCommands.length > 0 ? '' : ` --cmd "${sampleCmd}"`
     cmds.push(`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags}${cmdArg}`)
   }
   if (missingSteps.includes('check-fault:fail')) {
@@ -313,7 +313,7 @@ export function buildUnblockCommands({ missingSteps, dirtyFaultResidue, mode, ta
     cmds.push('核验实际渲染/交互与浅深色视觉效果后追加 --artifact "<真实非空产物路径>"；无渲染环境时改用 --visual-blocked-reason "<阻塞原因>" 诚实报阻')
   }
   if (missingSteps.includes('e2e-observation')) {
-    cmds.push(`运行端到端实证并附带运行观察结论后重试: node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --e2e-evidence "<运行观察实证>"`)
+    cmds.push(`运行端到端实证并附带运行观察结论后重试: node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags}${cmdArg} --e2e-evidence "<运行观察实证>"`)
   }
   const extraVisual = missingSteps.includes('visual-check') ? ' --artifact "<真实非空产物路径>"' : ''
   const extraE2e = missingSteps.includes('e2e-observation') ? ' --e2e-evidence "<运行观察实证>"' : ''

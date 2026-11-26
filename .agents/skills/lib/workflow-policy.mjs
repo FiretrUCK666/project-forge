@@ -524,8 +524,9 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
         reason: check.reason ?? 'E2E 观察回执仅为无实质水话，请写明执行入口与观察到的真实输出/状态。',
       }
     }
+    const visEv = String(evidence.visualCheckEvidence ?? '').trim()
     const hasE2eObs = hasValidE2eObservationOnHead(evidence, headSha)
-      || Boolean(evidence.visualCheckEvidence && (!headSha || evidence.visualVerifiedHead === headSha))
+      || Boolean(visEv && validateE2eEvidenceText(visEv).ok && (!headSha || evidence.visualVerifiedHead === headSha))
     if (!hasE2eObs) {
       return {
         ok: false,
@@ -724,8 +725,8 @@ export function resolveScopedVerificationGate({ repoRoot = null, changedFiles = 
           continue
         }
         if (affectedPkgDirs.size > 0 && rawPkgs.length > 1) {
-          const subDirHint = /(?:--filter\s+['"]?([^\s'"]+)|--prefix\s+['"]?([^\s'"]+)|-C\s+['"]?([^\s'"]+)|\bcd\s+([^\s&;]+))/.exec(seg)
-          const hinted = (subDirHint?.[1] || subDirHint?.[2] || subDirHint?.[3] || subDirHint?.[4] || '').replace(/^\.\//, '').replace(/\/+$/, '')
+          const subDirHint = /(?:(?:--filter|--prefix|--dir|-C)(?:=|\s+)['"]?([^\s'"]+)|\bcd\s+([^\s&;]+))/.exec(seg)
+          const hinted = (subDirHint?.[1] || subDirHint?.[2] || '').replace(/^\.\//, '').replace(/\/+$/, '')
           const matchesPkg = !hinted || affectedPackages.some((p) => p.dir === hinted || p.name === hinted || p.dir.endsWith(`/${hinted}`))
           if (!matchesPkg) {
             skipped.push({ cmd: seg, stack: cs ?? affectedStacks[0], reason: `unaffected-package:${hinted}` })

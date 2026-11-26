@@ -84,6 +84,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> |
 node .agents/skills/dev-review/scripts/review-pack.mjs record \
   [--task <id>] [--round <N>] --verdict pass|changes --reviewer-id <id> \
   --review-token <由 flow next 现场签发、绑定 round+reviewerId+headSha 的令牌> \
+  [--evidence "<命令与输出摘要；省略时自动复用同 HEAD 有效 check-empirical 回执>"] \
   [--must-fix <textOrJson>...] [--should-fix <text>...] [--pre-existing <text>...] \
   [--disposition "<idOrFp>:fixed|rebutted-wrong|intentional|deferred"...] \
   [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--no-enforce-gates] [--visual-checked]

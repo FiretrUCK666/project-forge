@@ -23,7 +23,7 @@ import { resolveHostMode } from '../../lib/harness-context.mjs'
 import { verifyPlanningProvenance } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, isUiVisualFile, splitDiffByFile } from '../../lib/static-gates.mjs'
-import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence, resolveEffectiveBaseSha, runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
+import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence, resolveEffectiveBaseSha, runLowRiskDocStaticCheck, validateE2eEvidenceText } from '../../lib/workflow-policy.mjs'
 import { EXIT, hasCommits } from './review-diff.mjs'
 
 export { checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId }
@@ -569,15 +569,16 @@ export async function evaluatePassBlockers({
         (evidence && (!headSha || headSha === 'UNBORN' || evidence.headSha === headSha) && !evidence.dirty && evidence.smokeVerifiedOnHead !== false && evidence.gates?.smoke?.exitCode === 0)
         || (receipt?.empiricalVerified && (!headSha || headSha === 'UNBORN' || receipt.empiricalVerified.headSha === headSha) && receipt.empiricalVerified.executed !== false && !receipt.empiricalVerified.errorOnly && receipt.empiricalVerified.smokeExecuted === true),
       )
-      const e2eInput = Boolean(
-        (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
-        || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim()),
-      )
+      const rawE2eObs = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+        || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
+        || ''
+      const e2eInput = Boolean(rawE2eObs && validateE2eEvidenceText(rawE2eObs).ok)
+      const visEv = String(evidence?.visualCheckEvidence ?? '').trim()
       const e2eObsOk = Boolean(
         hasValidE2eObservationOnHead(evidence, headSha)
         || hasValidE2eObservationOnHead(receipt?.empiricalVerified, headSha)
         || e2eInput
-        || (evidence?.visualCheckEvidence && (!headSha || evidence.visualVerifiedHead === headSha)),
+        || (visEv && validateE2eEvidenceText(visEv).ok && (!headSha || evidence.visualVerifiedHead === headSha)),
       )
       if (!smokeOk || !e2eObsOk) {
         blockers.push(`缺少当前 HEAD 的 E2E 运行与观察实证（smokeVerifiedOnHead=${smokeOk}, e2eObservation=${e2eObsOk}）`)

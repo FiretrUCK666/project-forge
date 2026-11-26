@@ -22,6 +22,7 @@ import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import { validateFeatureMapTopology } from '../../lib/feature-map-graph.mjs'
 import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/suite-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
+import * as workflowPolicy from '../../lib/workflow-policy.mjs'
 
 const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i
 
@@ -555,4 +556,22 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
     ledger.hooks = { ...(ledger.hooks ?? {}), [`govern_${stage}_at`]: now, [`govern_${stage}_ok`]: res.ok }
   }
   return { ok: true, executed: true, stage, hookOk: res.ok, scriptPath, ...(customResults.length ? { customResults } : {}) }
+}
+
+/**
+ * verify 前置预检的 Fail-Soft 调用口（供 flow-lifecycle.mjs / flow-lifecycle-helpers.mjs 复用）。
+ * 命名空间探测 `validateVerifyPrecheck`，未导出时按 Fail-Soft 放行，传 `record: false` 由调用方统一落账。
+ */
+export function runVerifyPrecheck(payload) {
+  const fn = workflowPolicy?.validateVerifyPrecheck
+  if (typeof fn !== 'function') return null
+  try {
+    const res = fn({ ...payload, record: false })
+    if (!res) return null
+    if (res.ok === false) return { ...res, blocked: true, exitCode: Number(res.exitCode) || 3 }
+    return { ...res, blocked: false }
+  } catch (err) {
+    process.stderr.write(`前置换算异常，按 Fail-Soft 放行：${err instanceof Error ? err.message : String(err)}\n`)
+    return null
+  }
 }

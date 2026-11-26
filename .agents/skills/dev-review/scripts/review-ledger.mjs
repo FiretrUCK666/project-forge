@@ -40,6 +40,33 @@ function matchesItemIdSet(pm, idSet) {
     || (pm.criterion && idSet.has(String(pm.criterion).toLowerCase()))
 }
 
+function isMatchingHeadEmpiricalReceipt(receipt, { headSha, round }) {
+  const rec = receipt?.empiricalVerified
+  if (!rec || typeof rec !== 'object') return false
+  if (rec.executed === false || rec.errorOnly === true || rec.succeeded === false) return false
+  if (headSha && rec.headSha !== headSha) return false
+  if (receipt.mode === 'task' && rec.round !== undefined && Number(rec.round) !== Number(round)) return false
+  return true
+}
+
+function formatEmpiricalReceiptEvidence(recEmp, headSha = '') {
+  if (!recEmp || typeof recEmp !== 'object') return { cmdSummary: '', obsSummary: '', text: '' }
+  const cmds = Array.isArray(recEmp.commands) ? recEmp.commands : []
+  const cmdSummary = cmds
+    .map((c) => `${c.cmd || 'cmd'}(exit=${c.exitCode ?? 0}${c.durationMs !== undefined ? `,${c.durationMs}ms` : ''})`)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('；')
+  const obsSummary = String(recEmp.e2eObservation?.summary ?? '').trim()
+  if (cmdSummary) return { cmdSummary, obsSummary, text: `回执实跑：${cmdSummary}` }
+  if (obsSummary) return { cmdSummary: '', obsSummary, text: `回执观察：${obsSummary}` }
+  if (recEmp.lowRiskNoRuntimeChecks) {
+    const st = recEmp.status || 'low-risk-no-runtime-checks'
+    return { cmdSummary: '', obsSummary: '', text: `回执静态核验：${st} (${String(headSha ?? '').slice(0, 7) || 'HEAD'})` }
+  }
+  return { cmdSummary: '', obsSummary: '', text: '' }
+}
+
 function resolveRecordNextSteps({ taskId, verdict, round, role, providerId = null, mainRoot, excludedReviewers = [] }) {
   const skills = resolveAvailableSkills(mainRoot)
   if (verdict === 'pass') {
@@ -116,10 +143,28 @@ export async function handleRecord(opts, roots) {
     return EXIT.USAGE
   }
 
-  // 实证佐证：没有它，'我跑过' 与 '我觉得' 在账本里分不出来。
-  const evidenceRaw = String(opts.evidence ?? '').trim()
+  const targetRoot = (baseLedger.reviewWorktreePath && existsSync(resolve(mainRoot, baseLedger.reviewWorktreePath)))
+    ? resolve(mainRoot, baseLedger.reviewWorktreePath)
+    : ((baseLedger.worktreePath && existsSync(resolve(mainRoot, baseLedger.worktreePath)))
+        ? resolve(mainRoot, baseLedger.worktreePath)
+        : workTreeRoot)
+
+  const headSha = opts.head
+    ? await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, opts.head, { preferReviewSlot: true })
+    : await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, 'HEAD', { preferReviewSlot: true })
+
+  const receipt = readReceipt(resolveEmpiricalReceiptPath({
+    gitDir: roots.gitDir, mode: 'task', task: baseLedger, prNo: baseLedger.prNumber,
+    reviewRoot: targetRoot, baseRef: baseLedger.baseSha || baseLedger.baseBranch,
+  }))
+  const matchingReceiptEmp = isMatchingHeadEmpiricalReceipt(receipt, { headSha, round }) ? receipt.empiricalVerified : null
+  const receiptFmt = formatEmpiricalReceiptEvidence(matchingReceiptEmp, headSha)
+
+  // 实证佐证：没有它，'我跑过' 与 '我觉得' 在账本里分不出来；缺省时自动复用同 HEAD 有效 check-empirical 回执。
+  const explicitEvidence = String(opts.evidence ?? '').trim()
+  const evidenceRaw = explicitEvidence || receiptFmt.text
   if (!evidenceRaw) {
-    const msg = 'BLOCKED_MISSING_REVIEW_EVIDENCE: 记审查结论必须传 --evidence "<你实际跑过的命令与输出摘要>"。'
+    const msg = 'BLOCKED_MISSING_REVIEW_EVIDENCE: 记审查结论必须传 --evidence "<你实际跑过的命令与输出摘要>"（或先在同 HEAD 跑通 check-empirical 以自动复用回执）。'
       + '判据是「跑过什么」，不是「觉得怎样」——没有佐证的通过和没有通过是一回事。'
     if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_REVIEW_EVIDENCE', error: msg, taskId, round }, null, 2)}\n`)
     else process.stdout.write(`${msg}\n`)
@@ -138,15 +183,6 @@ export async function handleRecord(opts, roots) {
     process.stderr.write(`${msg}\n`)
     return EXIT.USAGE
   }
-  const targetRoot = (baseLedger.reviewWorktreePath && existsSync(resolve(mainRoot, baseLedger.reviewWorktreePath)))
-    ? resolve(mainRoot, baseLedger.reviewWorktreePath)
-    : ((baseLedger.worktreePath && existsSync(resolve(mainRoot, baseLedger.worktreePath)))
-        ? resolve(mainRoot, baseLedger.worktreePath)
-        : workTreeRoot)
-
-  const headSha = opts.head
-    ? await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, opts.head, { preferReviewSlot: true })
-    : await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, 'HEAD', { preferReviewSlot: true })
 
   const criteriaDrift = checkFrozenCriteria(baseLedger, targetRoot)
   if (criteriaDrift.blocked) {
@@ -299,7 +335,6 @@ export async function handleRecord(opts, roots) {
     return scopeLock.exitCode
   }
 
-  const receipt = readReceipt(resolveEmpiricalReceiptPath({ gitDir: roots.gitDir, mode: 'task', task: baseLedger, prNo: baseLedger.prNumber, reviewRoot: targetRoot, baseRef: baseLedger.baseSha || baseLedger.baseBranch }))
   if (verdict === 'pass') {
     const passCheck = await evaluatePassBlockers({
       mainRoot,
@@ -424,16 +459,25 @@ export async function handleRecord(opts, roots) {
   const artifactRecords = artifactInput.records
   const artifactText = artifactRecords.map((r) => `${r.relPath}(${r.bytes}B,${r.sha256Prefix})`).join('、')
   const empParts = []
-  if (evidenceRaw) empParts.push(`审查命令与实证：${evidenceRaw}`)
-  if (e2eText) empParts.push(`E2E/交互观察：${e2eText}`)
-  if (artifactText) empParts.push(`产物核验：${artifactText}`)
-  if (blockedReasonText) empParts.push(`环境阻塞待人工核验：${blockedReasonText}`)
-  const recEmp = receipt?.empiricalVerified
-  if (recEmp && typeof recEmp === 'object') {
-    const cmds = Array.isArray(recEmp.commands) ? recEmp.commands : []
-    const cmdSummary = cmds.map((c) => `${c.cmd || 'cmd'}(exit=${c.exitCode ?? 0}${c.durationMs !== undefined ? `,${c.durationMs}ms` : ''})`).filter(Boolean).slice(0, 3).join('；')
-    if (cmdSummary) empParts.push(`回执实跑：${cmdSummary}`)
-    else if (recEmp.e2eObservation?.summary) empParts.push(`回执观察：${recEmp.e2eObservation.summary}`)
+  const seenEmpBodies = new Set()
+  const pushEmpPart = (prefix, body) => {
+    const clean = String(body ?? '').trim()
+    if (!clean) return
+    const norm = clean.toLowerCase()
+    for (const prev of seenEmpBodies) {
+      if (prev === norm || prev.includes(norm) || norm.includes(prev)) return
+    }
+    seenEmpBodies.add(norm)
+    empParts.push(prefix ? `${prefix}：${clean}` : clean)
+  }
+  if (explicitEvidence) pushEmpPart('审查命令与实证', explicitEvidence)
+  else if (evidenceRaw) pushEmpPart(null, evidenceRaw)
+  pushEmpPart('E2E/交互观察', e2eText)
+  pushEmpPart('产物核验', artifactText)
+  pushEmpPart('环境阻塞待人工核验', blockedReasonText)
+  if (matchingReceiptEmp) {
+    if (receiptFmt.cmdSummary) pushEmpPart('回执实跑', receiptFmt.cmdSummary)
+    if (receiptFmt.obsSummary) pushEmpPart('回执观察', receiptFmt.obsSummary)
   }
   const reviewEmpirical = empParts.join(' | ') || null
   const visualChecked = Boolean(e2eText || artifactRecords.length > 0 || blockedReasonText)

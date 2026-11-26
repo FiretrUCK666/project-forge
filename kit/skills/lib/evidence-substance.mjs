@@ -28,11 +28,27 @@ export const SHALLOW_EXACT_SET = new Set([
   '实测通过', '一切正常', '全部通过', '过了', '行', 'ok了', '通过了', '验证ok',
 ])
 
+/**
+ * 旧式合成观察串：由布尔开关直接拼出来的「已核验」，里面没有观察内容。
+ * 它们能被当成实证，正是本条判据要堵的敷衍通道。
+ */
+export const SYNTHETIC_OBSERVATION_TEXTS = Object.freeze([
+  'e2e/visual runtime behavior observed and verified',
+  '实际运行、端到端交互与输出观察核验已确认',
+  '独立审查已核验真实端到端运行、交互与输出观察',
+])
+
 /** 占位符形态：整段就是一个尖括号 / 花括号 / 方括号或纯符号。 */
 const PLACEHOLDER_RE = /^(?:<[^>]{1,40}>|\{[^}]{1,40}\}|\[[^\]]{1,40}\]|[.…\-_=*!?？\s]+)$/
 
 /** 具体锚点：命令、路径、等式、数字、退出码、状态码这一类可核对的东西。 */
 const EVIDENCE_CONCRETE_ANCHOR_RE = /(?:[=:/\\.]|\d|exit|stdout|stderr|status|http|cli|smoke|e2e|json|html|svg|ok_|_ok|pass_|_pass)/i
+
+export function isSyntheticObservationText(raw) {
+  const lowered = String(raw ?? '').trim().toLowerCase()
+  if (!lowered) return false
+  return SYNTHETIC_OBSERVATION_TEXTS.some((s) => lowered === s.toLowerCase() || lowered.includes(s.toLowerCase()))
+}
 
 /** 去掉首尾引号、括号与标点，压平空白。 */
 function normalizeText(raw) {
@@ -47,13 +63,16 @@ function normalizeText(raw) {
  * 判断一段文本有没有实质内容。
  *
  * @param {string} raw 待判文本
- * @param {{minChars?: number, subject?: string}} opts `subject` 只用于把提示写成人看得懂的话
+ * @param {{minChars?: number, subject?: string, rejectSynthetic?: boolean}} opts `subject` 只用于把提示写成人看得懂的话
  * @returns {{ok: boolean, code: string|null, reason: string|null, cleaned: string}}
  */
-export function evaluateTextSubstance(raw, { minChars = 6, subject = '实证说明' } = {}) {
+export function evaluateTextSubstance(raw, { minChars = 6, subject = '实证说明', rejectSynthetic = false } = {}) {
   const trimmed = String(raw ?? '').trim()
   if (!trimmed) {
     return { ok: false, code: 'BLOCKED_SHALLOW_EVIDENCE', reason: `${subject}不能为空，请写清执行入口与观察到的真实输出/状态。`, cleaned: '' }
+  }
+  if (rejectSynthetic && isSyntheticObservationText(trimmed)) {
+    return { ok: false, code: 'BLOCKED_SHALLOW_EVIDENCE', reason: `${subject}「${trimmed}」是旧式硬编码确认串，没有记录任何真实运行或渲染结果。`, cleaned: '' }
   }
   if (PLACEHOLDER_RE.test(trimmed)) {
     return { ok: false, code: 'BLOCKED_SHALLOW_EVIDENCE', reason: `${subject}「${trimmed}」是占位符，请填写实际执行入口与真实输出/状态。`, cleaned: '' }

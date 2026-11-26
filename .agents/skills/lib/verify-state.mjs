@@ -41,7 +41,7 @@ function uniqPaths(arr) {
 export function validateE2eEvidenceText(raw) {
   // 判据只有一处实现：措辞千变万化，词表每加一条就逼出下一个措辞。
   // 所以这里只把结果映射成原有的码位，判法本身在 evidence-substance.mjs。
-  const base = evaluateTextSubstance(raw, { subject: '--e2e-evidence' })
+  const base = evaluateTextSubstance(raw, { subject: '--e2e-evidence', rejectSynthetic: true })
   return base.ok
     ? { ok: true, code: null, cleaned: base.cleaned }
     : { ok: false, code: 'BLOCKED_SHALLOW_E2E_EVIDENCE', reason: base.reason }

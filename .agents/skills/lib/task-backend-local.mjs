@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { EXIT } from './exit-codes.mjs'
+import { evaluateReleaseReason } from './evidence-substance.mjs'
 import { gitRun, gitStatusPorcelainZ, inspectBranchMergeState, readTextSafe, resolveDefaultBranch, withFileLock } from './git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from './git-fast.mjs'
 import { parsePfStateTags } from './github-client.mjs'
@@ -501,7 +502,7 @@ export class GenericRemoteBackend {
    * （`inspectBranchMergeState`），别的三处也用它。判定前先取回远端——本地引用是上次
    * 取回时的快照，不取回就判会把「远端已合但我还没看到」误报成未合并。
    */
-  async mergePr({ humanApproved = false, ledger, branch, baseBranch } = {}) {
+  async mergePr({ humanApproved = false, reason = '', ledger, branch, baseBranch } = {}) {
     const targetBranch = branch ?? ledger?.branch ?? null
     const base = baseBranch ?? ledger?.baseBranch ?? await resolveDefaultBranch(this.mainRoot, { strict: true })
     if (!base) {
@@ -523,13 +524,24 @@ export class GenericRemoteBackend {
           + '确需人工拍板时带 --human-approved --reason "<为什么可以在核不到的情况下放行>"。',
       }
     }
-    // 核不到远端 + 人类签字：唯一允许「带着不确定性放行」的通道。区别必须写进记录
-    // （`verified: false` 加签字理由），事后有人问「这次凭什么合的」，答案在账本里。
+    // 核不到远端 + 人类签字：唯一允许「带着不确定性放行」的通道。必须经过实质放行理由校验并写进账本。
     if (!fetched && humanApproved) {
+      const reasonCheck = evaluateReleaseReason(reason, { subject: '离线无法核验远端合流时的放行理由' })
+      if (!reasonCheck.ok) {
+        return {
+          ok: false,
+          blocked: true,
+          code: reasonCheck.code || 'BLOCKED_SHALLOW_OVERRIDE_REASON',
+          exitCode: EXIT.USAGE,
+          fetched: false,
+          humanApproved: false,
+          message: `${reasonCheck.code || 'BLOCKED_SHALLOW_OVERRIDE_REASON'}: ${reasonCheck.reason} 请附 --reason "<为什么可以在离线状态下放行合并>"。`,
+        }
+      }
       return {
         ok: true, merged: true, fetched: false, verified: false, humanApproved: true,
         state: 'MERGED', branch: targetBranch, into: base,
-        reason: '远端取回失败，由人类签字放行；合并状态未经机器核验',
+        reason: reasonCheck.cleaned,
       }
     }
     // 核对远端引用，不是本地分支：本地那条可能还停在合并前，拿它判等于用旧快照回答新问题。

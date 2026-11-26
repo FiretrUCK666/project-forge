@@ -60,6 +60,23 @@ cases.push(['review-pack.mjs：双轨门禁、arch-rules、tombstone/excuse 检�
     if (bj.doorAssessment?.doorType !== 'one-way' || bj.doorAssessment?.mergeAuthority !== 'human-required') {
       return `CI workflow 改动未判为 one-way + human-required：${JSON.stringify(bj.doorAssessment)}`
     }
+
+    // 3. C8：普通高风险/manifest one-way（无 workflow/压制注释/humanAuth）应落 reviewer-with-fault-injection
+    const dirOneWay = tmpProject({
+      'AGENTS.md': '# gov-oneway\n\n```yaml\nhigh-risk: src/core/\n```\n',
+      'package.json': '{"name":"gw","version":"1.0.0"}\n',
+      'src/core/x.mjs': 'export const x = 1\n',
+    })
+    gitInit(dirOneWay, { branch: 'main' })
+    try {
+      writeFileSync(join(dirOneWay, 'package.json'), '{"name":"gw","version":"1.0.1"}\n')
+      const pOw = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--json'], { cwd: dirOneWay })
+      if (pOw.status !== 0) return `review-pack --local one-way 运行失败：${pOw.stderr}`
+      const owj = JSON.parse(pOw.stdout)
+      if (owj.doorAssessment?.doorType !== 'one-way' || owj.doorAssessment?.mergeAuthority !== 'reviewer-with-fault-injection') {
+        return `普通 one-way 误判为 ${JSON.stringify(owj.doorAssessment)}（应为 reviewer-with-fault-injection）`
+      }
+    } finally { rmTree(dirOneWay) }
     return true
   } finally { rmTree(dir) }
 }])

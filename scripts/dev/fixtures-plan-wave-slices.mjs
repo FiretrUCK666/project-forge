@@ -295,8 +295,10 @@ export function registerPlanWaveSliceCases(cases) {
 
     // 正向 3：Fail-Soft 探测仍在——入口缺席时必须放行，不能为「一个还没写的函数」把整条 verify 拦死。
     const helpers = readFileSync(new URL('../../kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs', import.meta.url), 'utf8')
-    if (!helpers.includes('validateVerifyPrecheck')) return '前置预检入口未接'
-    if (!/typeof fn !== 'function'\) return null/.test(helpers)) {
+    const hooks = readFileSync(new URL('../../kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs', import.meta.url), 'utf8')
+    const precheckSrc = `${hooks}\n${helpers}`
+    if (!precheckSrc.includes('validateVerifyPrecheck')) return '前置预检入口未接'
+    if (!/typeof fn !== 'function'\) return null/.test(precheckSrc)) {
       return '前置预检未按 Fail-Soft 处理：入口缺席时应直接放行'
     }
 

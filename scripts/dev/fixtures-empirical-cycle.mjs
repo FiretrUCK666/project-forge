@@ -33,6 +33,7 @@ import {
 } from '../../kit/skills/lib/ledger.mjs'
 import { handleRecord } from '../../kit/skills/dev-review/scripts/review-ledger.mjs'
 import { resolveReviewObservationInputs } from '../../kit/skills/dev-review/scripts/review-empirical-state.mjs'
+import { isUiVisualFile } from '../../kit/skills/lib/static-gates.mjs'
 import { gitInit, rmTree, runAbs, tmpProject } from './fixtures-helpers.mjs'
 
 function makeRepo() {
@@ -615,5 +616,33 @@ export function registerEmpiricalCycleCases(cases) {
       if (ledgerB?.visualVerifiedHead !== headB) return `--visual-blocked-reason 未写 visualVerifiedHead：${JSON.stringify(ledgerB)}`
       return true
     } finally { rmTree(cmdDir) }
+  }])
+
+  cases.push(['C7：isUiVisualFile 豁免模板/非 UI SVG/已同步架构图，evaluateStoredVisualEvidence 过滤 0 字节附件', async () => {
+    const dir = tmpProject({
+      'docs/hero.svg': '<svg></svg>\n',
+      'assets/logo.svg': '<svg></svg>\n',
+      'templates/hero.svg': '<svg></svg>\n',
+      'kit/x/templates/preview.html': '<div></div>\n',
+      'src/ui/Button.tsx': 'export const Button = () => null\n',
+      'styles/app.css': 'body { color: #000; }\n',
+    })
+    try {
+      for (const nonUi of ['docs/hero.svg', 'assets/logo.svg', 'templates/hero.svg', 'kit/x/templates/preview.html']) {
+        if (isUiVisualFile(nonUi, dir)) return `非 UI 资源被误判为界面文件：${nonUi}`
+      }
+      for (const realUi of ['src/ui/Button.tsx', 'styles/app.css']) {
+        if (!isUiVisualFile(realUi, dir)) return `真实 UI 文件漏判：${realUi}`
+      }
+      const zeroByte = evaluateStoredVisualEvidence({
+        evidence: { headSha: 'aaa', visual: { required: true, headSha: 'aaa' }, artifacts: [{ relPath: 'shots/a.png', bytes: 0 }] },
+        policy: { visualFilesChanged: ['src/ui/Button.tsx'] },
+        headSha: 'aaa',
+      })
+      if (zeroByte.ok || zeroByte.code !== 'BLOCKED_VISUAL_EVIDENCE_REQUIRED') {
+        return `0 字节附件记录未在 evaluateStoredVisualEvidence 拦截：${JSON.stringify(zeroByte)}`
+      }
+      return true
+    } finally { rmTree(dir) }
   }])
 }

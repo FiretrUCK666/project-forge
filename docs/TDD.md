@@ -348,7 +348,7 @@ flowchart LR
 
 `kit/skills/lib/empirical-artifacts.mjs` 把「真实产出」和「使用什么外部工具」彻底拆开：
 - **通用 `--artifact <path>` 附件校验**：`flow.mjs verify` 支持重复传入 `--artifact`，校验每个路径必须真实存在、为常规文件、非 `0` 字节且不超过 `50 MB`，计算 SHA256 前缀并写入仓外 `evidence.json`，不修改任何 Git 跟踪文件；`submit` 阶段自动在 PR 正文生成结构化实证附件清单。
-- **界面变更禁用布尔开关自证（含派生架构图精确豁免）**：所有 UI 判定统一走 `static-gates.mjs` 的 `isUiVisualFile(file, { repoRoot })`（由 `shared.mjs` 重导出，仅依赖叶子 `feature-map-graph.mjs` 校验首行指纹，无循环导入）。只要变更命中 `UI_VISUAL_EXT_RE` 且不满足 `docs/architecture-map.html` 与当前 `docs/feature-map.json` 实时 SHA256 一致的豁免条件，单独传入 `--visual-checked` 会被 `BLOCKED_VISUAL_EVIDENCE_REQUIRED`（或命中旧式硬编码串报 `BLOCKED_VISUAL_EVIDENCE_PLACEHOLDER`）以退出码 `3` 拦截，必须至少满足一项：附真实非空 `--artifact`、写下包含界面与观察结果的实质摘要、或在确无渲染节点时显式声明 `--visual-blocked-reason`。
+- **界面变更禁用布尔开关自证（含非 UI SVG/模板与派生架构图精确豁免）**：所有 UI 判定由 `static-gates.mjs` 的 `isUiVisualFile(file, { repoRoot })` 薄委托至 `empirical-artifacts.mjs` 的 `isUiVisualFileCandidate` / `isNonUiVisualAsset` 单源判据（豁免模板目录、非 UI README/静态目录 `.svg` 与经 `feature-map-graph.mjs` 首行指纹校验通过的 `docs/architecture-map.html`）；前置预检由 `flow-lifecycle-hooks.mjs` 的 `runVerifyPrecheck` 统一收敛。只要变更命中 `UI_VISUAL_EXT_RE` 且不满足上述豁免条件，单独传入 `--visual-checked` 会被 `BLOCKED_VISUAL_EVIDENCE_REQUIRED`（或命中旧式硬编码串报 `BLOCKED_VISUAL_EVIDENCE_PLACEHOLDER`）以退出码 `3` 拦截，必须至少满足一项：附真实非空 `--artifact`、写下包含界面与观察结果的实质摘要、或在确无渲染节点时显式声明 `--visual-blocked-reason`。
 - **双模零依赖视觉投影（架构全景图 + 仓外活需求简报）**：共享 `kit/skills/lib/visual-layout.mjs`、`kit/skills/lib/visual-render.mjs`、`kit/skills/lib/visual-render-panels.mjs` 与 `kit/skills/lib/visual-render-assets.mjs` 生成自包含离线交互 HTML（浅/深/跟随系统单色高对比主题、`全景架构`与`泳道流转`双无限画布、正交圆角侧道连线与拖拽实时重路由、底部焦点聚光条、居中 Quick-Look 详情窗、`⌘K` 命令与目录面板、`walk-bar` 键盘导览与三级 `file://` 剪贴板降级，零 `homedir()` 泄露）。仓内 `docs/architecture-map.html` 由写操作自动渲染同步，只读命令（`reconcile`、`verify`、`edit-gate --final`、`render --check`）纯只读核验漂移；仓外 `<gitCommonDir>/project-forge-flow/briefs/` 由 `kit/skills/lib/visual-brief.mjs` 与 `kit/skills/dev-plan/scripts/doc-plan-brief.mjs` 实时投影 `workRoot` 优先拓扑、1:N 切片与宿主中立 UI 原型（`<= 512 KB` 及 `http`/`https`/`file` 白名单），确认后变更自动置 `confirmedState: stale`。
 
 ### 支柱三：先最小运行复现（`PoC-first`）与整类根治（Tier 1 / Tier 2）
@@ -409,7 +409,7 @@ flowchart TD
 3. **「没做 / 没查到 / 不认识」不折成通过**：这是全仓跨模块共守的真实性铁律——跨仓不可判引用只报不折成同仓、验证工具零匹配或门禁失败不返回成功、合入后回复以写接口 `ok === true` 为准、未装套件降级提示保留可执行动作类别、循环解析告警进 `warnings` 不吞错。
 4. **退出码单点四档分层（`kit/skills/lib/exit-codes.mjs`）**：所有脚本共用同一套退出码常量：`0` 通过、`1` 有待办项、`2` 用法参数错误、`3` 前提事实不成立阻断、`4` 需人类拍板解锁（如弱化门禁或停损熔断）；在册阻断码的显式返回档位由 `scripts/dev/exit-code-parity.mjs` 对拍一致。
 5. **合入门禁四档互斥（`kit/skills/lib/gate-truth.mjs`）**：由 CI 结构谓词单源派生验证步骤并逐块执行，结论严格互斥输出 `passed`、`failed`、`unverified`、`not-applicable`，绝不把 `not-applicable` 折叠成通过。
-6. **实证实质性共用判据（`kit/skills/lib/evidence-substance.mjs`）**：提审观察、视觉核验与人工放行理由共用同一套实质判据，拒收占位词与旧式合成确认串；放行理由加严要求写明绕过对象与理由。
+6. **实证实质性共用判据（`kit/skills/lib/evidence-substance.mjs`）**：提审观察、视觉核验与人工放行理由共用同一套实质判据（导出 `SYNTHETIC_OBSERVATION_TEXTS` 与 `isSyntheticObservationText`），拒收占位词与旧式合成确认串；放行理由加严要求写明绕过对象与理由。
 7. **不可逆边界与弱化门禁人审**：日常推分支与开 PR 可撤回；合入默认分支由独立审查者在三方 `headSha`、干净工作区、远端检查与实证通过后收尾（声明 `merge-authority: human` 除外）；任何弱化测试/门禁动作必退 `4` 等人类点头；发版必须等人类明确下令并按 `RELEASING.md` 执行。
 
 ### 全链路自证与门禁矩阵

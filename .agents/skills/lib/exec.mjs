@@ -453,6 +453,24 @@ function tryParseDirectNodeArgs(commandStr) {
   return tokens.slice(1)
 }
 
+/**
+ * Windows cmd.exe 会将首段正斜杠相对可执行路径（如 `./.venv/Scripts/python.exe`）
+ * 拆成开关参数；仅在命令首 token 以 `./` / `.venv/` / `venv/` 开头时归一化为反斜杠。
+ */
+export function normalizeWindowsLeadingRelativeCmd(commandStr, platform = process.platform) {
+  const raw = String(commandStr ?? '')
+  if (platform !== 'win32') return raw
+  const quoted = /^(\s*)"((?:\.\/|\.venv\/|venv\/)[^"]+)"([\s\S]*)$/.exec(raw)
+  if (quoted) {
+    return `${quoted[1]}"${quoted[2].replace(/\//g, '\\')}"${quoted[3]}`
+  }
+  const bare = /^(\s*)((?:\.\/|\.venv\/|venv\/)[^\s&|;<>()"]+)([\s\S]*)$/.exec(raw)
+  if (bare) {
+    return `${bare[1]}${bare[2].replace(/\//g, '\\')}${bare[3]}`
+  }
+  return raw
+}
+
 export function execShellCommand(commandStr, cwd, opts = {}) {
   return new Promise((done) => {
     if (cwd && !existsSync(cwd)) {
@@ -476,6 +494,7 @@ export function execShellCommand(commandStr, cwd, opts = {}) {
     // macOS Node 18 (libuv < 1.45) 下 detached: true 会退回非 fork-safe 裸 fork() 触发 malloc/dyld 死锁
     const canUseDetached = supportsSafeDetachedSpawn()
     const directNodeArgs = !opts.stdio ? tryParseDirectNodeArgs(trimCmd) : null
+    const shellCmd = directNodeArgs ? null : normalizeWindowsLeadingRelativeCmd(commandStr)
     const child = directNodeArgs
       ? spawn(process.execPath, directNodeArgs, {
           cwd,
@@ -485,7 +504,7 @@ export function execShellCommand(commandStr, cwd, opts = {}) {
           windowsHide: true,
           env,
         })
-      : spawn(commandStr, {
+      : spawn(shellCmd, {
           cwd,
           shell: true,
           detached: canUseDetached,

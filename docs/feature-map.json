@@ -732,7 +732,8 @@
         "scripts/dev/fixtures-conv-s3.mjs",
         "scripts/dev/injections-data-conv-s3.mjs",
         "scripts/dev/fixtures-health-sweep.mjs",
-        "scripts/dev/injections-data-health-sweep.mjs"
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -889,7 +890,8 @@
         "scripts/dev/fixtures-conv-s3.mjs",
         "scripts/dev/injections-data-conv-s3.mjs",
         "scripts/dev/fixtures-health-sweep.mjs",
-        "scripts/dev/injections-data-health-sweep.mjs"
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -993,7 +995,7 @@
         "kit/skills/dev-iterate/scripts/iterate.mjs",
         "kit/skills/dev-iterate/scripts/iterate-plan.mjs",
         "kit/skills/dev-iterate/scripts/iterate-cycle.mjs",
-        "kit/skills/lib/test-inventory.mjs",
+        "kit/skills/lib/suite-inventory.mjs",
         "kit/skills/dev-iterate/SKILL.md"
       ],
       "businessFlows": [
@@ -1106,7 +1108,8 @@
         "scripts/dev/fixtures-conv-s3.mjs",
         "scripts/dev/injections-data-conv-s3.mjs",
         "scripts/dev/fixtures-health-sweep.mjs",
-        "scripts/dev/injections-data-health-sweep.mjs"
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -1298,7 +1301,8 @@
         "scripts/dev/fixtures-conv-s3.mjs",
         "scripts/dev/injections-data-conv-s3.mjs",
         "scripts/dev/fixtures-health-sweep.mjs",
-        "scripts/dev/injections-data-health-sweep.mjs"
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"

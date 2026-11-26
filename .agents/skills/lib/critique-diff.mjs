@@ -414,15 +414,30 @@ export function evaluateRound2CritiqueScope({
   return { blocked: false, diff, outOfScope: [] }
 }
 
-/** 解析 `plan_critique` 单行印记（兼容旧格式）。 */
+/** 解析 `plan_critique` 单行印记（兼容旧格式，支持 summary 内嵌套括号）。 */
 export function parseCritiqueStamp(stamp) {
   const raw = String(stamp ?? '').trim()
   if (!raw) return null
   const statusMatch = /^([a-z]+)/i.exec(raw)
-  const reviewer = /reviewer=([^,)]+)/i.exec(raw)?.[1]?.trim() ?? null
-  const roundRaw = /round=(\d+)/i.exec(raw)?.[1]
-  const sha = /\bsha=([a-f0-9]{8,64})\b/i.exec(raw)?.[1]?.toLowerCase() ?? null
-  const summary = /summary=([^)]*)/i.exec(raw)?.[1]?.trim() ?? null
+  let inner = raw
+  const openIdx = raw.indexOf('(')
+  if (openIdx >= 0) {
+    let depth = 0
+    let closeIdx = -1
+    for (let i = openIdx; i < raw.length; i += 1) {
+      if (raw[i] === '(') depth += 1
+      else if (raw[i] === ')') {
+        depth -= 1
+        if (depth === 0) { closeIdx = i; break }
+      }
+    }
+    inner = closeIdx > openIdx ? raw.slice(openIdx + 1, closeIdx) : raw.slice(openIdx + 1)
+  }
+  const reviewer = /(?:^|,)\s*reviewer=([^,)]+)/i.exec(inner)?.[1]?.trim() ?? null
+  const roundRaw = /(?:^|,)\s*round=(\d+)/i.exec(inner)?.[1]
+  const sha = /(?:^|,)\s*sha=([a-f0-9]{8,64})\b/i.exec(inner)?.[1]?.toLowerCase() ?? null
+  const sumMatch = /(?:^|,)\s*summary=([\s\S]*?)(?=,\s*(?:reviewer|round|sha)=|$)/i.exec(inner)
+  const summary = sumMatch ? sumMatch[1].trim() : null
   return {
     status: statusMatch ? statusMatch[1].toLowerCase() : null,
     reviewer,

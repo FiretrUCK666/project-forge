@@ -162,7 +162,7 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
         diffState: n.diffState, isVirtual: Boolean(n.isVirtual), changeDetail: n.changeDetail || null,
         impactReasons: n.impactReasons || [], risk: n.risk, description: n.description || '',
         x: n.x, y: n.y, w: n.w, h: n.h, cx: n.cx, cy: n.cy, gridRow: n.gridRow, gridCol: n.gridCol,
-        entrypoints: (n.entrypoints || []).slice(0, 3), modules: (n.modules || []).slice(0, 12),
+        entrypoints: (n.entrypoints || []).slice(0, 3), modules: [...(n.modules || [])],
         tests: (n.tests || []).slice(0, 8), verifyTools: (n.verifyTools || []).slice(0, 6),
         docAnchors: (n.docAnchors || []).slice(0, 6),
       })),

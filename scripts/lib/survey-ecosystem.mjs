@@ -179,7 +179,11 @@ export const ECOSYSTEMS = [
       } else if (existsSync(join(root, 'requirements.txt'))) {
         s.commands.install ??= 'pip install -r requirements.txt'
       }
-      if (hasPytestEvidence(root)) s.commands.test ??= 'pytest'
+      if (hasPytestEvidence(root)) {
+        const venvSub = process.platform === 'win32' ? ['.venv', 'Scripts', 'python.exe'] : ['.venv', 'bin', 'python']
+        const venvPy = existsSync(join(root, ...venvSub)) ? venvSub.join(process.platform === 'win32' ? '\\' : '/') : null
+        s.commands.test ??= venvPy ? `${venvPy} -m pytest` : 'pytest'
+      }
     },
   },
   {

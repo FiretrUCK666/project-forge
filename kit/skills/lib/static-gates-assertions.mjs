@@ -1,7 +1,7 @@
 /**
  * static-gates-assertions.mjs —— 栈无关多语言行为断言识别家族模型。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），被 static-gates / test-inventory / govern-tests / edit-gate 共用。
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），被 static-gates / suite-inventory / govern-tests / edit-gate 共用。
  * 识别各生态真实行为断言（tape/ava/node:test receiver 方法、Python self.assert*、PHP $this->assert*、
  * Ruby assert_* / refute_*、Swift #expect/#require 等），同时严格排除 t.plan/t.end/t.comment/t.skip/t.todo 等空壳调用。
  */

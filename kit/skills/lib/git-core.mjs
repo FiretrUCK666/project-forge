@@ -162,7 +162,11 @@ export function readJsonSafe(filePath, maxBytes = 512 * 1024) {
   try { return JSON.parse(text) } catch { return undefined }
 }
 
-/** 原子写入文本或二进制 Buffer：先写同目录临时文件再改名，自增计数器防同毫秒碰撞。 */
+const WRITE_ATOMIC_RETRY_BUF = new Int32Array(new SharedArrayBuffer(4))
+const WRITE_ATOMIC_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+const WRITE_ATOMIC_BACKOFF_MS = Object.freeze([10, 20, 40, 60])
+
+/** 原子写入文本或二进制 Buffer：先写同目录临时文件再改名，自增计数器防同毫秒碰撞；Windows 瞬态锁短退避重试。 */
 export function writeAtomic(filePath, content) {
   const abs = resolve(filePath)
   mkdirSync(dirname(abs), { recursive: true })
@@ -171,7 +175,17 @@ export function writeAtomic(filePath, content) {
   const data = Buffer.isBuffer(content) ? content : String(content ?? '')
   writeFileSync(tmp, data, 'utf8')
   try {
-    renameSync(tmp, abs)
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        renameSync(tmp, abs)
+        return
+      } catch (error) {
+        if (!WRITE_ATOMIC_RETRY_CODES.has(error?.code) || attempt >= WRITE_ATOMIC_BACKOFF_MS.length) {
+          throw error
+        }
+        Atomics.wait(WRITE_ATOMIC_RETRY_BUF, 0, 0, WRITE_ATOMIC_BACKOFF_MS[attempt])
+      }
+    }
   } catch (error) {
     try { unlinkSync(tmp) } catch { /* 清理失败不影响抛出原始异常 */ }
     throw error

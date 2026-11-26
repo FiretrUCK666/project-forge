@@ -20,7 +20,7 @@ import {
 } from '../../lib/static-gates.mjs'
 import {
   cmdCoversTestFile, collectConfiguredTestEntries, collectTestInventory, expandVerificationCommands,
-} from '../../lib/test-inventory.mjs'
+} from '../../lib/suite-inventory.mjs'
 import { addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
 const HEAVY_E2E_TOOL_RE = /\b(?:playwright|cypress|puppeteer|selenium|testcontainers|docker(?:\s+|-)compose)\b/i

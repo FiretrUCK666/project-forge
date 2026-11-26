@@ -64,6 +64,12 @@ export async function handleAudit(opts, roots) {
         zombies.push({ kind: 'missing-path', featureId: f.id, path: p })
       }
     }
+    for (const anchor of f.docAnchors ?? []) {
+      const targetRel = String(anchor ?? '').split('#')[0].trim()
+      if (targetRel && !targetRel.endsWith('/') && !existsSync(join(workRoot, targetRel))) {
+        zombies.push({ kind: 'missing-doc-anchor', featureId: f.id, path: anchor })
+      }
+    }
     for (const fl of f.businessFlows ?? []) {
       const k = fl.trim().toLowerCase()
       if (flowOwner.has(k) && flowOwner.get(k) !== f.id) {

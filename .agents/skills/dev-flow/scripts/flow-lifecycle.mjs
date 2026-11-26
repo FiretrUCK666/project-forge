@@ -42,6 +42,7 @@ import {
   emitVerifyOutcomeOutput,
   evaluateFlowMasterPrdGate,
   findStrictDocBySlug,
+  formatAgentCliArg,
   handleRework,
   handleVerifyE2eFailure,
   pickSignalBlameFile,
@@ -259,7 +260,7 @@ export async function handleVerify(opts, roots) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.shallowE2eEvidence?.code ?? 'BLOCKED_VERIFY_EVIDENCE', exitCode: evRec.overallExit || EXIT.FACT, reason: evRec.shallowE2eEvidence?.reason ?? null }, null, 2)}\n`)
       return { exitCode: evRec.overallExit || EXIT.FACT }
     }
-    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+    const submitAgent = formatAgentCliArg(ledger.claimedBy ?? ledger.implementerId ?? '<id>')
     const explicitNoneNext = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }]
     if (opts.json) {
       process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: EXIT.OK, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, explicitNoneNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)

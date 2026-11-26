@@ -6,7 +6,7 @@ export const INJECTIONS_ITERATE_EVOLUTION = [
   {
     id: 'I210',
     what: 'validateGeneratedTestQuality 不再拦截写入 .agents/ 的生成测试路径',
-    file: 'kit/skills/lib/test-inventory.mjs',
+    file: 'kit/skills/lib/suite-inventory.mjs',
     from: "  if (!rel || rel.startsWith('.agents/') || rel === '.agents') {",
     to: '  if (false) {',
     expect: 'dev-iterate 双入口定靶',
@@ -14,7 +14,7 @@ export const INJECTIONS_ITERATE_EVOLUTION = [
   {
     id: 'I211',
     what: 'validateGeneratedTestQuality 不再拦截零断言测试代码',
-    file: 'kit/skills/lib/test-inventory.mjs',
+    file: 'kit/skills/lib/suite-inventory.mjs',
     from: '  if (!hasBehavioralAssertion(codeOnly, { ext })) {',
     to: '  if (false) {',
     expect: 'dev-iterate 双入口定靶',

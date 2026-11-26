@@ -480,6 +480,7 @@ export function buildVars(facts, root, { kitDir } = {}) {
     RELEASE_NOTES_TARGET: releaseNotesTarget,
     WORK_DIR: `${resolvedWorkDir}/`,
     COMMIT_STYLE_HINT: commitStyleHint(facts),
+    PRIMARY_README: readmes[0] || 'README.md',
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
     SUBDIR_AGENTS_POINTER: subdirAgents.length > 0 ? subdirAgents.map((f) => `\`${f}\``).join('、') : '`<subdir>/AGENTS.md`',
     WORKSPACE_PACKAGES: formatWorkspacePackages(packages),

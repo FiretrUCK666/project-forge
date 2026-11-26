@@ -32,7 +32,7 @@ import {
   resolveEffectiveCommonGitDir,
   updateLocalIssue,
 } from './local-issues.mjs'
-import { readDecisions } from './profile.mjs'
+import { hasDecisionKey, readDecisionMap, readDecisions, resolveDecisionValue } from './profile.mjs'
 
 export const WORKFLOW_STATE_LABELS = Object.freeze({
   'in-progress': Object.freeze({ primary: 'in-progress', aliases: ['in-progress', 'status:in-progress', 'wip', 'doing'], removes: ['in-review', 'changes-requested', 'reviewed'] }),
@@ -362,8 +362,13 @@ export async function syncLocalDefaultBranchAfterMerge({
 
 async function tryLocalBareFastForwardMerge({ mainRoot, remote, targetBranch, base, ledger, humanApproved }) {
   if (!targetBranch || !ledger?.reviewPassed) return null
-  const decisions = readDecisions(readTextSafe(join(mainRoot, 'AGENTS.md')) ?? '')
-  if (!decisions.has('no-branch-protection') && !decisions.has('solo-fast-forward')) return null
+  const agentsText = readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
+  const decisions = readDecisionMap(agentsText)
+  const branchProtectionVal = resolveDecisionValue(decisions, agentsText, 'branch-protection')
+  const allowsFastForward = hasDecisionKey(decisions, agentsText, 'no-branch-protection')
+    || hasDecisionKey(decisions, agentsText, 'solo-fast-forward')
+    || (typeof branchProtectionVal === 'string' && /^`?no-branch-protection`?(?:\s|$|[，。；,;（(])/i.test(branchProtectionVal.trim()))
+  if (!allowsFastForward) return null
 
   const urlRes = await gitRun(mainRoot, ['remote', 'get-url', remote])
   const localBarePath = urlRes.ok ? resolveLocalBareRemotePath(mainRoot, urlRes.stdout) : null
@@ -384,7 +389,7 @@ async function tryLocalBareFastForwardMerge({ mainRoot, remote, targetBranch, ba
   const ancRes = await gitRun(mainRoot, ['merge-base', '--is-ancestor', baseSha, targetSha])
   if (!ancRes.ok) return null
 
-  const pushRes = await gitRun(mainRoot, ['push', remote, `${targetSha}:refs/heads/${base}`])
+  const pushRes = await gitRun(mainRoot, ['push', remote, `${targetSha}:refs/heads/${base}`], { env: { PF_ALLOW_DIRECT_PUSH: '1' } })
   if (!pushRes.ok) return null
   await gitRun(mainRoot, ['fetch', '--prune', '--quiet', remote])
 

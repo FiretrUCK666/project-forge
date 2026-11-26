@@ -134,8 +134,28 @@ export function addFinding(findings, item) {
   })
 }
 
+const GOVERN_EXTRA_SKIP_DIRS = new Set(['_build', 'htmlcov', '.nox'])
+
+function readGitignoreDirExcludes(root) {
+  const raw = readTextSafe(join(root, '.gitignore'))
+  if (!raw) return { exactRels: new Set(), dirNames: new Set() }
+  const exactRels = new Set()
+  const dirNames = new Set()
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!') || /[*?[\]]/.test(trimmed)) continue
+    if (!trimmed.endsWith('/')) continue
+    const norm = posixPath(trimmed).replace(/^\/+/, '').replace(/\/+$/, '')
+    if (!norm || norm === '.' || norm.includes('..')) continue
+    if (norm.includes('/')) exactRels.add(norm)
+    else dirNames.add(norm)
+  }
+  return { exactRels, dirNames }
+}
+
 export function walkFiles(root, scopeRel = '') {
   const start = scopeRel ? join(root, scopeRel) : root
+  const gitignoreDirs = readGitignoreDirExcludes(root)
   const files = []
   const queue = [start]
   while (queue.length > 0) {
@@ -148,7 +168,8 @@ export function walkFiles(root, scopeRel = '') {
       const rel = posixPath(relative(root, full))
       if (isMacOsJunkPath(rel)) continue
       if (entry.isDirectory()) {
-        if (DEFAULT_WALK_SKIP_DIRS.has(entry.name)) continue
+        if (DEFAULT_WALK_SKIP_DIRS.has(entry.name) || GOVERN_EXTRA_SKIP_DIRS.has(entry.name)) continue
+        if (gitignoreDirs.dirNames.has(entry.name) || gitignoreDirs.exactRels.has(rel)) continue
         if (!scopeRel && rel.startsWith('.agents/skills/')) continue
         queue.push(full)
       } else if (entry.isFile()) {

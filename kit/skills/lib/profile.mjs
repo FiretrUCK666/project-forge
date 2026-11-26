@@ -143,7 +143,7 @@ export function readDecisions(agentsText) {
   return new Set(readDecisionMap(agentsText).keys())
 }
 
-function hasDecisionKey(decisions, agentsText, key) {
+export function hasDecisionKey(decisions, agentsText, key) {
   if (decisions instanceof Set) return decisions.has(key)
   if (decisions instanceof Map) return decisions.has(key)
   if (Array.isArray(decisions)) return decisions.includes(key)
@@ -152,7 +152,7 @@ function hasDecisionKey(decisions, agentsText, key) {
   return false
 }
 
-function resolveDecisionValue(decisions, agentsText, key) {
+export function resolveDecisionValue(decisions, agentsText, key) {
   if (decisions instanceof Map) return decisions.get(key) ?? null
   if (typeof decisions === 'string') return readDecisionMap(decisions).get(key) ?? null
   if (agentsText) return readDecisionMap(agentsText).get(key) ?? null

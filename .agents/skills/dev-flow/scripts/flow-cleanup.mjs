@@ -245,7 +245,7 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
     taskId: ledger.taskId, role: ledger.role, worktrees,
     localBranch: localBranchExists ? ledger.branch : null, mergeState,
     remoteBranch: remoteBranchExists ? `${pushRemote}/${ledger.branch}` : null,
-    pushRemote, downstreamStackedPrs: downstream.prs ?? [], prNumber: ledger.prNumber, prState,
+    pushRemote, needGhApi, downstreamStackedPrs: downstream.prs ?? [], prNumber: ledger.prNumber, prState,
   }
 }
 
@@ -305,7 +305,8 @@ export async function handleCleanup(opts, roots) {
     process.stderr.write(`${hashCheck.reason}\n`)
     return { exitCode: hashCheck.exitCode }
   }
-  if (ledger.role === 'contributor-fork' && cl.prState === 'OPEN' && (!keepRemoteBr || !keepLocalBr)) {
+  const hasTrackedRemotePr = Boolean(cl.needGhApi || ledger.prNumber != null)
+  if (ledger.role === 'contributor-fork' && hasTrackedRemotePr && cl.prState === 'OPEN' && (!keepRemoteBr || !keepLocalBr)) {
     process.stderr.write(`BLOCKED_OPEN_FORK_PR: contributor-fork 关联上游 PR #${ledger.prNumber ?? '?'} 仍为 OPEN，硬锁拒绝删除 Fork 分支。\n`)
     return { exitCode: EXIT.FACT }
   }

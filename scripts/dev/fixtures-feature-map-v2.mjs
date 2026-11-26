@@ -22,7 +22,7 @@ import {
 } from '../../kit/skills/lib/feature-map.mjs'
 import { isMainModule, resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
 import { buildHandoff } from '../../kit/skills/lib/handoff-package.mjs'
-import { readFeatureMapSafe as tiReadSafe, updateFeatureMapTestRefs as tiUpdateRefs } from '../../kit/skills/lib/test-inventory.mjs'
+import { readFeatureMapSafe as tiReadSafe, updateFeatureMapTestRefs as tiUpdateRefs } from '../../kit/skills/lib/suite-inventory.mjs'
 import { checkCase2StructuralDriftOnVerify, checkFeatureMapSyncOnFinalize } from '../../kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs'
 import { runReconcileVerifyToolsAudit } from '../../kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs'
 import { buildIterationPlan } from '../../kit/skills/dev-iterate/scripts/iterate.mjs'
@@ -174,9 +174,9 @@ export function registerFeatureMapV2Cases(cases) {
         return `sliceFeatureMapContext 上下游指针越界膨胀或流上限失效：${JSON.stringify(sliced)}`
       }
 
-      // 6. test-inventory 薄重导出与 v2 无损更新 testRefs
+      // 6. suite-inventory 薄重导出与 v2 无损更新 testRefs
       if (tiReadSafe !== readFeatureMapSafe || tiUpdateRefs !== updateFeatureMapTestRefs) {
-        return 'test-inventory.mjs 未薄重导出 feature-map.mjs 的 readFeatureMapSafe/updateFeatureMapTestRefs'
+        return 'suite-inventory.mjs 未薄重导出 feature-map.mjs 的 readFeatureMapSafe/updateFeatureMapTestRefs'
       }
       const upd = updateFeatureMapTestRefs(dir, { featureIds: ['auth'], testPaths: ['test/e2e/checkout.e2e.test.mjs'] })
       const afterUpd = readFeatureMapSafe(dir)

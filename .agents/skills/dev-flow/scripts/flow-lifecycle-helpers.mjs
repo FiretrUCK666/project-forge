@@ -89,6 +89,11 @@ export async function emitFlowSignal(roots, payload) {
   await appendGovernSignal({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, ...payload })
 }
 
+export function formatAgentCliArg(agent) {
+  const s = String(agent ?? '').trim() || '<id>'
+  return /\s/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s
+}
+
 export async function handleRework(opts, roots) {
   const { taskId, ledger } = await resolveTaskContext(roots, opts)
   const mut = evaluateMutability({ ledger, taskId })
@@ -128,7 +133,7 @@ export async function handleRework(opts, roots) {
   ledger.status = 'rework'
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'flow.rework', severity: 'medium', source: 'flow-rework', file: changed[0] ?? '', taskId, message: `rework entered (reopen=${Boolean(opts.reopen)}, revokedTokens=${revokedTokensCount}, rebuts=${addedRebuts.length}, forbidden=${forbiddenTouched.length})`, meta: { forbiddenTouched, rebutCount: addedRebuts.length, reopened: Boolean(opts.reopen), revokedTokensCount } })
-  const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+  const submitAgent = formatAgentCliArg(ledger.claimedBy ?? ledger.implementerId ?? '<id>')
   const reworkNextSteps = [
     { skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
     { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` },
@@ -607,7 +612,7 @@ export function emitVerifyOutcomeOutput({
   }
   let verifyNextSteps = []
   if (allOk) {
-    const submitAgent = ledger.claimedBy ?? ledger.implementerId ?? '<id>'
+    const submitAgent = formatAgentCliArg(ledger.claimedBy ?? ledger.implementerId ?? '<id>')
     verifyNextSteps = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --agent ${submitAgent}` }]
     if (policy.smokeRequired && !evRec.e2eObservation) {
       verifyNextSteps.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)

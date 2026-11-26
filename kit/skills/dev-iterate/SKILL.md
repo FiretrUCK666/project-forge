@@ -26,7 +26,7 @@ metadata:
    - **默认主路径（无 `--focus` 时直接推进，不反问）**：当用户只唤起 `dev-iterate` 而未指定具体 `--focus` 时，不要反问卡住，默认自动结合 `dev-explore`、`docs/feature-map.json`（缺失时优雅降级）、`signals.jsonl`（高频复发热点模块）及近期 Git 变更排出最高价值盲区，按目标仓原生测试栈生成真实业务流/边界/性能测试集（必过 `edit-gate` 反作弊校验）并并发实跑；失败自动经 `escalation` 转正流闭环，通过则沉淀挂回 `testRefs`；
    - **定向模式（`--focus "<自然语言主题/业务流>"`）**：先结合 `doc-locator.mjs` 与源码符号索引只读勘察关联模块与文档切片，再定向生成该业务流的回归/集成/E2E/性能测试方案。
 2. **严守原生测试目录与极速 `quick-test` 边界**：
-   - 依据 `kit/skills/lib/test-inventory.mjs` 探测目标仓原生集成/回归/E2E/性能测试目录与栈命名惯例落盘，**严禁将生成的测试放入 `.agents/`**；
+   - 依据 `kit/skills/lib/suite-inventory.mjs` 探测目标仓原生集成/回归/E2E/性能测试目录与栈命名惯例落盘，**严禁将生成的测试放入 `.agents/`**；
    - 新生成的重型回归/集成/性能测试**绝不污染目标仓极速 `quick-test` 单测白名单**；
    - **探索转非 `Case 1` 写改强制隔离**：从只读探索转入任何非 `Case 1` 文件写改（仅补测试按 Case 2/3 路由），必先走 `flow.mjs start` 隔离 worktree，改后经 `edit-gate` 与 `review-pack` 独立审查合入，严禁在主仓直接落盘；
    - 落盘前必须通过 `edit-gate` / 静态反作弊门禁（拦截零断言、纯 Mock 自证、单测 `>= 1s` 硬等待、压制注释、`> 800` 行膨胀及过程编号文件名）。

@@ -20,7 +20,7 @@ import {
 } from '../../lib/git.mjs'
 import { readGitIndexPathsFast, readHeadFast } from '../../lib/git-fast.mjs'
 import { parseDevProfile, readDecisions } from '../../lib/profile.mjs'
-import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
+import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/suite-inventory.mjs'
 import {
   addFinding, auditDeadcode, auditHygiene, auditPerf, auditSecurity,
   createFileContentCache, readTextStrictInfo, setActiveFileCache, walkFiles,

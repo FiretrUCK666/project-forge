@@ -1,14 +1,14 @@
 ---
 kind: prd
 title: 零 Token 多图视觉 Studio 与第一性原理 UI 重构
-status: draft
+status: active
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 219
 pr: null
 owner: plan-studio-b
 plan_mode: interactive
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-studio-b-r1, round=1, sha=45b96f000406, summary=PRD C1..C12 1:1 coverage, MIT Clean-Room zero-dep invariants, <180KB budget, pure SVG viewBox, 7-stack universality, and cited line counts (visual-layout 691L, visual-render 234L, visual-brief 796L) all verified against repo source.)"
 related_spec: null
 related_todo: null
 multi_spec: true
@@ -20,9 +20,9 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 关联 Issue / PR | 未关联 / 未关联 |
+| 关联 Issue / PR | #219 / 未关联 |
 | 提出方 / 负责人 | `plan-studio-b` |
 | 规划态 | `interactive`（逐题问到零拍板） |
 | 关联设计 / 任务单 | 1:N 总控 PRD，拆分为 3 份切片 `SPEC + Todo`（Wave 1 -> Wave 2 -> Wave 3） |
@@ -71,7 +71,7 @@ multi_spec: true
 
 | 波次 | 切片任务 ID | 前置依赖 | 认领标准 | 关联设计文档 |
 | --- | --- | --- | --- | --- |
-| Wave 1 | `zero-token-static-analyzer` | 无（`[]`） | `C1..C4` | `docs/specs/261127-zero-token-static-analyzer-spec.md` |
+| Wave 1 | `zero-token-static-analyzer` | 无（`[]`） | `C1..C4` | `docs/specs/261127-issue219-zero-token-static-analyzer-spec.md` |
 | Wave 2 | `multi-diagram-layout-engine` | `zero-token-static-analyzer` | `C5..C8` | `docs/specs/261127-multi-diagram-layout-engine-spec.md` |
 | Wave 3 | `studio-ux-lazy-renderer` | `zero-token-static-analyzer`, `multi-diagram-layout-engine` | `C9..C12` | `docs/specs/261127-studio-ux-lazy-renderer-spec.md` |
 

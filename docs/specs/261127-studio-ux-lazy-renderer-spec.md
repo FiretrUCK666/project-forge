@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 第一性原理 Studio 交互界面与纯矢量懒渲染引擎
-status: draft
+status: approved
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
@@ -10,40 +10,15 @@ pr: null
 branch: feat/visual-studio-archify-v2
 owner: plan-studio-b
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
-related_prd: ../prd/261127-visual-studio-archify-v2-prd.md
+plan_critique: "passed (reviewer=critic-studio-b-r2, round=2, sha=c73c4d063993, summary=All 3 Round 1 major blockers genuinely closed: CLI triple-parity & verify-tools-render.mjs split, tree.nodes[].diffState compatibility + v5 fixture migration + 4 unique Wave 3 injections, and explicit <=650L rendering budgets with visual-render-client-diagrams.mjs split & external shoot.mjs clarification.)"
+related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
 related_todo: ../todo/261127-studio-ux-lazy-renderer-todo.md
+high_risk_paths: [kit/]
 task_id: studio-ux-lazy-renderer
-scope_files:
-  - kit/skills/lib/visual-render-svg.mjs
-  - kit/skills/lib/visual-render-client.mjs
-  - kit/skills/lib/visual-render-client-diagrams.mjs
-  - kit/skills/lib/visual-brief-store.mjs
-  - kit/skills/lib/visual-render.mjs
-  - kit/skills/lib/visual-render-assets.mjs
-  - kit/skills/lib/visual-render-panels.mjs
-  - kit/skills/lib/visual-brief.mjs
-  - kit/skills/lib/architecture-map.mjs
-  - kit/skills/dev-verify-tools/scripts/verify-tools.mjs
-  - kit/skills/dev-verify-tools/scripts/verify-tools-render.mjs
-  - kit/skills/dev-plan/scripts/doc-plan.mjs
-  - kit/skills/dev-plan/scripts/doc-plan-brief.mjs
-  - scripts/dev/fixtures-visual-engine.mjs
-  - scripts/dev/fixtures-studio-ux.mjs
-  - scripts/dev/fixtures-living-brief.mjs
-  - scripts/dev/injections-data-visual-engine.mjs
-  - docs/TDD.md
-  - docs/feature-map.json
-  - docs/architecture-map.html
-  - README.md
-  - README.en.md
-depends_on:
-  - zero-token-static-analyzer
-  - multi-diagram-layout-engine
-high_risk_paths:
-  - kit/
+scope_files: [kit/skills/lib/visual-render-svg.mjs, kit/skills/lib/visual-render-client.mjs, kit/skills/lib/visual-render-client-diagrams.mjs, kit/skills/lib/visual-brief-store.mjs, kit/skills/lib/visual-render.mjs, kit/skills/lib/visual-render-assets.mjs, kit/skills/lib/visual-render-panels.mjs, kit/skills/lib/visual-brief.mjs, kit/skills/lib/architecture-map.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-render.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-brief.mjs, scripts/dev/fixtures-visual-engine.mjs, scripts/dev/fixtures-studio-ux.mjs, scripts/dev/fixtures-living-brief.mjs, scripts/dev/injections-data-visual-engine.mjs, docs/TDD.md, docs/feature-map.json, docs/architecture-map.html, README.md, README.en.md]
+depends_on: [zero-token-static-analyzer, multi-diagram-layout-engine]
 ---
 
 # 第一性原理 Studio 交互界面与纯矢量懒渲染引擎 — 功能设计规范（SPEC）
@@ -52,13 +27,13 @@ high_risk_paths:
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（前端渲染架构推翻重做、多文件模块拆分与全仓长青资产收口；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / Issue / PR | `feat/visual-studio-archify-v2` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | `plan-studio-b` / `pending` |
+| 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-visual-studio-archify-v2-prd.md` / `docs/todo/261127-studio-ux-lazy-renderer-todo.md` |
+| 关联 PRD / Todo | `../prd/261127-issue219-visual-studio-archify-v2-prd.md` / `../todo/261127-studio-ux-lazy-renderer-todo.md` |
 
 - **变更一句话**：推翻旧 AI 模板 DOM 渲染，交付纯矢量 SVG `viewBox` 相机画布、单源索引压缩 JSON 懒渲染、模块化非文字墙 Change Blueprint、6 项 Studio 交互升级与真浏览器浅/深色实证闭环。
 

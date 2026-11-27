@@ -1,10 +1,10 @@
 ---
 kind: todo
 title: 零 Token 增量静态分析与多图证据抽取引擎
-status: draft
+status: active
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 219
 pr: null
 branch: feat/visual-studio-archify-v2
 owner: plan-studio-b
@@ -13,8 +13,8 @@ approved: false
 done_at: null
 task_id: zero-token-static-analyzer
 planned_at: 76795202dbd2d328d379fbff506b7dad39753133
-related_prd: ../prd/261127-visual-studio-archify-v2-prd.md
-related_spec: ../specs/261127-zero-token-static-analyzer-spec.md
+related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
+related_spec: ../specs/261127-issue219-zero-token-static-analyzer-spec.md
 ---
 
 # 零 Token 增量静态分析与多图证据抽取引擎
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-zero-token-static-analyzer-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / 基线 | `feat/visual-studio-archify-v2` @ `7679520` |
 | 任务编号 | `zero-token-static-analyzer` |
-| 负责人 / 审批 | `plan-studio-b` / `false` |
+| 负责人 / 审批 | plan-studio-b / `false` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/specs/261127-zero-token-static-analyzer-spec.md` |
+| 关联 Issue / PR / SPEC | #219 / 未关联 / `docs/specs/261127-issue219-zero-token-static-analyzer-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与关联 SPEC 审批状态。
 
@@ -61,7 +61,7 @@ related_spec: ../specs/261127-zero-token-static-analyzer-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`规划草案`（待总控 PRD 与本切片完成独立 Critique 并经维护者 `approve` 后开工）
+- **当前状态**：`进行中`（待总控 PRD 与本切片完成独立 Critique 并经维护者 `approve` 后开工）
 - **待拍板事项**：无
 - **下一步第一件事**：完成独立 Critique 与 `approve` 后，从 `kit/skills/lib/static-gates.mjs` 抽离 `kit/skills/lib/import-graph.mjs` (new)。
 

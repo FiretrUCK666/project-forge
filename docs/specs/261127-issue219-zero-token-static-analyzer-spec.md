@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: 零 Token 增量静态分析与多图证据抽取引擎
-status: draft
+status: approved
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 219
 pr: null
 branch: feat/visual-studio-archify-v2
 owner: plan-studio-b
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: "rejected (reviewer=critic-studio-b-r2, round=2, sha=1f623ad4b507, summary=F2 closed; F1 fail-closed fix in renderArchitectureMapFromRepo introduces two Wave 1 CI blockers (I986 still escapes because flow-lifecycle-finalize.mjs:233 ignores !archRes.ok, and BLOCKED_DIRTY_EVERGREEN_ARCHITECTURE_MAP is missing from exit-codes.mjs).)"
-related_prd: ../prd/261127-visual-studio-archify-v2-prd.md
-related_todo: ../todo/261127-zero-token-static-analyzer-todo.md
+plan_critique: "passed (reviewer=critic-studio-b-r3, round=3, sha=759b2d9b5ece, summary=Round 3 PASS: F1/F3/F4 genuinely closed (renderArchitectureMapFromRepo preserves caller diffOverlay/changedFiles contract keeping I986 + [Sandbox-C8] + checkExitCodeParity intact; BLOCKED_DIRTY_EVERGREEN_ARCHITECTURE_MAP removed; verifyArchitectureMapSync enforces zero-dirty-overlay via registered BLOCKED_ARCHITECTURE_MAP_DRIFT with parsed pf-visual-data JSON + stripped style/script inspection).)"
+related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
+related_todo: ../todo/261127-issue219-zero-token-static-analyzer-todo.md
 high_risk_paths: [kit/]
 task_id: zero-token-static-analyzer
 scope_files: [kit/skills/lib/import-graph.mjs, kit/skills/lib/static-analyzer.mjs, kit/skills/lib/static-evidence.mjs, kit/skills/lib/diff-materiality.mjs, kit/skills/lib/static-gates.mjs, kit/skills/lib/doc-graph.mjs, kit/skills/lib/architecture-map.mjs, scripts/dev/fixtures-static-analyzer.mjs, scripts/dev/injections-data-static-analyzer.mjs, docs/feature-map.json, docs/architecture-map.html]
@@ -27,13 +27,13 @@ depends_on: []
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块公共库契约新增与高风险路径 `kit/` 演进；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/visual-studio-archify-v2` / 未关联 / 未关联 |
-| 负责人 / 内审状态 | `plan-studio-b` / `pending` |
+| 分支 / Issue / PR | `feat/visual-studio-archify-v2` / #219 / 未关联 |
+| 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-visual-studio-archify-v2-prd.md` / `docs/todo/261127-zero-token-static-analyzer-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/todo/261127-issue219-zero-token-static-analyzer-todo.md` |
 
 - **变更一句话**：提供零 LLM Token、纯 Node 18+ 的增量静态分析器、3 层 10 类图表证据抽取器、3-dot PR Materiality 差分过滤器及常青架构图零脏态校验，为 Wave 2 布局引擎与 Wave 3 Studio UI 提供统一实证数据底座。
 

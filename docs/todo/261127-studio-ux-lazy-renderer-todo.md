@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 第一性原理 Studio 交互界面与纯矢量懒渲染引擎
-status: draft
+status: active
 created: 2026-11-27
 updated: 2026-11-27
 issue: null
@@ -13,7 +13,7 @@ approved: false
 done_at: null
 task_id: studio-ux-lazy-renderer
 planned_at: 76795202dbd2d328d379fbff506b7dad39753133
-related_prd: ../prd/261127-visual-studio-archify-v2-prd.md
+related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
 related_spec: ../specs/261127-studio-ux-lazy-renderer-spec.md
 ---
 
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-studio-ux-lazy-renderer-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / 基线 | `feat/visual-studio-archify-v2` @ `7679520` |
 | 任务编号 | `studio-ux-lazy-renderer` |
-| 负责人 / 审批 | `plan-studio-b` / `false` |
+| 负责人 / 审批 | plan-studio-b / `false` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `docs/specs/261127-studio-ux-lazy-renderer-spec.md` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261127-studio-ux-lazy-renderer-spec.md` |
 
 - **断点恢复**：接手人先核对 Wave 1 与 Wave 2 均已合入 `main`，且用户已通过 `oil-ui-pro` 3 方向对比页拍板主题 Token 并完成本切片 `approve`。
 
@@ -62,7 +62,7 @@ related_spec: ../specs/261127-studio-ux-lazy-renderer-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`等待前置 Wave 1 与 Wave 2`（并在 `approve` 前完成 `oil-ui-pro` 3 方向主题选型）
+- **当前状态**：`进行中`（并在 `approve` 前完成 `oil-ui-pro` 3 方向主题选型）
 - **待拍板事项**：无
 - **下一步第一件事**：Wave 1/2 合入并确认主题 Token 后，拆分 `kit/skills/lib/visual-brief-store.mjs` (new) 与 `kit/skills/dev-verify-tools/scripts/verify-tools-render.mjs` (new)，并补齐 `scripts/dev/fixtures-studio-ux.mjs` (new) 失败断言。
 

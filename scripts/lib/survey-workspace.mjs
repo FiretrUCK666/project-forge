@@ -80,7 +80,7 @@ export function runCmd(cmd, args, opts = {}) {
         ok: error === null,
         status: error?.code ?? 0,
         missing: error?.code === 'ENOENT',
-        stdout: (stdout ?? '').trim(),
+        stdout: opts.rawStdout ? (stdout ?? '') : (stdout ?? '').trim(),
         stderr: (stderr ?? '').trim(),
       })
     })
@@ -700,18 +700,9 @@ function buildGitignoreAnchorAdvice(pattern, path, source = '.gitignore') {
   return `收窄或移除 \`${source}\` 中的 \`${pat}\`，避免治理文件无法被 Git 跟踪`
 }
 
-/** 检测关键受管治理路径是否被 `.gitignore` 规则遮蔽。 */
-export function detectIgnoredGovernancePaths(root) {
-  if (!root || (!existsSync(join(root, '.git')) && !hasDotGitInAncestors(root))) return []
-  const res = spawnSync('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'check-ignore', '-v', '-z', '--stdin'], {
-    cwd: root,
-    input: `${GOVERNANCE_CHECK_PATHS.join('\0')}\0`,
-    encoding: 'utf8',
-    timeout: 5000,
-    windowsHide: true,
-  })
-  if ((res.status !== 0 && res.status !== 1) || typeof res.stdout !== 'string' || !res.stdout) return []
-  const parts = res.stdout.split('\0')
+function parseIgnoredGovernanceOutput(stdout) {
+  if (typeof stdout !== 'string' || !stdout) return []
+  const parts = stdout.split('\0')
   const hits = []
   for (let i = 0; i + 3 < parts.length; i += 4) {
     const source = parts[i] || '.gitignore'
@@ -728,6 +719,34 @@ export function detectIgnoredGovernancePaths(root) {
     })
   }
   return hits
+}
+
+/** 异步检测关键受管治理路径是否被 `.gitignore` 规则遮蔽（无候选路径或非 Git 仓零派生短路）。 */
+export async function detectIgnoredGovernancePathsAsync(root, paths = GOVERNANCE_CHECK_PATHS) {
+  if (!root || !Array.isArray(paths) || paths.length === 0) return []
+  if (!existsSync(join(root, '.git')) && !hasDotGitInAncestors(root)) return []
+  const res = await git(root, ['check-ignore', '-v', '-z', '--stdin'], {
+    input: `${paths.join('\0')}\0`,
+    timeout: 5000,
+    rawStdout: true,
+  })
+  if ((res.status !== 0 && res.status !== 1) || !res.stdout) return []
+  return parseIgnoredGovernanceOutput(res.stdout)
+}
+
+/** 同步兼容入口（供 equip.mjs 等同步调用方复用）。 */
+export function detectIgnoredGovernancePaths(root, paths = GOVERNANCE_CHECK_PATHS) {
+  if (!root || !Array.isArray(paths) || paths.length === 0) return []
+  if (!existsSync(join(root, '.git')) && !hasDotGitInAncestors(root)) return []
+  const res = spawnSync('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'check-ignore', '-v', '-z', '--stdin'], {
+    cwd: root,
+    input: `${paths.join('\0')}\0`,
+    encoding: 'utf8',
+    timeout: 5000,
+    windowsHide: true,
+  })
+  if ((res.status !== 0 && res.status !== 1) || typeof res.stdout !== 'string' || !res.stdout) return []
+  return parseIgnoredGovernanceOutput(res.stdout)
 }
 
 export async function walkWorkspace(root, gitFacts) {

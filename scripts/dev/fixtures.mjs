@@ -5,12 +5,14 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
-import { cpus, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
 import { killProcessTree, supportsSafeDetachedSpawn } from '../../kit/skills/lib/exec.mjs'
+import { applyLowPriority, resolveWorkerConcurrency } from '../../kit/skills/lib/proc-budget.mjs'
+import { isMainModule } from '../lib/text.mjs'
 import { initTestBackupDir, traceFixtureStage } from './fixtures-helpers.mjs'
 
 initTestBackupDir()
@@ -37,14 +39,83 @@ const DISCOVERED_FILES = readdirSync(FIXTURES_DIR)
     return pa !== pb ? pa - pb : da.localeCompare(db)
   })
 
-const DOMAIN_REGISTRY = []
-for (const file of DISCOVERED_FILES) {
+const DISCOVERED_SET = new Set(DISCOVERED_FILES)
+const LOADED_DOMAIN_CACHE = new Map()
+let cachedImportGraph = null
+
+async function loadDomainFile(file) {
+  if (LOADED_DOMAIN_CACHE.has(file)) return LOADED_DOMAIN_CACHE.get(file)
   const mod = await import(pathToFileURL(join(FIXTURES_DIR, file)).href)
   const regFn = Object.entries(mod).find(([k, v]) => typeof v === 'function' && /^register.*Cases$/.test(k))?.[1]
     ?? (typeof mod.default === 'function' ? mod.default : null)
-  if (regFn) {
-    const domainName = file.replace(/^fixtures-/, '').replace(/\.mjs$/, '')
-    DOMAIN_REGISTRY.push([domainName, regFn])
+  const entry = regFn ? [file.replace(/^fixtures-/, '').replace(/\.mjs$/, ''), regFn] : null
+  LOADED_DOMAIN_CACHE.set(file, entry)
+  return entry
+}
+
+async function loadDomainRegistry(files = DISCOVERED_FILES) {
+  const registry = []
+  for (const file of files) {
+    const entry = await loadDomainFile(file)
+    if (entry) registry.push(entry)
+  }
+  return registry
+}
+
+const LOCAL_FIXTURE_IMPORT_RE = /(?:\bfrom\s+|import\s*\(\s*)['"]\.\/(fixtures-[^'"/]+\.mjs)['"]/g
+
+function getFixtureImportGraph() {
+  if (cachedImportGraph) return cachedImportGraph
+  const texts = new Map()
+  const deps = new Map()
+  const reverseDeps = new Map()
+  for (const f of DISCOVERED_FILES) {
+    deps.set(f, new Set())
+    reverseDeps.set(f, new Set())
+  }
+  for (const f of DISCOVERED_FILES) {
+    const txt = readFileSync(join(FIXTURES_DIR, f), 'utf8')
+    texts.set(f, txt)
+    for (const m of txt.matchAll(LOCAL_FIXTURE_IMPORT_RE)) {
+      const target = m[1]
+      if (!DISCOVERED_SET.has(target) || target === f) continue
+      deps.get(f).add(target)
+      reverseDeps.get(target).add(f)
+    }
+  }
+  cachedImportGraph = { texts, deps, reverseDeps }
+  return cachedImportGraph
+}
+
+/**
+ * 为 `--only <keyword>` 预筛候选文件并求静态 `import` 双向闭包：
+ * - 命中文件导入的兄弟文件纳入闭包；
+ * - 被命中辅助文件反向扩展到导入它的全部注册文件，避免跨文件共享构造漏检。
+ */
+export function resolveOnlyCandidateFiles(keyword) {
+  const needle = String(keyword ?? '').toLowerCase()
+  if (!needle) return { files: [...DISCOVERED_FILES], totalFiles: DISCOVERED_FILES.length }
+  const { texts, deps, reverseDeps } = getFixtureImportGraph()
+  const visited = new Set()
+  const queue = []
+  for (const f of DISCOVERED_FILES) {
+    if (f.toLowerCase().includes(needle) || (texts.get(f) ?? '').toLowerCase().includes(needle)) {
+      visited.add(f)
+      queue.push(f)
+    }
+  }
+  while (queue.length > 0) {
+    const cur = queue.pop()
+    for (const next of [...(deps.get(cur) ?? []), ...(reverseDeps.get(cur) ?? [])]) {
+      if (!visited.has(next)) {
+        visited.add(next)
+        queue.push(next)
+      }
+    }
+  }
+  return {
+    files: DISCOVERED_FILES.filter((f) => visited.has(f)),
+    totalFiles: DISCOVERED_FILES.length,
   }
 }
 
@@ -57,6 +128,7 @@ function parseCliFlags(argv) {
   let worker = false
   let jobsArg
   let profile = false
+  let noLazy = false
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--prefer' && i + 1 < argv.length) { prefer = argv[++i]; continue }
@@ -71,10 +143,11 @@ function parseCliFlags(argv) {
     if (arg.startsWith('--shard=')) { shard = arg.slice('--shard='.length); continue }
     if (arg === '--worker') { worker = true; continue }
     if (arg === '--profile') { profile = true; continue }
+    if (arg === '--no-lazy') { noLazy = true; continue }
     if (arg === '--jobs' && i + 1 < argv.length) { jobsArg = Number(argv[++i]); continue }
     if (arg.startsWith('--jobs=')) { jobsArg = Number(arg.slice('--jobs='.length)); continue }
   }
-  return { prefer, bailOn, only, domain, shard, worker, profile, jobsArg }
+  return { prefer, bailOn, only, domain, shard, worker, profile, noLazy, jobsArg }
 }
 
 /** 用例命中的判据：标题或函数体里出现关键字即算命中。 */
@@ -134,7 +207,7 @@ function buildDispatchOrder(allCases) {
 const WORKER_TASK_TIMEOUT_MS = 180000
 const WORKER_MSG_PREFIX = '__PF_W__:'
 
-function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, runnerTempRoot, caseNames = [], caseCosts = []) {
+function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, runnerTempRoot, caseNames = [], caseCosts = [], workerExtraArgs = []) {
   return new Promise((done) => {
     const workerBkRoot = join(runnerTempRoot, 'bk')
     const workerTmpRoot = join(runnerTempRoot, 'tmp')
@@ -171,7 +244,7 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, runnerTempRoot, 
       const traceFile = join(workerBkRoot, `${tag}.trace`)
       const workerTempDir = join(workerTmpRoot, tag)
       mkdirSync(workerTempDir, { recursive: true })
-      const child = spawn(process.execPath, [scriptPath, '--worker'], {
+      const child = spawn(process.execPath, [scriptPath, '--worker', ...workerExtraArgs], {
         env: {
           ...process.env,
           PF_NO_REAL_AUTH_PROBE: process.env.PF_NO_REAL_AUTH_PROBE || '1',
@@ -185,6 +258,7 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, runnerTempRoot, 
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       })
+      if (child.pid) applyLowPriority(child.pid)
       activeChildren.add(child)
       child.stdin?.on('error', () => {})
       let outBuf = ''
@@ -310,12 +384,37 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, runnerTempRoot, 
   })
 }
 
+async function loadDomainEntry(domain, noLazy = false) {
+  const directFile = `fixtures-${domain}.mjs`
+  if (!noLazy && DISCOVERED_SET.has(directFile)) {
+    const direct = await loadDomainFile(directFile)
+    if (direct) {
+      const probeCases = []
+      direct[1](probeCases)
+      if (probeCases.length > 0) return { found: direct, domainCases: probeCases, registry: null }
+    }
+  }
+  const fullRegistry = await loadDomainRegistry(DISCOVERED_FILES)
+  const found = fullRegistry.find(([name]) => name === domain)
+  if (!found) return { found: null, domainCases: [], registry: fullRegistry }
+  const domainCases = []
+  found[1](domainCases)
+  return { found, domainCases, registry: fullRegistry }
+}
+
 async function main() {
-  const { prefer, bailOn, only, domain, shard, worker, profile, jobsArg } = parseCliFlags(process.argv.slice(2))
+  const { prefer, bailOn, only, domain, shard, worker, profile, noLazy, jobsArg } = parseCliFlags(process.argv.slice(2))
 
   if (worker) {
+    applyLowPriority(process.pid)
     const allCases = []
-    for (const [, registerFn] of DOMAIN_REGISTRY) registerFn(allCases)
+    if (domain) {
+      const { domainCases } = await loadDomainEntry(domain, noLazy)
+      allCases.push(...domainCases)
+    } else {
+      const fullRegistry = await loadDomainRegistry(DISCOVERED_FILES)
+      for (const [, registerFn] of fullRegistry) registerFn(allCases)
+    }
     process.stdout.write = (chunk, enc, cb) => {
       if (typeof enc === 'function') enc()
       else if (typeof cb === 'function') cb()
@@ -360,42 +459,31 @@ async function main() {
   }
 
   if (domain) {
-    const found = DOMAIN_REGISTRY.find(([name]) => name === domain)
+    const { found, domainCases, registry } = await loadDomainEntry(domain, noLazy)
     if (!found) {
-      process.stderr.write(`未知测试域：${domain}（可用：${DOMAIN_REGISTRY.map(([n]) => n).join(', ')}）\n`)
+      const avail = (registry ?? await loadDomainRegistry(DISCOVERED_FILES)).map(([n]) => n).join(', ')
+      process.stderr.write(`未知测试域：${domain}（可用：${avail}）\n`)
       return 2
     }
-    const domainCases = []
-    found[1](domainCases)
     const filtered = selectOnlyCases(domainCases, only)
     if (!filtered) return 1
-    const domainLanes = Number.isFinite(jobsArg) && jobsArg >= 1
-      ? Math.min(Math.floor(jobsArg), Math.max(1, cpus().length), filtered.length)
+    const hasExplicitJobs = Number.isFinite(jobsArg) && jobsArg >= 1
+    const domainLanes = hasExplicitJobs
+      ? Math.min(resolveWorkerConcurrency({ requestedJobs: jobsArg, cap: filtered.length }), filtered.length)
       : 1
     if (domainLanes > 1 && !only && !bailOn && process.env.PF_FIXTURE_WORKER !== '1') {
-      const allCases = []
-      let startIdx = 0
-      let endIdx = 0
-      for (const [name, registerFn] of DOMAIN_REGISTRY) {
-        if (name === domain) {
-          startIdx = allCases.length
-          registerFn(allCases)
-          endIdx = allCases.length
-        } else {
-          registerFn(allCases)
-        }
-      }
       const scriptPath = fileURLToPath(import.meta.url)
       const workerBkRoot = mkdtempSync(join(tmpdir(), 'pf-fix-pool-'))
       try {
-        const dispatchOrder = buildDispatchOrder(allCases).filter((idx) => idx >= startIdx && idx < endIdx)
+        const dispatchOrder = buildDispatchOrder(domainCases)
         const { passed: totalPassed, failures: allFailures } = await runDynamicWorkerPool(
           scriptPath,
           dispatchOrder,
           domainLanes,
           workerBkRoot,
-          allCases.map(([name]) => name),
-          allCases.map(([, , costMs]) => (Number(costMs) > 0 ? Number(costMs) : 0)),
+          domainCases.map(([name]) => name),
+          domainCases.map(([, , costMs]) => (Number(costMs) > 0 ? Number(costMs) : 0)),
+          ['--domain', domain, ...(noLazy ? ['--no-lazy'] : [])],
         )
         if (allFailures.length === 0) {
           process.stdout.write(`行为断言：${totalPassed} 项通过，0 项失败（--domain ${domain}, ${domainLanes} 隔离子进程动态并发）。\n`)
@@ -443,8 +531,9 @@ async function main() {
       process.stderr.write(`非法 --shard 范围：${shard}\n`)
       return 2
     }
+    const fullRegistry = await loadDomainRegistry(DISCOVERED_FILES)
     const allCases = []
-    for (const [, registerFn] of DOMAIN_REGISTRY) registerFn(allCases)
+    for (const [, registerFn] of fullRegistry) registerFn(allCases)
     const myCases = allCases.filter((_, idx) => idx % shardTotal === shardIdx)
     let passed = 0
     const failures = []
@@ -466,18 +555,21 @@ async function main() {
     return 1
   }
 
-  // 全量跑且未传 --only / --bail-on 时，默认按动态工作窃取队列派生隔离子进程池（macOS Node < 20 限 2 并发防调度拥塞，>= 12 核主机开 9 并发兼顾吞吐与低上下文切换）
+  // 全量跑且未传 --only / --bail-on 时，按 proc-budget 留出前台余量派生低优先级隔离子进程池
   const isMacLegacyNode = process.platform === 'darwin' && !supportsSafeDetachedSpawn()
-  const cpuCount = cpus().length
-  const defaultCap = isMacLegacyNode ? 2 : (cpuCount >= 12 ? 9 : 8)
-  const defaultJobs = only || bailOn ? 1 : Math.min(defaultCap, Math.max(2, cpuCount))
-  const lanes = Number.isFinite(jobsArg) && jobsArg >= 1
-    ? Math.min(Math.floor(jobsArg), Math.max(1, cpus().length))
-    : defaultJobs
+  const hasExplicitJobs = Number.isFinite(jobsArg) && jobsArg >= 1
+  const defaultCap = isMacLegacyNode ? 2 : 8
+  const lanes = only || bailOn
+    ? 1
+    : resolveWorkerConcurrency({
+        requestedJobs: hasExplicitJobs ? jobsArg : null,
+        cap: hasExplicitJobs ? Infinity : defaultCap,
+      })
 
   if (lanes > 1 && !only && !bailOn) {
+    const fullRegistry = await loadDomainRegistry(DISCOVERED_FILES)
     const allCases = []
-    for (const [, registerFn] of DOMAIN_REGISTRY) registerFn(allCases)
+    for (const [, registerFn] of fullRegistry) registerFn(allCases)
     const scriptPath = fileURLToPath(import.meta.url)
     const workerBkRoot = mkdtempSync(join(tmpdir(), 'pf-fix-pool-'))
     try {
@@ -510,9 +602,29 @@ async function main() {
     }
   }
 
-  const cases = []
-  for (const [, registerFn] of DOMAIN_REGISTRY) registerFn(cases)
-  const selected = selectOnlyCases(cases, only)
+  let selected
+  if (only && !noLazy) {
+    const pre = resolveOnlyCandidateFiles(only)
+    const partialRegistry = pre.files.length > 0 ? await loadDomainRegistry(pre.files) : []
+    const partialCases = []
+    for (const [, registerFn] of partialRegistry) registerFn(partialCases)
+    const partialMatched = partialCases.filter((fn) => caseMatches(fn, only))
+    if (partialMatched.length > 0) {
+      selected = partialMatched
+    } else if (pre.files.length < DISCOVERED_FILES.length) {
+      const fullRegistry = await loadDomainRegistry(DISCOVERED_FILES)
+      const fullCases = []
+      for (const [, registerFn] of fullRegistry) registerFn(fullCases)
+      selected = selectOnlyCases(fullCases, only)
+    } else {
+      selected = selectOnlyCases(partialCases, only)
+    }
+  } else {
+    const fullRegistry = await loadDomainRegistry(DISCOVERED_FILES)
+    const cases = []
+    for (const [, registerFn] of fullRegistry) registerFn(cases)
+    selected = selectOnlyCases(cases, only)
+  }
   if (!selected) return 1
   const orderedCases = prefer
     ? [...selected.filter((fn) => caseMatches(fn, prefer)), ...selected.filter((fn) => !caseMatches(fn, prefer))]
@@ -538,4 +650,6 @@ async function main() {
   return 1
 }
 
-main().then((code) => flushAndExit(code))
+if (isMainModule(import.meta.url, process.argv[1])) {
+  main().then((code) => flushAndExit(code))
+}

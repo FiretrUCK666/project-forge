@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: 全仓脚本低 CPU 调度原语与热点瘦身
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
 issue: 227
 pr: null
-branch: feat/multi-forge-worktree-perf-v1
+branch: feat/low-cpu-script-perf
 owner: plan-c-master
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-c-r2, round=2, sha=179cb9737e8b, summary=R2 verified all 4 R1 major findings closed: scripts/sync-toc.mjs & scripts/update.mjs runCli exports in scope for single-child checkHelps; fixtures-helpers.mjs mod.runCli ?? mod.main verified compatible with equip-ci.mjs main(); fixtures.mjs --only cross-file import closure + --domain lazy loading + 0-match fallback; readBlobBatch sunk to kit/skills/lib/git-fast-objects.mjs keeping edit-gate.mjs <=755L; 0 overlap with Wave 1B.)"
-related_prd: ../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
+related_prd: ../../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
 related_todo: ../todo/261127-issue227-low-cpu-script-perf-todo.md
 high_risk_paths: [kit/, scripts/lib/]
 task_id: low-cpu-script-perf
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/proc-budget.mjs, kit/skills/lib/git-fast-objects.mj
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨 `kit/`、`scripts/lib/` 与 `scripts/dev/` 的并发调度与热点重构；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/multi-forge-worktree-perf-v1` / #227 / 未关联 |
+| 分支 / Issue / PR | `feat/low-cpu-script-perf` / #227 / 未关联 |
 | 负责人 / 内审状态 | plan-c-master / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/todo/261127-issue227-low-cpu-script-perf-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/archive/todo/261127-issue227-low-cpu-script-perf-todo.md` |
 
 - **变更一句话**：建立零依赖进程并发预算与低优先级调度原语 `kit/skills/lib/proc-budget.mjs` (new)，实现 `fixtures.mjs` `--only`（含跨文件 `import` 闭包）与 `--domain` 懒加载、`sync-toc`/`update` 导出 `runCli` 支撑单子进程 `--help` 批量校验，以及 `readBlobBatch` 下沉 `git-fast-objects.mjs` 瘦身 `edit-gate.mjs`，在零弱化门禁前提下显著降低 CPU 峰值与总耗时。
 
@@ -147,9 +147,9 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C1: `kit/skills/lib/proc-budget.mjs` (new) 导出 `resolveWorkerConcurrency`（默认 `max(1, availableParallelism() - 2)` 且 `--jobs` 可显式覆盖，1-2 核退化为 `1`）与 `applyLowPriority(pid)`（调用 `os.setPriority(..., PRIORITY_BELOW_NORMAL)` 且对权限/非法 PID 异常安全兜底），并在 `scripts/dev/verify-injections.mjs`、`scripts/dev/fixtures.mjs`、`scripts/dev/e2e-zip-harness.mjs`、`scripts/dev/merge-gate.mjs` 与 `kit/skills/dev-iterate/scripts/iterate.mjs` 全部接入生效。
-- [ ] C2: `scripts/dev/fixtures.mjs` 实现 `--only` 跨文件 `import` 闭包预筛懒加载 + `--domain` 单域懒加载且 0 命中自动回退全量导入（实测冷启显著低于全量 325 ms 基线并逼近 ~15 ms，且跨文件引用与动态名用例 0 漏检）；`scripts/dev/fixtures-helpers.mjs` 补齐 `IN_PROCESS_CLI_SCRIPTS` 覆盖 `verify-tools.mjs`/`doc-locate.mjs`/`edit-gate.mjs`/`iterate.mjs`/`equip-ci.mjs` 并兼容 `mod.runCli ?? mod.main`；`scripts/sync-toc.mjs` 与 `scripts/update.mjs` 导出 `runCli` 且 `scripts/dev/preflight-e2e.mjs` `checkHelps` 以单子进程完成 8 个脚本 `--help` 校验。
-- [ ] C3: `kit/skills/lib/git-fast-objects.mjs` 新增 `readBlobBatch` 供 `kit/skills/dev-edit/scripts/edit-gate.mjs`（行数净减至 `<= 755` 行）与 `kit/skills/dev-govern/scripts/govern-checks.mjs` 复用，`govern-audit.mjs` 透传 `trackedSet` 给 `govern-checks-hygiene.mjs`，`scripts/lib/survey-workspace.mjs`/`scripts/survey.mjs` 消除同步 `git check-ignore` 阻塞；新增 `scripts/dev/fixtures-perf-budget.mjs` (new) 与 `scripts/dev/injections-data-perf-budget.mjs` (new) 正反双向实证通过，`node scripts/dev/bench.mjs`、`node scripts/dev/preflight.mjs`、`node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全部退出码 `0`。
+- [x] C1: `kit/skills/lib/proc-budget.mjs` (new) 导出 `resolveWorkerConcurrency`（默认 `max(1, availableParallelism() - 2)` 且 `--jobs` 可显式覆盖，1-2 核退化为 `1`）与 `applyLowPriority(pid)`（调用 `os.setPriority(..., PRIORITY_BELOW_NORMAL)` 且对权限/非法 PID 异常安全兜底），并在 `scripts/dev/verify-injections.mjs`、`scripts/dev/fixtures.mjs`、`scripts/dev/e2e-zip-harness.mjs`、`scripts/dev/merge-gate.mjs` 与 `kit/skills/dev-iterate/scripts/iterate.mjs` 全部接入生效。
+- [x] C2: `scripts/dev/fixtures.mjs` 实现 `--only` 跨文件 `import` 闭包预筛懒加载 + `--domain` 单域懒加载且 0 命中自动回退全量导入（实测冷启显著低于全量 325 ms 基线并逼近 ~15 ms，且跨文件引用与动态名用例 0 漏检）；`scripts/dev/fixtures-helpers.mjs` 补齐 `IN_PROCESS_CLI_SCRIPTS` 覆盖 `verify-tools.mjs`/`doc-locate.mjs`/`edit-gate.mjs`/`iterate.mjs`/`equip-ci.mjs` 并兼容 `mod.runCli ?? mod.main`；`scripts/sync-toc.mjs` 与 `scripts/update.mjs` 导出 `runCli` 且 `scripts/dev/preflight-e2e.mjs` `checkHelps` 以单子进程完成 8 个脚本 `--help` 校验。
+- [x] C3: `kit/skills/lib/git-fast-objects.mjs` 新增 `readBlobBatch` 供 `kit/skills/dev-edit/scripts/edit-gate.mjs`（行数净减至 `<= 755` 行）与 `kit/skills/dev-govern/scripts/govern-checks.mjs` 复用，`govern-audit.mjs` 透传 `trackedSet` 给 `govern-checks-hygiene.mjs`，`scripts/lib/survey-workspace.mjs`/`scripts/survey.mjs` 消除同步 `git check-ignore` 阻塞；新增 `scripts/dev/fixtures-perf-budget.mjs` (new) 与 `scripts/dev/injections-data-perf-budget.mjs` (new) 正反双向实证通过，`node scripts/dev/bench.mjs`、`node scripts/dev/preflight.mjs`、`node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 全部退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -165,5 +165,8 @@ flowchart LR
 ## 实现说明
 
 - **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+  - C1：新增 `kit/skills/lib/proc-budget.mjs`（83 行），接入 `verify-injections.mjs`、`fixtures.mjs`、`e2e-zip-harness.mjs`、`merge-gate.mjs` 与 `kit/skills/dev-iterate/scripts/iterate.mjs`（补齐 `--jobs` 帮助与别名）。
+  - C2：`fixtures.mjs` 实现 `--only` 双向静态 import 闭包预筛懒加载 + `--domain` 单域懒加载 + 0 命中自动回退全量导入（`--only` 进程冷启 397ms -> 171ms，`-56.9%`；`--domain` 369ms -> 136ms，`-63.1%`）；`fixtures-helpers.mjs` 补齐 5 脚本并兼容 `mod.runCli ?? mod.main` 与 `process.exitCode` 隔离；`sync-toc.mjs`/`update.mjs` 导出 `runCli`，`preflight-e2e.mjs` `checkHelps` 单子进程校验全部 8 脚本。
+  - C3：`kit/skills/lib/git-fast-objects.mjs` 新增 `readBlobBatch`（零子进程 loose/pack 直读 + 单次 `git cat-file --batch` 回退），`edit-gate.mjs` 瘦身至 736 行（`-35` 行），`govern-checks.mjs`/`govern-checks-hygiene.mjs`/`govern-audit.mjs` 复用 `readBlobBatch` 与 `trackedSet`，`survey-workspace.mjs` 新增 `detectIgnoredGovernancePathsAsync` 并在 `survey.mjs` 并发汇聚（`review(self)` 554ms -> 461ms `-16.8%`，`survey(self)` 376ms -> 348ms `-7.4%`，`preflight(self)` 2782ms -> 2694ms）。
+- **与草案的差异**：为兼容 `scripts/equip.mjs` 与 `fixtures-r5-onboarding.mjs` 既有同步调用，保留 `detectIgnoredGovernancePaths` 同步兼容入口并新增 `detectIgnoredGovernancePathsAsync` 接入 `scripts/survey.mjs` 并发链，实现零回归。
+- **关联同步文件**：经 `node scripts/equip.mjs .` 同步 `.agents/skills/`（含新增 `.agents/skills/lib/proc-budget.mjs` 与 `.agents/skills/.pf-manifest.json`）。

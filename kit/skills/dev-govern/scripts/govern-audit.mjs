@@ -320,6 +320,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
         catSet.has('hygiene')
           ? auditHygiene(workTreeRoot, mainRoot, isGit, scopedFiles, defaultBranch, devProfile, rawFindings, {
             changedFilesSet: preChangedSet ?? (opts.changed && isGit ? await collectChangedFilesSet(workTreeRoot, isGit, defaultBranch) : null),
+            trackedSet,
           })
           : Promise.resolve(hygieneMeta),
       ])

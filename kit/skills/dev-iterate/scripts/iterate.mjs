@@ -11,7 +11,6 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
-import { cpus } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
@@ -24,6 +23,7 @@ import {
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
+import { applyLowPriority, resolveWorkerConcurrency } from '../../lib/proc-budget.mjs'
 import { scanNeutralCiSteps } from '../../lib/profile-sniffer.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { TEST_FILE_RE } from '../../lib/static-gates.mjs'
@@ -62,7 +62,8 @@ function printHelp() {
     '  --limit <N>              最多生成/规划候选数（默认 5）',
     '  --write                  将通过反作弊校验的候选测试写入目标仓原生测试目录',
     '  --targets <a,b>          指定要并发运行的测试文件（逗号分隔）',
-    '  --concurrency <N>        并发 worker 数量（默认 min(4, CPU核数)）',
+    '  --concurrency <N>        并发 worker 数量（默认留 2 核余量，上限 4）',
+    '  --jobs <N>               --concurrency 的别名（显式覆盖并发度）',
     '  --timeout-ms <ms>        单测执行超时毫秒（默认 30000）',
     '  --perf-budget-ms <ms>    性能预算阈值毫秒（超阈视为退化并升级）',
     '  --escalate               运行失败/越阈时显式开启经 escalation.mjs 建单转入正流修复（run 探索期默认静默不建单）',
@@ -208,7 +209,7 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
 export async function runIterationSuites(repoRoot, {
   targets = [],
   tier = 'integration',
-  concurrency = Math.min(4, Math.max(1, cpus().length)),
+  concurrency = null,
   timeoutMs = 30000,
   perfBudgetMs = 0,
   escalate = false,
@@ -219,6 +220,7 @@ export async function runIterationSuites(repoRoot, {
   _ghProbe = null,
   _ghClient = null,
 } = {}) {
+  applyLowPriority(process.pid)
   const devProfile = parseDevProfile(repoRoot)
   let resolvedTargets = [...new Set((targets ?? []).map((t) => posixPath(String(t ?? '').trim()).replace(/^\.\//, '')).filter(Boolean))]
   if (resolvedTargets.length === 0) {
@@ -238,7 +240,9 @@ export async function runIterationSuites(repoRoot, {
   }
   resolvedTargets = resolvedTargets.filter((rel) => existsSync(join(repoRoot, rel))).sort()
 
-  const lanes = Math.max(1, Math.min(Number(concurrency) || 2, Math.max(1, resolvedTargets.length)))
+  const requestedJobs = concurrency !== null && concurrency !== undefined ? concurrency : null
+  const budgeted = resolveWorkerConcurrency({ requestedJobs, cap: requestedJobs !== null ? Infinity : 4 })
+  const lanes = Math.max(1, Math.min(budgeted, Math.max(1, resolvedTargets.length)))
   const results = new Array(resolvedTargets.length)
   let cursor = 0
   const worker = async () => {
@@ -321,7 +325,8 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       allowPositionalWithoutSubcommand: true,
       positionalDir: 'auto',
       booleanFlags: ['write', 'escalate', 'no-escalate', 'no-signals', 'reset'],
-      valueFlags: ['focus', 'tier', 'limit', 'targets', 'concurrency', 'timeout-ms', 'perf-budget-ms', 'goal', 'max-rounds', 'progress-history', 'pending-gates'],
+      valueFlags: ['focus', 'tier', 'limit', 'targets', 'concurrency', 'jobs', 'timeout-ms', 'perf-budget-ms', 'goal', 'max-rounds', 'progress-history', 'pending-gates'],
+      aliases: { jobs: 'concurrency' },
       usageHint: `iterate.mjs [${SUBCOMMANDS.join('|')}] [dir]`,
     })
   } catch (err) {

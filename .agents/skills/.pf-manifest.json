@@ -7,7 +7,7 @@
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
     },
     "dev-edit/scripts/edit-gate.mjs": {
-      "sha256": "953fa51582bf9d112bfef5c9d140cc83d9300edf10ade4d27a034dff67159409"
+      "sha256": "92f17a88d131efe7c4b8c2239d186e9e0654248d8275c00857e6b87bdb064372"
     },
     "dev-explore/SKILL.md": {
       "sha256": "2214403720df7eb05c072b465a73520379a0632eee878641e0938f44f3f39ff3"
@@ -91,13 +91,13 @@
       "sha256": "fbaa2b38a60fc1512862a90a1e8e879ebbf124221fa930f6fbc0c5a5a4f128d4"
     },
     "dev-govern/scripts/govern-audit.mjs": {
-      "sha256": "3041eb223af19b21d3d7ff0dc3762666fc6cfce17328a34dfb6b7f2dabff8de3"
+      "sha256": "70e5620b869ade61fb9ce5d16838fabf9c4c900df777e0266b3df6cb4802bbed"
     },
     "dev-govern/scripts/govern-checks-hygiene.mjs": {
-      "sha256": "8fa0a3276a40d73e3d522d3eaf7d65e4fe5f57cc88e4f5c973fdfa2dc4f9b260"
+      "sha256": "29af4f000306a82efd4036b06daad250dc71385c06c55d56b1eb12e53d630240"
     },
     "dev-govern/scripts/govern-checks.mjs": {
-      "sha256": "caa80e2220aacc3068dee0b2e84d65d8640dfa5da526438d411e4acb474f57cf"
+      "sha256": "cdc7a0610c5f4ecb2496e2489e4829fda4906b4c723a1f4f6a88d352a64f251a"
     },
     "dev-govern/scripts/govern-docs.mjs": {
       "sha256": "8c59ec531ad753d53b52d15c2257332086cd12901736540595a8cbe42f829f33"
@@ -130,7 +130,7 @@
       "sha256": "eab3c7494eb7b19a45275f2bcbc2ecd946ab72e0e71e5910888a4e19436dbd5d"
     },
     "dev-iterate/scripts/iterate.mjs": {
-      "sha256": "de2e9bc6629cc4000dbaa892fea4f9222112f73b6b5930a09c332ffabe4b234a"
+      "sha256": "146a0fc63500934ef8674645553745ab8d7ae5cd47a21928f532c9129787296a"
     },
     "dev-plan/SKILL.md": {
       "sha256": "8cb815d9c224008013b75439f5735cb8e0cf4bf6fda623ac2cfd5303d07327aa"
@@ -319,7 +319,7 @@
       "sha256": "8c0d66b06c42662c0d92ab91c59a27730112e3dddc1723071b265031493c5c4b"
     },
     "lib/git-fast-objects.mjs": {
-      "sha256": "d2c45946deb99f6a4c1045dd96bd34562fa499c799b0bf66b3811d84175b3451"
+      "sha256": "1e5226da98f023467b1eac33325fad6de4b4c2baf04b0c99b1811d04171b3a00"
     },
     "lib/git-fast.mjs": {
       "sha256": "ec3bc4da3bdf084509fff4bbe6a30f4d0dcb81d2f1940bddfe3d06222dc49bc6"
@@ -413,6 +413,9 @@
     },
     "lib/pr-template-hydrate.mjs": {
       "sha256": "0cfc1d92f0fb74d78e70afaa5f8e676f6f200d027829ca60bd50f017f022dfa4"
+    },
+    "lib/proc-budget.mjs": {
+      "sha256": "3d52ec707e5496f9970619e5719806e70e9298f862a336ee68723cb2b91c817b"
     },
     "lib/profile-sniffer-packages.mjs": {
       "sha256": "575244d0cecdb0d5046bc418db4c6ba403262edde002178818dcba7b37c0a16c"

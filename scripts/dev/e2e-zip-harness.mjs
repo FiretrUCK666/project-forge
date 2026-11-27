@@ -8,11 +8,12 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { cpus, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
+import { applyLowPriority, resolveWorkerConcurrency } from '../../kit/skills/lib/proc-budget.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { EVOLUTION_SCENARIOS } from './e2e-scenarios-evolution.mjs'
 import { STAGE_B_SCENARIOS } from './e2e-scenarios-lifecycle.mjs'
@@ -490,6 +491,7 @@ function runScenarioWorkerAsync(scenarioKey, pkgRoot, workerSandbox, seedGitDir)
       '--seed-git', seedGitDir,
       '--backup-dir', join(workerSandbox, 'backups'),
     ], { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    if (child.pid) applyLowPriority(child.pid)
     let out = ''
     let err = ''
     child.stdout.on('data', (c) => { out += String(c) })
@@ -515,7 +517,10 @@ async function runPoolWorkers(items, limit, fn) {
 function parseWorkerArgs(argv) {
   const out = {}
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--') && i + 1 < argv.length) {
+    if (argv[i].startsWith('--') && argv[i].includes('=')) {
+      const eq = argv[i].indexOf('=')
+      out[argv[i].slice(2, eq)] = argv[i].slice(eq + 1)
+    } else if (argv[i].startsWith('--') && i + 1 < argv.length) {
       out[argv[i].slice(2)] = argv[i + 1]
       i++
     }
@@ -551,6 +556,7 @@ async function runSingleScenario(scenarioKey, pkgRoot, sandbox, env) {
 async function main() {
   const workerArgs = parseWorkerArgs(process.argv.slice(2))
   if (workerArgs.worker) {
+    applyLowPriority(process.pid)
     try {
       SEEDED_GIT_TEMPLATE = workerArgs['seed-git'] || null
       const env = { PF_BACKUP_DIR: workerArgs['backup-dir'] || join(workerArgs.sandbox, 'backups'), PF_NO_REAL_AUTH_PROBE: '1' }
@@ -572,7 +578,11 @@ async function main() {
       ...Object.keys(STAGE_B_SCENARIOS),
       ...Object.keys(EVOLUTION_SCENARIOS),
     ]
-    const jobs = Math.min(6, Math.max(2, cpus().length || 4), scenarioKeys.length)
+    const rawJobs = workerArgs.jobs ?? null
+    const jobs = Math.min(
+      resolveWorkerConcurrency({ requestedJobs: rawJobs, cap: rawJobs !== null ? scenarioKeys.length : 6 }),
+      scenarioKeys.length,
+    )
     const results = await runPoolWorkers(scenarioKeys, jobs, (key) =>
       runScenarioWorkerAsync(key, pkgRoot, join(sandbox, `w-${key}`), seedGitDir))
     const failed = results.filter((r) => r.code !== 0)

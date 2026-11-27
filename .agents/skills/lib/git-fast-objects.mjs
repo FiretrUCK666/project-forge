@@ -2,12 +2,15 @@
  * git-fast-objects.mjs —— 零子进程松散 Git 对象、Tag/Reflog 读取、Immutable 缓存与 DAG 祖先遍历。
  */
 
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { inflateSync } from 'node:zlib'
 
-import { readTextSafe } from './git-core.mjs'
+import { prepareExecInvocation } from './exec.mjs'
+import { posixPath, readTextSafe } from './git-core.mjs'
+import { resolveGitDirFast } from './git-index-fast.mjs'
 
 const PACK_TYPE_NAMES = Object.freeze({ 1: 'commit', 2: 'tree', 3: 'blob', 4: 'tag' })
 const packIdxCache = new Map()
@@ -372,4 +375,195 @@ export function readFirstParentsFast(gitCommonDir, tipSha, limit = 200) {
     cur = pm ? pm[1].toLowerCase() : null
   }
   return set
+}
+
+function resolveRefShaLocal(commonDir, fullRef) {
+  const cleanRef = String(fullRef ?? '').replace(/^\/+/, '')
+  if (!cleanRef) return null
+  const looseTxt = readTextSafe(join(commonDir, ...cleanRef.split('/')))
+  if (looseTxt) {
+    const t = looseTxt.trim()
+    if (/^[0-9a-f]{40}$/i.test(t)) return t.toLowerCase()
+    if (t.startsWith('ref:')) return resolveRefShaLocal(commonDir, t.slice(4).trim())
+  }
+  const packed = readTextSafe(join(commonDir, 'packed-refs'))
+  if (packed) {
+    for (const line of packed.split('\n')) {
+      if (!line || line.startsWith('#') || line.startsWith('^')) continue
+      const sp = line.indexOf(' ')
+      if (sp > 0 && line.slice(sp + 1).trim() === cleanRef) {
+        const sha = line.slice(0, sp).trim()
+        if (/^[0-9a-f]{40}$/i.test(sha)) return sha.toLowerCase()
+      }
+    }
+  }
+  return null
+}
+
+function resolveCommitTreeShaFast(wtGitDir, commonDir, rev) {
+  let commitSha = null
+  const r = String(rev ?? '').trim()
+  if (/^[0-9a-f]{40}$/i.test(r)) {
+    commitSha = r.toLowerCase()
+  } else if (r === 'HEAD') {
+    const headTxt = readTextSafe(join(wtGitDir, 'HEAD'))?.trim() ?? ''
+    if (headTxt.startsWith('ref:')) commitSha = resolveRefShaLocal(commonDir, headTxt.slice(4).trim())
+    else if (/^[0-9a-f]{40}$/i.test(headTxt)) commitSha = headTxt.toLowerCase()
+  } else if (!/[~^:@{}]/.test(r)) {
+    for (const cand of [r, `refs/heads/${r}`, `refs/tags/${r}`, `refs/remotes/${r}`, `refs/remotes/origin/${r}`]) {
+      const hit = resolveRefShaLocal(commonDir, cand)
+      if (hit) { commitSha = hit; break }
+    }
+  }
+  if (!commitSha) return null
+  const commitObj = readGitObjectFast(commonDir, commitSha)
+  if (!commitObj || commitObj.type !== 'commit') return null
+  const m = /^tree ([0-9a-f]{40})$/m.exec(commitObj.bodyBuf.toString('utf8'))
+  return m ? m[1].toLowerCase() : null
+}
+
+function parseTreeEntriesFast(bodyBuf) {
+  const map = new Map()
+  let off = 0
+  while (off < bodyBuf.length) {
+    const sp = bodyBuf.indexOf(0x20, off)
+    if (sp < 0) return null
+    const nul = bodyBuf.indexOf(0x00, sp + 1)
+    if (nul < 0 || nul + 21 > bodyBuf.length) return null
+    const mode = bodyBuf.subarray(off, sp).toString('ascii')
+    const name = bodyBuf.subarray(sp + 1, nul).toString('utf8')
+    const sha = bodyBuf.subarray(nul + 1, nul + 21).toString('hex')
+    map.set(name, { mode, sha })
+    off = nul + 21
+  }
+  return map
+}
+
+function lookupBlobInTreeFast(commonDir, rootTreeSha, relPath, treeCache) {
+  const parts = relPath.split('/').filter(Boolean)
+  if (parts.length === 0) return { resolved: true, sha: null }
+  let curTreeSha = rootTreeSha
+  for (let i = 0; i < parts.length; i += 1) {
+    let entries = treeCache.get(curTreeSha)
+    if (entries === undefined) {
+      const obj = readGitObjectFast(commonDir, curTreeSha)
+      entries = (obj && obj.type === 'tree') ? parseTreeEntriesFast(obj.bodyBuf) : null
+      treeCache.set(curTreeSha, entries)
+    }
+    if (!entries) return { resolved: false, sha: null }
+    const ent = entries.get(parts[i])
+    if (!ent) return { resolved: true, sha: null }
+    if (i === parts.length - 1) {
+      const isBlob = ent.mode === '100644' || ent.mode === '100755'
+      return { resolved: true, sha: isBlob ? ent.sha : null }
+    }
+    if (ent.mode !== '40000' && ent.mode !== '040000') return { resolved: true, sha: null }
+    curTreeSha = ent.sha
+  }
+  return { resolved: true, sha: null }
+}
+
+function runGitCatFileBatch(repoRoot, rev, relPaths) {
+  return new Promise((done) => {
+    const outMap = new Map(relPaths.map((p) => [p, null]))
+    const inv = prepareExecInvocation('git', ['-c', 'core.quotepath=false', '--no-optional-locks', 'cat-file', '--batch'], { cwd: repoRoot })
+    const child = spawn(inv.cmd, inv.args, {
+      cwd: repoRoot,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true,
+      env: inv.env,
+      ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+    })
+    const chunks = []
+    const timer = setTimeout(() => { try { child.kill() } catch { /* ignore */ } }, 30000)
+    timer.unref?.()
+    child.stdout?.on('data', (c) => chunks.push(c))
+    child.stdin?.on('error', () => {})
+    child.on('error', () => { clearTimeout(timer); done(outMap) })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      if (code !== 0) { done(outMap); return }
+      const buf = Buffer.concat(chunks)
+      let off = 0
+      for (const rel of relPaths) {
+        if (off >= buf.length) break
+        const nl = buf.indexOf(0x0a, off)
+        if (nl < 0) break
+        const hdr = buf.subarray(off, nl).toString('utf8').replace(/\r$/, '')
+        off = nl + 1
+        if (hdr.endsWith(' missing') || hdr.endsWith(' ambiguous') || hdr.endsWith(' submodule')) {
+          outMap.set(rel, null)
+          continue
+        }
+        const sp1 = hdr.indexOf(' ')
+        const sp2 = sp1 > 0 ? hdr.indexOf(' ', sp1 + 1) : -1
+        if (sp1 <= 0 || sp2 <= sp1) break
+        const type = hdr.slice(sp1 + 1, sp2)
+        const size = Number(hdr.slice(sp2 + 1))
+        if (!Number.isFinite(size) || size < 0 || off + size > buf.length) break
+        if (type === 'blob') {
+          outMap.set(rel, buf.subarray(off, off + size).toString('utf8').replace(/\r\n/g, '\n'))
+        } else {
+          outMap.set(rel, null)
+        }
+        off += size + 1
+      }
+      done(outMap)
+    })
+    try {
+      child.stdin?.end(`${relPaths.map((p) => `${rev}:${p}`).join('\n')}\n`)
+    } catch { /* ignore */ }
+  })
+}
+
+/**
+ * 批量读取 `rev:relPath` 的 UTF-8 blob 文本：
+ * 先经 `readGitObjectFast` + `readGitBlobTextFast` 零子进程读取，未命中条目统一合并为单次 `git cat-file --batch`。
+ */
+export async function readBlobBatch(repoRoot, rev, relPaths) {
+  const result = new Map()
+  const unique = [...new Set(
+    (relPaths ?? [])
+      .map((p) => posixPath(String(p ?? '').trim()).replace(/^\.\//, '').replace(/^\/+/, ''))
+      .filter(Boolean),
+  )]
+  if (!repoRoot || !rev || unique.length === 0) return result
+
+  const unresolved = []
+  const wtGitDir = resolveGitDirFast(repoRoot)
+  let commonDir = null
+  let rootTreeSha = null
+  if (wtGitDir) {
+    const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
+    commonDir = cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir
+    if (!existsSync(join(commonDir, 'reftable')) && !existsSync(join(commonDir, 'refs', 'replace'))) {
+      rootTreeSha = resolveCommitTreeShaFast(wtGitDir, commonDir, rev)
+    }
+  }
+
+  if (rootTreeSha && commonDir) {
+    const treeCache = new Map()
+    for (const rel of unique) {
+      const hit = lookupBlobInTreeFast(commonDir, rootTreeSha, rel, treeCache)
+      if (!hit.resolved) {
+        unresolved.push(rel)
+      } else if (hit.sha === null) {
+        result.set(rel, null)
+      } else {
+        const text = readGitBlobTextFast(commonDir, hit.sha)
+        if (text !== null) result.set(rel, text)
+        else unresolved.push(rel)
+      }
+    }
+  } else if (wtGitDir) {
+    unresolved.push(...unique)
+  } else {
+    for (const rel of unique) result.set(rel, null)
+  }
+
+  if (unresolved.length > 0) {
+    const batchMap = await runGitCatFileBatch(repoRoot, rev, unresolved)
+    for (const [k, v] of batchMap.entries()) result.set(k, v)
+  }
+  return result
 }

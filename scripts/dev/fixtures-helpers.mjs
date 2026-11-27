@@ -198,14 +198,18 @@ export function readDirRefs(dir) {
   } catch { return [] }
 }
 
-const IN_PROCESS_CLI_SCRIPTS = new Set([
-  'backup.mjs', 'compose-agents.mjs', 'equip.mjs', 'handoff.mjs', 'review.mjs', 'survey.mjs',
+export const IN_PROCESS_CLI_SCRIPTS = new Set([
+  'backup.mjs', 'compose-agents.mjs', 'equip.mjs', 'equip-ci.mjs', 'handoff.mjs', 'review.mjs', 'survey.mjs',
   'kit/skills/dev-explore/scripts/repo-map.mjs',
+  'kit/skills/dev-explore/scripts/doc-locate.mjs',
+  'kit/skills/dev-edit/scripts/edit-gate.mjs',
   'kit/skills/dev-flow/scripts/flow.mjs',
   'kit/skills/dev-flow/scripts/worktree-deps.mjs',
   'kit/skills/dev-plan/scripts/doc-plan.mjs',
   'kit/skills/dev-review/scripts/review-pack.mjs',
   'kit/skills/dev-govern/scripts/govern-audit.mjs',
+  'kit/skills/dev-verify-tools/scripts/verify-tools.mjs',
+  'kit/skills/dev-iterate/scripts/iterate.mjs',
 ])
 const cliModCache = new Map()
 let inProcessQueue = Promise.resolve()
@@ -223,7 +227,10 @@ async function runCliInProcessUnlocked(absPath, args, opts = {}) {
     mod = await import(pathToFileURL(absPath).href)
     cliModCache.set(absPath, mod)
   }
-  if (typeof mod?.runCli !== 'function') return null
+  const entry = typeof mod?.runCli === 'function'
+    ? mod.runCli
+    : (typeof mod?.main === 'function' ? mod.main : null)
+  if (!entry) return null
 
   const outChunks = []
   const errChunks = []
@@ -236,6 +243,7 @@ async function runCliInProcessUnlocked(absPath, args, opts = {}) {
     return true
   }
   const prevCwd = process.cwd()
+  const prevExitCode = process.exitCode
   const changedCwd = Boolean(opts.cwd && resolve(opts.cwd) !== prevCwd)
   const savedEnv = new Map()
   if (opts.env) {
@@ -245,12 +253,16 @@ async function runCliInProcessUnlocked(absPath, args, opts = {}) {
       else process.env[k] = String(v)
     }
   }
+  process.exitCode = undefined
   process.stdout.write = capture(outChunks)
   process.stderr.write = capture(errChunks)
   let status = 0
   try {
     if (changedCwd) process.chdir(opts.cwd)
-    status = await Promise.resolve(mod.runCli([...args]))
+    const rawCode = await Promise.resolve(entry([...args]))
+    status = typeof rawCode === 'number'
+      ? rawCode
+      : (typeof process.exitCode === 'number' ? process.exitCode : 0)
   } catch (err) {
     errChunks.push(Buffer.from(err instanceof Error ? `${err.stack || err.message}\n` : `${String(err)}\n`, 'utf8'))
     status = 1
@@ -260,6 +272,7 @@ async function runCliInProcessUnlocked(absPath, args, opts = {}) {
       if (prev === undefined) delete process.env[k]
       else process.env[k] = prev
     }
+    process.exitCode = prevExitCode
     process.stdout.write = origOut
     process.stderr.write = origErr
   }
@@ -267,11 +280,12 @@ async function runCliInProcessUnlocked(absPath, args, opts = {}) {
     status: typeof status === 'number' ? status : 0,
     stdout: Buffer.concat(outChunks).toString('utf8'),
     stderr: Buffer.concat(errChunks).toString('utf8'),
+    inProcess: true,
   }
 }
 
 export async function runNode(script, args, opts = {}) {
-  if (!opts.input && IN_PROCESS_CLI_SCRIPTS.has(script)) {
+  if (!opts.input && !opts.forceSubprocess && !opts.killSignal && IN_PROCESS_CLI_SCRIPTS.has(script)) {
     const inProc = await execCliInProcess(join(SCRIPTS, script), args, opts)
     if (inProc) return inProc
   }
@@ -284,7 +298,7 @@ export async function runNode(script, args, opts = {}) {
 
 export async function runAbsAsync(scriptRel, args, opts = {}) {
   const norm = scriptRel.replace(/\\/g, '/')
-  if (!opts.input && (IN_PROCESS_CLI_SCRIPTS.has(norm) || IN_PROCESS_CLI_SCRIPTS.has(norm.replace(/^scripts\//, '')))) {
+  if (!opts.input && !opts.forceSubprocess && !opts.killSignal && (IN_PROCESS_CLI_SCRIPTS.has(norm) || IN_PROCESS_CLI_SCRIPTS.has(norm.replace(/^scripts\//, '')))) {
     const inProc = await execCliInProcess(join(SKILL_ROOT, scriptRel), args, opts)
     if (inProc) return inProc
   }

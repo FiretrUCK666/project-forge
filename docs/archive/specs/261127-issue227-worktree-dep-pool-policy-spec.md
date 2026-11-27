@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 多 Worktree 三类并发依赖池、Windows 批处理硬化与策略单向门升级
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-28
@@ -11,9 +11,9 @@ branch: feat/worktree-dep-pool-policy
 owner: plan-c-master
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-c-r2, round=2, sha=0750990a9cc5, summary=R2 verified all 4 R1 major findings closed: worktree-dep-pool.mjs removeReadOnlyTreeSync (Windows NTFS chmod 0o777/0o666 before rmSync); exec.mjs Layer-1 direct node for npm/pnpm/npx/yarn .cmd + Layer-2 precise metachar block allowing Program Files (x86) & gh.cmd + execSafe try/catch no-throw; fixtures-w6c-harness-gates.mjs & injections-data-core/gates aligned; flow.mjs in scope and hooks kept out of 788L flow-lifecycle.mjs.)"
-related_prd: ../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
+related_prd: ../../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
 related_todo: ../todo/261127-issue227-worktree-dep-pool-policy-todo.md
 high_risk_paths: [kit/]
 task_id: worktree-dep-pool-policy
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/worktree-dep-pool.mjs, kit/skills/dev-flow/scripts/
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（涉及 `kit/` 依赖池、命令安全边界、退出码注册与单向门策略；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-28` |
 | 分支 / Issue / PR | `feat/worktree-dep-pool-policy` / #227 / 未关联 |
 | 负责人 / 内审状态 | plan-c-master / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/todo/261127-issue227-worktree-dep-pool-policy-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/archive/todo/261127-issue227-worktree-dep-pool-policy-todo.md` |
 
 - **变更一句话**：落地 Class R / S / I 三类通用并发 Worktree 依赖引擎与仓外只读 `dep-pool`（含 Windows NTFS 递归撤只读位清理防 `EPERM`），硬化 Windows `.cmd`/`.bat` CVE-2024-27980（优先直调 `node` + 精准元字符拦截 + 维护 `execSafe` 永不抛异常契约），扩展单向门覆盖 NoSQL/API/基础设施并修复 `resolveScopedVerificationGate` 字段错位与 `intake` 写前防脏写复核。
 

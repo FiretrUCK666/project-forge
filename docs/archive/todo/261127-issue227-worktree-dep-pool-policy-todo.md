@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 多 Worktree 三类并发依赖池、Windows 批处理硬化与策略单向门升级
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-28
 issue: 227
@@ -10,10 +10,10 @@ branch: feat/worktree-dep-pool-policy
 owner: plan-c-master
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-28
 task_id: worktree-dep-pool-policy
 planned_at: 7785ef3c55cb5251cbca39c6b312b414ab4841f5
-related_prd: ../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
+related_prd: ../../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
 related_spec: ../specs/261127-issue227-worktree-dep-pool-policy-spec.md
 ---
 
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-issue227-worktree-dep-pool-policy-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-28` |
 | 分支 / 基线 | `feat/worktree-dep-pool-policy` @ `7785ef3` |
 | 任务编号 | `worktree-dep-pool-policy` |
 | 负责人 / 审批 | plan-c-master / `false` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 Issue / PR / SPEC | #227 / 未关联 / `docs/specs/261127-issue227-worktree-dep-pool-policy-spec.md` |
+| 关联 Issue / PR / SPEC | #227 / 未关联 / `docs/archive/specs/261127-issue227-worktree-dep-pool-policy-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与关联 SPEC 审批状态（需前置切片 `low-cpu-script-perf` 与 `multi-forge-platform-core` 合入后再启动）。
 
@@ -60,7 +60,7 @@ related_spec: ../specs/261127-issue227-worktree-dep-pool-policy-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，待提审合入`（C7..C9 已落地并通过 `merge-gate.mjs` 12/12 与 `verify-injections.mjs --jobs 4` 100% 实证）
+- **当前状态**：`已完成 (done)`（C7..C9 已落地并通过 `merge-gate.mjs` 12/12 与 `verify-injections.mjs --jobs 4` 100% 实证）
 - **待拍板事项**：无
 - **下一步第一件事**：执行 `flow.mjs finalize` -> `verify --mode gate` -> `submit --agent impl-c2-overnight` 提审 Wave 2 PR。
 

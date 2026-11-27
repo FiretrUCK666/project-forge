@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 零依赖 10 类图表布局引擎与避障正交路由器
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
@@ -11,9 +11,9 @@ branch: feat/multi-diagram-layout-engine
 owner: plan-studio-b
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-studio-b-r1, round=1, sha=efe524442738, summary=Wave 2 SPEC verified clean: C5..C8 1:1 with PRD/Todo, visual-layout.mjs (691L -> <=620L) and 4 new modules all <=800L, zero npm/Chrome per-render deps, backward-compatible tree/flow fields + I964 sanitizeSafeHref anchor preserved, self-contained Wave 2 CI with feature-map/architecture-map/equip sync.)"
-related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
+related_prd: ../../prd/261127-issue219-visual-studio-archify-v2-prd.md
 related_todo: ../todo/261127-issue219-multi-diagram-layout-engine-todo.md
 high_risk_paths: [kit/]
 task_id: multi-diagram-layout-engine
@@ -27,13 +27,13 @@ depends_on: [zero-token-static-analyzer]
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块布局与路由引擎重构，触及高风险路径 `kit/`；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / Issue / PR | `feat/multi-diagram-layout-engine` / #219 / 未关联 |
 | 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/todo/261127-issue219-multi-diagram-layout-engine-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/archive/todo/261127-issue219-multi-diagram-layout-engine-todo.md` |
 
 - **变更一句话**：以 MIT Clean-Room 纯 Node 18+ 模块化引擎实现 10 类图表的确定性坐标布局、端口散布 + 干线捆绑 + 避障网格 Dijkstra 正交路由，以及零浏览器依赖的纯 Node 几何自检器。
 

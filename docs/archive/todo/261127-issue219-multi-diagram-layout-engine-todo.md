@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 零依赖 10 类图表布局引擎与避障正交路由器
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
 issue: 219
@@ -10,10 +10,10 @@ branch: feat/multi-diagram-layout-engine
 owner: plan-studio-b
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-27
 task_id: multi-diagram-layout-engine
 planned_at: 76795202dbd2d328d379fbff506b7dad39753133
-related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
+related_prd: ../../prd/261127-issue219-visual-studio-archify-v2-prd.md
 related_spec: ../specs/261127-issue219-multi-diagram-layout-engine-spec.md
 ---
 
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-issue219-multi-diagram-layout-engine-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / 基线 | `feat/multi-diagram-layout-engine` @ `7679520` |
 | 任务编号 | `multi-diagram-layout-engine` |
 | 负责人 / 审批 | plan-studio-b / `false` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 Issue / PR / SPEC | #219 / 未关联 / `docs/specs/261127-issue219-multi-diagram-layout-engine-spec.md` |
+| 关联 Issue / PR / SPEC | #219 / 未关联 / `docs/archive/specs/261127-issue219-multi-diagram-layout-engine-spec.md` |
 
 - **断点恢复**：接手人先核对 Wave 1（`zero-token-static-analyzer`）是否已合入 `main` 且本切片已获批。
 
@@ -61,7 +61,7 @@ related_spec: ../specs/261127-issue219-multi-diagram-layout-engine-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（依赖 `zero-token-static-analyzer`）
+- **当前状态**：`已完成 (done)`（依赖 `zero-token-static-analyzer`）
 - **待拍板事项**：无
 - **下一步第一件事**：Wave 1 合入且本切片获批后，先编写 `scripts/dev/fixtures-visual-layout-v2.mjs` (new) 失败断言并实现 `kit/skills/lib/visual-router.mjs` (new)。
 

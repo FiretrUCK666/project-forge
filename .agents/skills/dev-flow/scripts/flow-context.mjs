@@ -8,12 +8,13 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'no
 import { dirname, join } from 'node:path'
 
 import { parseDocFilename, parseDocFrontmatter, syncDocsLifecycle } from '../../lib/docs.mjs'
-import { gitDiffNameStatusZ, gitRunBuffer, gitStatusPorcelainZ, posixPath, readTextSafe } from '../../lib/git.mjs'
-import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { listTaskLedgers, readTaskLedger, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { NON_API_CLIENT_TIERS } from '../../lib/github-client.mjs'
 import { getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
 import { syncPlanPhaseToBackend } from '../../lib/plan-sync.mjs'
-import { githubRepoFull, probeGitHubEnv } from '../../lib/platform.mjs'
+import { probePlatformEnv, resolveRemoteDescriptor, resolveRemoteTarget } from '../../lib/platform.mjs'
 
 /** 将远端读取失败归一为可追踪的稳定错误码（`no-api-channel` / `not-found` / `forbidden` 等）。 */
 export function normalizeContextFetchReason(res, error = null) {
@@ -59,14 +60,17 @@ export async function resolveReadClient({ mainRoot, remoteUrls, providerId, targ
     if (probeTier && NON_API_CLIENT_TIERS.has(probeTier)) return null
     return opts._ghProbe.client ?? null
   }
-  if (!targetRepo || providerId !== 'github') return null
+  const target = resolveRemoteTarget(remoteUrls ?? {}, { providerHint: providerId })
+  const effectiveRepo = targetRepo || target.repoSlug
+  if (!effectiveRepo || target.capabilities?.api !== true) return null
   try {
-    const ghProbe = await probeGitHubEnv({
+    const probe = await probePlatformEnv({
       cwd: mainRoot,
       remoteUrls,
+      providerHint: providerId,
       probeNetwork: true,
     })
-    return ghProbe?.client ?? null
+    return probe?.client ?? null
   } catch {
     return null
   }
@@ -378,16 +382,27 @@ export function resolvePreferredRemoteName(remotesTopology = [], preferredProvid
     ?? 'origin'
 }
 
-export function buildTargetRepoContext(role, remoteUrls, declaredRepo, topology = null) {
+export function buildTargetRepoContext(role, remoteUrls = {}, declaredRepo, topology = null, extra = {}) {
   const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
   const upstreamRaw = remoteUrls.upstream
-  const originFull = githubRepoFull(originRaw)
-  const upstreamFull = githubRepoFull(upstreamRaw)
+  const target = resolveRemoteTarget(remoteUrls, { role, declaredRepo, ...extra })
+  const originDesc = originRaw ? resolveRemoteDescriptor(originRaw) : null
+  const upstreamDesc = upstreamRaw ? resolveRemoteDescriptor(upstreamRaw) : null
+  const originFull = originDesc?.repoSlug ?? null
+  const upstreamFull = upstreamDesc?.repoSlug ?? null
   const originLower = originFull ? originFull.toLowerCase() : null
   const upstreamLower = upstreamFull ? upstreamFull.toLowerCase() : null
-  const targetRepo = role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : originFull
-  const pushRemote = topology?.origin?.name ?? (remoteUrls.origin ? 'origin' : Object.keys(remoteUrls)[0] ?? 'origin')
-  return { originFull, originLower, upstreamFull, upstreamLower, targetRepo, pushRemote }
+  const targetRepo = target.repoSlug ?? (role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : originFull)
+  const pushRemote = topology?.origin?.name ?? target.pushRemote ?? (remoteUrls.origin ? 'origin' : Object.keys(remoteUrls)[0] ?? 'origin')
+  return {
+    originFull, originLower, upstreamFull, upstreamLower, targetRepo, pushRemote,
+    providerId: target.providerId,
+    apiBaseUrl: target.apiBaseUrl,
+    mrRefPattern: target.mrRefPattern,
+    capabilities: target.capabilities,
+    isLan: Boolean(target.isLan),
+    isLocal: Boolean(target.isLocal),
+  }
 }
 
 function collectPreBindDocIssues(workRoot, docPaths) {
@@ -405,6 +420,60 @@ function collectPreBindDocIssues(workRoot, docPaths) {
     if (Number.isInteger(fmIss) && fmIss > 0) existingIssues.add(fmIss)
   }
   return { hasAnyDoc, existingIssues }
+}
+
+export async function resolveStartBaseAndStack(roots, state, opts, { effectiveExternalPr = null } = {}) {
+  let baseBranch = state.defaultBranch ?? (state.commits === 0 && state.branch && state.branch !== '(detached)' ? state.branch : null)
+  let baseSha = state.head
+  const explicitBase = String(opts.base ?? '').trim()
+  if (explicitBase) {
+    let ok = false
+    for (const cand of [`refs/heads/${explicitBase}`, `refs/remotes/origin/${explicitBase}`, explicitBase]) {
+      const sha = resolveRefShaFast(roots.gitDir, cand)
+      if (sha) { baseBranch = explicitBase; baseSha = sha; ok = true; break }
+      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
+      if (r.ok && r.stdout.trim()) { baseBranch = explicitBase; baseSha = r.stdout.trim(); ok = true; break }
+    }
+    if (!ok) throw new Error(`--base 指定的分支不存在：${explicitBase}`)
+  } else if (!baseBranch && state.commits > 0 && !opts.after && !effectiveExternalPr) {
+    return { blocked: true, code: 'BLOCKED_MISSING_DEFAULT_BRANCH', reason: '找不到可用默认分支，请先检出默认分支或显式传入 --base。' }
+  } else if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
+    for (const candRef of [`refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`]) {
+      const fastSha = resolveRefShaFast(roots.gitDir, candRef)
+      if (fastSha) { baseSha = fastSha; break }
+      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', candRef])
+      if (r.ok && r.stdout.trim()) { baseSha = r.stdout.trim(); break }
+    }
+  }
+  let stackFields = {}
+  if (opts.after) {
+    const rawAfter = String(opts.after).trim()
+    let parentLedger = null
+    try { parentLedger = readTaskLedger(roots.mainRoot, sanitizeTaskId(rawAfter)) } catch { /* branch name fallback */ }
+    if (!parentLedger) parentLedger = listTaskLedgers(roots.mainRoot, { includeTerminal: false }).find((t) => t.branch === rawAfter) ?? null
+    const parentBranch = parentLedger?.branch ?? rawAfter
+    let parentSha = resolveRefShaFast(roots.gitDir, `refs/heads/${parentBranch}`)
+    if (!parentSha) {
+      for (const cand of [`refs/heads/${parentBranch}`, parentBranch]) {
+        const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
+        if (r.ok && r.stdout.trim()) { parentSha = r.stdout.trim(); break }
+      }
+    }
+    if (!parentSha && parentLedger?.worktreePath && existsSync(join(roots.mainRoot, parentLedger.worktreePath))) {
+      const r = await gitRun(join(roots.mainRoot, parentLedger.worktreePath), ['rev-parse', 'HEAD'])
+      if (r.ok && r.stdout.trim()) parentSha = r.stdout.trim()
+    }
+    if (!parentSha) throw new Error(`找不到 --after 指定的父任务或父分支：${rawAfter}`)
+    baseBranch = parentBranch
+    baseSha = parentSha
+    stackFields = {
+      parentTaskId: parentLedger?.taskId ?? null,
+      parentBranch,
+      parentPrNumber: parentLedger?.prNumber ?? null,
+      stackTargetBase: parentLedger?.stackTargetBase ?? (state.defaultBranch ?? null),
+    }
+  }
+  return { blocked: false, baseBranch, baseSha, stackFields }
 }
 
 export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {

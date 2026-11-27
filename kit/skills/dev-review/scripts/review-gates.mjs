@@ -14,6 +14,7 @@ import { checkMermaidLabelWidth, isSharedMasterPrd } from '../../lib/docs.mjs'
 import { hasReusableGateCheck, resolveCleanReceiptKeySync, writeGateReceipt } from '../../lib/gate-receipt.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
+import { resolvePlanBootstrapDirOrder, resolvePrimaryPlanDocOrder } from '../../lib/master-criteria-sync.mjs'
 import { appendFallbackCriteriaFromTask, extractCriteriaFromBodyText } from '../../lib/plan-sync.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
@@ -183,48 +184,48 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task, { gitDir = nul
   }
 
   const sliceSpecRel = task?.privateSpecFile ?? task?.specFile ?? task?.archivedSpecFile ?? null
-  readFrom(task?.privateSpecFile)
-  readFrom(task?.specFile)
-  readFrom(task?.archivedSpecFile)
-  if (criteria.length === 0) {
-    readFrom(task?.privateTodoFile)
-    readFrom(task?.todoFile)
-    readFrom(task?.archivedTodoFile)
+  const docGroups = {
+    spec: [task?.privateSpecFile, task?.specFile, task?.archivedSpecFile],
+    todo: [task?.privateTodoFile, task?.todoFile, task?.archivedTodoFile],
+    prd: [task?.privatePrdFile, task?.prdFile, task?.archivedPrdFile],
   }
-
-  if (criteria.length === 0 && task?.privateDocsDir) {
-    const privDirAbs = join(mainRoot, task.privateDocsDir)
-    if (existsSync(privDirAbs)) {
-      try {
-        for (const name of readdirSync(privDirAbs).sort()) {
-          if (name.endsWith('.md') && !name.endsWith('-prd.md')) readFrom(posixPath(join(task.privateDocsDir, name)))
-        }
-      } catch { /* ignore */ }
+  for (const kind of resolvePrimaryPlanDocOrder(task)) {
+    if (criteria.length > 0) break
+    if (kind === 'prd') {
+      for (const prdRel of docGroups.prd.filter(Boolean)) {
+        const sharedInRepo = isSharedMasterPrd(repoRoot, prdRel, sliceSpecRel) || isSharedMasterPrd(mainRoot, prdRel, sliceSpecRel)
+        if (criteria.length > 0 && sharedInRepo) continue
+        readFrom(prdRel)
+      }
+      continue
+    }
+    for (const rel of docGroups[kind]) readFrom(rel)
+    if (kind === 'todo' && criteria.length === 0 && task?.privateDocsDir) {
+      const privDirAbs = join(mainRoot, task.privateDocsDir)
+      if (existsSync(privDirAbs)) {
+        try {
+          for (const name of readdirSync(privDirAbs).sort()) {
+            if (name.endsWith('.md') && !name.endsWith('-prd.md')) readFrom(posixPath(join(task.privateDocsDir, name)))
+          }
+        } catch { /* ignore */ }
+      }
     }
   }
 
-  // C22: 1:N 总控 PRD 不将全波未领条款注入当前切片审查包；仅当非共享 1:1 PRD 或无切片 SPEC/Todo 时读取 PRD 条款
-  if (criteria.length === 0) {
-    for (const prdRel of [task?.privatePrdFile, task?.prdFile, task?.archivedPrdFile].filter(Boolean)) {
-      const sharedInRepo = isSharedMasterPrd(repoRoot, prdRel, sliceSpecRel) || isSharedMasterPrd(mainRoot, prdRel, sliceSpecRel)
-      if (criteria.length > 0 && sharedInRepo) continue
-      readFrom(prdRel)
-    }
-  }
-
-  // planBootstrap 任务可能生成了多份 docs/(specs|todo|prd)/*.md 尚未归入单切片字段：按优先级扫描变更规划文档
+  // planBootstrap 任务可能生成了多份 docs/(prd|specs|todo)/*.md 尚未归入单切片字段：按优先级扫描变更规划文档
   if (criteria.length === 0 && task?.planBootstrap === true) {
+    const dirOrder = resolvePlanBootstrapDirOrder(task)
     const cands = (Array.isArray(task?.files) ? task.files : [])
       .map((f) => posixPath(f).replace(/^\.\//, ''))
       .filter((nf) => /^docs\/(?:specs|todo|prd)\/.*\.md$/.test(nf))
-    for (const dirRel of ['docs/specs', 'docs/todo', 'docs/prd']) {
+    for (const dirRel of dirOrder) {
       for (const root of [repoRoot, mainRoot].filter(Boolean)) {
         const dirAbs = join(root, dirRel)
         if (!existsSync(dirAbs)) continue
         try { for (const n of readdirSync(dirAbs).sort()) if (n.endsWith('.md')) cands.push(`${dirRel}/${n}`) } catch { /* ignore */ }
       }
     }
-    const ordered = ['docs/specs/', 'docs/todo/', 'docs/prd/'].flatMap((pfx) => cands.filter((p) => p.startsWith(pfx)))
+    const ordered = dirOrder.flatMap((dir) => cands.filter((p) => p.startsWith(`${dir}/`)))
     for (const cand of [...new Set(ordered)]) { readFrom(cand); if (criteria.length > 0) break }
   }
 

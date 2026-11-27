@@ -30,7 +30,8 @@ export const INJECTIONS_GATES = [
   {
     id: 'I109',
     what: 'flow start 忽略 --base（新任务从落后几十个提交的主线起头）',
-    file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
+    file: 'kit/skills/dev-flow/scripts/flow-context.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-context.mjs'],
     from: "  const explicitBase = String(opts.base ?? '').trim()",
     to: "  const explicitBase = ''",
     expect: 'flow start 能指定基线分支',

@@ -49,6 +49,12 @@ export const BUILTIN_PROVIDER_IDS = Object.freeze([
   'gitea',
 ])
 
+/** 托管平台变更提案（PR / MR）模板候选路径单源（按优先级查找）。 */
+export const PR_TEMPLATE_PATHS = Object.freeze([
+  '.github/pull_request_template.md',
+  '.gitlab/merge_request_templates/Default.md',
+])
+
 export const GENERIC_GIT_PROVIDER = Object.freeze({
   id: 'generic-git',
   label: 'Generic Git Remote',

@@ -5,13 +5,13 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块）。
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
   canonicalPath, gitRun, isInsideDir, posixPath, readJsonSafe, readTextSafe, samePath,
-  sha256Text, writeJsonAtomic,
+  sha256File, sha256Text, writeJsonAtomic,
 } from './git.mjs'
 import { evaluateTextSubstance } from './evidence-substance.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
@@ -535,4 +535,96 @@ export async function syncVerifyCacheOnMerge({
 
   if (dirty) writeJsonAtomic(resolveVerifyCachePath(gitCommonDir, mainRoot), cache)
   return { promoted, skipped }
+}
+
+/** 仓外 flow 状态根路径：`{gitCommonDir}/project-forge-flow/`（非 Git 回退 tmpdir 哈希目录）。 */
+export function resolveFlowStateRoot(gitCommonDir, mainRoot = process.cwd()) {
+  if (gitCommonDir) return join(gitCommonDir, 'project-forge-flow')
+  const hash = sha256Text(canonicalPath(mainRoot)).slice(0, 12)
+  return join(tmpdir(), 'project-forge-flow', hash)
+}
+
+/** 仓外实证附件根目录：`{gitCommonDir}/project-forge-flow/artifacts/`。 */
+export function resolveFlowArtifactsRoot(gitCommonDir, mainRoot = process.cwd()) {
+  return join(resolveFlowStateRoot(gitCommonDir, mainRoot), 'artifacts')
+}
+
+/** 单任务仓外实证附件目录：`{gitCommonDir}/project-forge-flow/artifacts/{taskId}`。 */
+export function resolveTaskArtifactsDir(gitCommonDir, taskId, mainRoot = process.cwd()) {
+  const safeId = sanitizeTaskId(taskId || 'default')
+  return join(resolveFlowArtifactsRoot(gitCommonDir, mainRoot), safeId)
+}
+
+/** 严格前缀校验：仅允许操作 `{gitCommonDir}/project-forge-flow/artifacts/{taskId}` 及其子项，严防路径遍历误删。 */
+export function isSafeTaskArtifactPath(candidateAbs, gitCommonDir, taskId, mainRoot = process.cwd()) {
+  if (!candidateAbs || !taskId) return false
+  const expected = canonicalPath(resolveTaskArtifactsDir(gitCommonDir, taskId, mainRoot))
+  const artifactsRoot = canonicalPath(resolveFlowArtifactsRoot(gitCommonDir, mainRoot))
+  const cand = canonicalPath(candidateAbs)
+  if (samePath(cand, artifactsRoot)) return false
+  if (samePath(cand, expected)) return true
+  const rel = relative(expected, cand)
+  return Boolean(rel && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/** 确保单任务仓外实证附件目录存在，先经严格前缀校验。 */
+export function ensureTaskArtifactsDir(gitCommonDir, taskId, mainRoot = process.cwd()) {
+  const safeId = sanitizeTaskId(taskId || 'default')
+  const dir = resolveTaskArtifactsDir(gitCommonDir, safeId, mainRoot)
+  if (!isSafeTaskArtifactPath(dir, gitCommonDir, safeId, mainRoot)) {
+    throw new Error(`UNSAFE_ARTIFACT_PATH: 拒绝创建仓外实证附件前缀之外的目录 (${dir})`)
+  }
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/** 将真实非空常规文件暂存至 `{gitCommonDir}/project-forge-flow/artifacts/{taskId}/`，绝不写入 Git 跟踪树。 */
+export function stageTaskArtifact(gitCommonDir, taskId, srcPath, mainRoot = process.cwd(), { maxBytes = 50 * 1024 * 1024 } = {}) {
+  const raw = String(srcPath ?? '').trim()
+  if (!raw) return { ok: false, code: 'BLOCKED_ARTIFACT_INVALID', reason: '实证附件路径为空。' }
+  const srcAbs = isAbsolute(raw) ? resolve(raw) : resolve(mainRoot, raw)
+  let st
+  try { st = statSync(srcAbs) } catch { return { ok: false, code: 'BLOCKED_ARTIFACT_MISSING', reason: `实证附件不存在：${raw}` } }
+  if (!st.isFile() || st.size <= 0 || st.size > maxBytes) {
+    return { ok: false, code: 'BLOCKED_ARTIFACT_INVALID', reason: `实证附件无效（非常规文件、空文件或超上限）：${raw}` }
+  }
+  const sha256Prefix = String(sha256File(srcAbs) ?? '').slice(0, 12)
+  const dir = ensureTaskArtifactsDir(gitCommonDir, taskId, mainRoot)
+  if (isSafeTaskArtifactPath(srcAbs, gitCommonDir, taskId, mainRoot) && !samePath(canonicalPath(srcAbs), canonicalPath(dir))) {
+    return { ok: true, stagedPath: posixPath(srcAbs), relName: basename(srcAbs), bytes: st.size, sha256Prefix, copied: false }
+  }
+  const safeBase = basename(srcAbs).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+/, '') || 'artifact.bin'
+  const destName = `${sha256Prefix || 'noid'}-${safeBase}`
+  const destAbs = join(dir, destName)
+  if (!isSafeTaskArtifactPath(destAbs, gitCommonDir, taskId, mainRoot)) {
+    throw new Error(`UNSAFE_ARTIFACT_PATH: 目标暂存路径越界 (${destAbs})`)
+  }
+  let copied = false
+  if (!existsSync(destAbs)) {
+    copyFileSync(srcAbs, destAbs)
+    copied = true
+  }
+  return { ok: true, stagedPath: posixPath(destAbs), relName: destName, bytes: st.size, sha256Prefix, copied }
+}
+
+/** 安全销毁单任务仓外实证附件目录（`flow cleanup` / `flow abort` 联动，强校前缀防越界）。 */
+export function destroyTaskArtifactsDir({ gitCommonDir, mainRoot = process.cwd(), taskId } = {}) {
+  if (!taskId) return { destroyed: false, dir: null, fileCount: 0 }
+  const safeId = sanitizeTaskId(taskId)
+  const dir = resolveTaskArtifactsDir(gitCommonDir, safeId, mainRoot)
+  if (!isSafeTaskArtifactPath(dir, gitCommonDir, safeId, mainRoot)) {
+    throw new Error(`UNSAFE_ARTIFACT_PATH: 拒绝删除仓外实证附件前缀之外的目录 (${dir})`)
+  }
+  if (!existsSync(dir)) return { destroyed: false, dir, fileCount: 0 }
+  let fileCount = 0
+  const walkCount = (cur) => {
+    for (const ent of readdirSync(cur, { withFileTypes: true })) {
+      const p = join(cur, ent.name)
+      if (ent.isDirectory()) walkCount(p)
+      else fileCount += 1
+    }
+  }
+  try { walkCount(dir) } catch { /* ignore */ }
+  rmSync(dir, { recursive: true, force: true })
+  return { destroyed: true, dir, fileCount }
 }

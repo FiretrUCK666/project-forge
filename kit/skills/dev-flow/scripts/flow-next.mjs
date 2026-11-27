@@ -18,7 +18,7 @@ import { buildSessionOrientation } from '../../lib/session-orient.mjs'
 import { readSessionState } from '../../lib/session-state.mjs'
 import { getVisualBriefSummary } from '../../lib/visual-brief.mjs'
 import { collectTaskLivenessBuckets, ensureReviewToken, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
+import { detectDeclaredRepo, detectGitModeMarkers, isVerifiedTier, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { computeSignalFingerprint, readSignalsJsonl } from '../../lib/signals.mjs'
 import { evaluateNextState } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, detectRemoteDriftWarnings, getChangedFiles } from './flow-context.mjs'
@@ -33,9 +33,10 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
-  if (!targetRepo || ledger.role === 'local-only' || ledger.role === 'generic-git') {
-    return { rehydrated: false, reason: 'no-github-target' }
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
+  const { targetRepo } = targetCtx
+  if (!targetRepo || ledger.role === 'local-only' || ledger.role === 'generic-git' || targetCtx.capabilities?.api !== true) {
+    return { rehydrated: false, reason: 'no-api-target' }
   }
   if (ledger.role === 'clone-readonly') {
     return { rehydrated: false, reason: 'write-auth-required' }
@@ -44,7 +45,7 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
   const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const ghClient = opts._ghClient ?? ghProbe.client
   const tier = ghProbe?.env?.trackB?.tier ?? (opts._ghClient?.tier ?? null)
-  const hasWriteChannel = tier === 'gh-cli' || tier === 'node-https-token' || Boolean(opts._ghClient)
+  const hasWriteChannel = isVerifiedTier(tier) || Boolean(opts._ghClient)
   if (!hasWriteChannel || typeof ghClient?.listComments !== 'function') {
     return { rehydrated: false, reason: 'write-auth-required' }
   }

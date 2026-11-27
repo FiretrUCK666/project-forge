@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assertNoAsciiControlChars } from './cli.mjs'
+import { extractCriteria } from './criteria-lock.mjs'
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { evaluateMasterPrdClosureState } from './doc-substantive.mjs'
 import { evaluateObservationSubstance, formatArtifactEvidenceLines } from './empirical-artifacts.mjs'
@@ -15,6 +16,12 @@ import { EXIT } from './exit-codes.mjs'
 import { formatWorkTitle } from './escalation.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { extractHeadlessSummary } from './markdown-scan.mjs'
+import {
+  renderCriteriaProgressTable,
+  resolvePrimaryPlanDocCandidates,
+  resolvePrimaryPlanDocOrder,
+} from './master-criteria-sync.mjs'
+import { PR_TEMPLATE_PATHS } from './platform-registry.mjs'
 
 /**
  * 校验待发送到 GitHub 的多节 Markdown 正文未被折叠成单行/双行。
@@ -174,14 +181,11 @@ export function resolveReadablePrTitleWithSource(repoRoot, ledger, explicitTitle
   return { title: resolveReadablePrTitle(repoRoot, ledger, null), titleSource: 'derived' }
 }
 
-/** 优先从关联 SPEC / Todo / Issue 提取可读标题并附加工作类型前缀，避免裸拼英文 taskId。 */
+/** 优先按 `resolvePrimaryPlanDocOrder` 从关联规划文档（planBootstrap 优先 PRD，常规切片优先 SPEC/Todo）或 Issue 提取可读标题。 */
 export function resolveReadablePrTitle(repoRoot, ledger, explicitTitle = null) {
   const manual = String(explicitTitle ?? '').trim()
   if (manual) return formatWorkTitle(manual, ledger?.caseType)
-  const docCandidates = [
-    ledger?.specFile, ledger?.archivedSpecFile,
-    ledger?.todoFile, ledger?.archivedTodoFile,
-  ].filter(Boolean)
+  const docCandidates = resolvePrimaryPlanDocCandidates(ledger)
   if (repoRoot) {
     for (const rel of docCandidates) {
       const abs = join(repoRoot, rel)
@@ -433,11 +437,16 @@ export function hydratePrTemplateBody({
   const pfTag = `<!-- pf-state:${JSON.stringify({ taskId, action: 'pr-body', branch: ledger?.branch ?? null, headSha: currentHead || null })} -->`
   const readableTitle = resolveReadablePrTitle(repoRoot, ledger)
 
-  const specGoalBullets = extractMeaningfulBullets(extractMarkdownSectionText(specText, [/(?:目标|范围|概述|要解决的问题|背景|summary|overview|goal|motivation|background|context|problem)/i]), 3)
-  const todoOutcomeBullets = extractMeaningfulBullets(extractMarkdownSectionText(todoText, [/(?:完成后的记录|实际结果|成果|results?|outcomes?|summary|notes)/i]), 3)
+  const docByKind = { prd: prdText, spec: specText, todo: todoText }
+  const orderedTexts = resolvePrimaryPlanDocOrder(ledger).map((k) => docByKind[k]).filter(Boolean)
+  const primaryGoalDoc = orderedTexts[0] ?? ''
+  const specGoalBullets = extractMeaningfulBullets(extractMarkdownSectionText(primaryGoalDoc, [/(?:目标|范围|概述|要解决的问题|背景|产品目标|summary|overview|goal|motivation|background|context|problem)/i]), 3)
+  const todoOutcomeBullets = ledger?.planBootstrap === true
+    ? []
+    : extractMeaningfulBullets(extractMarkdownSectionText(todoText, [/(?:完成后的记录|实际结果|成果|results?|outcomes?|summary|notes)/i]), 3)
   const headlessFallback = (todoOutcomeBullets.length === 0 && specGoalBullets.length === 0)
     ? (() => {
-        const rawDoc = specText || todoText
+        const rawDoc = primaryGoalDoc || specText || todoText || prdText
         const bodyBullets = extractMeaningfulBullets(parseDocFrontmatter(rawDoc).body || rawDoc, 2)
         if (bodyBullets.length > 0) return bodyBullets
         const hl = extractHeadlessSummary(rawDoc, { maxLength: 180 })
@@ -445,12 +454,21 @@ export function hydratePrTemplateBody({
       })()
     : []
   const effectiveGoalBullets = specGoalBullets.length > 0 ? specGoalBullets : headlessFallback
+  const primaryCriteria = (() => {
+    for (const txt of orderedTexts) {
+      const list = extractCriteria(txt)
+      if (list.length > 0) return list
+    }
+    return []
+  })()
+  const criteriaProgress = renderCriteriaProgressTable(primaryCriteria)
   const effectiveImpl = String(implementerDisplay ?? actorDisplay ?? '').trim()
   const implFragment = effectiveImpl ? `，实施人：${effectiveImpl}` : ''
   const summaryText = [
     `- **${readableTitle}**（任务 \`${taskId}\`${implFragment}，涉及 ${changedFiles.length} 个文件）`,
     ...todoOutcomeBullets.map((b) => `- ${b}`),
     ...(todoOutcomeBullets.length === 0 ? effectiveGoalBullets.map((b) => `- ${b}`) : []),
+    ...(criteriaProgress.block ? ['', `- **验收进度**：${criteriaProgress.summaryLine}`, '', criteriaProgress.block] : []),
   ].join('\n')
   const whyText = [
     ...(effectiveGoalBullets.length > 0 ? effectiveGoalBullets.slice(0, 2).map((b) => `- ${b}`) : [`- 完成任务 \`${taskId}\` 并对齐工程契约与文档。`]),
@@ -473,8 +491,11 @@ export function hydratePrTemplateBody({
     : '- 独立审查 `fail` 为空且 CI 绿灯后由审查者合入（审查结论以独立评论记录；若含弱化门禁须人工确认）'
 
   const verifyPassed = Boolean(ledger?.lastVerifyExitCode === 0 && (!currentHead || ledger?.verifiedHead === currentHead))
-  const tplPath = repoRoot ? join(repoRoot, '.github', 'pull_request_template.md') : ''
-  const tplRaw = tplPath && existsSync(tplPath) ? readTextSafe(tplPath) : null
+  const templateCandidates = repoRoot
+    ? PR_TEMPLATE_PATHS.map((rel) => join(repoRoot, ...rel.split('/')))
+    : []
+  const tplPath = templateCandidates.find((p) => existsSync(p)) ?? ''
+  const tplRaw = tplPath ? readTextSafe(tplPath) : null
   if (!tplRaw) {
     // 兜底正文用与模板同一份标题常量分段：模板缺段时不该另起一套说法。
     const fallbackRendered = [

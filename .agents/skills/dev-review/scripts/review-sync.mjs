@@ -10,8 +10,8 @@ import { buildEscalationIssuePayload, classifyEscalationTier } from '../../lib/e
 import { gitRun, posixPath } from '../../lib/git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
-  detectDeclaredRepo, getHostingProvider, githubRepoFull,
-  parsePrNumber, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
+  detectDeclaredRepo, getHostingProvider, isVerifiedTier,
+  parsePrNumber, parseRemoteUrls, probeForWrite, resolveIdentityLayers, resolveRemoteTarget,
 } from '../../lib/platform.mjs'
 import { extractCriteriaFromBodyText } from '../../lib/plan-sync.mjs'
 import { computeSignalFingerprint, inferDefectClass, inferSignalModule } from '../../lib/signals.mjs'
@@ -360,9 +360,10 @@ export async function syncReviewToGitHub({
     const hasRemote = Boolean(remoteRes.ok && remoteRes.stdout.trim())
     const remoteUrls = hasRemote ? parseRemoteUrls(remoteRes.stdout) : {}
     const declaredRepo = detectDeclaredRepo(mainRoot)
-    const originFull = hasRemote ? githubRepoFull(remoteUrls.origin ?? Object.values(remoteUrls)[0]) : null
-    const upstreamFull = hasRemote ? githubRepoFull(remoteUrls.upstream) : null
-    const targetRepo = (ledger.role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : (originFull ?? declaredRepo)) ?? null
+    const remoteTarget = hasRemote
+      ? resolveRemoteTarget(remoteUrls, { role: ledger.role, declaredRepo, providerHint: ledger.providerId })
+      : { providerId: 'none', repoSlug: null, capabilities: { api: false, mention: false } }
+    const targetRepo = remoteTarget.repoSlug ?? declaredRepo ?? null
 
     const ghProbe = hasRemote
       ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls })))
@@ -370,8 +371,10 @@ export async function syncReviewToGitHub({
     const ghClient = opts._ghClient ?? ghProbe?.client ?? null
     const tier = ghClient?.tier ?? ghProbe?.env?.trackB?.tier ?? 'offline'
     const ghLogin = ghProbe?.env?.trackB?.login
-    const fallbackProvider = ledger.role === 'local-only' ? 'none' : (targetRepo ? 'github' : 'generic-git')
-    const providerCaps = getHostingProvider(ledger.providerId || fallbackProvider)?.capabilities ?? { mention: false }
+    const effectiveProvider = ledger.providerId && ledger.providerId !== 'none'
+      ? ledger.providerId
+      : (remoteTarget.providerId !== 'none' ? remoteTarget.providerId : (ledger.role === 'local-only' ? 'none' : 'generic-git'))
+    const providerCaps = getHostingProvider(effectiveProvider)?.capabilities ?? remoteTarget.capabilities ?? { mention: false }
     const revLayers = resolveIdentityLayers({ ghLogin, ghTier: tier, explicitAgent: reviewerId })
     const implLayers = resolveIdentityLayers({
       ledgerAccount: ledger.account,
@@ -381,16 +384,12 @@ export async function syncReviewToGitHub({
     const reviewerDisplay = formatAttribution({ ...revLayers, capabilities: providerCaps })
     const implementerDisplay = formatAttribution({ ...implLayers, capabilities: providerCaps })
     const backend = createTaskBackend({
-      role: ledger.role, providerId: ledger.providerId, targetRepo,
+      role: ledger.role, providerId: effectiveProvider, targetRepo,
       client: ghClient, mainRoot, gitDir: opts.gitDir,
     })
 
-    const canFetchRemoteIssue = Boolean(
-      hasRemote
-      && targetRepo
-      && (opts._ghClient || ghProbe?.env?.providerId === 'github')
-      && (tier === 'gh-cli' || tier === 'node-https-token'),
-    )
+    const hasApiSupport = Boolean(opts._ghClient || providerCaps?.api === true || remoteTarget.capabilities?.api === true)
+    const canFetchRemoteIssue = Boolean(hasRemote && targetRepo && hasApiSupport && isVerifiedTier(tier))
     const parsedCriteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger, { gitDir: opts.gitDir })
     const criteria = canFetchRemoteIssue
       ? await hydrateCriteriaFromBackend(parsedCriteria, { backend, repo: targetRepo, issueNums })
@@ -448,11 +447,11 @@ export async function syncReviewToGitHub({
     if (!targetRepo) {
       return { synced: false, labelSynced: false, labelWarnings: [], skipped: true, reason: 'no-github-repo', delegatedPayloads, hint: '非 GitHub 远端，审查结论已写入本地账本。' }
     }
-    if ((!opts._ghClient && ghProbe?.env?.providerId !== 'github') || (tier !== 'gh-cli' && tier !== 'node-https-token')) {
+    if ((!opts._ghClient && !hasApiSupport) || !isVerifiedTier(tier)) {
       return {
         synced: false, labelSynced: false, labelWarnings: [], offlineOrNoCreds: true, tier, targetRepo,
         reason: `offline-or-no-credentials(${tier})`, delegatedPayloads,
-        hint: `离线或无可用 GitHub 凭据（tier=${tier}），已写入本地账本并输出规范化 delegatedPayloads 供宿主原样双写。`,
+        hint: `离线或无可用托管平台凭据（tier=${tier}），已写入本地账本并输出规范化 delegatedPayloads 供宿主原样双写。`,
       }
     }
 

@@ -392,6 +392,9 @@ function appendRemoteAndAuthWizard(lines, facts) {
     || auth.details?.canPushSsh
     || auth.apiChannel?.tier === 'gh-cli'
     || auth.apiChannel?.tier === 'node-https-token'
+    || auth.apiChannel?.tier === 'provider-api'
+    || auth.apiChannel?.tier === 'api-token'
+    || auth.apiChannel?.tier === 'authenticated'
     || auth.apiChannel?.tier === 'half-duplex',
   )
   const needsAuthWizard = Boolean(noRemote || (auth.probed && !hasAnyPushAuth))
@@ -427,7 +430,7 @@ function appendRemoteAndAuthWizard(lines, facts) {
     lines.push(`- **SSH 与 HTTP(S) 凭据配置路线**（${isGeneric ? '通用托管平台按所用协议选一条' : '按所用协议与托管平台任选一条'}）：`)
     lines.push('  1. **`SSH Ed25519` 路线（通用 SSH 远端与 GitHub 均适用）**：`ssh-keygen -t ed25519 -C "<你的邮箱>"`（macOS 可执行 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` 并配置 `UseKeychain yes`）-> 将公钥 `~/.ssh/id_ed25519.pub` 写入托管账户 SSH Keys -> 核对主机指纹后运行 `ssh -T git@<host>` 校验 -> `git remote add origin git@<host>:<owner>/<repo>.git`。')
     lines.push('  2. **`HTTP(S) + PAT + 系统凭据管理器` 路线（通用 HTTP(S) 远端与 GitHub 均适用）**：创建最小权限访问令牌（GitHub 选 Fine-grained PAT，仅勾选 `Contents` / `Pull requests`），交由系统 `credential.helper` 保存（macOS Keychain / Windows GCM / Linux 凭据库），**严禁把明文令牌写进 `.git/config` 远端 URL**。')
-    if (!isGeneric) {
+    if (git.providerId === 'github' || !hasRemote) {
       lines.push('  3. **`GitHub gh CLI` 路线（GitHub 远端可选）**：`gh auth login` -> `gh auth setup-git` -> `gh repo create <name> --private --source=. --push`。')
     }
   }

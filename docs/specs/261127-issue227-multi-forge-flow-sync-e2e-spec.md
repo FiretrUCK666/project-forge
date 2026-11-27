@@ -4,10 +4,10 @@ title: 全业务流去 GitHub 硬假设、实证附件闭环、同步缺陷根�
 status: approved
 tier: L3
 created: 2026-11-27
-updated: 2026-11-27
+updated: 2026-11-28
 issue: 227
 pr: null
-branch: feat/multi-forge-worktree-perf-v1
+branch: feat/multi-forge-flow-sync-e2e
 owner: plan-c-master
 plan_mode: interactive
 approved: true
@@ -29,8 +29,8 @@ scope_files: [kit/skills/lib/master-criteria-sync.mjs, kit/skills/dev-flow/scrip
 | --- | --- |
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（全业务流多平台切换、实证附件生命周期、三大同步缺陷根治与 Milestone C 终态收口；未 `approved` 前不编码） |
-| 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/multi-forge-worktree-perf-v1` / #227 / 未关联 |
+| 创建 / 更新 | `2026-11-27` / `2026-11-28` |
+| 分支 / Issue / PR | `feat/multi-forge-flow-sync-e2e` / #227 / 未关联 |
 | 负责人 / 内审状态 | plan-c-master / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
 | 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/todo/261127-issue227-multi-forge-flow-sync-e2e-todo.md` |
@@ -154,10 +154,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C10: 全量消除 `kit/skills/dev-flow/scripts/flow-*.mjs`、`kit/skills/dev-review/scripts/review-{pr,sync}.mjs`、`kit/skills/lib/plan-sync.mjs`（L508-520）、`kit/skills/lib/escalation.mjs`、`kit/skills/lib/task-graph.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `scripts/survey.mjs`、`scripts/review.mjs`、`scripts/equip-ci.mjs`、`scripts/lib/navigation.mjs`、`scripts/lib/render.mjs`（L393）中的 `github`/`gh` 硬假设，统一切换为 `resolveRemoteTarget`、`mrRefPattern` 与 10 键 `capabilities` 驱动。
-- [ ] C11: 落地仓外实证附件目录 `<gitCommonDir>/project-forge-flow/artifacts/<taskId>/` 生命周期（`verify-state.mjs` 安全前缀原语 + `empirical-artifacts.mjs` 5 列统一渲染与 `stageAndSyncTaskArtifacts` + `flow-cleanup.mjs` `cleanup`/`abort` 联动销毁，零入 Git），对接 `capabilities.uploadAttachment`（GitLab/GitCode 原生 `/uploads` 内嵌图且缓存防重传，GitHub/Gitee/Gitea/LAN 直接降级输出文件名 + 字节数 + 校验指纹 + 观察摘要，不询问图床），并确保 `flow-lifecycle.mjs`/`review-empirical.mjs` 瘦身至 `<= 780` 行。
-- [ ] C12: 新增独立单源模块 `kit/skills/lib/master-criteria-sync.mjs` (new) 根治 3 大同步缺陷并统一 PR/Issue 详单：（1）阻断 `flow-inspect.mjs` L616-617 与 L755-763 两处 `planBootstrap` 自动挂载子切片 SPEC/Todo（并瘦身 `flow-inspect.mjs <= 770` 行），`resolvePrimaryPlanDocOrder` 在 `flow-inspect`/`pr-template-hydrate`/`review-gates`/`handoff-package` 统一优先 `prdFile`（修 PR `#215`）；（2）`collectMasterIssueCriteriaState` 迁入 `master-criteria-sync.mjs` 并增 `includeSelf = false` 默认开关（非终态 `plan-backfill`/`approve` 仅聚合已归档兄弟切片绝不误勾当前未完成切片，`flow-merge` 终态传 `includeSelf: true`），`syncIssueCriteriaCheckboxes` 默认 `preserveChecked = false`（仅非终态 `plan-sync` 显式传 `preserveChecked: true`，完整兼容 `scripts/dev/fixtures-issue-checklist-sync.mjs` 与 `clarify --drop-criterion`，修 Issue `#219`）；（3）PR 详单表格（变更摘要 + 验收清单进度表 + 门禁与 5 列实证附件表，对齐 `scripts/dev/fixtures-empirical-cycle.mjs`、目标仓 GitLab 默认 MR 模板（`.gitlab` 下 `merge_request_templates` 目录 `Default.md`）与 `PR_SECTION_TITLES`）与 Issue `pf:plan-summary` 单源一致。
-- [ ] C13: 新增 `scripts/dev/fixtures-multi-platform.mjs` (new) 与 `scripts/dev/injections-data-multi-platform.mjs` (new)（纯 Node HTTP Mock Forge + `git init --bare` 全覆盖 GitLab v4 `/uploads` & `refs/merge-requests/1/head` 真 SHA、GitCode 4 字节守卫 & 客户端过滤、Gitee/Gitea 降级、LAN IP / 离线四态核验），提供零硬编码凭据的 opt-in 一次性私有测试仓入口 `scripts/dev/live-forge-e2e.mjs` (new)，并同步 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md` 与 `node scripts/equip.mjs .`，全量 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
+- [x] C10: 全量消除 `kit/skills/dev-flow/scripts/flow-*.mjs`、`kit/skills/dev-review/scripts/review-{pr,sync}.mjs`、`kit/skills/lib/plan-sync.mjs`（L508-520）、`kit/skills/lib/escalation.mjs`、`kit/skills/lib/task-graph.mjs`、`kit/skills/lib/workflow-policy-next.mjs` 与 `scripts/survey.mjs`、`scripts/review.mjs`、`scripts/equip-ci.mjs`、`scripts/lib/navigation.mjs`、`scripts/lib/render.mjs`（L393）中的 `github`/`gh` 硬假设，统一切换为 `resolveRemoteTarget`、`mrRefPattern` 与 10 键 `capabilities` 驱动。
+- [x] C11: 落地仓外实证附件目录 `<gitCommonDir>/project-forge-flow/artifacts/<taskId>/` 生命周期（`verify-state.mjs` 安全前缀原语 + `empirical-artifacts.mjs` 5 列统一渲染与 `stageAndSyncTaskArtifacts` + `flow-cleanup.mjs` `cleanup`/`abort` 联动销毁，零入 Git），对接 `capabilities.uploadAttachment`（GitLab/GitCode 原生 `/uploads` 内嵌图且缓存防重传，GitHub/Gitee/Gitea/LAN 直接降级输出文件名 + 字节数 + 校验指纹 + 观察摘要，不询问图床），并确保 `flow-lifecycle.mjs`/`review-empirical.mjs` 瘦身至 `<= 780` 行。
+- [x] C12: 新增独立单源模块 `kit/skills/lib/master-criteria-sync.mjs` (new) 根治 3 大同步缺陷并统一 PR/Issue 详单：（1）阻断 `flow-inspect.mjs` L616-617 与 L755-763 两处 `planBootstrap` 自动挂载子切片 SPEC/Todo（并瘦身 `flow-inspect.mjs <= 770` 行），`resolvePrimaryPlanDocOrder` 在 `flow-inspect`/`pr-template-hydrate`/`review-gates`/`handoff-package` 统一优先 `prdFile`（修 PR `#215`）；（2）`collectMasterIssueCriteriaState` 迁入 `master-criteria-sync.mjs` 并增 `includeSelf = false` 默认开关（非终态 `plan-backfill`/`approve` 仅聚合已归档兄弟切片绝不误勾当前未完成切片，`flow-merge` 终态传 `includeSelf: true`），`syncIssueCriteriaCheckboxes` 默认 `preserveChecked = false`（仅非终态 `plan-sync` 显式传 `preserveChecked: true`，完整兼容 `scripts/dev/fixtures-issue-checklist-sync.mjs` 与 `clarify --drop-criterion`，修 Issue `#219`）；（3）PR 详单表格（变更摘要 + 验收清单进度表 + 门禁与 5 列实证附件表，对齐 `scripts/dev/fixtures-empirical-cycle.mjs`、目标仓 GitLab 默认 MR 模板（`.gitlab` 下 `merge_request_templates` 目录 `Default.md`）与 `PR_SECTION_TITLES`）与 Issue `pf:plan-summary` 单源一致。
+- [x] C13: 新增 `scripts/dev/fixtures-multi-platform.mjs` (new) 与 `scripts/dev/injections-data-multi-platform.mjs` (new)（纯 Node HTTP Mock Forge + `git init --bare` 全覆盖 GitLab v4 `/uploads` & `refs/merge-requests/1/head` 真 SHA、GitCode 4 字节守卫 & 客户端过滤、Gitee/Gitea 降级、LAN IP / 离线四态核验），提供零硬编码凭据的 opt-in 一次性私有测试仓入口 `scripts/dev/live-forge-e2e.mjs` (new)，并同步 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md` 与 `node scripts/equip.mjs .`，全量 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -172,6 +172,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：全量完成 `C10..C13`：（1）将 `flow-*.mjs`、`review-{pr,sync,gates,empirical}.mjs`、`plan-sync.mjs`、`escalation.mjs`、`task-graph.mjs`、`workflow-policy-next.mjs` 与 `scripts/{survey,lib/navigation,lib/render}.mjs` 切换至 `resolveRemoteTarget`、`mrRefPattern`、`isVerifiedTier` 与 10 键 `capabilities` 驱动；（2）在 `verify-state.mjs` 与 `empirical-artifacts.mjs` 落地仓外 `<gitCommonDir>/project-forge-flow/artifacts/<taskId>/` 生命周期（`flow-cleanup.mjs` `cleanup`/`abort` 联动销毁）、`capabilities.uploadAttachment` 上传去重缓存与 5 列统一实证附件表；（3）新增独立 `kit/skills/lib/master-criteria-sync.mjs`（260 行，保持 `doc-slice-graph.mjs` 713 行不变）根治 PR `#215` 与 Issue `#219` 并统一 PR/Issue 详单（含 `PR_TEMPLATE_PATHS` 单源兼容 `.github/pull_request_template.md` 与 GitLab 默认 MR 模板），全部紧文件瘦身稳压 `<= 775` 行（`flow-inspect` 760L、`flow-lifecycle` 757L、`flow-merge` 726L、`review-empirical` 752L）；（4）新增 `scripts/dev/fixtures-multi-platform.mjs`（8 项纯 Node HTTP Mock Forge + `git init --bare` E2E）、`scripts/dev/injections-data-multi-platform.mjs`（`I_MP1..I_MP8`）与 opt-in 环境变量脚本 `scripts/dev/live-forge-e2e.mjs`，并完成全仓长青资产终态收口。
+- **与草案的差异**：为严守平台锁门禁，将跨平台 PR/MR 模板探测路径常量 `PR_TEMPLATE_PATHS` 收口于平台内核 `kit/skills/lib/platform-registry.mjs` 单源导出，`pr-template-hydrate.mjs` 与双语 README 保持平台品牌中性表述；`filterBootstrapAutoAttachDocs` 在存在 `docs/prd/` 引导时阻断子切片自动挂载，同时兼容无 PRD 的单切片 `--allow-plan-bootstrap` 用例。
+- **关联同步文件**：`kit/skills/lib/master-criteria-sync.mjs`、`kit/skills/lib/platform-registry.mjs`、`kit/skills/lib/platform.mjs`、`kit/skills/lib/github-client.mjs`、`kit/skills/lib/verify-state.mjs`、`kit/skills/lib/empirical-artifacts.mjs`、`kit/skills/lib/plan-sync.mjs`、`kit/skills/lib/pr-template-hydrate.mjs`、`kit/skills/lib/handoff-package.mjs`、`kit/skills/lib/escalation.mjs`、`kit/skills/lib/task-graph.mjs`、`kit/skills/lib/workflow-policy-next.mjs`、`kit/skills/dev-flow/scripts/flow-*.mjs`、`kit/skills/dev-review/scripts/review-{pr,sync,gates,empirical}.mjs`、`scripts/{survey,lib/navigation,lib/render}.mjs`、`scripts/dev/{fixtures-multi-platform,injections-data-multi-platform,live-forge-e2e,injections-data-gates,injections-data-conv-s1}.mjs`、`docs/TDD.md`、`docs/feature-map.json`、`docs/architecture-map.html`、`README.md`、`README.en.md`、`.agents/skills/`（`equip.mjs .` 全量同步）。

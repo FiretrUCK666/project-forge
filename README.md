@@ -78,7 +78,7 @@ PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 - **沙箱双环与主干隔离**：有提交历史的仓库严守主干干净——可逆迭代先入 `.worktrees/sandbox-*` 高频试错（内环实证标 `inner: true` 由外环硬拒防偷渡），拍板后 `promote` 按真实 `git diff` 确定性晋升；跨模块/单向门走 `.worktrees/impl-*` 规划评审并按依赖分波并行。
 - **禁止自审与 6 锁防死循环**：方案评审与代码审查均禁止自己审查自己；第 2 轮起全历史换人，最多 3 轮硬停损，并由同 SHA 防空转、回执绑定等 6 把锁收敛。
 - **复发 2 次下沉成规则**：同一类问题出现第 2 次，不再只靠文档提醒，由 `dev-govern` 自动复盘并下沉为结构约束或静态检查。
-- **老仓无损接入与人握不可逆开关**：保留原有 `README.md`、架构文档、CI 与自有技能。日常操作按**能不能撤回**分档：推自己的分支、开 PR 随时可撤；合并默认分支、发版、改历史与**弱化门禁**必须人点头，永不自动强推；独立审查全部通过后由审查者直接合入。
+- **老仓无损接入、多托管平台与人握不可逆开关**：保留原有 `README.md`、架构文档、CI 与自有技能，支持 GitHub、多类主流及自建/内网 Git 托管平台（内置 5 套原生 API 协议方言与 10 键能力矩阵）、`generic-git` 与纯本地仓库，并带共享依赖池与低占并行调度。日常操作按**能不能撤回**分档：推自己的分支、开 PR/MR 随时可撤；合并默认分支、发版、改历史与**弱化门禁**必须人点头，永不自动强推；独立审查全部通过后由审查者直接合入。
 
 ## 流程和日常怎么用
 
@@ -197,6 +197,7 @@ PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 | `node scripts/handoff.mjs <目录>` | 扫描引导标记与临时残留，辅助交棒清理 |
 | `node scripts/sync-toc.mjs README.md README.en.md` | 同步双语 README 的目录锚点 |
 | `node scripts/update.mjs [--check]` | 检查并原子更新压缩包副本 |
+| `node scripts/dev/live-forge-e2e.mjs` | 可选（opt-in）真机多平台一次性私有测试仓 E2E（通过 `PF_LIVE_FORGE_PROVIDER`/`PF_LIVE_FORGE_URL`/`PF_LIVE_FORGE_TOKEN` 环境变量驱动，自动销毁临时仓） |
 
 </details>
 

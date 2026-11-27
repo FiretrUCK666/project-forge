@@ -14,7 +14,7 @@ import {
   determineWorkflowPolicy, buildE2eObservation, hasRepoCiWorkflow, hasValidE2eObservationOnHead,
   readVerificationEvidence, resolveScopedVerificationGate, runLowRiskDocStaticCheck, validateE2eEvidenceText,
 } from '../../lib/workflow-policy.mjs'
-import { evaluateStoredVisualEvidence, mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
+import { evaluateStoredVisualEvidence, mergeArtifactRecords, stageAndSyncTaskArtifacts } from '../../lib/empirical-artifacts.mjs'
 import { EXIT } from './review-diff.mjs'
 import {
   buildModeTargetFlags, buildUnblockCommands, checkDirtyFaultResidueBeforeSync,
@@ -351,18 +351,8 @@ export async function handleCheckEmpirical(ctx) {
   if (pendingFault) {
     const msg = `BLOCKED_DIRTY_FAULT_RESIDUE: 审查工作位 ${posixPath(reviewRoot)} 存在未还原的故障注入残留，请先还原并运行 check-fault --phase restore。`
     return emitGateBlock({
-      opts,
-      code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-      payload: {
-        status: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-        code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-        exitCode: EXIT.FACT,
-        mode,
-        round,
-        targetRoot: posixPath(reviewRoot),
-        dirtyFiles: dirtyEntries.map((e) => e.file),
-        error: msg,
-      },
+      opts, code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
+      payload: { status: 'BLOCKED_DIRTY_FAULT_RESIDUE', code: 'BLOCKED_DIRTY_FAULT_RESIDUE', exitCode: EXIT.FACT, mode, round, targetRoot: posixPath(reviewRoot), dirtyFiles: dirtyEntries.map((e) => e.file), error: msg },
       textLines: ['BLOCKED_DIRTY_FAULT_RESIDUE', `Worktree : ${posixPath(reviewRoot)}`, `Reason   : ${msg}`],
     })
   }
@@ -439,19 +429,8 @@ export async function handleCheckEmpirical(ctx) {
       if (!staticCheck.ok) {
         const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: ${staticCheck.errors.map((e) => e?.message ?? String(e)).join('；')}`
         return emitGateBlock({
-          opts,
-          code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
-          payload: {
-            status: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
-            code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
-            exitCode: EXIT.FACT,
-            mode,
-            round,
-            headSha,
-            workspaceFingerprint: currentFingerprint,
-            errors: staticCheck.errors,
-            error: msg,
-          },
+          opts, code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
+          payload: { status: 'BLOCKED_STATIC_DOC_CHECK_FAILED', code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', exitCode: EXIT.FACT, mode, round, headSha, workspaceFingerprint: currentFingerprint, errors: staticCheck.errors, error: msg },
           textLines: ['BLOCKED_STATIC_DOC_CHECK_FAILED', msg],
         })
       }
@@ -471,21 +450,8 @@ export async function handleCheckEmpirical(ctx) {
       })
       const msg = `BLOCKED_EMPIRICAL_FAILED: 实证命令失败 (exit=${failed.exitCode}): ${failed.cmd}`
       return emitGateBlock({
-        opts,
-        code: 'BLOCKED_EMPIRICAL_FAILED',
-        payload: {
-          status: 'BLOCKED_EMPIRICAL_FAILED',
-          code: 'BLOCKED_EMPIRICAL_FAILED',
-          exitCode: EXIT.FACT,
-          mode,
-          round,
-          headSha,
-          workspaceFingerprint: currentFingerprint,
-          commands: cmdResults,
-          diagnostic: failReport.diagnostic,
-          escalatedIssue: failReport.escalation,
-          error: msg,
-        },
+        opts, code: 'BLOCKED_EMPIRICAL_FAILED',
+        payload: { status: 'BLOCKED_EMPIRICAL_FAILED', code: 'BLOCKED_EMPIRICAL_FAILED', exitCode: EXIT.FACT, mode, round, headSha, workspaceFingerprint: currentFingerprint, commands: cmdResults, diagnostic: failReport.diagnostic, escalatedIssue: failReport.escalation, error: msg },
         textLines: [
           'BLOCKED_EMPIRICAL_FAILED',
           `Command  : ${failed.cmd} (exit=${failed.exitCode})`,
@@ -518,36 +484,26 @@ export async function handleCheckEmpirical(ctx) {
   const keepMechanical = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint && prev?.mechanicalPackSeen)
   const keepFault = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint)
   const verifiedAt = new Date().toISOString()
-  const artifacts = mergeArtifactRecords(prev?.artifacts ?? [], artifactVisual.records ?? [])
+  let stagedArtifactRecs = artifactVisual.records ?? []
+  if (task?.taskId && gitDir && stagedArtifactRecs.length > 0) {
+    const staged = await stageAndSyncTaskArtifacts({
+      repoRoot: reviewRoot, gitCommonDir: gitDir, mainRoot, taskId: task.taskId,
+      records: stagedArtifactRecs, backend: null, observationSummary: e2eEvidenceInput,
+    }).catch(() => null)
+    if (staged?.records) stagedArtifactRecs = staged.records
+  }
+  const artifacts = mergeArtifactRecords(prev?.artifacts ?? [], stagedArtifactRecs)
   const visualChecked = Boolean(artifactVisual.visual.satisfiedBy || e2eEvidenceInput)
   writeReceipt(receiptPath, {
-    mode,
-    round,
-    prNo: prNo ?? null,
-    headSha,
-    diffScope,
-    baselineFingerprint: currentFingerprint,
+    mode, round, prNo: prNo ?? null, headSha, diffScope, baselineFingerprint: currentFingerprint,
     untrustedScanClean: untrusted.scanClean ?? prev?.untrustedScanClean ?? null,
     humanApprovedExec: Boolean(untrusted.approved || prev?.humanApprovedExec),
-    mechanicalPackSeen: keepMechanical,
-    mechanicalPackAt: keepMechanical ? prev.mechanicalPackAt : null,
+    mechanicalPackSeen: keepMechanical, mechanicalPackAt: keepMechanical ? prev.mechanicalPackAt : null,
     ...(artifacts.length > 0 ? { artifacts } : {}),
     empiricalVerified: {
-      status: statusLabel,
-      lowRiskNoRuntimeChecks,
-      fingerprint: currentFingerprint,
-      headSha,
-      round,
-      diffScope,
-      commands: cmdResults,
-      executed: commandsToRun.length > 0 || lowRiskNoRuntimeChecks,
-      succeeded: true,
-      errorOnly: false,
-      smokeExecuted,
-      e2eObservation,
-      visualChecked,
-      ...(artifactVisual.visual.required ? { visual: artifactVisual.visual } : {}),
-      verifiedAt,
+      status: statusLabel, lowRiskNoRuntimeChecks, fingerprint: currentFingerprint, headSha, round, diffScope,
+      commands: cmdResults, executed: commandsToRun.length > 0 || lowRiskNoRuntimeChecks, succeeded: true, errorOnly: false,
+      smokeExecuted, e2eObservation, visualChecked, ...(artifactVisual.visual.required ? { visual: artifactVisual.visual } : {}), verifiedAt,
     },
     faultInjectedAndFailed: keepFault ? (prev?.faultInjectedAndFailed ?? null) : null,
     faultRestoredClean: keepFault ? Boolean(prev?.faultRestoredClean) : false,

@@ -78,7 +78,7 @@ PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 - **Sandbox dual-loop and main-branch isolation**: Repositories with commit history keep `main` clean—reversible iterations start in `.worktrees/sandbox-*` (inner checks tagged `inner: true` are hard-rejected by the outer gate), then `promote` routes by real `git diff`, while cross-module or `one-way` work runs in `.worktrees/impl-*` with wave parallelism.
 - **No self-review and 6-lock convergence**: Neither plans nor code can be self-reviewed. Round 2+ requires a fresh reviewer not seen in prior rounds, capped at 3 rounds and guarded by 6 locks including same-SHA and receipt checks.
 - **Promote repeated issues after 2 occurrences**: When the same class of failure happens twice, `dev-govern` promotes it into a structural check or static gate instead of adding another prose reminder.
-- **Lossless adoption and human control on irreversible actions**: Existing `README.md`, design docs, CI workflows, and custom skills stay intact across GitHub, `generic-git`, and `local-only` repos. Daily actions split by **whether they can be undone**: pushing your own branch and opening PRs are undoable; merging into default branches, tagging releases, rewriting history, and weakening a gate require human sign-off, force-push is never automatic, and the reviewer merges directly once independent checks pass.
+- **Lossless adoption, multi-forge support, and human control on irreversible actions**: Existing `README.md`, design docs, CI workflows, and custom skills stay intact across GitHub, mainstream and self-hosted/LAN Git forges (5 built-in API dialects with a 10-key capability matrix), `generic-git`, and `local-only` repos, backed by shared worktree dependency pools and low-CPU scheduling. Daily actions split by **whether they can be undone**: pushing your own branch and opening PRs/MRs are undoable; merging into default branches, tagging releases, rewriting history, and weakening a gate require human sign-off, force-push is never automatic, and the reviewer merges directly once independent checks pass.
 
 ## Workflows and Daily Usage
 
@@ -197,6 +197,7 @@ Daily workflows route through `AGENTS.md`, so you do not need to memorize comman
 | `node scripts/handoff.mjs <dir>` | Scan scaffold markers and temporary leftovers before handoff |
 | `node scripts/sync-toc.mjs README.md README.en.md` | Keep bilingual README tables of contents in sync |
 | `node scripts/update.mjs [--check]` | Check and atomically apply updates to the archive copy |
+| `node scripts/dev/live-forge-e2e.mjs` | Opt-in real-forge disposable private repo E2E (configured via `PF_LIVE_FORGE_PROVIDER`, `PF_LIVE_FORGE_URL`, `PF_LIVE_FORGE_TOKEN`; auto-deletes temp repo) |
 
 </details>
 

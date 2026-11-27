@@ -138,9 +138,10 @@ async function hydrateTargetMetadata({
     if (!platform.branch) platform.branch = String(local.headBranch ?? local.branch ?? '').trim()
   }
 
+  const targetCtx = buildTargetRepoContext(state.identity?.role ?? 'local-only', state.remoteUrls ?? {}, state.declaredRepo)
   const shouldTryRemoteRead = Boolean(
     targetRepo
-    && (state.github?.providerId === 'github' || opts._ghClient || opts._ghProbe)
+    && (targetCtx.capabilities?.api === true || opts._ghClient || opts._ghProbe)
     && (forceRemote || !platform.title || !platform.body),
   )
   if (shouldTryRemoteRead) {
@@ -281,7 +282,8 @@ export async function handleIntake(opts = {}, rootsArg = null) {
   const state = await inspectWorkspace(mainRoot, { roots, probeAuth: false })
   const role = state.identity?.role ?? 'local-only'
   const providerId = state.github?.providerId ?? 'none'
-  const { targetRepo, pushRemote } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const { targetRepo, pushRemote } = targetCtx
 
   // 引用里带了别的仓就是跨仓引用：写操作会落到那张单上，不是本地这一条。
   // 三态由 `judgeCrossRepoReference` 判，本仓不可判定时只报出不阻断。
@@ -294,7 +296,7 @@ export async function handleIntake(opts = {}, rootsArg = null) {
   })
 
   const applyMode = Boolean(opts.apply) && !Boolean(opts['dry-run'])
-  const useRemoteGh = providerId === 'github' && role !== 'local-only' && role !== 'generic-git' && Boolean(targetRepo)
+  const useRemoteGh = targetCtx.capabilities?.api === true && role !== 'local-only' && role !== 'generic-git' && Boolean(targetRepo)
   const ghProbe = applyMode && useRemoteGh
     ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls: state.remoteUrls ?? {} })))
     : (opts._ghProbe ?? null)

@@ -45,9 +45,10 @@ export {
   parseRemoteUrlHost, parseSshConfigDetails, probeSshKeyReadiness, probeSshTransport,
 } from './platform-probe.mjs'
 export {
-  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest,
-  listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
-  parseMilestoneNumber, parsePfStateTags, parsePrNumber, removeLabel, resolveIdentityLayers, summarizeCommitChecks,
+  NON_API_CLIENT_TIERS, VERIFIED_API_TIERS, closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue,
+  githubHttpsRequest, isVerifiedTier, listComments, listIssues, listOpenPrsByHead, parseBodyRelations,
+  parseFlowInputs, parseIssueNumbers, parseMilestoneNumber, parsePfStateTags, parsePrNumber, removeLabel,
+  resolveIdentityLayers, summarizeCommitChecks,
 } from './github-client.mjs'
 
 /** 兼容旧版远端 URL 映射视图（origin / upstream -> fetchUrl）。 */
@@ -547,32 +548,59 @@ export function resolveWorkspaceIdentity({
   externalPr,
   apiProbe,
   sshHostMap = parseSshConfigHostMap(),
+  providerHint = null,
+  apiBaseHint = null,
+  env = process.env,
+  agentsText = null,
 } = {}) {
+  const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
+  const resolvedTarget = originRaw
+    ? resolveRemoteTarget(remoteUrls, { declaredRepo, sshHostMap, providerHint, apiBaseHint, env, agentsText })
+    : null
   if (externalPr) {
-    return { role: 'inbound-external-pr', providerId: 'github', reason: `审阅外部传入 PR #${externalPr}` }
+    const extProvider = resolvedTarget?.providerId && resolvedTarget.providerId !== 'none' ? resolvedTarget.providerId : 'github'
+    return {
+      role: 'inbound-external-pr',
+      providerId: extProvider,
+      ...(resolvedTarget?.capabilities ? { capabilities: resolvedTarget.capabilities } : {}),
+      reason: `审阅外部传入 PR #${externalPr}`,
+    }
   }
-  const hasRemote = Boolean(remoteUrls.origin ?? Object.values(remoteUrls)[0])
+  const hasRemote = Boolean(originRaw)
   const markers = resolveGitModeMarkersCompat(gitDir, { hasRemote })
   if (markers.localMode) {
     return { role: 'local-only', providerId: 'none', reason: '已显式启用本地模式（.git/pf-local-mode）' }
   }
-
-  const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
   if (!originRaw) {
     return { role: 'local-only', providerId: 'none', reason: '仓库没有配置任何远端' }
   }
 
-  const descriptor = resolveRemoteDescriptor(originRaw, sshHostMap)
+  const descriptor = resolvedTarget ?? resolveRemoteDescriptor(originRaw, sshHostMap)
   const providerId = descriptor.providerId
   if (markers.forkMode) {
-    return { role: 'contributor-fork', providerId, reason: '已选择 Fork 协作模式（.git/pf-fork-mode）' }
+    return { role: 'contributor-fork', providerId, capabilities: descriptor.capabilities, reason: '已选择 Fork 协作模式（.git/pf-fork-mode）' }
   }
   if (markers.standaloneMode) {
-    return { role: 'maintainer', providerId, collaborationScope: 'owner', reason: '已选择独立项目模式（.git/pf-standalone-mode）' }
+    return { role: 'maintainer', providerId, capabilities: descriptor.capabilities, collaborationScope: 'owner', reason: '已选择独立项目模式（.git/pf-standalone-mode）' }
   }
 
-  const origin = githubRepoPath(originRaw, sshHostMap)
-  if (!origin) {
+  if (providerId !== 'github') {
+    if (providerId !== 'generic-git' && providerId !== 'none') {
+      if (remoteUrls.upstream && remoteUrls.upstream !== originRaw) {
+        return { role: 'contributor-fork', providerId, capabilities: descriptor.capabilities, reason: `存在独立 upstream 与 origin（${providerId}）` }
+      }
+      if (hasWritePerm(apiProbe)) {
+        return { role: 'maintainer', providerId, capabilities: descriptor.capabilities, collaborationScope: 'owner', reason: `${providerId} 远端具备写权限` }
+      }
+      if (hasReadOnlyPerm(apiProbe)) {
+        return { role: 'clone-readonly', providerId, capabilities: descriptor.capabilities, reason: `${providerId} 远端当前凭据仅具只读权限` }
+      }
+      const hist = matchAuthorsHistory(historyAuthors, { userName: gitIdentity.name, userEmail: gitIdentity.email })
+      if (commits > 0 && historyAuthors.length > 0 && !hist.anyMatch) {
+        return { role: 'clone-readonly', providerId, capabilities: descriptor.capabilities, reason: `${providerId} 克隆仓历史作者与当前配置署名不匹配` }
+      }
+      return { role: 'maintainer', providerId, capabilities: descriptor.capabilities, collaborationScope: 'owner', reason: `${providerId} 远端已匹配且按维护者协作` }
+    }
     if (descriptor.isLocal) {
       if (remoteUrls.upstream && remoteUrls.upstream !== originRaw) {
         return { role: 'contributor-fork', providerId: 'generic-git', reason: '本地测试远端存在独立的 upstream 与 origin' }

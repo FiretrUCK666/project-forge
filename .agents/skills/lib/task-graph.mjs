@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 import { gitRun, inspectBranchMergeState, resolveDefaultBranch } from './git.mjs'
 import { readTaskLedger } from './ledger.mjs'
-import { parseBodyRelations, parseFlowInputs, parseIssueNumbers, parsePrNumber } from './platform.mjs'
+import { isVerifiedTier, parseBodyRelations, parseFlowInputs, parseIssueNumbers, parsePrNumber } from './platform.mjs'
 
 const EMPTY_RELATIONS = Object.freeze({ dependsOn: [], blocks: [], partOf: [], fixes: [], refs: [] })
 
@@ -89,13 +89,11 @@ export async function resolveExternalCollaborationGraph({
 
   const stateMap = toIssueStateMap(knownIssueStates)
   const apiClient = client ?? backend?.client ?? null
-  const canQueryIssue = Boolean(apiClient && typeof apiClient.getIssue === 'function'
-    && (!apiClient.tier || apiClient.tier === 'gh-cli' || apiClient.tier === 'node-https-token'))
+  const tierUsable = !apiClient?.tier || isVerifiedTier(apiClient.tier)
+  const canQueryIssue = Boolean(apiClient && typeof apiClient.getIssue === 'function' && tierUsable)
   const canQueryPr = Boolean(
-    (backend && typeof backend.getPr === 'function' && (!backend.kind || backend.kind === 'github')
-      && (!apiClient?.tier || apiClient.tier === 'gh-cli' || apiClient.tier === 'node-https-token'))
-    || (apiClient && typeof apiClient.getPr === 'function'
-      && (!apiClient.tier || apiClient.tier === 'gh-cli' || apiClient.tier === 'node-https-token')),
+    (backend && typeof backend.getPr === 'function' && (!backend.kind || backend.capabilities?.pr !== false) && tierUsable)
+    || (apiClient && typeof apiClient.getPr === 'function' && tierUsable),
   )
 
   const resolvedIssues = Array.isArray(preFetchedIssues)

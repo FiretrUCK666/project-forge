@@ -23,7 +23,16 @@ import {
   redactGhTokens, resolveIdentityLayers, stripPfStateTags, summarizeCommitChecks,
 } from './github-parse.mjs'
 
-export const NON_API_CLIENT_TIERS = Object.freeze(new Set(['none', 'offline', 'half-duplex', 'mcp-delegate']))
+export const NON_API_CLIENT_TIERS = Object.freeze(new Set(['none', 'offline', 'half-duplex', 'mcp-delegate', 'generic-git']))
+
+export const VERIFIED_API_TIERS = Object.freeze(new Set([
+  'gh-cli', 'node-https-token', 'authenticated', 'provider-api', 'api-token', 'cli-auth',
+]))
+
+/** 判断探测轨道 tier 是否具备可直接发起真实 API 读写的已验活通道。 */
+export function isVerifiedTier(tier) {
+  return VERIFIED_API_TIERS.has(String(tier ?? '').trim())
+}
 
 export {
   DEFAULT_GITHUB_CONCURRENCY, computeWriteBackFingerprint, mapWithConcurrency,

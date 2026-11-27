@@ -461,7 +461,7 @@ export function evaluateNextState({
     blockingReasons.push('ISSUE_CONTEXT_UNAVAILABLE')
     const nums = unackedIssues.join('、')
     const fetchHint = t.providerId === 'github' && t.role !== 'local-only'
-      ? 'gh issue view <N> --repo <声明仓库> 并重跑 flow start'
+      ? 'gh issue view <N> --repo <声明仓库> 或 node ".agents/skills/dev-flow/scripts/flow.mjs" issue view --issue <N> 后重跑 flow start'
       : 'node ".agents/skills/dev-flow/scripts/flow.mjs" issue view --issue <N> 或补充正文后重跑 flow start'
     nextAction = `拿不到 Issue #${nums} 的正文，先取回来再动手：${fetchHint}，`
       + `或显式确认凭现有信息继续：flow.mjs next --task ${t.taskId} --ack-no-issue-context --reason "<原因>"`

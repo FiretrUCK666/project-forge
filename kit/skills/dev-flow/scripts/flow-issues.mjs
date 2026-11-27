@@ -16,7 +16,7 @@ import { extractPlanDocContext, validateIssueBodyQuality } from '../../lib/issue
 import { hydrateIssueBody } from '../../lib/issue-template-hydrate.mjs'
 import { resolveTaskContext, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { closeLocalIssue, getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
-import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv, resolveIdentityLayers } from '../../lib/platform.mjs'
+import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probePlatformEnv, resolveIdentityLayers } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext } from './flow-context.mjs'
 import { inspectWorkspace } from './flow-inspect.mjs'
@@ -109,8 +109,9 @@ async function closeIssuesStructured({
 }) {
   const role = state.identity.role
   const providerId = state.identity.providerId ?? 'none'
-  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
-  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && providerId === 'github' && Boolean(targetRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const { targetRepo } = targetCtx
+  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && targetCtx.capabilities?.issues === true && Boolean(targetRepo)
   const ghProbe = useRemoteGh
     ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} })))
     : null
@@ -288,10 +289,11 @@ export async function createIssueForStart({
     process.stderr.write(`BLOCKED_CREATE_ISSUE_ROLE: --create-issue 仅支持 maintainer、local-only 或 generic-git 创建新工单（当前 role=${role}）。\n`)
     return { exitCode: EXIT.FACT, blocked: true }
   }
-  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
-  const useRemoteGh = role === 'maintainer' && providerId === 'github'
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const { targetRepo } = targetCtx
+  const useRemoteGh = role === 'maintainer' && targetCtx.capabilities?.issues === true
   if (useRemoteGh && !targetRepo) {
-    throw new Error('--create-issue 在 GitHub maintainer 模式下需要配置有效的 GitHub 远端仓库')
+    throw new Error(`--create-issue 在 ${providerId} maintainer 模式下需要配置有效的远端仓库`)
   }
   const ghProbe = useRemoteGh
     ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} })))
@@ -363,8 +365,9 @@ export async function handleIssue(opts, roots) {
   })
   const role = state.identity.role
   const providerId = state.identity.providerId ?? 'none'
-  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
-  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && providerId === 'github' && Boolean(targetRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const { targetRepo } = targetCtx
+  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && targetCtx.capabilities?.issues === true && Boolean(targetRepo)
 
   const resolveIssueNum = () => {
     const raw = opts.issue ?? opts.issues ?? pos[1]
@@ -427,7 +430,7 @@ export async function handleIssue(opts, roots) {
   if (action === 'list') {
     const listState = String(opts.state ?? 'open').toLowerCase()
     const ghProbe = useRemoteGh
-      ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {}, probeNetwork: true })))
+      ? (opts._ghProbe ?? (await probePlatformEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {}, probeNetwork: true })))
       : null
     const backend = buildBackendForIssue({
       role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
@@ -448,7 +451,7 @@ export async function handleIssue(opts, roots) {
   if (action === 'view') {
     const num = resolveIssueNum()
     const ghProbe = useRemoteGh
-      ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {}, probeNetwork: true })))
+      ? (opts._ghProbe ?? (await probePlatformEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {}, probeNetwork: true })))
       : null
     const backend = buildBackendForIssue({
       role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
@@ -530,7 +533,7 @@ export async function handleIssue(opts, roots) {
     const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} }))
     const remoteRepo = targetRepo ?? 'local/migrated'
     const remoteBackend = buildBackendForIssue({
-      role: 'maintainer', providerId: 'github', targetRepo: remoteRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+      role: 'maintainer', providerId: targetCtx.providerId || providerId, targetRepo: remoteRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
     })
     const onlyNums = opts.issue || opts.issues ? parseIssueNumbers([opts.issue, opts.issues]) : null
     const openLocal = listLocalIssues({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, state: 'open' })
@@ -606,12 +609,13 @@ export async function handleMilestone(opts, roots) {
   })
   const role = state.identity.role
   const providerId = state.identity.providerId ?? 'none'
-  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
-  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && providerId === 'github' && Boolean(targetRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const { targetRepo } = targetCtx
+  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && targetCtx.capabilities?.milestones === true && Boolean(targetRepo)
 
   const ghProbe = useRemoteGh
     ? (action === 'list'
-        ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {}, probeNetwork: true })))
+        ? (opts._ghProbe ?? (await probePlatformEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {}, probeNetwork: true })))
         : (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} }))))
     : null
   const backend = buildBackendForIssue({

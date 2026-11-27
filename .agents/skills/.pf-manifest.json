@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-27T20:25:48.208Z",
+  "installedAt": "2026-11-27T20:51:30.182Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -559,7 +559,7 @@
       "sha256": "35643af061a9c66a6061e70ba384794401053e1da3664d76e98ee817cfac0dd4"
     },
     "lib/worktree-dep-pool.mjs": {
-      "sha256": "d106c344447fe47c88c93191f4855feb9f52c998919dfcc84c05a1fc420fe96b"
+      "sha256": "6de6df2d873abae6869d4af0b650f99cbc0517d2b26492e060514c786fc27359"
     },
     "templates/docs-prd.md": {
       "sha256": "a9fc3613c1c7716fddadd06a906e257b577574d9d6b9808a4d23622eec7fa0d9"

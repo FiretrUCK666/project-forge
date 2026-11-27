@@ -81,9 +81,9 @@ export function resolveCommonGitDir(mainAbs) {
 
 export function resolveDepPoolRoot(mainAbs) {
   const common = resolveCommonGitDir(mainAbs)
-  return common
+  return canonicalPath(common
     ? join(common, 'project-forge-flow', 'dep-pool')
-    : join(mainAbs, '.worktrees', '.state', 'dep-pool')
+    : join(mainAbs, '.worktrees', '.state', 'dep-pool'))
 }
 
 /** 卸载单个符号链接/Windows junction（遇 EPERM/EISDIR 回退非递归 rmdirSync，绝不递归删除目标内容）。 */
@@ -312,21 +312,16 @@ function readFirstLineSafe(filePath, maxBytes = 256) {
     fd = openSync(filePath, 'r')
     const buf = Buffer.alloc(maxBytes)
     const n = readSync(fd, buf, 0, maxBytes, 0)
-    if (n <= 0) return ''
-    const slice = buf.subarray(0, n)
-    if (slice.includes(0)) return ''
-    return slice.toString('utf8').split(/\r?\n/, 1)[0] ?? ''
-  } catch {
-    return ''
-  } finally {
-    if (fd !== undefined) try { closeSync(fd) } catch { /* ignore */ }
-  }
+    const slice = n > 0 ? buf.subarray(0, n) : null
+    return (slice && !slice.includes(0)) ? (slice.toString('utf8').split(/\r?\n/, 1)[0] ?? '') : ''
+  } catch { return '' } finally { if (fd !== undefined) try { closeSync(fd) } catch { /* ignore */ } }
 }
 
 export function detectPythonEditablePoisoning(mainAbs, venvAbs) {
   if (!existsSync(venvAbs)) return null
-  const mainNormPosix = posixPath(canonicalPath(mainAbs)).toLowerCase()
-  const mainNormNative = canonicalPath(mainAbs).toLowerCase()
+  const mainReal = canonicalPath(mainAbs)
+  const mainNormPosix = posixPath(mainReal).toLowerCase()
+  const mainNormNative = mainReal.toLowerCase()
   for (const binDirName of ['bin', 'Scripts']) {
     const binDir = join(venvAbs, binDirName)
     if (!existsSync(binDir)) continue
@@ -336,8 +331,16 @@ export function detectPythonEditablePoisoning(mainAbs, venvAbs) {
       if (!entry.isFile()) continue
       const firstLine = readFirstLineSafe(join(binDir, entry.name))
       if (!firstLine.startsWith('#!')) continue
+      const rawShebang = firstLine.slice(2).trim()
+      const shebangExec = rawShebang.startsWith('"')
+        ? rawShebang.slice(1).split('"', 1)[0]
+        : (rawShebang.startsWith("'") ? rawShebang.slice(1).split("'", 1)[0] : rawShebang.split(/\s+/, 1)[0])
       const low = firstLine.toLowerCase()
-      if (low.includes(mainNormPosix) || low.includes(mainNormNative)) {
+      const byCanonical = Boolean(
+        (shebangExec && isInsideDir(canonicalPath(shebangExec), mainReal))
+        || (rawShebang && rawShebang !== shebangExec && isInsideDir(canonicalPath(rawShebang), mainReal)),
+      )
+      if (byCanonical || low.includes(mainNormPosix) || low.includes(mainNormNative)) {
         return `POSIX ${binDirName}/${entry.name} shebang 硬编码主仓绝对路径`
       }
     }
@@ -521,16 +524,14 @@ export function ensureMountedDepsExcluded(mainAbs, relPaths) {
 }
 
 function readPoolRefsStrict(refsPath) {
-  if (!existsSync(refsPath)) return { data: { version: 1, entries: {} }, corrupt: false, missing: true }
+  const empty = { version: 1, entries: {} }
+  if (!existsSync(refsPath)) return { data: empty, corrupt: false, missing: true }
   try {
-    const raw = readFileSync(refsPath, 'utf8')
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || !parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
-      return { data: { version: 1, entries: {} }, corrupt: true, missing: false }
-    }
-    return { data: parsed, corrupt: false, missing: false }
+    const parsed = JSON.parse(readFileSync(refsPath, 'utf8'))
+    const ok = Boolean(parsed && typeof parsed === 'object' && parsed.entries && typeof parsed.entries === 'object' && !Array.isArray(parsed.entries))
+    return { data: ok ? parsed : empty, corrupt: !ok, missing: false }
   } catch {
-    return { data: { version: 1, entries: {} }, corrupt: true, missing: false }
+    return { data: empty, corrupt: true, missing: false }
   }
 }
 

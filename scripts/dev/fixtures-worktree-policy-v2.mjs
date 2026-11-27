@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 import { blockedExitOf, EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { computeWorktreeEnv, execSafe, prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
-import { resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
+import { canonicalPath, isInsideDir, resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
 import { parseAgentsProfile, parseDevProfile } from '../../kit/skills/lib/profile.mjs'
 import { determineWorkflowPolicy, isOneWayBoundaryFile, resolveScopedVerificationGate } from '../../kit/skills/lib/workflow-policy.mjs'
 import { handleIntake } from '../../kit/skills/dev-flow/scripts/flow-intake.mjs'
@@ -147,8 +147,8 @@ export function registerWorktreePolicyV2Cases(cases) {
       if (existsSync(join(wt1, 'pg_data'))) return 'Class I 数据卷 pg_data 竟被误挂载进 worktree'
 
       const poolRoot = resolveDepPoolRoot(sDir)
-      const nmReal = realpathSync.native(join(wt1, 'node_modules'))
-      if (!nmReal.toLowerCase().replace(/\\/g, '/').includes(poolRoot.toLowerCase().replace(/\\/g, '/'))) {
+      const nmReal = canonicalPath(realpathSync.native(join(wt1, 'node_modules')))
+      if (!isInsideDir(nmReal, poolRoot)) {
         return `Class S 未指向仓外 dep-pool（仍直连主仓）：nmReal=${nmReal}, poolRoot=${poolRoot}`
       }
       const pooledFileStat = statSync(join(nmReal, 'lodash', 'index.js'))
@@ -192,18 +192,25 @@ export function registerWorktreePolicyV2Cases(cases) {
       if (!existsSync(join(sDir, 'node_modules', 'lodash', 'index.js'))) return 'GC 误伤主仓 node_modules'
     } finally { rmTree(sDir) }
 
-    // 5. 毒化探测：.prisma 生成代码 + POSIX .venv/bin/* 主仓绝对路径 shebang
+    // 5. 毒化探测：.prisma 生成代码 + POSIX .venv/bin/* 主仓绝对路径 shebang（含跨平台软链别名路径如 macOS /var -> /private/var）
     const pDir = tmpProject({
       '.gitignore': '.worktrees/\nnode_modules/\n.venv/\n',
       'package.json': '{"name":"poison"}\n',
       'package-lock.json': '{"lockfileVersion":3}\n',
       'requirements.txt': 'pytest==8.0.0\n',
     })
+    const pAliasHost = tmpProject({})
+    const pAlias = join(pAliasHost, 'var-alias')
     gitInit(pDir, { branch: 'main' })
     mkdirSync(join(pDir, 'node_modules', '.prisma', 'client'), { recursive: true })
     writeFileSync(join(pDir, 'node_modules', '.prisma', 'client', 'index.js'), '1\n')
     mkdirSync(join(pDir, '.venv', 'bin'), { recursive: true })
-    writeFileSync(join(pDir, '.venv', 'bin', 'pytest'), `#!${join(pDir, '.venv', 'bin', 'python3')}\nimport sys\n`)
+    let shebangRoot = pDir
+    try {
+      symlinkSync(pDir, pAlias, process.platform === 'win32' ? 'junction' : 'dir')
+      shebangRoot = pAlias
+    } catch { /* fallback to direct pDir */ }
+    writeFileSync(join(pDir, '.venv', 'bin', 'pytest'), `#!${join(shebangRoot, '.venv', 'bin', 'python3')}\nimport sys\n`)
     try {
       const wtP = join(pDir, '.worktrees', 'impl-p')
       gitSync(pDir, ['worktree', 'add', '-b', 'feat/p', wtP, 'HEAD'])
@@ -212,7 +219,7 @@ export function registerWorktreePolicyV2Cases(cases) {
       if (!mP.isolatedUnits.some((u) => u.ecosystem === 'node') || !mP.isolatedUnits.some((u) => u.ecosystem === 'python')) {
         return `毒化隔离记录缺失 node 或 python：${JSON.stringify(mP.isolatedUnits)}`
       }
-    } finally { rmTree(pDir) }
+    } finally { rmTree(pAliasHost); rmTree(pDir) }
 
     return true
   }])

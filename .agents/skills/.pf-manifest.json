@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-27T21:52:58.138Z",
+  "installedAt": "2026-11-27T22:49:06.505Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -511,13 +511,13 @@
       "sha256": "083205728af2e5a67fab786236df3a364b5dc04244c415fc33d4e23550951d55"
     },
     "lib/visual-brief-doc-extract.mjs": {
-      "sha256": "20b729ff44d634c8fe9de279da3026a2949c31e0bb2a2af2d8e6f9f9408e10f3"
+      "sha256": "719774e58844ec1d1d4d13fd2f46cedeffe79a1c3894ab0e2adf8f603e639dce"
     },
     "lib/visual-brief-store.mjs": {
-      "sha256": "4093ddb91c5f368a8fffeec1504d38e5c4a3cc6fd71c54cad53055483c3fa943"
+      "sha256": "e1e5322af1b26091e55b9ace838c767c557aa1cd09cab8ed70767531bbf3e246"
     },
     "lib/visual-brief.mjs": {
-      "sha256": "aaaffa116e0d219ec9c5046176502986542676a221c8332e369a76a065d0742f"
+      "sha256": "90d34601865a967cfe8abc6d66ad796168cb8c259e0facbf9ee9b3db3a81bb9c"
     },
     "lib/visual-geometry-check.mjs": {
       "sha256": "9f006c9079ad28bd40de76372b83e8bd9e06d21a195b860359f5ab7c6d14bcb7"
@@ -529,25 +529,25 @@
       "sha256": "52732378d8df7fbc2a0deae061a5e28eaf4b2b0d7fb4571537b60493e4d058ed"
     },
     "lib/visual-layout.mjs": {
-      "sha256": "82579560ce83644b62f952f87aa84e31adabc542afbda001e0f7a34edee231d3"
+      "sha256": "f7979106df468bdeb306eaa753cc70fe9219a590fcce29240ae51aa16902228a"
     },
     "lib/visual-render-assets.mjs": {
-      "sha256": "4a895058e1f5f38bd39f8b926afb60805d519b91e15382c73318f296d3255661"
+      "sha256": "a369c94d9edc591349f108b1c29506d1720ecd91149fafeab6a2a1111f888ca2"
     },
     "lib/visual-render-client-diagrams.mjs": {
       "sha256": "9c6ca8b1e6d22d497802ede774244b7811c7d0769fa1eca7b47cdcc752bb66a7"
     },
     "lib/visual-render-client.mjs": {
-      "sha256": "f2e04e05b4d8247ea26dd4bfc0cc67a2df67def3d02e19651f443affc3d226a3"
+      "sha256": "082b982e877f727e7e99afaae073471375b87b6185a0accd63582eba96264df6"
     },
     "lib/visual-render-panels.mjs": {
-      "sha256": "9f6ce29f0ffd825f90137821683ca4bbcf54a4e57720d313bf6dbebede39d454"
+      "sha256": "eef95dedb6d28740ec0e1782e2fdb75eb380ceee4c5b67a9f139a37f85e98b87"
     },
     "lib/visual-render-svg.mjs": {
-      "sha256": "582d82ecaeec3551285c05878cf3700d3ef807e0b94362257e4328fe5ace3bb5"
+      "sha256": "5729607cb66c6f541d819aedb2b4221943f117b9ca8f3d9736098b26fbdb5cfd"
     },
     "lib/visual-render.mjs": {
-      "sha256": "76d990c8b21e2f45e68665743b72da652a128867b9d5149c767849f5d8de2f4a"
+      "sha256": "48c0a98812457d2ae152e0188703bd2d96576373d4ad1bbe742d12d04d82b83a"
     },
     "lib/visual-router.mjs": {
       "sha256": "bb56f3f850c60a3534f02d4984b18f2fc6259166f2de87f6838b6c95159b35b7"

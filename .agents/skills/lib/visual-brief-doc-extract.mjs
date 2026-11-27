@@ -10,19 +10,20 @@ import { extractCriteria } from './criteria-lock.mjs'
 import { parseDocFilename } from './doc-frontmatter.mjs'
 import { posixPath } from './git.mjs'
 import { deriveMasterPrdBriefKey, sanitizeBriefKey, uniqClean } from './visual-brief-store.mjs'
+import { clipAtSemanticBoundary } from './visual-layout.mjs'
 
 const NEW_MARKER_RE = /\s*(?:\(new\)|（新增）)\s*$/i
 const MD_BOLD_RE = /\*\*([^*]+)\*\*/g
 
-function cleanMdInline(raw, maxLen = 220) {
+function cleanMdInline(raw, maxLen = 0) {
   const s = String(raw ?? '')
     .replace(MD_BOLD_RE, '$1')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/`/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-  if (s.length <= maxLen) return s
-  return `${s.slice(0, Math.max(12, maxLen - 3)).trim()}...`
+  if (!maxLen || s.length <= maxLen) return s
+  return clipAtSemanticBoundary(s, maxLen).preview
 }
 
 function normScopeEntry(raw) {
@@ -61,7 +62,7 @@ function extractFileNotesFromTables(mdText) {
     if (/^[-:\s]+$/.test(cells[0]) || /^(?:模块|文件|路径)/.test(cells[0])) continue
     const kindCell = cleanMdInline(cells[1], 32)
     if (!/(?:新增|修改|移除|删除|重构|升级|收口)/.test(kindCell)) continue
-    const summaryCell = cleanMdInline(cells[2], 140)
+    const summaryCell = cleanMdInline(cells[2], 0)
     if (!summaryCell) continue
     const fileTokens = [...cells[0].matchAll(/`([^`]+)`/g)].map((m) => m[1])
     const candidates = fileTokens.length > 0 ? fileTokens : cells[0].split(/[、,，\s]+/)
@@ -103,7 +104,7 @@ function extractBulletsFromLines(lines, limit = 6) {
   for (const rawLine of lines) {
     const m = /^\s*(?:[-*]|\d+\.)\s+(.+)$/.exec(rawLine)
     if (!m) continue
-    const txt = cleanMdInline(m[1], 220)
+    const txt = cleanMdInline(m[1], 0)
     if (!txt || /^\[[ xX]\]\s*C\d+/i.test(txt) || /^(?:无|待确认[:：]?\s*无)$/i.test(txt)) continue
     out.push(txt)
     if (out.length >= limit) break
@@ -120,15 +121,15 @@ function extractStructuredFieldsFromDoc(docText) {
 
   for (const rawLine of String(docText ?? '').split(/\r?\n/)) {
     const oneLiner = /^\s*-\s*\*\*变更一句话\*\*\s*[:：]\s*(.+)$/.exec(rawLine)
-    if (oneLiner && !specSummaryLine) specSummaryLine = cleanMdInline(oneLiner[1], 240)
+    if (oneLiner && !specSummaryLine) specSummaryLine = cleanMdInline(oneLiner[1], 0)
     const whatToChange = /^\s*-\s*\*\*要改什么\*\*\s*[:：]\s*(.+)$/.exec(rawLine)
-    if (whatToChange) goals.push(cleanMdInline(whatToChange[1], 220))
+    if (whatToChange) goals.push(cleanMdInline(whatToChange[1], 0))
     const notChange = /^\s*-\s*\*\*(?:不改什么|本期不做)\*\*\s*[:：]\s*(.+)$/.exec(rawLine)
-    if (notChange) nonGoals.push(cleanMdInline(notChange[1], 220))
+    if (notChange) nonGoals.push(cleanMdInline(notChange[1], 0))
     const confirmed = /^\s*-\s*已确认\s*[:：]\s*(.+)$/.exec(rawLine)
-    if (confirmed) decisions.push(cleanMdInline(confirmed[1], 220))
+    if (confirmed) decisions.push(cleanMdInline(confirmed[1], 0))
     const door = /^\s*-\s*\*\*门型判定\*\*\s*[:：]\s*(.+)$/.exec(rawLine)
-    if (door) decisions.push(`门型：${cleanMdInline(door[1], 180)}`)
+    if (door) decisions.push(`门型：${cleanMdInline(door[1], 0)}`)
   }
 
   for (const sec of sections) {
@@ -143,7 +144,7 @@ function extractStructuredFieldsFromDoc(docText) {
         if (!line.startsWith('|')) continue
         const cells = line.split('|').slice(1, -1).map((c) => c.trim())
         if (cells.length >= 2 && /(?:\(已选\)|（已选）|已选)/.test(cells[0])) {
-          decisions.push(`${cleanMdInline(cells[0], 110)}：${cleanMdInline(cells[1], 120)}`)
+          decisions.push(`${cleanMdInline(cells[0], 0)}：${cleanMdInline(cells[1], 0)}`)
         }
       }
     }
@@ -177,9 +178,14 @@ function docMatchesTask(doc, norm) {
  * - `kind === 'topic'`：仅按 taskId / briefKey 精确命中。
  */
 export function selectRelevantPlanDocs({ allDocs = [], norm, masterRel = null, effWork = '' }) {
+  const wantArchived = Boolean(
+    (masterRel && posixPath(masterRel).startsWith('docs/archive/'))
+    || (norm.masterPrdRel && posixPath(norm.masterPrdRel).startsWith('docs/archive/')),
+  )
   const dedup = new Map()
   for (const d of allDocs) {
-    if (!d || d.archived) continue
+    if (!d) continue
+    if (!wantArchived && d.archived) continue
     const rel = posixPath(d.rel || '')
     if (!rel) continue
     const existing = dedup.get(rel)
@@ -282,8 +288,7 @@ function synthesizeModuleChangeNote({ fid, entries, fileNotes, criteria }) {
     const fn = fileNotes.get(e.rel)
     if (fn?.what) {
       const prefix = e.isNew || fn.kind === '新增' ? '[新增] ' : ''
-      noteParts.push(`${prefix}${basename(e.rel)}: ${cleanMdInline(fn.what, 88)}`)
-      if (noteParts.length >= 3) break
+      noteParts.push(`${prefix}${basename(e.rel)}: ${cleanMdInline(fn.what, 0)}`)
     }
   }
 
@@ -293,20 +298,21 @@ function synthesizeModuleChangeNote({ fid, entries, fileNotes, criteria }) {
     return rels.some((r) => txt.includes(r.toLowerCase()) || txt.includes(basename(r).toLowerCase()))
   })
 
-  let note = ''
+  let noteItems = []
   if (noteParts.length > 0) {
-    note = noteParts.join('；')
+    noteItems = noteParts
   } else if (matchedCriteria.length > 0) {
-    note = matchedCriteria.slice(0, 2).map((c) => `${c.id}: ${cleanMdInline(c.text, 92)}`).join('；')
+    noteItems = matchedCriteria.map((c) => `${c.id}: ${cleanMdInline(c.text, 0)}`)
   } else if (rels.length > 0) {
-    const preview = rels.slice(0, 4).map((r) => basename(r)).join(', ')
-    note = `涉及 ${rels.length} 个变更文件：${preview}${rels.length > 4 ? ` 等` : ''}`
+    const preview = rels.slice(0, 6).map((r) => basename(r)).join(', ')
+    noteItems = [`涉及 ${rels.length} 个变更文件：${preview}${rels.length > 6 ? ' 等' : ''}`]
   }
 
   return {
-    note: note.slice(0, 380),
-    scopeFiles: rels.slice(0, 12),
-    criteriaRefs: matchedCriteria.map((c) => c.id).slice(0, 8),
+    note: noteItems.join('；'),
+    noteItems,
+    scopeFiles: rels.slice(0, 24),
+    criteriaRefs: matchedCriteria.map((c) => c.id).slice(0, 12),
   }
 }
 
@@ -341,7 +347,7 @@ export function extractPlanDocProjection({ relevantDocs = [], featureMap = {}, m
 
     for (const c of extractCriteria(d.text)) {
       if (!criteriaById.has(c.id)) {
-        criteriaById.set(c.id, { id: c.id, text: cleanMdInline(c.text, 240), checked: Boolean(c.checked), source: d.rel })
+        criteriaById.set(c.id, { id: c.id, text: cleanMdInline(c.text, 0), checked: Boolean(c.checked), source: d.rel })
       }
     }
   }
@@ -360,7 +366,7 @@ export function extractPlanDocProjection({ relevantDocs = [], featureMap = {}, m
     if (prev) {
       mergedFeatureChanges[fid] = {
         ...prev,
-        ...(prev.note || (prev.before && prev.after) ? {} : { note: synth.note }),
+        ...(prev.note || (prev.before && prev.after) ? {} : { note: synth.note, noteItems: synth.noteItems }),
         scopeFiles: prev.scopeFiles?.length ? prev.scopeFiles : synth.scopeFiles,
         criteriaRefs: prev.criteriaRefs?.length ? prev.criteriaRefs : synth.criteriaRefs,
       }
@@ -368,6 +374,7 @@ export function extractPlanDocProjection({ relevantDocs = [], featureMap = {}, m
       mergedFeatureChanges[fid] = {
         state: 'modified',
         note: synth.note,
+        noteItems: synth.noteItems,
         scopeFiles: synth.scopeFiles,
         criteriaRefs: synth.criteriaRefs,
       }

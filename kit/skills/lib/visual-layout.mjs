@@ -32,6 +32,46 @@ export function escapeJsonForScript(obj) {
   return JSON.stringify(obj).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
+/** 按句读或词边界语义截取预览文本，严禁在路径或标识符中间腰斩出半截残词。 */
+export function clipAtSemanticBoundary(raw, maxLen = 150) {
+  const s = String(raw ?? '').replace(/\s+/g, ' ').trim()
+  if (!maxLen || s.length <= maxLen) return { preview: s, truncated: false }
+  const minPos = Math.floor(maxLen * 0.5)
+  const searchEnd = Math.min(s.length, maxLen + 1)
+  const strongMarks = ['。', '；', '！', '？', '. ', '; ']
+  let cut = -1
+  for (const mk of strongMarks) {
+    const idx = s.lastIndexOf(mk, searchEnd)
+    if (idx >= minPos) cut = Math.max(cut, idx + mk.trimEnd().length)
+  }
+  if (cut < minPos) {
+    const softMarks = ['，', '、', '：', '）', ', ', ') ']
+    for (const mk of softMarks) {
+      const idx = s.lastIndexOf(mk, searchEnd)
+      if (idx >= minPos) cut = Math.max(cut, idx + (mk.endsWith(' ') ? mk.length - 1 : mk.length))
+    }
+  }
+  if (cut < minPos) {
+    const isTokenChar = (ch) => /[A-Za-z0-9_./:-]/.test(ch || '')
+    let pos = maxLen
+    if (isTokenChar(s[pos - 1]) && isTokenChar(s[pos])) {
+      let fwd = pos
+      while (fwd < s.length && fwd - maxLen <= 44 && isTokenChar(s[fwd])) fwd += 1
+      if (fwd < s.length && !isTokenChar(s[fwd])) {
+        pos = fwd
+      } else {
+        let back = pos - 1
+        while (back > minPos && isTokenChar(s[back])) back -= 1
+        if (back >= minPos) pos = back
+      }
+    }
+    cut = pos
+  }
+  const preview = s.slice(0, cut).replace(/[，、：；,;:\s]+$/, '').trim()
+  if (!preview || preview.length >= s.length) return { preview: s, truncated: false }
+  return { preview: `${preview}…`, truncated: true }
+}
+
 export function toRelPath(rawPath) {
   let p = String(rawPath ?? '').trim()
   if (!p) return ''
@@ -198,9 +238,11 @@ export function computeDiffOverlay(featureMap, diffOverlay = {}) {
     const prev = changeDetails.get(fid) || {}
     const scopeFiles = normRelArray(fc.scopeFiles ?? prev.scopeFiles)
     const criteriaRefs = normArray(fc.criteriaRefs ?? prev.criteriaRefs)
+    const noteItems = normArray(fc.noteItems ?? prev.noteItems)
     changeDetails.set(fid, {
       state: st,
       note: String(fc.note ?? prev.note ?? '').trim(),
+      ...(noteItems.length > 0 ? { noteItems } : {}),
       before: String(fc.before ?? prev.before ?? '').trim(),
       after: String(fc.after ?? prev.after ?? '').trim(),
       reason: String(fc.reason ?? prev.reason ?? '').trim(),

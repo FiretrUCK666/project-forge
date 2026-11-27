@@ -490,4 +490,100 @@ export function registerStudioUxCases(cases) {
       rmTree(dir)
     }
   }])
+
+  cases.push(['[StudioUX-BlueprintClarity] 变更蓝图吸顶快搜、直接/受波及双分节折叠、画布回跳自动展开与常青架构图零污染', async () => {
+    const features = [
+      { id: 'root-core', name: '核心内核', domain: 'core', entrypoints: ['src/root.mjs'], modules: ['src/root.mjs'], tests: [], dependsOn: [] },
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `downstream-${i + 1}`,
+        name: `下游服务 ${i + 1}`,
+        domain: i < 4 ? 'core' : 'edge',
+        entrypoints: [`src/d${i + 1}.mjs`],
+        modules: [`src/d${i + 1}.mjs`],
+        tests: [],
+        dependsOn: ['root-core'],
+      })),
+    ]
+    const dir = tmpProject({
+      'package.json': JSON.stringify({ name: 'bp-clarity-demo', version: '1.0.0' }, null, 2) + '\n',
+      'src/root.mjs': 'export const root = 1\n',
+      'docs/feature-map.json': JSON.stringify({
+        version: 2,
+        repoName: 'bp-clarity-demo',
+        domains: [
+          { id: 'core', name: '核心域' },
+          { id: 'edge', name: '下游域' },
+        ],
+        features,
+        flows: [],
+      }, null, 2) + '\n',
+    })
+    gitInit(dir)
+    gitCommitFast(dir, 'chore: init blueprint clarity fixture')
+    try {
+      const res = upsertVisualBrief(dir, {
+        briefKey: 'clarity-ux',
+        kind: 'task',
+        taskId: 'clarity-ux',
+        title: '蓝图清爽层级验证',
+        decisions: ['采用双分节折叠与吸顶快搜'],
+        affectedFeatures: ['root-core'],
+        featureChanges: {
+          'root-core': {
+            state: 'modified',
+            note: 'root.mjs: 重构核心执行路径；helper.mjs: 抽出单源公共辅助；guard.mjs: 强化输入校验；extra.mjs: 补充回退分支',
+          },
+        },
+      })
+      const html = readFileSync(res.htmlPath, 'utf8')
+      const css = extractStyleCss(html)
+      const js = extractInlineScripts(html).join('\n')
+
+      if (res.bytes >= 180 * 1024) return `clarity-ux Brief 超出 180 KB 预算：${res.bytes} bytes`
+      if (/border-left\s*:\s*[2-9](?:\.\d+)?px\s+solid/i.test(css)) {
+        return 'Brief CSS 违规包含左侧彩条装饰（border-left >= 2px solid）'
+      }
+
+      // 1. 吸顶工具条 + 实时关键字快搜 + 命中计数 + 一键重置
+      for (const marker of ['pf-bp-toolbar', 'id="pf-bp-search"', 'id="pf-bp-match-count"', 'id="pf-bp-reset"', 'pf-group-direct', 'pf-group-impacted', 'btn-toggle-impacted']) {
+        if (!html.includes(marker)) return `变更蓝图缺少吸顶筛选/双分节折叠关键结构：${marker}`
+      }
+      // 2. M=8 > 6 时默认折叠后 2 张下游受波及卡片
+      const extraMatches = html.match(/data-impacted-extra="1"/g) || []
+      if (extraMatches.length !== 2) {
+        return `下游受波及模块 M=8 时应默认折叠后 2 张（data-impacted-extra="1"），实得 ${extraMatches.length}`
+      }
+      if (!html.includes('展开其余 2 个下游受波及模块')) {
+        return '缺少「展开其余 2 个下游受波及模块」按钮文案'
+      }
+      // 3. 垂直顺序：Hero -> 决策 -> 传播链 -> 吸顶工具条 -> 直接变更 -> 下游受波及
+      const bodyHtml = html.slice(html.indexOf('<body'))
+      const idxHero = bodyHtml.indexOf('class="pf-hero-strip"')
+      const idxDec = bodyHtml.indexOf('class="pf-decision-panel"')
+      const idxChain = bodyHtml.indexOf('class="pf-chain-panel"')
+      const idxBar = bodyHtml.indexOf('class="pf-bp-toolbar"')
+      const idxDirect = bodyHtml.indexOf('id="pf-group-direct"')
+      const idxImpacted = bodyHtml.indexOf('id="pf-group-impacted"')
+      if (!(idxHero > 0 && idxDec > idxHero && idxChain > idxDec && idxBar > idxChain && idxDirect > idxBar && idxImpacted > idxDirect)) {
+        return `垂直顺序异常：hero=${idxHero} dec=${idxDec} chain=${idxChain} bar=${idxBar} direct=${idxDirect} impacted=${idxImpacted}`
+      }
+      // 4. 客户端支持快搜、重置、展开受波及与画布回跳自动展开折叠卡片
+      for (const token of ['pf-bp-search', 'pf-bp-reset', 'toggle-impacted', 'data-impacted-extra', 'applyBpFilters']) {
+        if (!js.includes(token)) return `客户端脚本缺少变更蓝图交互逻辑：${token}`
+      }
+      for (const code of extractInlineScripts(html)) {
+        try { new Script(code) } catch (err) { return `内联 <script> 语法错误：${err.message}` }
+      }
+
+      // 5. 反例：常青 architecture-map 严格零污染
+      const cleanArch = await renderArchitectureMapAsync(dir, { write: false })
+      if (!cleanArch.ok || cleanArch.bytes >= 180 * 1024) return `常青图渲染失败或超预算：bytes=${cleanArch.bytes}`
+      for (const leaked of ['pf-bp-toolbar', 'pf-wave-panel', 'pf-sibling-rail', 'pf-group-impacted', 'btn-toggle-impacted']) {
+        if (cleanArch.html.includes(leaked)) return `常青 architecture-map 违规混入变更蓝图专属结构：${leaked}`
+      }
+      return true
+    } finally {
+      rmTree(dir)
+    }
+  }])
 }

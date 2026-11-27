@@ -45,7 +45,7 @@ export function buildClientCoreScript({ isBrief = true, hasDiff = isBrief } = {}
     return navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v).then(()=>{toast(mg);return true;}).catch(fb):Promise.resolve(fb());
   }
 
-  ${isBrief ? `(()=>{const bar=G('pf-parent-bar'),lk=G('pf-parent-link');if(!bar||!lk)return;let h=DM.parentBriefHref||'';try{const f=validFrom(new URLSearchParams(W.location.search||'').get('from'));if(f)h='./'+encodeURIComponent(f)+'.html';}catch{}if(h&&/^\\.\\/[^/\\\\:]+\\.html$/i.test(h)){SA(lk,'href',h);H(bar,false);}})();` : ''}
+  ${isBrief ? `(()=>{const bar=G('pf-parent-bar'),lk=G('pf-parent-link');if(!bar||!lk)return;let h=DM.parentBriefHref||'',fk='';try{const f=validFrom(new URLSearchParams(W.location.search||'').get('from'));if(f){fk=f;h='./'+encodeURIComponent(f)+'.html';}}catch{}if(h&&/^\\.\\/[^/\\\\:]+\\.html$/i.test(h)){SA(lk,'href',h);H(bar,false);}if(fk){Q('[data-sib-key]',bar).forEach((el)=>{const sk=validFrom(A(el,'data-sib-key'));if(sk)SA(el,'href','./'+encodeURIComponent(sk)+'.html?from='+encodeURIComponent(fk));});}})();` : ''}
 
   function computeReach(sid){
     const up=new Set(),dn=new Set();if(!sid||!nodeById.has(sid))return{upstream:up,downstream:dn};
@@ -172,7 +172,7 @@ export function buildClientCoreScript({ isBrief = true, hasDiff = isBrief } = {}
       const cd=sp.changeDetail||{},irs=sp.impactReasons||[],cp=[];
       if(cd.before&&cd.after)cp.push('<div class="pf-diff-pair"><div class="pf-before"><span class="pf-tag-before">改前</span><span>'+E(cd.before)+'</span></div><div class="pf-after"><span class="pf-tag-after">改后</span><span>'+E(cd.after)+'</span></div></div>');
       else if(cd.reason)cp.push('<p class="pp-desc">'+E(cd.reason)+(cd.replacementId?' · 替代：'+E(cd.replacementId):'')+'</p>');
-      else if(cd.note)cp.push('<p class="pp-desc">'+E(cd.note)+'</p>');
+      else if((cd.noteItems&&cd.noteItems.length)||cd.note){const nis=(cd.noteItems&&cd.noteItems.length)?cd.noteItems:String(cd.note||'').split('；').map((s)=>s.trim()).filter(Boolean);if(nis.length>1){const hd=nis.slice(0,3),rs=nis.slice(3);cp.push('<ul class="pp-note-list">'+hd.map((x)=>'<li>'+E(x)+'</li>').join('')+'</ul>'+(rs.length?'<details class="pf-more-fold"><summary>展开其余 '+rs.length+' 条明细</summary><ul class="pp-note-list">'+rs.map((x)=>'<li>'+E(x)+'</li>').join('')+'</ul></details>':''));}else if(nis.length===1)cp.push('<p class="pp-desc">'+E(nis[0])+'</p>');}
       if(irs.length)cp.push('<p class="pp-desc pp-impact-line">波及原因：'+E(irs.join('；'))+'</p>');
       if(cd.criteriaRefs&&cd.criteriaRefs.length)cp.push('<div class="pp-criteria-row">'+cd.criteriaRefs.map((c)=>'<span class="pf-tag-crit">'+E(c)+'</span>').join('')+'</div>');
       if(cd.scopeFiles&&cd.scopeFiles.length)cp.push(dv('pp-scope-block','<div class="pp-sub-lbl">命中变更文件 ('+cd.scopeFiles.length+')</div>'+anc(cd.scopeFiles.slice(0,4).map((f)=>({text:f,copy:f})))+(cd.scopeFiles.length>4?'<details class="pf-more-fold"><summary>展开其余 '+(cd.scopeFiles.length-4)+' 个文件</summary>'+anc(cd.scopeFiles.slice(4).map((f)=>({text:f,copy:f})))+'</details>':'')));
@@ -295,6 +295,32 @@ export function buildClientCoreScript({ isBrief = true, hasDiff = isBrief } = {}
     ta.value=buildDiagramContext(tb,curSel(),S.ai,lastEx,DM,hp());H(G('clipboard-fallback'),true);H(d,false);ta.focus();
   }
 
+  ${isBrief ? `S.bq='';S.ie=false;function applyBpFilters(){
+    const q=String(S.bq||'').trim().toLowerCase(),terms=q?q.split(/\\s+/).filter(Boolean):[],hf=S.df!=='all'||Boolean(S.ff)||terms.length>0;
+    Q('[data-domain-filter]').forEach((b)=>T(b,IA,(A(b,'data-domain-filter')||'all')===S.df));
+    Q('[data-diff-filter]').forEach((b)=>T(b,IA,Boolean(S.ff)&&A(b,'data-diff-filter')===S.ff));
+    let tot=0,vis=0,dv=0,iv=0;
+    Q('[data-slice-id]').forEach((card)=>{
+      tot+=1;
+      const dom=A(card,'data-slice-domain'),st=A(card,'data-diff-state'),gp=A(card,'data-slice-group')||'direct',ex=A(card,'data-impacted-extra')==='1';
+      let ok=(S.df==='all'||dom===S.df)&&(!S.ff||st===S.ff);
+      if(ok&&terms.length){const hay=(A(card,'data-slice-id')+' '+dom+' '+st+' '+(card.textContent||'')).toLowerCase();ok=terms.every((tm)=>hay.includes(tm));}
+      const foldHide=ok&&!hf&&ex&&!S.ie;
+      H(card,!ok||foldHide);
+      if(ok&&!foldHide){vis+=1;if(gp==='impacted')iv+=1;else dv+=1;}
+    });
+    const dg=G('pf-group-direct'),ig=G('pf-group-impacted');
+    if(dg)H(dg,dv===0);if(ig)H(ig,iv===0);
+    const dc=D.querySelector('[data-group-count="direct"]'),ic=D.querySelector('[data-group-count="impacted"]');
+    if(dc)dc.textContent=String(dv);if(ic)ic.textContent=String(iv);
+    const fb=G('pf-impacted-fold-bar'),tb=G('btn-toggle-impacted');
+    if(fb){H(fb,hf);if(tb){const n=A(tb,'data-extra-count')||'';tb.textContent=S.ie?('收起其余 '+n+' 个下游受波及模块'):('展开其余 '+n+' 个下游受波及模块');}}
+    const mc=G('pf-bp-match-count'),rb=G('pf-bp-reset'),em=G('pf-bp-empty');
+    if(mc)mc.textContent='显示 '+vis+' / 共 '+tot+' 个模块';
+    if(rb)H(rb,!hf);if(em)H(em,vis>0||tot===0);
+  }
+  function resetBpFilters(){S.df='all';S.ff='';S.bq='';const bs=G('pf-bp-search');if(bs)bs.value='';applyBpFilters();}` : ''}
+
   ON(D,'click',(ev)=>{
     const c=(s)=>CL(ev.target,s);
     const tb=c('[data-tab-target]');if(tb){const t=A(tb,'data-tab-target');S.v=t==='brief'?'brief':(t==='prototypes'?'prototypes':'canvas');return syncUI();}
@@ -305,9 +331,11 @@ export function buildClientCoreScript({ isBrief = true, hasDiff = isBrief } = {}
     const cp=c('[data-copy-path]');if(cp){flashCopied(cp,cp.querySelector('.pp-copy-st'));return copyText(A(cp,'data-copy-path'),'已复制路径');}
     const ib=c('[data-intent]');if(ib){S.ai=A(ib,'data-intent');return renderInsp();}
     const qb=c('[data-qa-intent]');if(qb){S.ai=A(qb,'data-qa-intent');return openQa(lastEx);}
-    ${isBrief ? `const df=c('[data-domain-filter]');if(df){S.df=A(df,'data-domain-filter')||'all';Q('[data-domain-filter]').forEach((b)=>T(b,IA,(A(b,'data-domain-filter')||'all')===S.df));Q('[data-slice-domain]').forEach((x)=>H(x,(S.df!=='all'&&A(x,'data-slice-domain')!==S.df)||(Boolean(S.ff)&&A(x,'data-diff-state')!==S.ff)));return;}
-    const ff=c('[data-diff-filter]');if(ff){const s=A(ff,'data-diff-filter')||'';S.ff=S.ff===s?'':s;Q('[data-diff-filter]').forEach((b)=>T(b,IA,Boolean(S.ff)&&A(b,'data-diff-filter')===S.ff));Q('[data-diff-state]').forEach((x)=>H(x,(S.df!=='all'&&A(x,'data-slice-domain')!==S.df)||(Boolean(S.ff)&&A(x,'data-diff-state')!==S.ff)));return;}
-    const jbp=c('[data-jump-blueprint]');if(jbp){const tid=A(jbp,'data-jump-blueprint');S.v='brief';S.df='all';S.ff='';Q('[data-domain-filter]').forEach((b)=>T(b,IA,(A(b,'data-domain-filter')||'all')==='all'));Q('[data-diff-filter]').forEach((b)=>T(b,IA,false));Q('[data-slice-id]').forEach((x)=>H(x,false));syncUI();const card=Array.from(Q('[data-slice-id]')).find((x)=>A(x,'data-slice-id')===tid);if(card){if(card.scrollIntoView)card.scrollIntoView({behavior:'smooth',block:'center'});T(card,'is-flash-focus',false);void card.offsetWidth;T(card,'is-flash-focus',true);clearTimeout(card._ft);card._ft=setTimeout(()=>T(card,'is-flash-focus',false),1600);}return;}
+    ${isBrief ? `const df=c('[data-domain-filter]');if(df){S.df=A(df,'data-domain-filter')||'all';return applyBpFilters();}
+    const ff=c('[data-diff-filter]');if(ff){const s=A(ff,'data-diff-filter')||'';S.ff=S.ff===s?'':s;return applyBpFilters();}
+    if(c('#pf-bp-reset')||c('#pf-bp-empty-reset'))return resetBpFilters();
+    if(c('[data-jump-bp-work]')){const ws=G('pf-bp-toolbar')||G('pf-bp-workspace');if(ws&&ws.scrollIntoView)ws.scrollIntoView({behavior:'smooth',block:'start'});return;}
+    const jbp=c('[data-jump-blueprint]');if(jbp){const tid=A(jbp,'data-jump-blueprint');S.v='brief';S.df='all';S.ff='';S.bq='';const bs=G('pf-bp-search');if(bs)bs.value='';const card=Array.from(Q('[data-slice-id]')).find((x)=>A(x,'data-slice-id')===tid);if(card&&A(card,'data-impacted-extra')==='1')S.ie=true;applyBpFilters();syncUI();if(card){if(card.scrollIntoView)card.scrollIntoView({behavior:'smooth',block:'center'});T(card,'is-flash-focus',false);void card.offsetWidth;T(card,'is-flash-focus',true);clearTimeout(card._ft);card._ft=setTimeout(()=>T(card,'is-flash-focus',false),1600);}return;}
     const pt=c('[data-proto-tab]'),pm=c('[data-proto-mode]');if(pt||pm){const gd=G('pf-proto-grid');if(!gd)return;Q('[data-proto-tab],[data-proto-mode]').forEach((b)=>T(b,IA,false));if(pm){T(pm,IA,true);T(gd,'is-compare',true);Q('.pf-proto-card',gd).forEach((x)=>H(x,false));}else{T(pt,IA,true);T(gd,'is-compare',false);const ix=A(pt,'data-proto-tab');Q('.pf-proto-card',gd).forEach((x)=>H(x,A(x,'data-proto-index')!==ix));}return;}
     if(c('#btn-jump-diff-tree')){S.v='canvas';S.d=AR;if(DM.hasActiveDiff)S.od=true;const fd=nodes.find((n)=>n.diffState==='added'||n.diffState==='modified'||n.diffState==='removed')||nodes.find((n)=>n.diffState==='impacted');if(fd){S.sel={tab:AR,id:fd.id};S.io=true;tabChips(AR);}syncUI();if(fd)focusCam(AR,fd.id);return;}` : ''}
     if(c('#btn-cmdk'))return openCmdk();if(c('#cmdk-close'))return H(G('pf-cmdk'),true);
@@ -319,6 +347,7 @@ export function buildClientCoreScript({ isBrief = true, hasDiff = isBrief } = {}
     const pcb=c('#prompt-copy-btn');if(pcb){flashCopied(pcb);return copyText((G('prompt-dialog-text')||{}).value||'','已复制提问内容');}
     if(c('#prompt-close-btn'))return H(G('prompt-dialog'),true);
     const ab=c('[data-act]'),act=A(ab,'data-act');if(!act)return;
+    ${isBrief ? `if(act==='toggle-impacted'){S.ie=!S.ie;return applyBpFilters();}` : ''}
     if(act==='close-inspector')clearSelection();
     else if(act==='zoom-node'){if(curSel()){S.v='canvas';syncUI(true);focusCam(S.d,curSel());}}
     else if(act==='copy-intent'){flashCopied(ab,ab.querySelector('span'));const pv=G('pf-intent-preview');copyText(pv?pv.textContent:buildDiagramContext(S.d,curSel(),S.ai,'',DM,hp()),'已复制提示词');}
@@ -335,6 +364,7 @@ export function buildClientCoreScript({ isBrief = true, hasDiff = isBrief } = {}
   ['pf-cmdk','prompt-dialog'].forEach((id)=>{const m=G(id);ON(m,'click',(ev)=>{if (ev.target === m) H(m,true);});});
   const si=G('pf-search');
   ON(si,'input',()=>{const q=(si.value||'').trim().toLowerCase();Q('.pf-catalog-group').forEach((g)=>{let v=0;Q('.pf-catalog-item',g).forEach((it)=>{const n=nodeById.get(A(it,'data-target-id')),ok=!q||(n&&[n.id,n.title,n.domainTitle,n.description,...(n.modules||[])].join(' ').toLowerCase().includes(q));H(it,!ok);if(ok)v+=1;});H(g,v===0);});});
+  ${isBrief ? `const bps=G('pf-bp-search');ON(bps,'input',()=>{S.bq=bps.value||'';applyBpFilters();});` : ''}
   const sfb=G('pf-selection-float');
   ON(D,'mouseup',(e)=>{const dlg=G('prompt-dialog');if(!sfb||(dlg&&!dlg.hidden))return;const s=W.getSelection?String(W.getSelection().toString()||'').trim():'';if(s.length>=6){sfb.style.left=snapDpr(M.min(W.innerWidth-160,M.max(12,e.clientX+8)))+'px';sfb.style.top=snapDpr(M.min(W.innerHeight-44,M.max(12,e.clientY-36)))+'px';SA(sfb,'data-selection-excerpt',s.slice(0,240));H(sfb,false);}else H(sfb,true);});
   ON(sfb,'click',()=>{const ex=A(sfb,'data-selection-excerpt')||'';H(sfb,true);openQa(ex);});

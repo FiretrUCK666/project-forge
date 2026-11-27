@@ -344,6 +344,7 @@ export function buildIndexedVisualPayload(model, {
   couplingMap = new Map(),
   parentBriefHref = null,
   childBriefLinks = [],
+  siblingBriefLinks = [],
 } = {}) {
   const tree = model?.tree || { width: 680, height: 400, domains: [], nodes: [], edges: [] }
   const activeTabs = Array.isArray(model?.activeTabs) && model.activeTabs.length > 0
@@ -367,6 +368,7 @@ export function buildIndexedVisualPayload(model, {
     defaultTab: mode === 'visual-brief' ? 'brief' : 'architecture',
     parentBriefHref: parentBriefHref || null,
     childBriefLinks: Array.isArray(childBriefLinks) ? childBriefLinks : [],
+    ...(mode === 'visual-brief' && Array.isArray(siblingBriefLinks) && siblingBriefLinks.length > 0 ? { siblingBriefLinks } : {}),
     activeTabs,
     tree: {
       width: Math.round(Number(tree.width) || 680),
@@ -404,10 +406,11 @@ export function buildIndexedVisualPayload(model, {
           if (n.changeDetail.before) cd.before = n.changeDetail.before
           if (n.changeDetail.after) cd.after = n.changeDetail.after
           if (n.changeDetail.note) cd.note = n.changeDetail.note
+          else if (Array.isArray(n.changeDetail.noteItems) && n.changeDetail.noteItems.length > 0) cd.note = n.changeDetail.noteItems.slice(0, 24).join('；')
           if (n.changeDetail.reason) cd.reason = n.changeDetail.reason
           if (n.changeDetail.replacementId) cd.replacementId = n.changeDetail.replacementId
-          if (Array.isArray(n.changeDetail.scopeFiles) && n.changeDetail.scopeFiles.length > 0) cd.scopeFiles = n.changeDetail.scopeFiles.slice(0, 10)
-          if (Array.isArray(n.changeDetail.criteriaRefs) && n.changeDetail.criteriaRefs.length > 0) cd.criteriaRefs = n.changeDetail.criteriaRefs.slice(0, 8)
+          if (Array.isArray(n.changeDetail.scopeFiles) && n.changeDetail.scopeFiles.length > 0) cd.scopeFiles = n.changeDetail.scopeFiles.slice(0, 24)
+          if (Array.isArray(n.changeDetail.criteriaRefs) && n.changeDetail.criteriaRefs.length > 0) cd.criteriaRefs = n.changeDetail.criteriaRefs.slice(0, 12)
           if (Object.keys(cd).length > 0) item.changeDetail = cd
         }
         if (item.diffState !== 'context' && n.impactReasons?.length) item.impactReasons = n.impactReasons.slice(0, 4)

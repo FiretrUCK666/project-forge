@@ -85,7 +85,7 @@ export function stripHomedirLeaks(text) {
   return out
 }
 
-export function uniqClean(arr, existing = [], maxLen = 400) {
+export function uniqClean(arr, existing = [], maxLen = 1200) {
   const out = [...(Array.isArray(existing) ? existing : [])]
   const seen = new Set(out)
   const incoming = Array.isArray(arr) ? arr : (arr !== undefined && arr !== null ? [arr] : [])
@@ -122,10 +122,11 @@ export function normFeatureChangesMap(rawMap) {
     const state = ['added', 'modified', 'removed', 'impacted', 'context'].includes(val.state) ? val.state : 'modified'
     out[id] = {
       state,
-      ...(val.note ? { note: String(val.note).trim().slice(0, 400) } : {}),
-      ...(val.before ? { before: String(val.before).trim().slice(0, 300) } : {}),
-      ...(val.after ? { after: String(val.after).trim().slice(0, 300) } : {}),
-      ...(val.reason ? { reason: String(val.reason).trim().slice(0, 300) } : {}),
+      ...(val.note ? { note: String(val.note).trim().slice(0, 2400) } : {}),
+      ...(Array.isArray(val.noteItems) && val.noteItems.length > 0 ? { noteItems: val.noteItems.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 24) } : {}),
+      ...(val.before ? { before: String(val.before).trim().slice(0, 400) } : {}),
+      ...(val.after ? { after: String(val.after).trim().slice(0, 400) } : {}),
+      ...(val.reason ? { reason: String(val.reason).trim().slice(0, 400) } : {}),
       ...(val.replacementId ? { replacementId: String(val.replacementId).trim().slice(0, 120) } : {}),
       ...(val.targetDomain ? { targetDomain: String(val.targetDomain).trim().slice(0, 120) } : {}),
     }

@@ -171,11 +171,41 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
     )) ?? null
 
   const masterRel = matchingMasterPrd?.rel ?? norm.masterPrdRel ?? null
-  const childSlices = masterRel
+  const masterBase = masterRel ? basename(posixPath(masterRel)) : null
+  const rawChildSlices = masterRel
     ? sliceGraph.slices
-        .filter((s) => s.kind === 'spec' && s.masterRel && posixPath(s.masterRel) === posixPath(masterRel))
-        .map((s) => ({ key: s.key, rel: s.rel, status: s.status, done: s.done, dependsOn: s.dependsOn, scopeCount: s.scopeFiles.length }))
+        .filter((s) => s.kind === 'spec' && s.masterRel && (
+          posixPath(s.masterRel) === posixPath(masterRel)
+          || (masterBase && basename(posixPath(s.masterRel)) === masterBase)
+        ))
+        .map((s) => ({
+          key: s.key,
+          title: String(s.data?.title || s.key).trim(),
+          rel: s.rel,
+          status: s.status,
+          done: s.done,
+          dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn : [],
+          scopeCount: s.scopeFiles.length,
+        }))
     : []
+  const sliceByKey = new Map(rawChildSlices.map((s) => [s.key, s]))
+  const waveMemo = new Map()
+  const computeWave = (key, visiting = new Set()) => {
+    if (waveMemo.has(key)) return waveMemo.get(key)
+    if (visiting.has(key)) return 1
+    visiting.add(key)
+    const sl = sliceByKey.get(key)
+    let depth = 1
+    for (const dep of sl?.dependsOn || []) {
+      if (sliceByKey.has(dep)) depth = Math.max(depth, computeWave(dep, visiting) + 1)
+    }
+    visiting.delete(key)
+    waveMemo.set(key, depth)
+    return depth
+  }
+  const childSlices = rawChildSlices
+    .map((s) => ({ ...s, wave: computeWave(s.key) }))
+    .sort((a, b) => (a.wave - b.wave) || a.key.localeCompare(b.key))
 
   const relevantDocs = selectRelevantPlanDocs({ allDocs, norm, masterRel, effWork })
   const docProj = extractPlanDocProjection({
@@ -248,19 +278,42 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
     featureList,
   })
 
-  // Pure relative parent/child brief links (zero absolute paths or homedir leaks)
-  const parentBriefHref = norm.parentBriefKey && isValidBriefKey(norm.parentBriefKey)
-    ? `./${norm.parentBriefKey}.html`
+  // Pure relative parent/child/sibling brief links (zero absolute paths or homedir leaks)
+  const resolvedParentKey = norm.parentBriefKey && isValidBriefKey(norm.parentBriefKey)
+    ? norm.parentBriefKey
+    : (norm.kind !== 'master-prd' && masterRel ? deriveMasterPrdBriefKey(masterRel) : null)
+  const parentBriefHref = resolvedParentKey && isValidBriefKey(resolvedParentKey)
+    ? `./${resolvedParentKey}.html`
     : null
   const childBriefLinks = norm.kind === 'master-prd'
     ? childSlices.map((sl) => {
         const cKey = sanitizeBriefKey(sl.key)
         return {
           key: cKey,
-          title: sl.key,
+          title: sl.title || sl.key,
           status: sl.status,
-          done: sl.done,
+          done: Boolean(sl.done),
+          wave: sl.wave || 1,
+          scopeCount: Number(sl.scopeCount) || 0,
+          dependsOn: Array.isArray(sl.dependsOn) ? sl.dependsOn : [],
           href: `./${cKey}.html?from=${encodeURIComponent(norm.briefKey)}`,
+        }
+      })
+    : []
+  const siblingBriefLinks = norm.kind !== 'master-prd' && childSlices.length > 0
+    ? childSlices.map((sl) => {
+        const cKey = sanitizeBriefKey(sl.key)
+        const isCurrent = cKey === norm.briefKey || (norm.taskId && sanitizeBriefKey(norm.taskId) === cKey)
+        return {
+          key: cKey,
+          title: sl.title || sl.key,
+          status: sl.status,
+          done: Boolean(sl.done),
+          wave: sl.wave || 1,
+          current: Boolean(isCurrent),
+          href: resolvedParentKey && isValidBriefKey(resolvedParentKey)
+            ? `./${cKey}.html?from=${encodeURIComponent(resolvedParentKey)}`
+            : `./${cKey}.html`,
         }
       })
     : []
@@ -327,6 +380,7 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
         masterPrd: masterPrdInfo,
         parentBriefHref,
         childBriefLinks,
+        siblingBriefLinks,
         childSlices: norm.kind === 'master-prd' ? childSlices : [],
         activeWorktrees,
         mergedDecisions: allMergedDecisions,
@@ -355,6 +409,7 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
       masterPrd: masterPrdInfo,
       parentBriefHref,
       childBriefLinks,
+      siblingBriefLinks,
       childSlices, sliceGraphOk: sliceEval.ok, sliceGraphErrors: sliceEval.errors.length,
       activeWorktrees, pendingDecisions: livePendingDecisions, critiqueRounds: liveCritiqueRounds,
       mergedDecisions: allMergedDecisions, mergedNonGoals: allMergedNonGoals, mergedOpen,

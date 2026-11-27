@@ -554,4 +554,202 @@ export function registerLivingBriefCases(cases) {
       rmTree(dir)
     }
   }])
+
+  cases.push(['Living Brief UX：1:N 波次导航置顶、兄弟切片纯相对互链、语义无截断残词与结构化要点全量无损', async () => {
+    const dir = tmpProject({
+      'package.json': JSON.stringify({ name: 'lb-ux-clarity', version: '1.0.0' }, null, 2) + '\n',
+      'src/a1.mjs': 'export const a1 = 1\n',
+      'src/a2.mjs': 'export const a2 = 2\n',
+      'src/a3.mjs': 'export const a3 = 3\n',
+      'src/a4.mjs': 'export const a4 = 4\n',
+      'src/a5.mjs': 'export const a5 = 5\n',
+      'src/b1.mjs': 'import { a1 } from "./a1.mjs"\nexport const b1 = a1\n',
+      'docs/feature-map.json': JSON.stringify({
+        version: 2,
+        domains: [{ id: 'core', name: '核心域' }, { id: 'edge', name: '边缘域' }],
+        features: [
+          {
+            id: 'mod-core',
+            name: '核心执行器',
+            domain: 'core',
+            entrypoints: ['src/a1.mjs'],
+            modules: ['src/a1.mjs', 'src/a2.mjs', 'src/a3.mjs', 'src/a4.mjs', 'src/a5.mjs'],
+            tests: [],
+            dependsOn: [],
+          },
+          {
+            id: 'mod-edge',
+            name: '边缘消费器',
+            domain: 'edge',
+            entrypoints: ['src/b1.mjs'],
+            modules: ['src/b1.mjs'],
+            tests: [],
+            dependsOn: ['mod-core'],
+          },
+        ],
+        flows: [],
+      }, null, 2) + '\n',
+    })
+    gitInit(dir)
+    gitCommitFast(dir, 'chore: init ux clarity repo')
+    try {
+      mkdirSync(join(dir, 'docs', 'prd'), { recursive: true })
+      mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+      const masterPrdRel = 'docs/prd/261128-ux-master-prd.md'
+      const longDecisionTail = '并将钩子下沉至 kit/skills/lib/worktree-dep-pool.mjs 与 flow-lifecycle-helpers.mjs 避免触碰高紧文件。'
+      writeFileSync(join(dir, masterPrdRel), [
+        '---',
+        'kind: prd',
+        'title: 变更蓝图清爽层级总控方案',
+        'status: active',
+        'multi_spec: true',
+        'owner: ux-tester',
+        '---',
+        '',
+        '# 变更蓝图清爽层级总控方案',
+        '',
+        '## 六、验收标准',
+        '<!-- criteria:start -->',
+        '- [ ] C1: 波次一核心改动完成',
+        '- [ ] C2: 波次二边缘适配完成',
+        '<!-- criteria:end -->',
+        '',
+        '## 澄清与补充记录',
+        `- 已确认：吸收独立审查意见，补齐 Windows NTFS 递归撤只读位再删、包管理器直调 node、放行含括号合法路径与测试垫片参数、对齐既有夹具与注入锚点，${longDecisionTail}`,
+        '- 已确认：采用单源双向复用，画布抽屉与蓝图卡片共用复制路径芯片与 Toast 反馈。',
+      ].join('\n'), 'utf8')
+
+      writeFileSync(join(dir, 'docs/specs/261128-wave1-core-spec.md'), [
+        '---',
+        'kind: spec',
+        'title: 波次一核心模块升级',
+        'status: implemented',
+        'tier: L3',
+        'task_id: wave1-core',
+        'related_prd: ../prd/261128-ux-master-prd.md',
+        'depends_on: []',
+        'scope_files: [src/a1.mjs, src/a2.mjs, src/a3.mjs, src/a4.mjs, src/a5.mjs]',
+        '---',
+        '',
+        '# 波次一核心模块升级',
+        '',
+        '| 模块 / 文件 | 变更性质 | 核心职责 |',
+        '| --- | --- | --- |',
+        '| `src/a1.mjs` | 修改 | 升级入口参数解析并补齐结构化要点一 |',
+        '| `src/a2.mjs` | 修改 | 优化缓存路径重定向并补齐结构化要点二 |',
+        '| `src/a3.mjs` | 新增 | 新增只读依赖池管理与结构化要点三 |',
+        '| `src/a4.mjs` | 修改 | 补齐错误码登记与结构化要点四 |',
+        '| `src/a5.mjs` | 修改 | 补齐跨平台卸载兜底与结构化要点五 |',
+        '',
+        '## 五、冻结的验收标准',
+        '<!-- criteria:start -->',
+        '- [x] C1: `src/a1.mjs` 等 5 个核心文件完成改造',
+        '<!-- criteria:end -->',
+        '',
+        '## 澄清与补充记录',
+        `- 已确认：吸收独立审查意见，补齐 Windows NTFS 递归撤只读位再删、包管理器直调 node、放行含括号合法路径与测试垫片参数、对齐既有夹具与注入锚点，${longDecisionTail}`,
+      ].join('\n'), 'utf8')
+
+      writeFileSync(join(dir, 'docs/specs/261128-wave2-edge-spec.md'), [
+        '---',
+        'kind: spec',
+        'title: 波次二边缘适配升级',
+        'status: draft',
+        'tier: L3',
+        'task_id: wave2-edge',
+        'related_prd: ../prd/261128-ux-master-prd.md',
+        'depends_on: [wave1-core]',
+        'scope_files: [src/b1.mjs]',
+        '---',
+        '',
+        '# 波次二边缘适配升级',
+        '',
+        '## 五、冻结的验收标准',
+        '<!-- criteria:start -->',
+        '- [ ] C2: `src/b1.mjs` 完成边缘消费者适配',
+        '<!-- criteria:end -->',
+      ].join('\n'), 'utf8')
+
+      const masterBrief = upsertVisualBrief(dir, {
+        briefKey: 'ux-master',
+        kind: 'master-prd',
+        masterPrdRel,
+        title: '变更蓝图清爽层级总控方案',
+      })
+      const masterHtml = readFileSync(masterBrief.htmlPath, 'utf8')
+
+      // 1. 垂直节奏：Hero -> 1:N 子切片波次导航 -> 已拍板决策 -> 下游波及链 -> 分域卡片区
+      const bodyHtml = masterHtml.slice(masterHtml.indexOf('<body'))
+      const idxHero = bodyHtml.indexOf('class="pf-hero-strip"')
+      const idxWave = bodyHtml.indexOf('class="pf-wave-panel"')
+      const idxDec = bodyHtml.indexOf('class="pf-decision-panel"')
+      const idxChain = bodyHtml.indexOf('class="pf-chain-panel"')
+      const idxCards = bodyHtml.indexOf('class="pf-slice-grid"')
+      if (!(idxHero > 0 && idxWave > idxHero && idxDec > idxWave && idxChain > idxDec && idxCards > idxChain)) {
+        return `Master PRD 垂直层级顺序不符：hero=${idxHero}, wave=${idxWave}, dec=${idxDec}, chain=${idxChain}, cards=${idxCards}`
+      }
+      if (!masterHtml.includes('./wave1-core.html?from=ux-master') || !masterHtml.includes('./wave2-edge.html?from=ux-master')) {
+        return 'Master PRD 波次导航缺少纯相对子切片跳转链接'
+      }
+      if (!masterHtml.includes('W1') || !masterHtml.includes('W2')) {
+        return 'Master PRD 波次导航缺少 W1/W2 波次标识'
+      }
+
+      // 2. 决策无半截路径截断且全文无损
+      if (masterHtml.includes('worktree-dep-pool.mjs/f...') || !masterHtml.includes('flow-lifecycle-helpers.mjs 避免触碰高紧文件')) {
+        return '长决策文本存在半截路径截断或丢字'
+      }
+
+      // 3. 结构化要点列表：前 3 条默认展示 + 其余 2 条进 details 100% 无损 + 复用 [data-copy-path]
+      if (!masterHtml.includes('pf-note-list') || !masterHtml.includes('pf-note-fold')) {
+        return '多文件改动未拆分为结构化要点列表与渐进展开折叠区'
+      }
+      for (const expected of ['结构化要点一', '结构化要点二', '结构化要点三', '结构化要点四', '结构化要点五']) {
+        if (!masterHtml.includes(expected)) return `结构化要点丢失说明文字：${expected}`
+      }
+      if (!masterHtml.includes('data-copy-path="src/a1.mjs"') || !masterHtml.includes('pf-file-chip')) {
+        return '切片卡片未复用 [data-copy-path] 点击复制文件芯片'
+      }
+
+      // 4. 子切片简报透出纯相对 siblingBriefLinks 并在 #pf-parent-bar 渲染兄弟横向切换条
+      const childBrief = upsertVisualBrief(dir, {
+        briefKey: 'wave1-core',
+        kind: 'task',
+        taskId: 'wave1-core',
+        parentBriefKey: 'ux-master',
+        masterPrdRel,
+        title: '波次一核心模块升级',
+      })
+      const sibs = childBrief.liveProjection?.siblingBriefLinks || []
+      if (sibs.length !== 2 || !sibs.some((s) => s.key === 'wave1-core' && s.current) || !sibs.some((s) => s.key === 'wave2-edge' && !s.current)) {
+        return `子切片 siblingBriefLinks 投影异常：${JSON.stringify(sibs)}`
+      }
+      if (sibs.some((s) => !s.href.startsWith('./') || s.href.includes('://') || s.href.includes('\\'))) {
+        return `siblingBriefLinks 存在非相对路径泄露：${JSON.stringify(sibs)}`
+      }
+      const childHtml = readFileSync(childBrief.htmlPath, 'utf8')
+      if (!childHtml.includes('pf-sibling-rail') || !childHtml.includes('./wave2-edge.html?from=ux-master') || !childHtml.includes('aria-current="page"')) {
+        return '子切片 #pf-parent-bar 缺少兄弟切片横向切换条或当前切片高亮'
+      }
+      const home = homedir().replace(/\\/g, '/')
+      if (home.length >= 4 && childHtml.includes(home)) return '子切片 HTML 泄露了宿主机 homedir'
+
+      // 5. 反例：独立无兄弟的任务简报不得渲染 pf-sibling-rail 或 pf-wave-panel
+      const soloBrief = upsertVisualBrief(dir, {
+        briefKey: 'solo-only',
+        kind: 'task',
+        taskId: 'solo-only',
+        title: '独立任务简报',
+        affectedFeatures: ['mod-core'],
+      })
+      const soloHtml = readFileSync(soloBrief.htmlPath, 'utf8')
+      const soloBody = soloHtml.slice(soloHtml.indexOf('<body'))
+      if (soloBody.includes('pf-sibling-rail') || soloBody.includes('pf-wave-panel')) {
+        return '独立任务简报不应渲染 1:N 波次导航或兄弟切片切换条'
+      }
+      return true
+    } finally {
+      rmTree(dir)
+    }
+  }])
 }

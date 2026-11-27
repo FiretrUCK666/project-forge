@@ -103,12 +103,14 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
   const couplingMap = computeNodeCouplingMap(tree.nodes, tree.edges, model.analysis || null)
   const parentBriefHref = model.briefData?.parentBriefHref || null
   const childBriefLinks = model.briefData?.childBriefLinks || []
+  const siblingBriefLinks = Array.isArray(model.briefData?.siblingBriefLinks) ? model.briefData.siblingBriefLinks : []
 
   const payload = buildIndexedVisualPayload(model, {
     mode: resolvedMode,
     couplingMap,
     parentBriefHref,
     childBriefLinks,
+    siblingBriefLinks,
   })
   const activeTabs = payload.activeTabs
 
@@ -123,8 +125,18 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
 
   const themeSvg = '<svg class="pf-ico" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/></svg>'
   const defaultFollowup = isBrief ? '变更蓝图' : '全景架构'
-  const parentBarHidden = parentBriefHref ? '' : ' hidden'
+  const parentBarHidden = parentBriefHref || siblingBriefLinks.length > 0 ? '' : ' hidden'
   const parentHrefAttr = parentBriefHref ? escapeHtml(parentBriefHref) : '#'
+  const siblingRailHtml = siblingBriefLinks.length > 0
+    ? `<div class="pf-sibling-rail" role="navigation" aria-label="兄弟切片快速切换">${siblingBriefLinks.map((sib) => {
+        const wTag = `W${Number(sib.wave) || 1}`
+        const lbl = `${wTag} · ${sib.key}`
+        const tip = sib.title && sib.title !== sib.key ? `${sib.title} (${sib.key})` : sib.key
+        return sib.current
+          ? `<span class="pf-sib-item is-current" aria-current="page" title="${escapeHtml(tip)}">${escapeHtml(lbl)}</span>`
+          : `<a class="pf-sib-item" href="${escapeHtml(sib.href)}" data-sib-key="${escapeXml(sib.key)}" title="${escapeHtml(tip)}">${escapeHtml(lbl)}</a>`
+      }).join('')}</div>`
+    : '<span class="mono-id">1:N 上下文导航</span>'
 
   const hasDiff = isBrief || Boolean(model.hasActiveDiff) || (tree?.edges || []).some((e) => e.edgeState && e.edgeState !== 'context')
   const compactJs = (src) => String(src || '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).join('\n')
@@ -137,7 +149,7 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
     '<!DOCTYPE html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />',
     `<title>${title}</title><style>${buildStylesCss({ isBrief, showProto: showProtoTab, hasDiff })}</style></head>`,
     `<body data-mode-canvas="${isBrief ? '0' : '1'}"><div class="pf-shell">`,
-    isBrief || parentBriefHref ? `<div id="pf-parent-bar" class="pf-parent-bar"${parentBarHidden}><a id="pf-parent-link" class="pf-parent-link" href="${parentHrefAttr}">&lt;- 返回总控 PRD 简报</a><span class="mono-id">1:N 上下文导航</span></div>` : '',
+    isBrief || parentBriefHref ? `<div id="pf-parent-bar" class="pf-parent-bar"${parentBarHidden}><a id="pf-parent-link" class="pf-parent-link" href="${parentHrefAttr}">&lt;- 返回总控 PRD</a>${siblingRailHtml}</div>` : '',
     `<header class="pf-topbar"><div class="pf-brand"><span class="pf-mark" aria-hidden="true"></span><h1 class="pf-title" title="${title}">${title}</h1><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span></div>${topTabsHtml}<div class="pf-controls"><button id="btn-cmdk" class="pf-btn-sec" type="button">搜索 ⌘K</button>${hasWalkthrough ? '<button id="btn-walk-start" class="pf-btn-icon" type="button" title="分步导览">导览</button>' : ''}<button id="btn-theme" class="pf-btn-icon" type="button" title="切换浅深色主题" aria-label="切换浅深色主题">${themeSvg}</button><button id="btn-followup-ctx" class="pf-btn-primary" type="button" data-followup-panel="${defaultFollowup}">向 AI 提问</button></div></header>`,
     '<div id="walk-bar" class="walk-bar" hidden><div class="walk-bar-inner"><span id="walk-step-badge" class="walk-badge">1 / 1</span><span id="walk-step-label" class="walk-bar-text"></span><div class="walk-actions"><button id="walk-prev" class="pf-btn-sec pf-btn-sm" type="button">上一步</button><button id="walk-next" class="pf-btn-primary pf-btn-sm" type="button">下一步</button><span class="pf-hud-sep"></span><button id="walk-close" class="pf-btn-ghost pf-btn-sm" type="button">退出</button></div></div></div>',
     '<main class="pf-workspace">',

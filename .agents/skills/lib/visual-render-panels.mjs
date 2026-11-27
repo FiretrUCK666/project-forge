@@ -66,40 +66,63 @@ function renderSliceCardHtml(node, idx, prDiff) {
   const d = node.changeDetail || {}
   const domainLabel = node.domainTitle || node.domain || '核心域'
 
-  let bodyHtml = ''
+  const scopeFiles = Array.isArray(d.scopeFiles) ? d.scopeFiles : []
+  const criteriaRefs = Array.isArray(d.criteriaRefs) ? d.criteriaRefs : []
+  const impactReasons = Array.isArray(node.impactReasons) ? node.impactReasons : []
+
+  const bodyParts = []
   if (d.before && d.after) {
-    bodyHtml = `<div class="pf-diff-pair">`
+    bodyParts.push(
+      '<div class="pf-diff-pair">'
       + `<div class="pf-before"><span class="pf-tag-before">改前</span><span>${escapeHtml(d.before)}</span></div>`
       + `<div class="pf-after"><span class="pf-tag-after">改后</span><span>${escapeHtml(d.after)}</span></div>`
-      + '</div>'
+      + '</div>',
+    )
   } else if (d.reason) {
     const rep = d.replacementId
       ? ` · 替代：<button type="button" class="pf-btn-ghost pf-btn-sm" data-jump-node="${escapeXml(d.replacementId)}">${escapeHtml(d.replacementId)}</button>`
       : ''
-    bodyHtml = `<p class="pf-chg-note">${escapeHtml(d.reason)}${rep}</p>`
+    bodyParts.push(`<p class="pf-chg-note">${escapeHtml(d.reason)}${rep}</p>`)
   } else if (d.note) {
-    bodyHtml = `<p class="pf-chg-note">${escapeHtml(d.note)}</p>`
-  } else if (Array.isArray(node.impactReasons) && node.impactReasons.length > 0) {
-    bodyHtml = `<p class="pf-chg-note">${escapeHtml(node.impactReasons.join('；'))}</p>`
-  } else if (node.description) {
-    bodyHtml = `<p class="pf-chg-note">${escapeHtml(node.description)}</p>`
+    bodyParts.push(`<p class="pf-chg-note">${escapeHtml(d.note)}</p>`)
   }
+
+  if (impactReasons.length > 0 && (st === 'impacted' || bodyParts.length === 0)) {
+    const shown = impactReasons.slice(0, 3)
+    const extra = impactReasons.length > 3 ? ` 等 ${impactReasons.length} 项` : ''
+    const impText = shown.join('；') + extra
+    if (!d.note || !d.note.includes(impText)) {
+      bodyParts.push(`<p class="pf-chg-note pf-chg-impact">波及链路：${escapeHtml(impText)}</p>`)
+    }
+  }
+  if (bodyParts.length === 0 && node.description) {
+    bodyParts.push(`<p class="pf-chg-note">${escapeHtml(node.description)}</p>`)
+  }
+
+  if (scopeFiles.length > 0 || criteriaRefs.length > 0) {
+    const fileTags = scopeFiles.slice(0, 4).map((f) => `<span class="pf-tag-mono" title="${escapeXml(f)}">${escapeHtml(toRelPath(f))}</span>`).join('')
+    const extraFiles = scopeFiles.length > 4 ? `<span class="pf-tag-mono">+${scopeFiles.length - 4} 文件</span>` : ''
+    const critTags = criteriaRefs.slice(0, 5).map((cid) => `<span class="pf-tag-crit">${escapeHtml(cid)}</span>`).join('')
+    bodyParts.push(`<div class="pf-slice-tags">${critTags}${fileTags}${extraFiles}</div>`)
+  }
+  const bodyHtml = bodyParts.join('')
 
   const hunks = findMatchingHunks(node, prDiff)
   const hunkHtml = hunks.length > 0
     ? hunks.map((h) => `<details class="pf-hunk-fold"><summary>3-dot Diff · ${escapeHtml(toRelPath(h.file))} (+${h.addedCount || 0} / -${h.removedCount || 0})</summary><pre class="pf-hunk-pre">${escapeHtml((h.lines || []).slice(0, 24).join('\n'))}</pre></details>`).join('')
     : ''
 
-  const primaryFile = toRelPath(node.entrypoints?.[0] || node.modules?.[0] || '')
-  const fileCount = (node.modules || []).length
+  const primaryFile = toRelPath(scopeFiles[0] || node.entrypoints?.[0] || node.modules?.[0] || '')
+  const fileCount = scopeFiles.length > 0 ? scopeFiles.length : (node.modules || []).length
+  const fileCountLabel = scopeFiles.length > 0 ? `命中 ${scopeFiles.length} 文件` : `${fileCount} 文件`
   const titleCls = st === 'removed' ? 'pf-slice-title is-removed' : 'pf-slice-title'
 
-  return `<article class="pf-slice" data-slice-domain="${escapeXml(node.domain || '')}" data-diff-state="${escapeXml(st)}" data-hover-node="${escapeXml(node.id)}">`
+  return `<article class="pf-slice" data-slice-id="${escapeXml(node.id)}" data-slice-domain="${escapeXml(node.domain || '')}" data-diff-state="${escapeXml(st)}" data-hover-node="${escapeXml(node.id)}">`
     + `<div class="pf-slice-top"><div><div class="pf-slice-kicker"><span>S${idx + 1} · ${escapeHtml(domainLabel)}</span><span class="pf-pill pf-pill-${escapeXml(st)}">${escapeXml(label)}</span></div><h3 class="${titleCls}">${escapeHtml(node.title)}</h3></div>`
     + `<button type="button" class="pf-btn-ghost pf-btn-sm" data-jump-node="${escapeXml(node.id)}">画布定位 -&gt;</button></div>`
     + bodyHtml
     + hunkHtml
-    + `<div class="pf-slice-foot"><span class="mono-id">${escapeHtml(node.id)}</span><span class="mono-id">${fileCount > 0 ? `${fileCount} 文件${primaryFile ? ` · ${escapeHtml(primaryFile)}` : ''}` : escapeHtml(primaryFile || '虚拟规划节点')}</span></div>`
+    + `<div class="pf-slice-foot"><span class="mono-id">${escapeHtml(node.id)}</span><span class="mono-id">${fileCount > 0 ? `${fileCountLabel}${primaryFile ? ` · ${escapeHtml(primaryFile)}` : ''}` : escapeHtml(primaryFile || '虚拟规划节点')}</span></div>`
     + '</article>'
 }
 
@@ -125,8 +148,22 @@ export function renderBlueprintLandingHtml(model, verdict) {
     ['impacted', '受波及', counts.impacted || 0, 'var(--di)'],
   ].map(([st, lbl, num, col]) => `<button type="button" class="pf-seg-btn" data-diff-filter="${st}" title="筛选「${lbl}」"><span class="pf-dot" style="--dc:${col}"></span><span>${lbl}</span><strong>${num}</strong></button>`).join('')
 
+  const critiqueRounds = Array.isArray(bd.critiqueRounds) ? bd.critiqueRounds : []
+  const topCritique = critiqueRounds.length > 0
+    ? critiqueRounds.reduce((best, cur) => ((cur.lastRound || cur.rounds || 0) >= (best.lastRound || best.rounds || 0) ? cur : best), critiqueRounds[0])
+    : null
+  const critiquePillHtml = topCritique
+    ? (() => {
+        const rn = topCritique.lastRound || topCritique.rounds || 1
+        const passed = topCritique.lastVerdict === 'passed'
+        const lbl = bd.critiqueStatusText || (passed ? `内审 R${rn} 通过` : `内审 R${rn} ${topCritique.lastVerdict || ''}`.trim())
+        const cls = passed ? 'pf-pill pf-pill-added pf-critique-pill' : 'pf-pill pf-pill-modified pf-critique-pill'
+        return `<span class="${cls}">${escapeHtml(lbl)}</span>`
+      })()
+    : ''
+
   const heroHtml = `<section class="pf-hero-strip"><div>`
-    + `<div class="pf-eyebrow">${escapeHtml(eyebrow)}</div>`
+    + `<div class="pf-eyebrow-row"><span class="pf-eyebrow">${escapeHtml(eyebrow)}</span>${critiquePillHtml}</div>`
     + `<h2 class="pf-h1">${escapeHtml(model?.repoName || model?.title || '变更蓝图')}</h2>`
     + `<p class="pf-subtitle">${escapeHtml(headline)}</p>`
     + `<div class="pf-hero-actions"><button id="btn-jump-diff-tree" class="pf-btn-primary" type="button">在架构图中高亮改动 -&gt;</button>${filterBtns}</div>`
@@ -190,7 +227,21 @@ export function renderBlueprintLandingHtml(model, verdict) {
     ? `<section class="pf-brief-sec"><h3>3-dot PR 实质差分 (${escapeHtml(prDiff.range || 'merge-base...HEAD')})</h3>${prDiff.hunks.files.slice(0, 6).map((h) => `<details class="pf-hunk-fold"><summary>${escapeHtml(toRelPath(h.file))} (+${h.addedCount || 0} / -${h.removedCount || 0})</summary><pre class="pf-hunk-pre">${escapeHtml((h.lines || []).slice(0, 24).join('\n'))}</pre></details>`).join('')}</section>`
     : ''
 
-  return `<div class="pf-bp-wrap">${heroHtml}${decisionsRowHtml}${cardsHtml}${chainHtml}${sliceLinksHtml}${prSummaryHtml}${ledgerSecs.length > 0 ? `<div class="pf-brief-ledger">${ledgerSecs.join('')}</div>` : ''}</div>`
+  const criteriaList = Array.isArray(bd.criteria) ? bd.criteria : []
+  const criteriaHtml = criteriaList.length > 0
+    ? (() => {
+        const doneCount = criteriaList.filter((c) => c.checked).length
+        const openAttr = criteriaList.length <= 5 ? ' open' : ''
+        const rows = criteriaList.map((c) => {
+          const stCls = c.checked ? 'pf-crit-st is-done' : 'pf-crit-st'
+          const stLbl = c.checked ? '已完成' : '待实现'
+          return `<li class="pf-crit-row"><span class="pf-tag-crit">${escapeHtml(c.id)}</span><span class="${stCls}">${stLbl}</span><span class="pf-crit-txt">${escapeHtml(c.text)}</span></li>`
+        }).join('')
+        return `<section class="pf-brief-sec pf-criteria-sec"><details class="pf-criteria-fold"${openAttr}><summary class="pf-criteria-sum"><span>冻结验收标准清单</span><span class="mono-id">已完成 ${doneCount} / 共 ${criteriaList.length} 条</span></summary><ul class="pf-criteria-list">${rows}</ul></details></section>`
+      })()
+    : ''
+
+  return `<div class="pf-bp-wrap">${heroHtml}${decisionsRowHtml}${cardsHtml}${chainHtml}${sliceLinksHtml}${prSummaryHtml}${ledgerSecs.length > 0 ? `<div class="pf-brief-ledger">${ledgerSecs.join('')}</div>` : ''}${criteriaHtml}</div>`
 }
 
 export function renderInspectorShellHtml() {

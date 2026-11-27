@@ -53,8 +53,8 @@ export const INJECTIONS_SANDBOX_FLOW = [
     what: 'C8 flow-lifecycle-finalize: finalize 重新传入 changedFiles 污染常青 docs/architecture-map.html',
     file: 'kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs'],
-    from: '      if (fmChanged) {\n        const archRes = renderArchitectureMapFromRepo(implRoot)\n        if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)\n      }',
-    to: '      if (fmChanged) {\n        const archRes = renderArchitectureMapFromRepo(implRoot, { changedFiles: changed })\n        if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)\n      }',
+    from: '      if (fmChanged) {\n        const archRes = await renderArchitectureMapAsync(implRoot)\n        if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)\n      }',
+    to: '      if (fmChanged) {\n        const archRes = await renderArchitectureMapAsync(implRoot, { changedFiles: changed })\n        if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)\n      }',
     expect: '[Sandbox-C8]',
   },
 ]

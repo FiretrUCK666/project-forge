@@ -388,4 +388,170 @@ export function registerLivingBriefCases(cases) {
       rmTree(dir)
     }
   }])
+
+  cases.push(['Living Brief Parity：零手工参数从 SPEC/PRD 自动投影 scope_files 四态变更、模块改动说明、验收项、内审胶囊与精确切片隔离', async () => {
+    const dir = makeRepoWithFeatureMap('lb-auto-proj')
+    try {
+      mkdirSync(join(dir, 'docs', 'prd'), { recursive: true })
+      mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+      mkdirSync(join(dir, '.github', 'workflows'), { recursive: true })
+      writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), 'name: CI\njobs:\n  lint:\n    steps: [{ run: echo lint }]\n  test:\n    needs: lint\n    steps: [{ run: echo test }]\n', 'utf8')
+
+      const masterPrdRel = 'docs/prd/261127-auth-export-upgrade-prd.md'
+      writeFileSync(join(dir, masterPrdRel), [
+        '---',
+        'kind: prd',
+        'title: 认证与导出升级总控方案',
+        'status: draft',
+        'multi_spec: true',
+        'owner: planner-a',
+        'plan_critique: "passed (reviewer=critic-r2, round=2, sha=abc123456789, summary=R2 passed cleanly)"',
+        '---',
+        '',
+        '# 认证与导出升级总控方案',
+        '',
+        '### 产品目标',
+        '- 统一认证令牌签发并保留向后兼容',
+        '- 扩展流式导出管道支持大文件',
+        '',
+        '### 明确不做（Non-Goals）',
+        '- 不引入第三方缓存数据库依赖',
+        '',
+        '## 六、验收标准',
+        '<!-- criteria:start -->',
+        '- [ ] C1: `src/auth.mjs` 支持双轨令牌校验并返回稳定错误码',
+        '- [ ] C2: 新增 `src/auth-helper.mjs` 提供无状态签名校验',
+        '- [ ] C3: `src/export.mjs` 支持分块流式导出 CSV',
+        '<!-- criteria:end -->',
+        '',
+        '## 澄清与补充记录',
+        '- 已确认：令牌签名采用原生 node:crypto HMAC-SHA256',
+      ].join('\n'), 'utf8')
+
+      const sliceARel = 'docs/specs/261127-slice-auth-spec.md'
+      writeFileSync(join(dir, sliceARel), [
+        '---',
+        'kind: spec',
+        'title: 认证双轨令牌升级',
+        'status: draft',
+        'tier: L3',
+        'task_id: slice-auth',
+        'related_prd: ../prd/261127-auth-export-upgrade-prd.md',
+        'plan_critique: "passed (reviewer=critic-r2, round=2, sha=def123456789, summary=R2 verified slice-auth)"',
+        'scope_files: [src/auth.mjs, src/auth-helper.mjs (new)]',
+        '---',
+        '',
+        '# 认证双轨令牌升级',
+        '',
+        '- **变更一句话**：升级认证模块支持无状态令牌校验并补充独立签名辅助模块。',
+        '',
+        '| 模块 / 文件 | 变更性质 | 核心职责 |',
+        '| --- | --- | --- |',
+        '| `src/auth.mjs` | 修改 | 新增双轨令牌校验与失败原因码 |',
+        '| `src/auth-helper.mjs` | 新增 | 封装 HMAC-SHA256 签名工具 |',
+        '',
+        '## 一、背景与边界声明',
+        '- **要改什么**：为 `src/auth.mjs` 增加无状态令牌路径。',
+        '- **不改什么**：不修改 `src/export.mjs` 对外函数签名。',
+        '- **本期不做**：不接入外部 OAuth 服务端。',
+        '',
+        '## 五、冻结的验收标准',
+        '<!-- criteria:start -->',
+        '- [ ] C1: `src/auth.mjs` 支持双轨令牌校验并返回稳定错误码',
+        '- [ ] C2: 新增 `src/auth-helper.mjs` 提供无状态签名校验',
+        '<!-- criteria:end -->',
+        '',
+        '## 澄清与补充记录',
+        '- 已确认：保持旧版 login(u) 默认返回值兼容',
+      ].join('\n'), 'utf8')
+
+      const sliceBRel = 'docs/specs/261127-slice-export-spec.md'
+      writeFileSync(join(dir, sliceBRel), [
+        '---',
+        'kind: spec',
+        'title: 导出分块流式升级',
+        'status: draft',
+        'tier: L3',
+        'task_id: slice-export',
+        'related_prd: ../prd/261127-auth-export-upgrade-prd.md',
+        'scope_files: [src/export.mjs]',
+        '---',
+        '',
+        '# 导出分块流式升级',
+        '',
+        '## 五、冻结的验收标准',
+        '<!-- criteria:start -->',
+        '- [ ] C3: `src/export.mjs` 支持分块流式导出 CSV',
+        '<!-- criteria:end -->',
+      ].join('\n'), 'utf8')
+
+      // 1. 子切片零手工 --affected-feature 自动投影
+      const sliceBrief = upsertVisualBrief(dir, {
+        briefKey: 'slice-auth',
+        kind: 'task',
+        taskId: 'slice-auth',
+        parentBriefKey: 'auth-export-upgrade',
+        masterPrdRel,
+        title: '认证双轨令牌升级',
+      })
+      const projSlice = projectVisualBriefViewModel({ mainRoot: dir, workRoot: dir, sidecar: sliceBrief.sidecar })
+      const authNode = projSlice.visualModel.tree.nodes.find((n) => n.id === 'auth')
+      const exportNode = projSlice.visualModel.tree.nodes.find((n) => n.id === 'export')
+      if (!authNode || authNode.diffState !== 'modified') {
+        return `子切片未从 scope_files 自动投影 auth 为 modified：${JSON.stringify(authNode)}`
+      }
+      if (!exportNode || exportNode.diffState !== 'impacted' || !(exportNode.impactReasons?.length > 0)) {
+        return `子切片未通过依赖边自动传播 export 为 impacted：${JSON.stringify(exportNode)}`
+      }
+      if (!authNode.changeDetail?.note || !(authNode.changeDetail?.scopeFiles?.includes('src/auth.mjs'))) {
+        return `auth 节点缺少自动合成的模块级改动说明或 scopeFiles：${JSON.stringify(authNode.changeDetail)}`
+      }
+      const bd = projSlice.visualModel.briefData
+      if (!Array.isArray(bd.criteria) || bd.criteria.length !== 2 || bd.criteria.some((c) => c.id === 'C3')) {
+        return `子切片应仅提取自身 C1..C2 且不混入兄弟切片 C3：${JSON.stringify(bd.criteria)}`
+      }
+      if ((bd.goals || []).length === 0 || (bd.nonGoals || []).length === 0 || (bd.mergedDecisions || []).length === 0) {
+        return `子切片未自动提取目标/非目标/已拍板决策：goals=${bd.goals?.length} nonGoals=${bd.nonGoals?.length} decisions=${bd.mergedDecisions?.length}`
+      }
+      if (String(bd.verdict || '').includes('个切片')) {
+        return `子切片副标题误显总切片数：${bd.verdict}`
+      }
+      if (!String(bd.verdict || '').includes('验收项 2 条') || !String(bd.verdict || '').includes('涉及 2 文件')) {
+        return `子切片副标题应展示自身验收项与涉及文件数：${bd.verdict}`
+      }
+      if ((projSlice.visualModel.activeTabs || []).length < 3 || !projSlice.visualModel.activeTabs.some((t) => t.id === 'tree')) {
+        return `Brief 未自动接入多图静态证据（缺少 tree/dataflow 等）：${JSON.stringify(projSlice.visualModel.activeTabs)}`
+      }
+      const sliceHtml = readFileSync(sliceBrief.htmlPath, 'utf8')
+      if (!sliceHtml.includes('data-slice-id="auth"') || !sliceHtml.includes('内审 R2 通过') || !sliceHtml.includes('pf-criteria-fold')) {
+        return '子切片 Brief HTML 缺少 data-slice-id、内审 R2 通过胶囊或验收清单折叠区'
+      }
+      if (sliceHtml.includes('data-tab-target="prototypes"')) {
+        return '零原型 Brief 不应展示空的「方案原型」Tab'
+      }
+
+      // 2. 总控 Master PRD 聚合子切片 scope_files + 展示「2 个切片」
+      const masterBrief = upsertVisualBrief(dir, {
+        briefKey: 'auth-export-upgrade',
+        kind: 'master-prd',
+        masterPrdRel,
+        title: '认证与导出升级总控方案',
+      })
+      const projMaster = projectVisualBriefViewModel({ mainRoot: dir, workRoot: dir, sidecar: masterBrief.sidecar })
+      const mAuth = projMaster.visualModel.tree.nodes.find((n) => n.id === 'auth')
+      const mExp = projMaster.visualModel.tree.nodes.find((n) => n.id === 'export')
+      if (mAuth?.diffState !== 'modified' || mExp?.diffState !== 'modified') {
+        return `Master PRD 未聚合全部子切片的 scope_files：auth=${mAuth?.diffState}, export=${mExp?.diffState}`
+      }
+      if (!String(projMaster.visualModel.briefData?.verdict || '').includes('2 个切片')) {
+        return `Master PRD 副标题应展示「2 个切片」：${projMaster.visualModel.briefData?.verdict}`
+      }
+      if ((projMaster.visualModel.briefData?.criteria || []).length !== 3) {
+        return `Master PRD 应提取 C1..C3 共 3 条验收标准：${JSON.stringify(projMaster.visualModel.briefData?.criteria)}`
+      }
+      return true
+    } finally {
+      rmTree(dir)
+    }
+  }])
 }

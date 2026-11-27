@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
-import { ARCHITECTURE_MAP_REL, renderArchitectureMapFromRepo } from '../../lib/architecture-map.mjs'
+import { ARCHITECTURE_MAP_REL, renderArchitectureMapAsync } from '../../lib/architecture-map.mjs'
 import { FEATURE_MAP_REL } from '../../lib/feature-map.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { parseDocFrontmatter } from '../../lib/doc-frontmatter.mjs'
@@ -229,7 +229,7 @@ export async function handleFinalize(opts, roots) {
         || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
         || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
       if (fmChanged) {
-        const archRes = renderArchitectureMapFromRepo(implRoot)
+        const archRes = await renderArchitectureMapAsync(implRoot)
         if (archRes.ok && !archRes.optedOut && !archRes.skipped) pathsToStage.push(ARCHITECTURE_MAP_REL)
       }
     }
@@ -243,7 +243,7 @@ export async function handleFinalize(opts, roots) {
       || statusEntries.some((e) => e.file === FEATURE_MAP_REL)
       || diffEntries.some((e) => e.file === FEATURE_MAP_REL)
     if (fmChanged) {
-      const archRes = renderArchitectureMapFromRepo(implRoot)
+      const archRes = await renderArchitectureMapAsync(implRoot)
       if (archRes.ok && !archRes.optedOut && !archRes.skipped && roots.isGit) {
         await gitRun(implRoot, ['add', '-A', '--', ARCHITECTURE_MAP_REL])
       }

@@ -496,6 +496,7 @@
         "kit/skills/templates/docs-todo.md",
         "kit/skills/lib/visual-brief.mjs",
         "kit/skills/lib/visual-brief-store.mjs",
+        "kit/skills/lib/visual-brief-doc-extract.mjs",
         "kit/skills/dev-plan/scripts/doc-plan-brief.mjs"
       ],
       "businessFlows": [

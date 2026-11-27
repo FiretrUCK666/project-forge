@@ -523,8 +523,8 @@ export function registerVisualLayoutV2Cases(cases) {
         return `端到端全证据仓库应激活全部 10 类图，实得 ${model.activeTabs?.length}: ${JSON.stringify(model.activeTabs?.map((t) => t.id))}`
       }
       const rendered = renderVisualHtml({ visualModel: model, featureMapSha256: 'e'.repeat(64) })
-      if (rendered.bytes > 60 * 1024) {
-        return `4 功能 HTML 体积超出 60KB 红线: ${rendered.bytes} bytes`
+      if (rendered.bytes > 90 * 1024) {
+        return `4 功能 HTML 体积超出 90KB 红线: ${rendered.bytes} bytes`
       }
       return true
     } finally {

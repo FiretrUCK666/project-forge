@@ -401,7 +401,7 @@ export function registerStaticAnalyzerCases(cases) {
       renderArchitectureMapFromRepo(dir)
       const htmlPath = join(dir, 'docs/architecture-map.html')
       const cleanHtml = readFileSync(htmlPath, 'utf8')
-      const tamperedDom = cleanHtml.replace('<div class="pf-node pf-diff-context"', '<div class="pf-node pf-diff-context" data-diff-state="impacted"')
+      const tamperedDom = cleanHtml.replace(/<(?:div|g)\s+class="(?:pf-node pf-diff-context|svg-node)"/, (m) => `${m} data-diff-state="impacted"`)
       writeFileSync(htmlPath, tamperedDom, 'utf8')
       const domVerify = verifyArchitectureMapSync(dir)
       if (domVerify.ok || domVerify.code !== 'BLOCKED_ARCHITECTURE_MAP_DRIFT' || domVerify.reason !== 'dirty-diff-overlay') {

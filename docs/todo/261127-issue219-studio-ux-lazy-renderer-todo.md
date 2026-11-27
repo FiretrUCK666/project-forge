@@ -4,9 +4,9 @@ title: 第一性原理 Studio 交互界面与纯矢量懒渲染引擎
 status: active
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 219
 pr: null
-branch: feat/visual-studio-archify-v2
+branch: feat/studio-ux-lazy-renderer
 owner: plan-studio-b
 plan_mode: interactive
 approved: false
@@ -14,7 +14,7 @@ done_at: null
 task_id: studio-ux-lazy-renderer
 planned_at: 76795202dbd2d328d379fbff506b7dad39753133
 related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
-related_spec: ../specs/261127-studio-ux-lazy-renderer-spec.md
+related_spec: ../specs/261127-issue219-studio-ux-lazy-renderer-spec.md
 ---
 
 # 第一性原理 Studio 交互界面与纯矢量懒渲染引擎
@@ -25,11 +25,11 @@ related_spec: ../specs/261127-studio-ux-lazy-renderer-spec.md
 | --- | --- |
 | 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / 基线 | `feat/visual-studio-archify-v2` @ `7679520` |
+| 分支 / 基线 | `feat/studio-ux-lazy-renderer` @ `7679520` |
 | 任务编号 | `studio-ux-lazy-renderer` |
 | 负责人 / 审批 | plan-studio-b / `false` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 Issue / PR / SPEC | 未关联 / 未关联 / `../specs/261127-studio-ux-lazy-renderer-spec.md` |
+| 关联 Issue / PR / SPEC | #219 / 未关联 / `docs/specs/261127-issue219-studio-ux-lazy-renderer-spec.md` |
 
 - **断点恢复**：接手人先核对 Wave 1 与 Wave 2 均已合入 `main`，且用户已通过 `oil-ui-pro` 3 方向对比页拍板主题 Token 并完成本切片 `approve`。
 
@@ -44,10 +44,10 @@ related_spec: ../specs/261127-studio-ux-lazy-renderer-spec.md
 ## 验收标准与执行清单
 
 <!-- criteria:start -->
-- [ ] C9: `kit/skills/lib/visual-render.mjs`、`visual-render-svg.mjs`、`visual-render-assets.mjs`、`visual-render-client.mjs` 与 `visual-render-client-diagrams.mjs`（单文件均 `<= 650` 行）实现三级按钮权重分层、参数化浅/深色 WCAG AA 主题 Token 与纯矢量 SVG `viewBox` 相机缩放平移；静态与回归断言确认含文字缩放容器零 `will-change: transform`、浮层按 `Math.round(v * dpr) / dpr` 对齐物理像素、拖拽全程文字清晰无模糊。
-- [ ] C10: `kit/skills/lib/visual-render-panels.mjs` 与拆分后的 `visual-brief.mjs` + `visual-brief-store.mjs` 实现模块化非文字墙 Change Blueprint（顶部决策条、分域变更卡与改前->改后对比、独立下游波及块、画布双向悬浮高亮）与单份索引压缩 JSON（向后兼容 `tree.nodes[].diffState`）+ 非当前 Tab 客户端懒渲染，典型项目 HTML 严格 `< 180 KB` 且保持零外链/XSS/512KB/白名单/`homedir` 安全红线。
-- [ ] C11: 6 项 Studio 交互升级、CLI 三重对拍与导览修复全部通过自动化与真浏览器实证：Hash/历史导航（`#tab=&focus=&reach=&route=`、`Alt+←`）与 `?from=` 安全父子 Brief 返回条、Semantic Passport（含 `fanIn`/`fanOut`/入环耦合与验真链接）、有向 BFS Reach 与双节点 Route Probe（`R`）、Walkthrough 每步绑定独立真实目标节点、意图芯片自动注入活跃路径、纯矢量 `.svg` 与 `2x .png` 导出；`verify-tools.mjs`（经 `verify-tools-render.mjs` 瘦身）与 `doc-plan.mjs` 通过 `checkCliParity`。
-- [ ] C12: 通过外部 `oil-ui-pro` 真浏览器截图脚本产出浅/深色多状态实证截图（全景、拖拽清晰度、多 Tab 懒渲染、Reach/Route 与 Change Blueprint）作为 `--artifact`；完成 `fixtures-visual-engine.mjs` 冲突 v5 断言迁移与 `fixtures-studio-ux.mjs` (new) 补测，保持 `[Sandbox-C8]` 与 `I961..I964` 全绿并补齐 Wave 3 专属故障注入；同步更新 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md` 与 `equip.mjs .`，执行 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
+- [x] C9: `kit/skills/lib/visual-render.mjs`、`visual-render-svg.mjs`、`visual-render-assets.mjs`、`visual-render-client.mjs` 与 `visual-render-client-diagrams.mjs`（单文件均 `<= 650` 行）实现三级按钮权重分层、参数化浅/深色 WCAG AA 主题 Token 与纯矢量 SVG `viewBox` 相机缩放平移；静态与回归断言确认含文字缩放容器零 `will-change: transform`、浮层按 `Math.round(v * dpr) / dpr` 对齐物理像素、拖拽全程文字清晰无模糊。
+- [x] C10: `kit/skills/lib/visual-render-panels.mjs` 与拆分后的 `visual-brief.mjs` + `visual-brief-store.mjs` 实现模块化非文字墙 Change Blueprint（顶部决策条、分域变更卡与改前->改后对比、独立下游波及块、画布双向悬浮高亮）与单份索引压缩 JSON（向后兼容 `tree.nodes[].diffState`）+ 非当前 Tab 客户端懒渲染，典型项目 HTML 严格 `< 180 KB` 且保持零外链/XSS/512KB/白名单/`homedir` 安全红线。
+- [x] C11: 6 项 Studio 交互升级、CLI 三重对拍与导览修复全部通过自动化与真浏览器实证：Hash/历史导航（`#tab=&focus=&reach=&route=`、`Alt+←`）与 `?from=` 安全父子 Brief 返回条、Semantic Passport（含 `fanIn`/`fanOut`/入环耦合与验真链接）、有向 BFS Reach 与双节点 Route Probe（`R`）、Walkthrough 每步绑定独立真实目标节点、意图芯片自动注入活跃路径、纯矢量 `.svg` 与 `2x .png` 导出；`verify-tools.mjs`（经 `verify-tools-render.mjs` 瘦身）与 `doc-plan.mjs` 通过 `checkCliParity`。
+- [x] C12: 通过外部 `oil-ui-pro` 真浏览器截图脚本产出浅/深色多状态实证截图（全景、拖拽清晰度、多 Tab 懒渲染、Reach/Route 与 Change Blueprint）作为 `--artifact`；完成 `fixtures-visual-engine.mjs` 冲突 v5 断言迁移与 `fixtures-studio-ux.mjs` (new) 补测，保持 `[Sandbox-C8]` 与 `I961..I964` 全绿并补齐 Wave 3 专属故障注入；同步更新 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md` 与 `equip.mjs .`，执行 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 执行步骤
@@ -75,5 +75,12 @@ related_spec: ../specs/261127-studio-ux-lazy-renderer-spec.md
 **在合并之前写完，随这次改动一起提交。**
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/equip.mjs . --check`：PASS（`kit/skills` 与 `.agents/skills` 字节级同步）。
+  - `node scripts/sync-toc.mjs README.md README.en.md --check`：PASS。
+  - `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs render . --check`：PASS（`docs/architecture-map.html` `< 180 KB` 且 0 脏 diff 节点）。
+  - `node .agents/skills/dev-edit/scripts/edit-gate.mjs --final --json`：`ok: true`，0 blockers。
+  - `node scripts/dev/merge-gate.mjs`：12/12 PASS（含 `fixtures-studio-ux.mjs`、`fixtures-visual-engine.mjs`、`fixtures-living-brief.mjs`、`fixtures-sandbox-dual-loop.mjs` 与 `cli-parity`）。
+  - `node scripts/dev/verify-injections.mjs --jobs 4`：100% PASS（含 `I961..I964`、`I986` 及 Wave 3 新增 `I1021..I1024`）。
+  - 真浏览器 `oil-ui-pro/scripts/shoot.mjs` 浅/深色及 `1440x900`/`1024x768`/`768x900`/`390x844` 多视口截图人工目检：0 console 错误、0 横向溢出、0 按钮文字裁切、0 可读性告警。
+- **文档同步检查**：已同步 `docs/feature-map.json`、`docs/architecture-map.html`、`docs/TDD.md`、`README.md`、`README.en.md` 与 `docs/specs/261127-issue219-studio-ux-lazy-renderer-spec.md`。
+- **遗留问题**：无。

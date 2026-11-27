@@ -206,18 +206,22 @@ export function layoutClassDiagram(evidence, {
     byLayer.get(r).push(id)
   }
 
-  const layers = [...byLayer.keys()].sort((a, b) => a - b), halfStep = roundCoord((cardW + gapX) / 2)
+  const layers = [...byLayer.keys()].sort((a, b) => a - b), halfStep = roundCoord((cardW + gapX) / 2), maxCols = 5
   const nodes = [], boxMap = new Map()
-  let halfColStaggered = false
+  let halfColStaggered = false, curY = pad
   for (const layer of layers) {
     const group = byLayer.get(layer).sort(), isOdd = layer % 2 === 1
     if (isOdd && group.length > 0) halfColStaggered = true
-    const rowOffsetX = pad + (isOdd ? halfStep : 0), y = pad + layer * (cardH + gapY)
+    const rowCount = Math.max(1, Math.ceil(group.length / maxCols))
     group.forEach((cls, idx) => {
-      const x = roundCoord(rowOffsetX + idx * (cardW + gapX))
+      const subRow = Math.floor(idx / maxCols), subCol = idx % maxCols
+      const rowOffsetX = pad + ((isOdd && subRow % 2 === 0) ? halfStep : 0)
+      const x = roundCoord(rowOffsetX + subCol * (cardW + gapX))
+      const y = roundCoord(curY + subRow * (cardH + gapY))
       const node = { id: cls, label: cls, shortLabel: truncateLabel(cls, 22), layer, staggered: isOdd, x, y, w: cardW, h: cardH, cx: roundCoord(x + cardW / 2), cy: roundCoord(y + cardH / 2) }
       nodes.push(node); boxMap.set(cls, node)
     })
+    curY = roundCoord(curY + rowCount * (cardH + gapY))
   }
 
   const styleMap = {
@@ -236,7 +240,7 @@ export function layoutClassDiagram(evidence, {
 
 /** Sequence 参与者生命线与严格递增消息序列布局。 */
 export function layoutSequenceDiagram(evidence, {
-  headW = 168, headH = 44, colGap = 48, firstMsgGap = 44, rowH = 48, selfLoopW = 46, selfLoopH = 22, pad = 36,
+  headW = 168, headH = 44, colGap = 48, firstMsgGap = 48, rowH = 56, selfLoopW = 46, selfLoopH = 24, pad = 36,
 } = {}) {
   const steps = Array.isArray(evidence?.steps) ? evidence.steps : []
   const partOrder = [], seen = new Set()

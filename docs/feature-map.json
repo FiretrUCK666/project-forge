@@ -495,6 +495,7 @@
         "kit/skills/templates/docs-tdd.md",
         "kit/skills/templates/docs-todo.md",
         "kit/skills/lib/visual-brief.mjs",
+        "kit/skills/lib/visual-brief-store.mjs",
         "kit/skills/dev-plan/scripts/doc-plan-brief.mjs"
       ],
       "businessFlows": [
@@ -544,6 +545,8 @@
         "scripts/dev/fixtures-health-sweep.mjs",
         "scripts/dev/injections-data-health-sweep.mjs",
         "scripts/dev/fixtures-living-brief.mjs",
+        "scripts/dev/fixtures-studio-ux.mjs",
+        "scripts/dev/injections-data-studio-ux.mjs",
         "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
         "scripts/dev/injections-data-triage-parity.mjs"
       ],
@@ -774,6 +777,7 @@
       "modules": [
         "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
         "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs",
+        "kit/skills/dev-verify-tools/scripts/verify-tools-render.mjs",
         "kit/skills/lib/feature-map.mjs",
         "kit/skills/lib/feature-map-graph.mjs",
         "kit/skills/lib/import-graph.mjs",
@@ -785,6 +789,9 @@
         "kit/skills/lib/visual-layout-diagrams.mjs",
         "kit/skills/lib/visual-layout-charts.mjs",
         "kit/skills/lib/visual-geometry-check.mjs",
+        "kit/skills/lib/visual-render-svg.mjs",
+        "kit/skills/lib/visual-render-client.mjs",
+        "kit/skills/lib/visual-render-client-diagrams.mjs",
         "kit/skills/lib/visual-render-panels.mjs",
         "kit/skills/lib/visual-render.mjs",
         "kit/skills/lib/visual-render-assets.mjs",
@@ -829,7 +836,9 @@
         "scripts/dev/fixtures-static-analyzer.mjs",
         "scripts/dev/injections-data-static-analyzer.mjs",
         "scripts/dev/fixtures-visual-layout-v2.mjs",
-        "scripts/dev/injections-data-visual-layout-v2.mjs"
+        "scripts/dev/injections-data-visual-layout-v2.mjs",
+        "scripts/dev/fixtures-studio-ux.mjs",
+        "scripts/dev/injections-data-studio-ux.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全",
@@ -1067,7 +1076,9 @@
         "scripts/dev/fixtures-static-analyzer.mjs",
         "scripts/dev/injections-data-static-analyzer.mjs",
         "scripts/dev/fixtures-visual-layout-v2.mjs",
-        "scripts/dev/injections-data-visual-layout-v2.mjs"
+        "scripts/dev/injections-data-visual-layout-v2.mjs",
+        "scripts/dev/fixtures-studio-ux.mjs",
+        "scripts/dev/injections-data-studio-ux.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"

@@ -333,7 +333,7 @@ export function computeTriageFingerprint({ summary = '', paths = [] } = {}) {
 }
 
 export function recordTriageDecision(mainRoot, {
-  caseType, summary = '', paths = [], doorType = null, planMode = null, taskId = null, slug = null, topic = null,
+  caseType, summary = '', paths = [], doorType = null, planMode = null, recommendedEntry = null, taskId = null, slug = null, topic = null,
 } = {}) {
   const { statePath, state: prev } = readNormalizedState(mainRoot)
   const fingerprint = computeTriageFingerprint({ summary, paths })
@@ -348,6 +348,7 @@ export function recordTriageDecision(mainRoot, {
     summary: String(summary ?? '').trim().slice(0, 240),
     doorType: doorType ?? null,
     planMode: planMode ?? null,
+    recommendedEntry: recommendedEntry ?? null,
     consumedByTaskId: null,
     terminal: false,
     at: now,

@@ -207,6 +207,12 @@ export function registerLivingBriefCases(cases) {
       if (!masterAfter || masterAfter.kind !== 'master-prd' || masterAfter.verdict !== 'Master verdict') {
         return `子切片意外覆写了 Master PRD Brief：${JSON.stringify(masterAfter)}`
       }
+      // 校验 Master PRD Brief 包含子切片 ?from= 相对链接，子切片 Brief 包含返回父简报相对链接
+      const masterHtml = readFileSync(resolveBriefPaths(dir, 'mega-platform').htmlPath, 'utf8')
+      const childHtml = readFileSync(resolveBriefPaths(dir, 'mega-s1').htmlPath, 'utf8')
+      if (!masterHtml.includes('./mega-s1.html?from=mega-platform') || !childHtml.includes('./mega-platform.html')) {
+        return '1:N 父子简报缺少纯相对 ?from= 串跳与返回链接'
+      }
 
       // 3. workRoot > mainRoot 优先级实证
       const wtDir = join(dir, '.worktrees', 'impl-override')

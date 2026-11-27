@@ -99,18 +99,18 @@ multi_spec: true
 ## 六、验收标准
 
 <!-- criteria:start -->
-- [ ] C1: `kit/skills/lib/static-analyzer.mjs` (new) 复用多语言导入解析与 Tarjan SCC 算法，按 `relPath + blobSha/mtime` 在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 增量缓存模块依赖图、`fanIn`/`fanOut`/入环耦合与 Git 变更热度，零污染工作区 `git status`（经 `node scripts/dev/fixtures.mjs --domain static-analyzer` 验真）。
-- [ ] C2: `kit/skills/lib/static-evidence.mjs` (new) 实现 3 层证据驱动的 10 类图表激活协议（Tier 1 `architecture`/`workflow`/`tree` 常驻；Tier 2 `erd`/`class`/`sequence`/`lifecycle`/`dataflow`/`timeline` 严格按阈值激活且无证据零空 Tab；Tier 3 `waterfall` 仅实测 span 激活），经正反双向夹具验真。
-- [ ] C3: `kit/skills/lib/diff-materiality.mjs` (new) 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异执行 Materiality 过滤（Schema/迁移必触发，纯文档/锁文件/纯重命名跳过），输出 1-hop 邻域并集与有界 `-`/`+` hunk，且 `verifyArchitectureMapSync` 机械阻断含临时变更脏标的常青 `docs/architecture-map.html`。
-- [ ] C4: `scripts/dev/fixtures-static-analyzer.mjs` (new) 与 `scripts/dev/injections-data-static-analyzer.mjs` (new) 覆盖 7 类异构仓库栈（空仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、前端 UI、CI 密集仓、无包清单非 JS 仓）正反双向验证并同步 `docs/feature-map.json`、`docs/architecture-map.html` 与 `equip.mjs .`，Wave 1 全量门禁退出码 `0`。
-- [ ] C5: Clean-Room 布局引擎（`kit/skills/lib/visual-layout.mjs`、`kit/skills/lib/visual-layout-diagrams.mjs` (new)、`kit/skills/lib/visual-layout-charts.mjs` (new)，每文件 `<= 800` 行）实现全部 10 类图表确定性坐标排布（含 `tree` 轮廓排布与 `>= 3` 叶子叠放、`timeline` 静默断口压缩、`lifecycle` 脊柱与顶弧等），重复运行字节一致。
-- [ ] C6: `kit/skills/lib/visual-router.mjs` (new) 实现端口防重叠散布、同侧共享干线捆绑与紧凑避障网格 Dijkstra 正交路由，输出无穿盒、无端口重合的圆角正交 SVG 路径。
-- [ ] C7: `kit/skills/lib/visual-geometry-check.mjs` (new) 提供纯 Node 确定性 SVG 几何自检（零浏览器渲染期依赖），机械检出节点重叠、边界越界、连线穿盒与空图违规并可被故障注入捕获。
-- [ ] C8: `scripts/dev/fixtures-visual-layout-v2.mjs` (new) 与 `scripts/dev/injections-data-visual-layout-v2.mjs` (new) 对 10 类图表布局、正交路由与几何校验执行正反双向实证，并同步 `docs/feature-map.json`、`docs/architecture-map.html` 与 `equip.mjs .`，Wave 2 全量门禁退出码 `0`。
-- [ ] C9: Studio UI/UX 渲染层（`kit/skills/lib/visual-render.mjs`、`kit/skills/lib/visual-render-svg.mjs` (new)、`kit/skills/lib/visual-render-assets.mjs`、`kit/skills/lib/visual-render-client.mjs` (new)）落实三级按钮权重（Primary/Secondary/Icon-Ghost）、参数化浅/深色 WCAG AA 主题 Token、纯矢量 SVG `viewBox` 平移缩放（禁用含文字缩放容器 `will-change: transform`，浮层按 `Math.round(v * dpr) / dpr` 对齐物理像素），根治拖拽模糊。
-- [ ] C10: `kit/skills/lib/visual-render-panels.mjs` 与拆分瘦身后的 `kit/skills/lib/visual-brief.mjs` + `kit/skills/lib/visual-brief-store.mjs` (new) 实现模块化非文字墙 Change Blueprint（顶部决策概览、分域变更卡与改前->改后对比、独立下游波及块、双向悬浮联动）与单源索引压缩 JSON + 非当前 Tab 客户端懒渲染，典型项目 HTML `< 180 KB` 且保持离线安全红线。
-- [ ] C11: 完成 6 项 Studio 交互升级与导览修复：Hash/历史导航（`#tab=&focus=&reach=&route=`、`Alt+←`）与 `?from=` 父子 Brief 返回条、Semantic Passport、有向 BFS 多跳 Reach 与双节点 Route Probe（`R`）、修复 `visual-brief.mjs` 导览每步独立绑定真实目标、意图芯片注入活跃路径、纯矢量 `.svg` 与 `2x .png` 导出。
-- [ ] C12: 完成真浏览器浅/深色视觉与交互实证截图（覆盖全景、拖拽清晰度、多 Tab 懒渲染、Reach/Route 与 Change Blueprint），同步更新 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md`、视觉回归夹具/故障注入与 `equip.mjs .`，执行 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
+- [x] C1: `kit/skills/lib/static-analyzer.mjs` (new) 复用多语言导入解析与 Tarjan SCC 算法，按 `relPath + blobSha/mtime` 在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 增量缓存模块依赖图、`fanIn`/`fanOut`/入环耦合与 Git 变更热度，零污染工作区 `git status`（经 `node scripts/dev/fixtures.mjs --domain static-analyzer` 验真）。
+- [x] C2: `kit/skills/lib/static-evidence.mjs` (new) 实现 3 层证据驱动的 10 类图表激活协议（Tier 1 `architecture`/`workflow`/`tree` 常驻；Tier 2 `erd`/`class`/`sequence`/`lifecycle`/`dataflow`/`timeline` 严格按阈值激活且无证据零空 Tab；Tier 3 `waterfall` 仅实测 span 激活），经正反双向夹具验真。
+- [x] C3: `kit/skills/lib/diff-materiality.mjs` (new) 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异执行 Materiality 过滤（Schema/迁移必触发，纯文档/锁文件/纯重命名跳过），输出 1-hop 邻域并集与有界 `-`/`+` hunk，且 `verifyArchitectureMapSync` 机械阻断含临时变更脏标的常青 `docs/architecture-map.html`。
+- [x] C4: `scripts/dev/fixtures-static-analyzer.mjs` (new) 与 `scripts/dev/injections-data-static-analyzer.mjs` (new) 覆盖 7 类异构仓库栈（空仓、Node/TS 单包与 Monorepo、Python/Go/Rust、Prisma/SQL、前端 UI、CI 密集仓、无包清单非 JS 仓）正反双向验证并同步 `docs/feature-map.json`、`docs/architecture-map.html` 与 `equip.mjs .`，Wave 1 全量门禁退出码 `0`。
+- [x] C5: Clean-Room 布局引擎（`kit/skills/lib/visual-layout.mjs`、`kit/skills/lib/visual-layout-diagrams.mjs` (new)、`kit/skills/lib/visual-layout-charts.mjs` (new)，每文件 `<= 800` 行）实现全部 10 类图表确定性坐标排布（含 `tree` 轮廓排布与 `>= 3` 叶子叠放、`timeline` 静默断口压缩、`lifecycle` 脊柱与顶弧等），重复运行字节一致。
+- [x] C6: `kit/skills/lib/visual-router.mjs` (new) 实现端口防重叠散布、同侧共享干线捆绑与紧凑避障网格 Dijkstra 正交路由，输出无穿盒、无端口重合的圆角正交 SVG 路径。
+- [x] C7: `kit/skills/lib/visual-geometry-check.mjs` (new) 提供纯 Node 确定性 SVG 几何自检（零浏览器渲染期依赖），机械检出节点重叠、边界越界、连线穿盒与空图违规并可被故障注入捕获。
+- [x] C8: `scripts/dev/fixtures-visual-layout-v2.mjs` (new) 与 `scripts/dev/injections-data-visual-layout-v2.mjs` (new) 对 10 类图表布局、正交路由与几何校验执行正反双向实证，并同步 `docs/feature-map.json`、`docs/architecture-map.html` 与 `equip.mjs .`，Wave 2 全量门禁退出码 `0`。
+- [x] C9: Studio UI/UX 渲染层（`kit/skills/lib/visual-render.mjs`、`kit/skills/lib/visual-render-svg.mjs` (new)、`kit/skills/lib/visual-render-assets.mjs`、`kit/skills/lib/visual-render-client.mjs` (new)）落实三级按钮权重（Primary/Secondary/Icon-Ghost）、参数化浅/深色 WCAG AA 主题 Token、纯矢量 SVG `viewBox` 平移缩放（禁用含文字缩放容器 `will-change: transform`，浮层按 `Math.round(v * dpr) / dpr` 对齐物理像素），根治拖拽模糊。
+- [x] C10: `kit/skills/lib/visual-render-panels.mjs` 与拆分瘦身后的 `kit/skills/lib/visual-brief.mjs` + `kit/skills/lib/visual-brief-store.mjs` (new) 实现模块化非文字墙 Change Blueprint（顶部决策概览、分域变更卡与改前->改后对比、独立下游波及块、双向悬浮联动）与单源索引压缩 JSON + 非当前 Tab 客户端懒渲染，典型项目 HTML `< 180 KB` 且保持离线安全红线。
+- [x] C11: 完成 6 项 Studio 交互升级与导览修复：Hash/历史导航（`#tab=&focus=&reach=&route=`、`Alt+←`）与 `?from=` 父子 Brief 返回条、Semantic Passport、有向 BFS 多跳 Reach 与双节点 Route Probe（`R`）、修复 `visual-brief.mjs` 导览每步独立绑定真实目标、意图芯片注入活跃路径、纯矢量 `.svg` 与 `2x .png` 导出。
+- [x] C12: 完成真浏览器浅/深色视觉与交互实证截图（覆盖全景、拖拽清晰度、多 Tab 懒渲染、Reach/Route 与 Change Blueprint），同步更新 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md`、视觉回归夹具/故障注入与 `equip.mjs .`，执行 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 七、待拍板问题

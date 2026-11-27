@@ -46,7 +46,7 @@ import {
   classifyHomePath,
   detectConventions,
   detectGit,
-  detectIgnoredGovernancePaths,
+  detectIgnoredGovernancePathsAsync,
   finalizeWalkWorkspace,
 } from './lib/survey-workspace.mjs'
 import { detectReentry, scanProjectStaticFacts } from './lib/survey-scan.mjs'
@@ -413,7 +413,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     fastUnbornStatus: opts.fastUnbornStatus === true,
   })
   const staticPromise = scanProjectStaticFacts(root)
-  const [gitFacts, staticFacts] = await Promise.all([gitPromise, staticPromise])
+  const ignoredGovPromise = detectIgnoredGovernancePathsAsync(root)
+  const [gitFacts, staticFacts, ignoredGovernancePaths] = await Promise.all([gitPromise, staticPromise, ignoredGovPromise])
   const {
     rawWs, relFiles, relSet, dirSet, ecosystem, taskEntryMeta, taskCommands, docs, docGraph, workspace,
     kit, localSkills, artifacts, universal, agentsText, tddText,
@@ -574,7 +575,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       unignoredOutputDirs: ws.unignoredOutputDirs,
       ignoredButTracked: ws.ignoredButTracked,
       ignoredGovernancePaths: (gitFacts.present === true && gitFacts.isRepoRoot !== false)
-        ? detectIgnoredGovernancePaths(root)
+        ? ignoredGovernancePaths
         : [],
     },
     outputs: {

@@ -38,6 +38,7 @@ import { flushAndExit, parseStandardCli } from '../../kit/skills/lib/cli.mjs'
 import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { deriveMergeGate, formatMergeGate, GATE_VERDICT } from '../../kit/skills/lib/gate-truth.mjs'
 import { isMainModule } from '../../kit/skills/lib/git.mjs'
+import { applyLowPriority, resolveWorkerConcurrency } from '../../kit/skills/lib/proc-budget.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -61,6 +62,7 @@ function runStepAsync(step, cwd, extraEnv = {}) {
       windowsHide: true,
       env: { ...process.env, ...extraEnv },
     })
+    if (child.pid) applyLowPriority(child.pid)
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -132,7 +134,7 @@ function printHelp() {
 
 async function main(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printHelp(); return EXIT.OK }
-  const cli = parseStandardCli(argv, { booleanFlags: ['dry-run'], valueFlags: ['dir'], positionalDir: 'first' })
+  const cli = parseStandardCli(argv, { booleanFlags: ['dry-run'], valueFlags: ['dir', 'jobs'], positionalDir: 'first' })
   const repoRoot = cli.targetDir === process.cwd() ? ROOT : cli.targetDir
 
   const derived = deriveMergeGate(repoRoot)
@@ -179,9 +181,14 @@ async function main(argv) {
   const resultsByIdx = new Array(preparedSteps.length)
 
   if (readonlyEntries.length > 0) {
+    const requestedJobs = cli.opts?.jobs ?? cli.flags?.jobs ?? null
+    const roConcurrency = resolveWorkerConcurrency({
+      requestedJobs,
+      cap: requestedJobs !== null ? readonlyEntries.length : 4,
+    })
     const roResults = await runPoolBounded(
       readonlyEntries.map((entry) => () => runStepAsync(entry.step, repoRoot, pipelineEnv)),
-      4,
+      roConcurrency,
     )
     for (let i = 0; i < readonlyEntries.length; i += 1) {
       resultsByIdx[readonlyEntries[i].idx] = roResults[i]

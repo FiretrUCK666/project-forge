@@ -18,6 +18,7 @@ import {
   posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { readBlobBatch } from '../../lib/git-fast-objects.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
@@ -357,19 +358,21 @@ export async function runEditGate(opts = {}) {
   const forgeHooksConfig = loadForgeHooksConfig(mainRoot, workTreeRoot)?.config ?? null
   const ratchetInfo = await resolveCompareBaseSha(workTreeRoot, isGit, defaultBranch, taskLedger, opts.base)
   const gitBaseRef = ratchetInfo.baseRef || 'HEAD'
+  const baseBlobMap = (isGit && dedupEntries.length > 0)
+    ? await readBlobBatch(workTreeRoot, gitBaseRef, dedupEntries.map((e) => e.file))
+    : new Map()
 
   for (const entry of dedupEntries) {
     const rel = entry.file
     if (!isLegalArchiveMove(entry, deletedFiles, ownArchived) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
-      const hit = { ruleId: 'edit.do-not-edit', defectClass: 'stale-contract', severity: 'high', file: rel, line: 1, message: `目标文件命中 AGENTS.md do-not-edit 禁改路径：${rel}`, fixHint: '停止修改受保护归档/生成目录；若属合法任务归档请走 flow.mjs finalize。' }
-      blockers.push(hit)
+      blockers.push({ ruleId: 'edit.do-not-edit', defectClass: 'stale-contract', severity: 'high', file: rel, line: 1, message: `目标文件命中 AGENTS.md do-not-edit 禁改路径：${rel}`, fixHint: '停止修改受保护归档/生成目录；若属合法任务归档请走 flow.mjs finalize。' })
     }
     if (mode === 'pre-edit' || existsSync(join(workTreeRoot, rel))) {
       const procNameHit = checkProcessArtifactFilename(rel)
       if (procNameHit) blockers.push(procNameHit)
     }
     const isMarkedNew = entry.status === '??' || /^A/i.test(String(entry.status ?? ''))
-    const isNewlyAdded = isMarkedNew || (!isGit ? !existsSync(join(workTreeRoot, rel)) : !(await gitRun(workTreeRoot, ['cat-file', '-e', `${gitBaseRef}:${rel}`])).ok)
+    const isNewlyAdded = isMarkedNew || (!isGit ? !existsSync(join(workTreeRoot, rel)) : (baseBlobMap.get(rel) ?? null) === null)
     if (isNewlyAdded) {
       const mechHit = checkMechanicalSplitName(rel)
       if (mechHit) blockers.push(mechHit)
@@ -432,11 +435,19 @@ export async function runEditGate(opts = {}) {
   const changedFilesMap = new Map()
   const baseTextMap = new Map()
   let diffChunks = null
-  if (isGit && ratchetInfo.baseRef && dedupEntries.some((e) => CODE_EXT_RE.test(e.file))) {
-    const diffRes = await gitRunBuffer(workTreeRoot, ['--no-optional-locks', 'diff', '--unified=3', '--no-ext-diff', '--no-color', ratchetInfo.baseRef])
-    if (diffRes.ok) {
-      diffChunks = splitDiffByFile(diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n'))
-    }
+  const headPathList = enableCommentPathCheck
+    ? dedupEntries.filter((e) => CODE_EXT_RE.test(e.file) && !isTestOrFixtureFile(e.file)).map((e) => e.file)
+    : []
+  const [diffRes, headBlobMap] = await Promise.all([
+    (isGit && ratchetInfo.baseRef && dedupEntries.some((e) => CODE_EXT_RE.test(e.file)))
+      ? gitRunBuffer(workTreeRoot, ['--no-optional-locks', 'diff', '--unified=3', '--no-ext-diff', '--no-color', ratchetInfo.baseRef])
+      : Promise.resolve(null),
+    (isGit && headPathList.length > 0)
+      ? (gitBaseRef === 'HEAD' ? Promise.resolve(baseBlobMap) : readBlobBatch(workTreeRoot, 'HEAD', headPathList))
+      : Promise.resolve(new Map()),
+  ])
+  if (diffRes?.ok) {
+    diffChunks = splitDiffByFile(diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n'))
   }
 
   for (const entry of dedupEntries) {
@@ -485,26 +496,10 @@ export async function runEditGate(opts = {}) {
           : '直接修复根因类型或静态检查错误，禁止使用 @ts-ignore/eslint-disable/HACK/WORKAROUND/TEMP/noqa/#[allow( 压制。',
       })
     }
-    let headText = null
-    let headTextLoaded = false
-    const loadHeadText = async () => {
-      if (headTextLoaded) return headText
-      headTextLoaded = true
-      if (isGit) {
-        const showRes = await gitRun(workTreeRoot, ['show', `HEAD:${rel}`])
-        if (showRes.ok) headText = showRes.stdout
-      }
-      return headText
-    }
     if (enableCommentPathCheck && !isTestOrFixtureFile(rel)) {
-      for (const bp of scanBrokenCommentPaths({ repoRoot: workTreeRoot, fileRel: rel, text: txt, headText: await loadHeadText() })) {
+      for (const bp of scanBrokenCommentPaths({ repoRoot: workTreeRoot, fileRel: rel, text: txt, headText: headBlobMap.get(rel) ?? null })) {
         blockers.push({
-          ruleId: 'edit.broken-comment-path',
-          defectClass: 'stale-contract',
-          severity: 'high',
-          file: rel,
-          line: bp.line,
-          excerpt: bp.raw,
+          ruleId: 'edit.broken-comment-path', defectClass: 'stale-contract', severity: 'high', file: rel, line: bp.line, excerpt: bp.raw,
           message: `注释引用了不存在的仓库路径 \`${bp.path}\`：${rel}:${bp.line}`,
           fixHint: '同步更新或删除失效的反引号路径引用，保持注释与真实文件树一致。',
         })
@@ -516,16 +511,8 @@ export async function runEditGate(opts = {}) {
     for (const db of hyg.deadCodeBlocks) {
       blockers.push({ ruleId: 'edit.dead-code-block', defectClass: 'dead-code', severity: 'high', file: rel, line: db.line, endLine: db.endLine, excerpt: db.excerpt, message: `检测到连续注释死代码块（${db.length} 行）：${rel}:${db.line}-${db.endLine}`, fixHint: '直接删除废弃注释代码块，依靠版本历史追溯。' })
     }
-    let baseText = null
-    if (!isNewEntry && isGit && ratchetInfo.baseRef) {
-      if (ratchetInfo.baseRef === 'HEAD') {
-        baseText = await loadHeadText()
-      } else {
-        const showBase = await gitRun(workTreeRoot, ['show', `${ratchetInfo.baseRef}:${rel}`])
-        baseText = showBase.ok ? showBase.stdout : null
-      }
-      if (typeof baseText === 'string') baseTextMap.set(rel, baseText)
-    }
+    const baseText = (!isNewEntry && isGit && ratchetInfo.baseRef) ? (baseBlobMap.get(rel) ?? null) : null
+    if (typeof baseText === 'string') baseTextMap.set(rel, baseText)
     const baseLineCount = baseText !== null ? countTextLines(baseText) : null
     if (baseText !== null && baseLineCount > NEAR_LIMIT_LINES) {
       const squashHit = detectLineSquashCheat({ fileRel: rel, ext, baseText, currentText: txt, baseLineCount, currentLineCount: fullLineCount })
@@ -538,10 +525,8 @@ export async function runEditGate(opts = {}) {
       } else {
         const sibs = findSiblingsFor(collectSiblingReuseHints(workTreeRoot, [rel]), rel)
         const guidance = buildSplitReuseGuidance({ fileRel: rel, fullText: txt, ext, siblingReuse: sibs })
-        let isUntouchedOnMain = false
-        if (!ratchetInfo.hasBranchBase && baseText !== null && isGit) {
-          isUntouchedOnMain = (await gitRun(workTreeRoot, ['--no-optional-locks', 'diff', '--quiet', 'HEAD', '--', rel])).ok
-        }
+        const isUntouchedOnMain = !ratchetInfo.hasBranchBase && baseText !== null && isGit
+          && baseText.replace(/\r\n/g, '\n') === txt.replace(/\r\n/g, '\n')
         if (baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {
           const netGrowth = fullLineCount - baseLineCount
           if (netGrowth > BROWNFIELD_GROWTH_LIMIT) {
@@ -641,20 +626,9 @@ export async function runEditGate(opts = {}) {
   if (opts.emitSignals && blockers.length > 0) {
     for (const b of blockers.slice(0, 20)) {
       await appendGovernSignal({
-        mainRoot,
-        gitDir,
-        isGit,
-        category: 'hygiene',
-        module: inferSignalModule(b.file),
-        pattern: b.ruleId,
-        ruleId: b.ruleId,
-        defectClass: b.defectClass,
-        severity: b.severity || 'high',
-        source: 'edit-gate',
-        file: b.file || '',
-        line: b.line,
-        message: b.message,
-        taskId,
+        mainRoot, gitDir, isGit, category: 'hygiene', module: inferSignalModule(b.file),
+        pattern: b.ruleId, ruleId: b.ruleId, defectClass: b.defectClass, severity: b.severity || 'high',
+        source: 'edit-gate', file: b.file || '', line: b.line, message: b.message, taskId,
       })
     }
   }
@@ -679,17 +653,8 @@ export async function runEditGate(opts = {}) {
     }
   }
   return {
-    ok,
-    mode,
-    exitCode: ok ? EXIT.OK : EXIT.FACT,
-    repoRoot: posixPath(workTreeRoot),
-    checkedFiles,
-    blockers,
-    violations: blockers,
-    warnings,
-    nearLimitFiles,
-    highRiskHits,
-    nativeCheckers,
+    ok, mode, exitCode: ok ? EXIT.OK : EXIT.FACT, repoRoot: posixPath(workTreeRoot),
+    checkedFiles, blockers, violations: blockers, warnings, nearLimitFiles, highRiskHits, nativeCheckers,
     ...(nativeRun ? { nativeRun } : {}),
     summary: { checked: checkedFiles.length, blockers: blockers.length, warnings: warnings.length },
   }

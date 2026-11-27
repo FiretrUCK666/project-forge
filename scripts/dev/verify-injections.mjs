@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
 import { killProcessTree, supportsSafeDetachedSpawn } from '../../kit/skills/lib/exec.mjs'
+import { applyLowPriority, resolveWorkerConcurrency } from '../../kit/skills/lib/proc-budget.mjs'
 import { isMainModule } from '../lib/text.mjs'
 import { INJECTIONS } from './injections-data.mjs'
 
@@ -60,6 +61,7 @@ function runNodeAsync(scriptPath, args, cwd, label = '') {
       detached: useDetached,
       env: { ...process.env, PF_NO_REAL_AUTH_PROBE: process.env.PF_NO_REAL_AUTH_PROBE || '1' },
     })
+    if (child.pid) applyLowPriority(child.pid)
     let out = ''
     let err = ''
     let settled = false
@@ -229,10 +231,12 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const argvOnly = onlyEq ? onlyEq.slice('--only='.length) : (onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined)
   const jobsEq = process.argv.find((a) => a.startsWith('--jobs='))
   const jobsIndex = process.argv.indexOf('--jobs')
-  const requestedJobs = (jobsEq ? Number(jobsEq.slice('--jobs='.length)) : (jobsIndex >= 0 ? Number(process.argv[jobsIndex + 1]) : 6)) || 6
-  const jobs = (process.platform === 'darwin' && process.env.CI)
-    ? Math.min(requestedJobs, 2)
-    : requestedJobs
+  const rawJobs = jobsEq ? jobsEq.slice('--jobs='.length) : (jobsIndex >= 0 ? process.argv[jobsIndex + 1] : null)
+  const isDarwinCi = process.platform === 'darwin' && Boolean(process.env.CI)
+  const jobs = resolveWorkerConcurrency({
+    requestedJobs: rawJobs,
+    cap: isDarwinCi ? 2 : (rawJobs !== null ? Infinity : 6),
+  })
 
   // 数组里出现空洞时（比如某处多打了一个逗号 `},,`），后面的 `inj.id` 会崩在
   // `Cannot read properties of undefined`——那条报错指向不了真正的问题。

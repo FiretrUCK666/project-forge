@@ -5,7 +5,7 @@
  * 子命令：
  *   next           [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]
  *   note           [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--decision <text>] [--exclude <t>...] [--anchor <p>...] [--open <q>...] [--json]
- *   brief          [--topic <id>] [--task <id>] [--title <title>] [--verdict <text>] [--affected-feature <spec>...] [--add-feature <spec>...] [--remove-feature <spec>...] [--flow-delta <text>...] [--prototype <t=p>...] [--select-prototype <id>] [--source-skill <name>] [--confirm] [--open-browser] [--json]
+ *   brief          [--topic <id>] [--task <id>] [--title <title>] [--verdict <text>] [--affected-feature <spec>...] [--add-feature <spec>...] [--remove-feature <spec>...] [--flow-delta <text>...] [--prototype <t=p>...] [--select-prototype <id>] [--source-skill <name>] [--pr-diff-base <ref>] [--parent-brief <key>] [--confirm] [--open-browser] [--json]
  *   triage         --summary <text> [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
  *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--topic <id>] [--allow-open-draft] [--spec-slug <slug>] [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
  *   slice          --prd <prdPath> --spec-slug <slug> --title <title> [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--topic <id>] [--allow-open-draft] [--worktree | --in-place] [--json]
@@ -59,6 +59,7 @@ import { approveSpec, clarifyDoc, initDoc, sliceSpec, supersedeSpec } from './do
 import {
   isValidPlanMode, normalizePlanMode, PLAN_MODES,
 } from '../../lib/pending-decisions.mjs'
+import { refreshVisualBriefForDoc } from '../../lib/visual-brief.mjs'
 
 export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
 
@@ -119,7 +120,7 @@ function printHelp() {
     '子命令：',
     '  next               [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]',
     '  note               [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
-    '  brief              [--topic <主题>] [--task <id>] [--title <标题>] [--verdict <结论>] [--affected-feature <模块或改前改后>...] [--add-feature "<id|domain|title|summary>"...] [--remove-feature "<id|reason>"...] [--flow-delta <变化>...] [--prototype "<标题>=<路径或URL>"...] [--select-prototype <id>] [--source-skill <名称>] [--confirm] [--open-browser] [--json]',
+    '  brief              [--topic <主题>] [--task <id>] [--title <标题>] [--verdict <结论>] [--affected-feature <模块或改前改后>...] [--add-feature "<id|domain|title|summary>"...] [--remove-feature "<id|reason>"...] [--flow-delta <变化>...] [--prototype "<标题>=<路径或URL>"...] [--select-prototype <id>] [--source-skill <名称>] [--pr-diff-base <ref>] [--parent-brief <key>] [--confirm] [--open-browser] [--json]',
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
     '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--topic <主题>] [--allow-open-draft] [--spec-slug <slug>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
     '  slice              --prd <prdPath> --spec-slug <slug> --title <标题> [--kind <spec|pair>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--agent <id>] [--host-mode <m>] [--topic <主题>] [--allow-open-draft] [--worktree | --in-place] [--json]',
@@ -151,7 +152,7 @@ async function main(argv) {
     cli = parseStandardCli(normalizedArgv, {
       subcommands: SUBCOMMANDS,
       booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'handoff', 'plan-only', 'run-commands', 'reset', 'allow-open-draft', 'confirm', 'open-browser'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'spec-slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'drop-criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic', 'verdict', 'select-prototype', 'source-skill'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'spec-slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'drop-criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic', 'verdict', 'select-prototype', 'source-skill', 'pr-diff-base', 'parent-brief'],
       multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open', 'fact', 'resolve', 'drop', 'scope', 'criteria', 'depends-on', 'prototype', 'affected-feature', 'add-feature', 'remove-feature', 'flow-delta'],
       aliases: { type: 'kind', owner: 'agent' },
       flagPresets: { 'single-session': { flag: 'host-mode', value: 'single-session', keepBoolean: true } },
@@ -481,10 +482,15 @@ async function main(argv) {
         actor: res.reviewer, summary: res.summary ?? '', taskId: opts.task ?? null,
         issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
       }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
+      try {
+        const refreshed = refreshVisualBriefForDoc({ mainRoot, workRoot: repoRoot, file: res.file, taskId: opts.task ?? null })
+        if (refreshed?.summary) res.visualBrief = refreshed.summary
+      } catch { /* non-fatal */ }
       const passNext = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${res.file}"`
       if (cli.json) process.stdout.write(`${JSON.stringify(withNextSteps(res, [{ skill: 'dev-plan', text: passNext }], { repoRoot: mainRoot }), null, 2)}\n`)
       else {
         process.stdout.write(`Critique 通过记录已写入 ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
+        if (res.visualBrief?.htmlUri) process.stdout.write(`- Living Visual Brief (${res.visualBrief.confirmedState}): ${res.visualBrief.htmlUri}\n`)
         printNextStep([{ skill: 'dev-plan', text: passNext }], { repoRoot: mainRoot })
       }
       return 0
@@ -507,9 +513,14 @@ async function main(argv) {
         summary: res.summary || res.findings?.[0] || '', taskId: opts.task ?? null,
         issueNumber: resolveDocIssueNumber(repoRoot, res.file, opts.issue ?? null),
       }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
+      try {
+        const refreshed = refreshVisualBriefForDoc({ mainRoot, workRoot: repoRoot, file: res.file, taskId: opts.task ?? null })
+        if (refreshed?.summary) res.visualBrief = refreshed.summary
+      } catch { /* non-fatal */ }
       if (cli.json) process.stdout.write(`${JSON.stringify(withNextSteps(res, [{ skill: 'dev-plan', text: res.nextStep }], { repoRoot: mainRoot }), null, 2)}\n`)
       else {
         process.stdout.write(`${res.status}: ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
+        if (res.visualBrief?.htmlUri) process.stdout.write(`- Living Visual Brief (${res.visualBrief.confirmedState}): ${res.visualBrief.htmlUri}\n`)
         if (res.stopLossTriggered) process.stderr.write(`STOP_LOSS_ESCALATE: ${res.stopLossPacket?.reasons?.join('; ') || '3-round plan stop-loss triggered'} (exit 4)\n`)
         printNextStep([{ skill: 'dev-plan', text: res.nextStep }], { repoRoot: mainRoot })
       }

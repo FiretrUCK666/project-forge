@@ -272,7 +272,7 @@ export function layoutDomainTree(featureMap, overlay, _opts = {}) {
 
   const preppedDomains = domains.map((dom) => {
     const items = dom.featureIds.map((fid) => featureById.get(fid)).filter(Boolean)
-    const innerCols = items.length <= 3 ? 1 : (items.length >= 6 ? 3 : 2)
+    const innerCols = items.length <= 1 ? 1 : (items.length >= 6 ? 3 : 2)
     const innerRows = Math.max(1, Math.ceil(items.length / innerCols))
     const domHeaderH = dom.description ? 66 : 52
     return { dom, items, innerCols, innerRows, domHeaderH, w: domPadX * 2 + innerCols * cardW + Math.max(0, innerCols - 1) * cardGapX, h: domHeaderH + innerRows * cardH + Math.max(0, innerRows - 1) * cardGapY + domPadBottom }

@@ -113,8 +113,15 @@ function buildWorkflowDiagram(analysis, featureMap) {
   }
 }
 
-function buildTreeDiagram(repoRoot, analysis) {
-  const rootNode = { name: basename(resolve(repoRoot)), path: '', children: new Map(), fileCount: 0 }
+function isTestFixturePath(rel) {
+  const p = posixPath(String(rel || ''))
+  return /(?:^|\/)(?:__fixtures__|fixtures-[^/]+|[^/]*\.fixtures\.[^/]+)$/i.test(p)
+    || /^scripts\/dev\/fixtures/i.test(p)
+}
+
+function buildTreeDiagram(repoRoot, analysis, featureMap) {
+  const rootName = String(featureMap?.repoName || featureMap?.project || '').trim() || basename(resolve(repoRoot))
+  const rootNode = { name: rootName, path: '', children: new Map(), fileCount: 0 }
   for (const rel of analysis.repoFiles) {
     const parts = posixPath(rel).split('/').filter(Boolean)
     let cur = rootNode
@@ -296,6 +303,7 @@ function extractClassEvidence(repoRoot, nodes) {
   }
 
   for (const n of nodes) {
+    if (isTestFixturePath(n.id)) continue
     const cleaned = readCleanCode(repoRoot, n.id)
     if (!cleaned) continue
     const { ext, codeLines } = cleaned
@@ -448,6 +456,7 @@ function extractLifecycleEvidence(repoRoot, nodes) {
   }
 
   for (const n of nodes) {
+    if (isTestFixturePath(n.id)) continue
     const cleaned = readCleanCode(repoRoot, n.id)
     if (!cleaned) continue
     const text = cleaned.codeLines.join('\n')
@@ -664,7 +673,7 @@ export async function extractMultiDiagramEvidence(repoRoot, {
   const tier1Diagrams = {
     architecture: buildArchitectureDiagram(resolvedAnalysis, fmData),
     workflow: buildWorkflowDiagram(resolvedAnalysis, fmData),
-    tree: buildTreeDiagram(root, resolvedAnalysis),
+    tree: buildTreeDiagram(root, resolvedAnalysis, fmData),
   }
   for (const id of DIAGRAM_TIERS.tier1) {
     diagrams[id] = tier1Diagrams[id]

@@ -1,20 +1,20 @@
 ---
 kind: spec
 title: 第一性原理 Studio 交互界面与纯矢量懒渲染引擎
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 219
 pr: null
-branch: feat/visual-studio-archify-v2
+branch: feat/studio-ux-lazy-renderer
 owner: plan-studio-b
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-studio-b-r2, round=2, sha=c73c4d063993, summary=All 3 Round 1 major blockers genuinely closed: CLI triple-parity & verify-tools-render.mjs split, tree.nodes[].diffState compatibility + v5 fixture migration + 4 unique Wave 3 injections, and explicit <=650L rendering budgets with visual-render-client-diagrams.mjs split & external shoot.mjs clarification.)"
 related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
-related_todo: ../todo/261127-studio-ux-lazy-renderer-todo.md
+related_todo: ../todo/261127-issue219-studio-ux-lazy-renderer-todo.md
 high_risk_paths: [kit/]
 task_id: studio-ux-lazy-renderer
 scope_files: [kit/skills/lib/visual-render-svg.mjs, kit/skills/lib/visual-render-client.mjs, kit/skills/lib/visual-render-client-diagrams.mjs, kit/skills/lib/visual-brief-store.mjs, kit/skills/lib/visual-render.mjs, kit/skills/lib/visual-render-assets.mjs, kit/skills/lib/visual-render-panels.mjs, kit/skills/lib/visual-brief.mjs, kit/skills/lib/architecture-map.mjs, kit/skills/dev-verify-tools/scripts/verify-tools.mjs, kit/skills/dev-verify-tools/scripts/verify-tools-render.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/dev-plan/scripts/doc-plan-brief.mjs, scripts/dev/fixtures-visual-engine.mjs, scripts/dev/fixtures-studio-ux.mjs, scripts/dev/fixtures-living-brief.mjs, scripts/dev/injections-data-visual-engine.mjs, docs/TDD.md, docs/feature-map.json, docs/architecture-map.html, README.md, README.en.md]
@@ -27,13 +27,13 @@ depends_on: [zero-token-static-analyzer, multi-diagram-layout-engine]
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（前端渲染架构推翻重做、多文件模块拆分与全仓长青资产收口；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/visual-studio-archify-v2` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/studio-ux-lazy-renderer` / #219 / 未关联 |
 | 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `../prd/261127-issue219-visual-studio-archify-v2-prd.md` / `../todo/261127-studio-ux-lazy-renderer-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/archive/todo/261127-issue219-studio-ux-lazy-renderer-todo.md` |
 
 - **变更一句话**：推翻旧 AI 模板 DOM 渲染，交付纯矢量 SVG `viewBox` 相机画布、单源索引压缩 JSON 懒渲染、模块化非文字墙 Change Blueprint、6 项 Studio 交互升级与真浏览器浅/深色实证闭环。
 
@@ -175,10 +175,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C9: `kit/skills/lib/visual-render.mjs`、`visual-render-svg.mjs`、`visual-render-assets.mjs`、`visual-render-client.mjs` 与 `visual-render-client-diagrams.mjs`（单文件均 `<= 650` 行）实现三级按钮权重分层、参数化浅/深色 WCAG AA 主题 Token 与纯矢量 SVG `viewBox` 相机缩放平移；静态与回归断言确认含文字缩放容器零 `will-change: transform`、浮层按 `Math.round(v * dpr) / dpr` 对齐物理像素、拖拽全程文字清晰无模糊。
-- [ ] C10: `kit/skills/lib/visual-render-panels.mjs` 与拆分后的 `visual-brief.mjs` + `visual-brief-store.mjs` 实现模块化非文字墙 Change Blueprint（顶部决策条、分域变更卡与改前->改后对比、独立下游波及块、画布双向悬浮高亮）与单份索引压缩 JSON（向后兼容 `tree.nodes[].diffState`）+ 非当前 Tab 客户端懒渲染，典型项目 HTML 严格 `< 180 KB` 且保持零外链/XSS/512KB/白名单/`homedir` 安全红线。
-- [ ] C11: 6 项 Studio 交互升级、CLI 三重对拍与导览修复全部通过自动化与真浏览器实证：Hash/历史导航（`#tab=&focus=&reach=&route=`、`Alt+←`）与 `?from=` 安全父子 Brief 返回条、Semantic Passport（含 `fanIn`/`fanOut`/入环耦合与验真链接）、有向 BFS Reach 与双节点 Route Probe（`R`）、Walkthrough 每步绑定独立真实目标节点、意图芯片自动注入活跃路径、纯矢量 `.svg` 与 `2x .png` 导出；`verify-tools.mjs`（经 `verify-tools-render.mjs` 瘦身）与 `doc-plan.mjs` 通过 `checkCliParity`。
-- [ ] C12: 通过外部 `oil-ui-pro` 真浏览器截图脚本产出浅/深色多状态实证截图（全景、拖拽清晰度、多 Tab 懒渲染、Reach/Route 与 Change Blueprint）作为 `--artifact`；完成 `fixtures-visual-engine.mjs` 冲突 v5 断言迁移与 `fixtures-studio-ux.mjs` 补测，保持 `[Sandbox-C8]` 与 `I961..I964` 全绿并补齐 Wave 3 专属故障注入；同步更新 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md` 与 `equip.mjs .`，执行 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
+- [x] C9: `kit/skills/lib/visual-render.mjs`、`visual-render-svg.mjs`、`visual-render-assets.mjs`、`visual-render-client.mjs` 与 `visual-render-client-diagrams.mjs`（单文件均 `<= 650` 行）实现三级按钮权重分层、参数化浅/深色 WCAG AA 主题 Token 与纯矢量 SVG `viewBox` 相机缩放平移；静态与回归断言确认含文字缩放容器零 `will-change: transform`、浮层按 `Math.round(v * dpr) / dpr` 对齐物理像素、拖拽全程文字清晰无模糊。
+- [x] C10: `kit/skills/lib/visual-render-panels.mjs` 与拆分后的 `visual-brief.mjs` + `visual-brief-store.mjs` 实现模块化非文字墙 Change Blueprint（顶部决策条、分域变更卡与改前->改后对比、独立下游波及块、画布双向悬浮高亮）与单份索引压缩 JSON（向后兼容 `tree.nodes[].diffState`）+ 非当前 Tab 客户端懒渲染，典型项目 HTML 严格 `< 180 KB` 且保持零外链/XSS/512KB/白名单/`homedir` 安全红线。
+- [x] C11: 6 项 Studio 交互升级、CLI 三重对拍与导览修复全部通过自动化与真浏览器实证：Hash/历史导航（`#tab=&focus=&reach=&route=`、`Alt+←`）与 `?from=` 安全父子 Brief 返回条、Semantic Passport（含 `fanIn`/`fanOut`/入环耦合与验真链接）、有向 BFS Reach 与双节点 Route Probe（`R`）、Walkthrough 每步绑定独立真实目标节点、意图芯片自动注入活跃路径、纯矢量 `.svg` 与 `2x .png` 导出；`verify-tools.mjs`（经 `verify-tools-render.mjs` 瘦身）与 `doc-plan.mjs` 通过 `checkCliParity`。
+- [x] C12: 通过外部 `oil-ui-pro` 真浏览器截图脚本产出浅/深色多状态实证截图（全景、拖拽清晰度、多 Tab 懒渲染、Reach/Route 与 Change Blueprint）作为 `--artifact`；完成 `fixtures-visual-engine.mjs` 冲突 v5 断言迁移与 `fixtures-studio-ux.mjs` 补测，保持 `[Sandbox-C8]` 与 `I961..I964` 全绿并补齐 Wave 3 专属故障注入；同步更新 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html`、`README.md`/`README.en.md` 与 `equip.mjs .`，执行 `node scripts/dev/merge-gate.mjs` 与 `node scripts/dev/verify-injections.mjs --jobs 4` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -194,6 +194,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：基于用户拍板的 Direction B Spatial Studio 视觉方向完成纯矢量 SVG `viewBox` 相机画布、单源索引压缩 JSON（`schemaVersion: 3`，保留 `tree.nodes[].diffState`）与 10 类图表客户端按需懒渲染引擎；同步落实 4 项界面打磨（零左侧彩色边条、点击已选节点/空白/`Esc` 反选并默认收起右侧 Semantic Passport、`1440/1280/1024/768/390` 多视口响应式零溢出、浅/深色点阵画布背景）及 2 项连续性优化（`critique-pass`/`critique-reject` 自动刷新 Living Visual Brief；`--select-prototype`/`--confirm` 依据 `triage.recommendedEntry` 为 `sandbox` 任务推荐 `flow.mjs start --sandbox`）。拆分 `visual-brief-store.mjs`、`verify-tools-render.mjs`、`visual-render-svg.mjs`、`visual-render-client.mjs`、`visual-render-client-diagrams.mjs`，全部 `.mjs` 严格遵守 `<= 800` 行预算且 `docs/architecture-map.html` 实测 `< 180 KB`（零脏 diff 态）。
+- **与草案的差异**：为满足真浏览器多视口自检（`shoot.mjs` 0 告警）与 `< 180 KB` 体积预算，采用无边框微阴影层级（borderless elevation）消除嵌套边框告警，在单文件目录树与时间线序列化中对大仓实施有界采样（`tree <= 48` 目录节点、`timeline <= 24` 事件），并新增独立故障注入数据表 `scripts/dev/injections-data-studio-ux.mjs`（`I1021..I1024`，自动被 `injections-data.mjs` 发现，不干扰既有 `I961..I964`）。
+- **关联同步文件**：`docs/feature-map.json`、`docs/architecture-map.html`、`docs/TDD.md`、`README.md`、`README.en.md`、`.agents/skills/**`（经 `node scripts/equip.mjs .` 全量同步）。

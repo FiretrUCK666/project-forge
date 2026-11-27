@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 
 import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
 import { formatContextBriefLines } from '../../lib/context-brief.mjs'
+import { computePrDiffContext } from '../../lib/diff-materiality.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readTaskLedger, sanitizeTaskId } from '../../lib/ledger.mjs'
@@ -176,6 +177,7 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
       paths: triagePaths,
       doorType: result.doorType,
       planMode: result.planMode,
+      recommendedEntry: result.recommendedEntry,
       topic: opts.topic ?? null,
     })
   } catch { /* non-fatal on non-writable root */ }
@@ -304,11 +306,14 @@ export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
   const prototypesToAdd = opts.prototype ?? []
   const selectPrototypeId = opts['select-prototype'] ?? null
   const sourceSkill = opts['source-skill'] ?? ''
+  const prDiffBase = opts['pr-diff-base'] ? String(opts['pr-diff-base']).trim() : null
+  const parentBriefRaw = opts['parent-brief'] ? String(opts['parent-brief']).trim() : null
+  const parentBriefKey = parentBriefRaw ? sanitizeBriefKey(parentBriefRaw) : undefined
   const confirm = Boolean(opts.confirm)
   const openBrowser = Boolean(opts['open-browser'])
 
   const hasMutation = Boolean(
-    title || verdict || confirm || selectPrototypeId || sourceSkill
+    title || verdict || confirm || selectPrototypeId || sourceSkill || prDiffBase || parentBriefKey
     || rawAffected.length > 0 || rawAdded.length > 0 || rawRemoved.length > 0
     || flowDeltas.length > 0 || prototypesToAdd.length > 0
     || opts.decision || (opts.exclude?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
@@ -341,10 +346,21 @@ export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
     return 0
   }
 
+  const effectivePrBase = prDiffBase || existing?.prDiffBase || null
+  let prDiff = null
+  if (effectivePrBase) {
+    try {
+      prDiff = await computePrDiffContext(effectiveWorkRoot, { baseRef: effectivePrBase })
+    } catch { prDiff = null }
+  }
+
   const res = upsertVisualBrief(mainRoot, {
     workRoot: effectiveWorkRoot,
     briefKey: resolvedKey,
     kind: existing?.kind ?? (taskId ? 'task' : 'topic'),
+    ...(parentBriefKey !== undefined ? { parentBriefKey } : {}),
+    ...(prDiffBase ? { prDiffBase } : {}),
+    prDiff,
     topicId: resolvedTopic,
     taskId,
     title: title ?? existing?.title ?? resolvedKey,
@@ -371,12 +387,24 @@ export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
     sidecar: res.sidecar,
     liveProjection: res.liveProjection,
     bytes: res.bytes,
+    ...(prDiff ? { prDiff: { range: prDiff.range, materialFiles: prDiff.materialFiles, degraded: prDiff.degraded } } : {}),
     ...(browserRes ? { browser: browserRes } : {}),
   }
 
-  const nextSteps = res.summary.confirmedState !== 'confirmed'
-    ? [{ skill: 'dev-plan', text: `确认简报快照：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" brief --${taskId ? `task ${taskId}` : `topic ${res.briefKey}`} --confirm` }]
+  const topicTriage = (resolvedTopic && sess?.topics?.[resolvedTopic]?.triage)
+    || (existing?.topicId && sess?.topics?.[existing.topicId]?.triage)
+    || sess?.triage
+    || null
+  const topicRecommended = topicTriage?.recommendedEntry
+    || (topicTriage?.caseType === 3 && topicTriage?.doorType === 'two-way' ? 'sandbox' : null)
+  const confirmedNext = topicRecommended === 'sandbox'
+    ? [{ skill: 'dev-flow', text: `简报已确认（sandbox 分流），可直接进入隔离沙箱迭代：node ".agents/skills/dev-flow/scripts/flow.mjs" start --sandbox --task ${taskId || res.briefKey} --slug ${res.briefKey} --agent <id>` }]
     : [{ skill: 'dev-plan', text: '简报已确认，可继续执行 doc-plan.mjs init 或 next --handoff。' }]
+  const nextSteps = res.summary.confirmedState !== 'confirmed'
+    ? (selectPrototypeId && topicRecommended === 'sandbox'
+        ? [{ skill: 'dev-flow', text: `已选定原型，可确认快照或直接进隔离沙箱：node ".agents/skills/dev-flow/scripts/flow.mjs" start --sandbox --task ${taskId || res.briefKey} --slug ${res.briefKey} --agent <id>` }]
+        : [{ skill: 'dev-plan', text: `确认简报快照：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" brief --${taskId ? `task ${taskId}` : `topic ${res.briefKey}`} --confirm` }])
+    : confirmedNext
 
   if (cli.json) {
     process.stdout.write(`${JSON.stringify(withNextSteps(payload, nextSteps, { repoRoot: mainRoot }), null, 2)}\n`)

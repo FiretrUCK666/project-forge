@@ -19,11 +19,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import {
-  ARCHITECTURE_MAP_REL, renderArchitectureMapFromRepo, verifyArchitectureMapSync,
-} from '../../lib/architecture-map.mjs'
-import {
   computeFeatureFingerprint, ensureTaskScratchDir, evaluateToolStaleness,
-  FEATURE_MAP_REL, findAffectedFeatures, isSafeTaskScratchPath, prefillFeatureMapFromRepoMap,
+  FEATURE_MAP_REL, findAffectedFeatures, isSafeTaskScratchPath,
   readFeatureMap, resolveTaskScratchDir, resolveVerifySlotKey, sanitizeFeatureEntry, sanitizeVerificationTool,
   slugifyFeatureId, VALID_RISK_LEVELS, VALID_TOOL_KINDS, writeFeatureMap, writeVerifyCacheEntry,
 } from '../../lib/feature-map.mjs'
@@ -35,10 +32,10 @@ import { sanitizeTaskId } from '../../lib/ledger.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { runEditGate } from '../../dev-edit/scripts/edit-gate.mjs'
-import { generateRepoMap } from '../../dev-explore/scripts/repo-map.mjs'
 import { guardExistingFeatureMapForWrite, handleAudit, handleClean } from './verify-tools-audit.mjs'
+import { handleRender, handleSync, normRelFile, resolveCurrentHead, splitCsv } from './verify-tools-render.mjs'
 
-export { handleAudit, handleClean }
+export { handleAudit, handleClean, handleRender, handleSync }
 
 export { EXIT }
 const SUBCOMMANDS = subcommandNamesFor('verify-tools')
@@ -91,30 +88,13 @@ function printHelp() {
     '  --prune-scratch              Remove closed-task scratch dirs during clean',
     '  --check                      Verify docs/architecture-map.html matches docs/feature-map.json without writing',
     '  --out <path>                 Custom relative output path for render (default docs/architecture-map.html)',
+    '  --telemetry-spans <path>     Optional measured spans JSON path to activate Tier 3 waterfall diagram on render',
     '  --json                       Emit machine-readable JSON',
     '  --help                       Show help',
     '',
     'Exit Codes: 0=ok, 1=error, 2=usage, 3=policy/stale/gate blocked',
     '',
   ].join('\n'))
-}
-
-function splitCsv(raw) {
-  if (!raw) return []
-  const list = Array.isArray(raw) ? raw : [raw]
-  return list.flatMap((v) => String(v ?? '').split(',')).map((s) => s.trim()).filter(Boolean)
-}
-
-function normRelFile(repoRoot, raw) {
-  const s = String(raw ?? '').trim()
-  if (!s) return ''
-  const rel = isAbsolute(s) ? relative(repoRoot, s) : s
-  return posixPath(rel).replace(/^\.\//, '').replace(/^\/+/, '')
-}
-
-async function resolveCurrentHead(repoRoot) {
-  const res = await gitRun(repoRoot, ['rev-parse', 'HEAD'])
-  return res.ok ? res.stdout.trim() : null
 }
 
 async function collectChangedFilesForRun(repoRoot, baseRef = null) {
@@ -158,33 +138,6 @@ function isSelfAuditTool(tool, taskId) {
 function emitOut(opts, payload, lines) {
   if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
   else process.stdout.write(`${lines.join('\n')}\n`)
-}
-
-export async function handleSync(opts, roots) {
-  const workRoot = roots.workTreeRoot
-  if (!opts['dry-run']) {
-    const guard = guardExistingFeatureMapForWrite(workRoot, opts)
-    if (!guard.ok) return { exitCode: guard.exitCode, ok: false, code: 'BLOCKED_CORRUPT_FEATURE_MAP' }
-  }
-  const map = await generateRepoMap(workRoot, { writeFeatureMap: !opts['dry-run'] })
-  const res = map.featureMapSync ?? prefillFeatureMapFromRepoMap(workRoot, map, { write: !opts['dry-run'] })
-  const archRes = !opts['dry-run'] ? renderArchitectureMapFromRepo(workRoot) : null
-  const payload = {
-    ok: true,
-    action: opts['dry-run'] ? 'sync-dry-run' : 'synced',
-    path: FEATURE_MAP_REL,
-    existed: res.existed,
-    written: res.written,
-    featureCount: res.featureMap.features.length,
-    addedFeatures: res.addedFeatures,
-    updatedFeatures: res.updatedFeatures,
-    featureMap: res.featureMap,
-    ...(archRes ? { architectureMap: { relPath: archRes.relPath, written: archRes.written, optedOut: Boolean(archRes.optedOut), bytes: archRes.bytes ?? 0 } } : {}),
-  }
-  emitOut(opts, payload, [
-    `[verify-tools sync] ${FEATURE_MAP_REL}: features=${payload.featureCount} (added=${res.addedFeatures}, updated=${res.updatedFeatures}, written=${res.written})`,
-  ])
-  return { exitCode: EXIT.OK, ...payload }
 }
 
 export async function handleCreate(opts, roots) {
@@ -696,27 +649,6 @@ export async function handleRun(opts, roots) {
   return { exitCode, ...payload }
 }
 
-export async function handleRender(opts, roots) {
-  const workRoot = roots.workTreeRoot
-  const outRel = typeof opts.out === 'string' && opts.out.trim() ? opts.out.trim() : ARCHITECTURE_MAP_REL
-  if (opts.check) {
-    const checkRes = verifyArchitectureMapSync(workRoot, { outRel })
-    emitOut(opts, checkRes, [
-      checkRes.ok
-        ? `[verify-tools render --check] OK (${checkRes.reason}): ${checkRes.relPath}`
-        : `[verify-tools render --check] DRIFT (${checkRes.code}): ${checkRes.message}`,
-    ])
-    return { exitCode: checkRes.ok ? EXIT.OK : (checkRes.exitCode ?? EXIT.FACT), ...checkRes }
-  }
-  const res = renderArchitectureMapFromRepo(workRoot, { outRel, write: true })
-  emitOut(opts, res, [
-    res.ok
-      ? `[verify-tools render] ${res.optedOut ? 'opted-out (no-architecture-html)' : `${res.relPath} (${res.bytes} bytes, written=${res.written})`}`
-      : `[verify-tools render] FAILED: ${res.message}`,
-  ])
-  return { exitCode: res.ok ? EXIT.OK : (res.exitCode ?? EXIT.FACT), ...res }
-}
-
 async function main(argv = process.argv.slice(2)) {
   if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
     printHelp()
@@ -732,7 +664,7 @@ async function main(argv = process.argv.slice(2)) {
         'changed', 'stale', 'refresh-baseline', 'allow-medium-fallback', 'confirm', 'prune-zombies', 'prune-scratch',
       ],
       valueFlags: [
-        'feature', 'name', 'tool', 'tool-id', 'kind', 'command', 'script', 'out',
+        'feature', 'name', 'tool', 'tool-id', 'kind', 'command', 'script', 'out', 'telemetry-spans',
         'from-scratch', 'draft-file', 'draft-content', 'task', 'risk', 'entrypoints',
         'modules', 'flows', 'test-refs', 'hints', 'files', 'base', 'live-e2e-cmd',
       ],

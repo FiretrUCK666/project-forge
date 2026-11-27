@@ -62,9 +62,13 @@ export function layoutLifecycleDiagram(evidence, {
     const box = { id: s, label: s, shortLabel: truncateLabel(s, 16), onSpine: true, spineIndex: idx, x, y: spineY, w: nodeW, h: nodeH, cx: roundCoord(x + nodeW / 2), cy: roundCoord(spineY + nodeH / 2) }
     nodes.push(box); boxMap.set(s, box)
   })
+  const maxOffCols = Math.max(4, Math.min(6, spineIds.length || 5))
+  const offRowGap = 44
   offSpine.forEach((s, idx) => {
-    const x = roundCoord(pad + idx * (nodeW + gapX))
-    const box = { id: s, label: s, shortLabel: truncateLabel(s, 16), onSpine: false, spineIndex: -1, x, y: branchY, w: nodeW, h: nodeH, cx: roundCoord(x + nodeW / 2), cy: roundCoord(branchY + nodeH / 2) }
+    const col = idx % maxOffCols, row = Math.floor(idx / maxOffCols)
+    const x = roundCoord(pad + col * (nodeW + gapX))
+    const y = roundCoord(branchY + row * (nodeH + offRowGap))
+    const box = { id: s, label: s, shortLabel: truncateLabel(s, 16), onSpine: false, spineIndex: -1, x, y, w: nodeW, h: nodeH, cx: roundCoord(x + nodeW / 2), cy: roundCoord(y + nodeH / 2) }
     nodes.push(box); boxMap.set(s, box)
   })
 
@@ -177,7 +181,9 @@ export function layoutTimelineDiagram(evidence, {
 
   const events = rawEvents.map((ev, idx) => {
     const ts = ev?.date ? Date.parse(String(ev.date)) : NaN
-    return { id: String(ev?.id || `ev-${idx + 1}`), kind: String(ev?.kind || 'event'), date: String(ev?.date || ''), ts: Number.isFinite(ts) ? ts : null, sha: String(ev?.sha || ''), label: String(ev?.label || ev?.id || `event ${idx + 1}`) }
+    const rawLbl = String(ev?.label || ev?.id || `event ${idx + 1}`).trim()
+    const cleanLbl = rawLbl.replace(/^Merge pull request #(\d+) from [^/]+\/(?:feat\/|fix\/|chore\/|docs\/)?(.+)$/i, 'PR #$1 $2')
+    return { id: String(ev?.id || `ev-${idx + 1}`), kind: String(ev?.kind || 'event'), date: String(ev?.date || ''), ts: Number.isFinite(ts) ? ts : null, sha: String(ev?.sha || ''), label: cleanLbl }
   }).sort((a, b) => ((a.ts !== null && b.ts !== null && a.ts !== b.ts) ? a.ts - b.ts : (a.date.localeCompare(b.date) || a.id.localeCompare(b.id))))
 
   const rawDeltas = []

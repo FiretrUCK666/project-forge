@@ -8,6 +8,8 @@ import { FEATURE_MAP_REL, readFeatureMapStatus } from './feature-map.mjs'
 import { computeFeatureMapFingerprint, verifyArchitectureMapHeader } from './feature-map-graph.mjs'
 import { posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { readDecisions } from './profile.mjs'
+import { analyzeRepoStatic } from './static-analyzer.mjs'
+import { extractMultiDiagramEvidence } from './static-evidence.mjs'
 import { buildVisualModel } from './visual-layout.mjs'
 import { renderVisualHtml } from './visual-render.mjs'
 
@@ -129,6 +131,8 @@ export function renderArchitectureMapFromRepo(repoRoot, {
   mode = 'architecture-map',
   title = '',
   briefSpec = null,
+  analysis = null,
+  evidence = null,
   ignoreOptOut = false,
   write = true,
 } = {}) {
@@ -179,7 +183,10 @@ export function renderArchitectureMapFromRepo(repoRoot, {
     mode,
     title,
     briefSpec,
+    analysis,
+    evidence,
   })
+  visualModel.analysis = analysis || null
   const rendered = renderVisualHtml({
     visualModel,
     featureMapSha256,
@@ -208,8 +215,45 @@ export function renderArchitectureMapFromRepo(repoRoot, {
     bytes,
     featureMapSha256,
     headerLine: rendered.headerLine,
+    activeTabs: visualModel.activeTabs || [],
     html: write ? undefined : cleanHtml,
   }
+}
+
+/** 异步全量静态分析 + 3 层 10 类图表证据抽取，渲染干净常青 Studio `docs/architecture-map.html`。 */
+export async function renderArchitectureMapAsync(repoRoot, {
+  outRel = ARCHITECTURE_MAP_REL,
+  telemetrySpans = null,
+  ignoreOptOut = false,
+  write = true,
+  useCache = true,
+} = {}) {
+  const root = resolve(repoRoot)
+  if (!ignoreOptOut && isArchitectureMapOptedOut(root)) {
+    return renderArchitectureMapFromRepo(root, { outRel, ignoreOptOut, write })
+  }
+  const fmStatus = readFeatureMapStatus(root)
+  if (!fmStatus.exists || fmStatus.corrupt || !fmStatus.raw) {
+    return renderArchitectureMapFromRepo(root, { outRel, ignoreOptOut, write })
+  }
+  let analysis = null
+  let evidence = null
+  try {
+    analysis = await analyzeRepoStatic(root, { useCache })
+    evidence = await extractMultiDiagramEvidence(root, {
+      analysis,
+      featureMap: fmStatus.raw,
+      telemetrySpans,
+    })
+  } catch { /* 静态分析异常时安全降级为功能地图常驻两图 */ }
+
+  return renderArchitectureMapFromRepo(root, {
+    outRel,
+    analysis,
+    evidence,
+    ignoreOptOut,
+    write,
+  })
 }
 
 export const syncArchitectureMap = renderArchitectureMapFromRepo

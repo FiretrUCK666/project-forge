@@ -283,6 +283,7 @@ export function collectRepoVisualEvidenceSync({
 /** 异步全量静态分析 + 3 层 10 类图表证据抽取，渲染干净常青 Studio `docs/architecture-map.html`。 */
 export async function renderArchitectureMapAsync(repoRoot, {
   outRel = ARCHITECTURE_MAP_REL,
+  changedFiles = null,
   telemetrySpans = null,
   ignoreOptOut = false,
   write = true,
@@ -290,11 +291,11 @@ export async function renderArchitectureMapAsync(repoRoot, {
 } = {}) {
   const root = resolve(repoRoot)
   if (!ignoreOptOut && isArchitectureMapOptedOut(root)) {
-    return renderArchitectureMapFromRepo(root, { outRel, ignoreOptOut, write })
+    return renderArchitectureMapFromRepo(root, { outRel, changedFiles, ignoreOptOut, write })
   }
   const fmStatus = readFeatureMapStatus(root)
   if (!fmStatus.exists || fmStatus.corrupt || !fmStatus.raw) {
-    return renderArchitectureMapFromRepo(root, { outRel, ignoreOptOut, write })
+    return renderArchitectureMapFromRepo(root, { outRel, changedFiles, ignoreOptOut, write })
   }
   const { analysis, evidence } = await collectRepoVisualEvidence({
     workRoot: root,
@@ -305,6 +306,7 @@ export async function renderArchitectureMapAsync(repoRoot, {
 
   return renderArchitectureMapFromRepo(root, {
     outRel,
+    changedFiles,
     analysis,
     evidence,
     ignoreOptOut,

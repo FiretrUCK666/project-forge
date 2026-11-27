@@ -354,8 +354,13 @@ async function checkPlatformSemanticParity({ ROOT, readText, fail, note }) {
 
   const engProviders = enginePlatform.listHostingProviders().map((p) => p.id)
   const kitProviders = kitPlatform.listHostingProviders().map((p) => p.id)
-  if (engProviders.join(',') !== 'github' || kitProviders.join(',') !== 'github') {
-    fail(`平台语义对齐：注册表仅允许注册 github（engine=${engProviders}, kit=${kitProviders}）`)
+  const expectedProviders = 'github,gitlab,gitcode,gitee,gitea'
+  if (engProviders.join(',') !== expectedProviders || kitProviders.join(',') !== expectedProviders) {
+    fail(`平台语义对齐：双端注册表必须对齐 5 方言（engine=${engProviders}, kit=${kitProviders}）`)
+  }
+  const capKeys = kitPlatform.CAPABILITY_KEYS ?? []
+  if (capKeys.length !== 10 || !sameKeyList(Object.keys(enginePlatform.NONE_CAPABILITIES ?? {}), capKeys) || !sameKeyList(Object.keys(kitPlatform.NONE_CAPABILITIES ?? {}), capKeys)) {
+    fail('平台语义对齐：双端 NONE_CAPABILITIES 必须对齐 10 键能力矩阵')
   }
 
   const probeAdapterSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github-probe.mjs'))
@@ -378,10 +383,11 @@ async function checkPlatformSemanticParity({ ROOT, readText, fail, note }) {
     fail('平台语义对齐：共享平台探测核心 gh auth status 必须显式指定 --hostname github.com')
   }
 
+  const kitHttpSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'platform-http.mjs'))
   const kitClientSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'github-client.mjs'))
   const engClientSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github-client.mjs'))
-  if (!kitClientSrc.includes('AbortSignal.timeout') || !kitProbeSrc.includes('AbortSignal.timeout')) {
-    fail('平台语义对齐：双端 HTTPS 请求必须显式设置 AbortSignal.timeout')
+  if (!kitHttpSrc.includes('AbortSignal.timeout') || !kitClientSrc.includes('./platform-http.mjs') || !kitProbeSrc.includes('./platform-http.mjs')) {
+    fail('平台语义对齐：双端 HTTP(S) 请求必须经 platform-http.mjs 显式设置 AbortSignal.timeout')
   }
   if (!engClientSrc.includes('kit/skills/lib/platform-probe.mjs')) {
     fail('平台语义对齐：scripts/lib/platform/github-client.mjs 必须单源复用 kit/skills/lib/platform-probe.mjs')
@@ -414,6 +420,8 @@ async function checkPlatformSemanticParity({ ROOT, readText, fail, note }) {
   note('平台语义对齐：scripts/lib/platform/ 与 kit/skills/lib/platform.mjs 无交互变量、StrictHostKeyChecking=yes、SSH 别名、generic-git 与身份分类全对齐')
 }
 
+const MULTI_FORGE_CORE_RE = /^(?:kit\/skills\/lib\/(?:platform(?:-[a-z-]+)?|task-backend)\.mjs|scripts\/lib\/platform\/[^/]+\.mjs)$/
+
 function checkPlatformLock({ ROOT, rel, readText, walk, fail, note }) {
   const targets = [
     join(ROOT, 'SKILL.md'), join(ROOT, 'README.md'), join(ROOT, 'README.en.md'),
@@ -424,12 +432,12 @@ function checkPlatformLock({ ROOT, rel, readText, walk, fail, note }) {
     ...walk(join(ROOT, 'assets'), (f) => /\.svg$/i.test(f)),
   ]
   for (const file of targets) {
-    if (!existsSync(file)) continue
+    if (!existsSync(file) || MULTI_FORGE_CORE_RE.test(rel(file))) continue
     const text = readText(file)
     const m = FORBIDDEN_PLATFORM_RE.exec(text)
-    if (m) fail(`${rel(file)} 第 ${text.slice(0, m.index).split('\n').length} 行提到了「${m[0]}」——这个 skill 只针对 GitHub，别的托管平台不进产物层`)
+    if (m) fail(`${rel(file)} 第 ${text.slice(0, m.index).split('\n').length} 行提到了「${m[0]}」——非平台内核文件遵循平台锁定，别的托管平台不进产物层`)
   }
-  note(`平台锁定：${targets.length} 个产物层文件里没有提及其他托管平台`)
+  note(`平台锁定：${targets.length} 个产物层文件通过多平台内核隔离校验`)
 }
 
 function checkStructureRules({ ROOT, readText, fail, note }) {

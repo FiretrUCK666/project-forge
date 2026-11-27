@@ -1,8 +1,8 @@
 /**
- * platform.mjs —— 平台注册契约、SSH 别名解析、多远端拓扑与双端单源五态身份判定。
+ * platform.mjs —— 5 方言平台注册契约、SSH 别名解析、多远端目标解析与双端单源五态身份判定。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），底层网络与凭据探测复用 `./platform-probe.mjs`。
- * 产品层注册表仅注册 GitHub 适配器，未知主机优雅退化为 `generic-git` 安全放行本地研发流。
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），底层网络与凭据探测复用 `./platform-probe.mjs`、
+ * `./platform-http.mjs` 与 `./platform-providers.mjs`；未知主机优雅退化为 `generic-git`。
  */
 
 import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
@@ -12,19 +12,32 @@ import { readJsonSafe, readTextSafe } from './git.mjs'
 import {
   TEAM_PROBE_HINT, extractHostAndPath, githubRepoFull, githubRepoPath,
   normalizeGitHubRepo, parseRemoteUrlHost, parseSshConfigHostMap, probeGitHubEnvCore,
+  probePlatformEnvCore, resolveProviderTokenEnv,
 } from './platform-probe.mjs'
+import {
+  buildMultipartBody, isLanHost, platformHttpRequest, redactPlatformTokens,
+  sanitizeFourByteChars, validateRequestUrl,
+} from './platform-http.mjs'
+import {
+  buildDialectAuthHeaders, createProviderClient, filterOpenPrsByBranch, resolveGitLabMrHeadSha,
+} from './platform-providers.mjs'
 import { createGitHubClient, parseBodyRelations } from './github-client.mjs'
 import {
-  GENERIC_GIT_PROVIDER, GITHUB_PROVIDER, NONE_CAPABILITIES, REQUIRED_PROVIDER_METHODS,
-  getHostingProvider, listHostingProviders, registerHostingProvider, resolveRemoteDescriptor,
-  validateHostingProvider,
+  BUILTIN_PROVIDER_IDS, CAPABILITY_KEYS, GENERIC_GIT_PROVIDER, GITCODE_PROVIDER, GITEA_PROVIDER,
+  GITEE_PROVIDER, GITHUB_PROVIDER, GITLAB_PROVIDER, NONE_CAPABILITIES, REQUIRED_PROVIDER_METHODS,
+  getHostingProvider, listHostingProviders, normalizeMultiSegmentRepo, registerHostingProvider,
+  resolveRemoteDescriptor, resolveRemoteTarget, validateHostingProvider,
 } from './platform-registry.mjs'
 
 export {
-  GENERIC_GIT_PROVIDER, GITHUB_PROVIDER, NONE_CAPABILITIES, REQUIRED_PROVIDER_METHODS,
-  TEAM_PROBE_HINT, getHostingProvider, githubRepoFull, githubRepoPath, listHostingProviders,
-  normalizeGitHubRepo, parseSshConfigHostMap, registerHostingProvider, resolveRemoteDescriptor,
-  validateHostingProvider,
+  BUILTIN_PROVIDER_IDS, CAPABILITY_KEYS, GENERIC_GIT_PROVIDER, GITCODE_PROVIDER, GITEA_PROVIDER,
+  GITEE_PROVIDER, GITHUB_PROVIDER, GITLAB_PROVIDER, NONE_CAPABILITIES, REQUIRED_PROVIDER_METHODS,
+  TEAM_PROBE_HINT, buildDialectAuthHeaders, buildMultipartBody, createProviderClient,
+  filterOpenPrsByBranch, getHostingProvider, githubRepoFull, githubRepoPath, isLanHost,
+  listHostingProviders, normalizeGitHubRepo, normalizeMultiSegmentRepo, parseSshConfigHostMap,
+  platformHttpRequest, probePlatformEnvCore, redactPlatformTokens, registerHostingProvider,
+  resolveGitLabMrHeadSha, resolveProviderTokenEnv, resolveRemoteDescriptor, resolveRemoteTarget,
+  sanitizeFourByteChars, validateHostingProvider, validateRequestUrl,
 }
 export { lookupSshHost } from './platform-probe.mjs'
 export {
@@ -603,7 +616,45 @@ function resolveGitModeMarkersCompat(gitDir, opts = {}) {
  * 判断标准一句话：这次调用之后平台上的状态会不会变。会，就用这个。
  */
 export async function probeForWrite(options = {}) {
-  return probeGitHubEnv({ ...options, probeNetwork: true })
+  return probePlatformEnv({ ...options, probeNetwork: true })
+}
+
+/** 统一多方言惰性平台探测与客户端装配（GitHub 走完整双轨探针，其余 4 方言走统一协议适配器）。 */
+export async function probePlatformEnv(options = {}) {
+  const {
+    cwd = process.cwd(), remoteUrls = {}, sshHostMap = parseSshConfigHostMap(),
+    providerHint = null, apiBaseHint = null, env = process.env, agentsText = null,
+    probeNetwork = false, verifyToken = false, offline, runner, httpRequest,
+  } = options
+  const target = resolveRemoteTarget(remoteUrls, { sshHostMap, providerHint, apiBaseHint, env, agentsText })
+  if (target.providerId === 'none' || target.providerId === 'github' || target.providerId === 'generic-git') {
+    return probeGitHubEnv({ ...options, sshHostMap })
+  }
+  const core = await probePlatformEnvCore({
+    providerId: target.providerId, cwd, remoteUrls, host: target.host, apiBaseUrl: target.apiBaseUrl,
+    repoSlug: target.repoSlug, probeNetwork, verifyToken, offline, runner, httpRequest, env,
+  })
+  return {
+    env: {
+      hasRemote: true, providerId: target.providerId, origin: target.repoSlug, host: target.host,
+      apiBaseUrl: target.apiBaseUrl, isLan: target.isLan, protocol: core.parsedOrigin?.protocol ?? null,
+      trackA: {
+        ssh: core.sshWorks ? `available:${core.ssh.port}` : (core.ssh.state === 'unprobed' ? 'unprobed' : 'unavailable'),
+        https: core.httpsPublic.hasToken || core.httpsPublic.state === 'available' ? 'available' : core.httpsPublic.state,
+        remediationCmd: core.remediationCmd ?? null,
+      },
+      trackB: {
+        tier: core.apiChannel.tier, ghCli: false,
+        ...(core.effectiveLogin ? { login: core.effectiveLogin } : {}),
+        hasToken: Boolean(core.memoryToken && core.tokenVerified),
+      },
+    },
+    client: createProviderClient({
+      providerId: target.providerId, apiBaseUrl: target.apiBaseUrl, repoSlug: target.repoSlug,
+      token: core.tokenVerified ? core.memoryToken : null, remoteName: target.pushRemote || 'origin',
+      repoRoot: cwd, login: core.effectiveLogin, ...(httpRequest ? { httpRequest } : {}), ...(runner ? { runner } : {}),
+    }),
+  }
 }
 
 /**

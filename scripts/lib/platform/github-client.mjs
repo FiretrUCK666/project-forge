@@ -24,6 +24,7 @@ import {
   detectRemoteProtocol,
   normalizeGitHubRepo,
 } from '../../../kit/skills/lib/platform-probe.mjs'
+import { redactPlatformTokens } from '../../../kit/skills/lib/platform-http.mjs'
 
 export {
   DEFAULT_PROBE_TIMEOUT_MS,
@@ -34,6 +35,7 @@ export {
   defaultRunCommand,
   detectRemoteProtocol,
   normalizeGitHubRepo,
+  redactPlatformTokens,
 }
 
 function makeHttpError(status, message, data) {

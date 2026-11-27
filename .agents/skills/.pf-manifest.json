@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-27T08:49:47.946Z",
+  "installedAt": "2026-11-27T10:13:47.830Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -337,13 +337,13 @@
       "sha256": "b9a3f698fd0a4303376fac06e372e1413b2e0109ef123c90b870777d8ab8c76f"
     },
     "lib/github-client.mjs": {
-      "sha256": "e95d68b57964cced85c441a2ded0d191b99aed937d86b4804f92a1ead6e24486"
+      "sha256": "f1ef037b455230f7180600ba75028f91a43644e0db9fb0c2d746300c4c027d93"
     },
     "lib/github-labels.mjs": {
-      "sha256": "dcb9a8ef50991b6eb0a7a76a1b5562cf202b67b18fced91ff064e8137fa0733b"
+      "sha256": "112c95d13946dd17a3e7316cb96fbc607aa06ab31e45a13fac3e3935ebdddbf6"
     },
     "lib/github-parse.mjs": {
-      "sha256": "32d156afb06cdd48dd9dfd2b4d0f4cc424790a8fceee7edc25800df6a2c95f1c"
+      "sha256": "d60d87136e16c845d477cdc5eeaa75eb029a1bcf4bf0932829318f9498892a4d"
     },
     "lib/handoff-package.mjs": {
       "sha256": "720a64a580c8f05cb795f34290b70ef2c7002471268dc8ff96776864d8f78e36"
@@ -396,14 +396,20 @@
     "lib/plan-sync.mjs": {
       "sha256": "ffbad1d7ad598b9615a7030889dc6fb471c8d623770b1163758d99367da329e2"
     },
+    "lib/platform-http.mjs": {
+      "sha256": "652c4d6260c922cc867ebdfbcbbc5e47299230e58a0b43435e49ac9b4f8e9019"
+    },
     "lib/platform-probe.mjs": {
-      "sha256": "b8e9a712b0e067c724e618509453bf9b15e32e4183ad523c2936096a81bf9e7c"
+      "sha256": "94b42f23c3943d0f7bdcedafd7dada7543b852ffd6bd9f9f0f98deece9b009d4"
+    },
+    "lib/platform-providers.mjs": {
+      "sha256": "7c06da98dedddbb28794fa23d205c609e1ebee055478dbcfe6883abb819844c4"
     },
     "lib/platform-registry.mjs": {
-      "sha256": "c19395cf3f2a9f71005b6b9100b513fe75ce8dd8b26a65f1c1e9b11860c23cd1"
+      "sha256": "bb9dadae78d4d45b0c692494f8a02d428de6205151cc8c26bbfce0516522e6cc"
     },
     "lib/platform.mjs": {
-      "sha256": "6c79e962984b028dc98d2f10f90e084213f61408ea4828de2fdea7a4478c6c35"
+      "sha256": "fd0868eedb44891757d1f8e3dfe32e4331eda800ef879d90d004d8cf93c90884"
     },
     "lib/pr-template-hydrate.mjs": {
       "sha256": "0cfc1d92f0fb74d78e70afaa5f8e676f6f200d027829ca60bd50f017f022dfa4"
@@ -469,7 +475,7 @@
       "sha256": "51064fd452e3b38b5c155d230589b301d4bc6c7b23c762620fb8f1321d1b7e4e"
     },
     "lib/task-backend.mjs": {
-      "sha256": "ba4520749247d1ec085d38e0d308ae8b316b25dc83c2711908cd0d61412680b8"
+      "sha256": "2283c9ffb163bbee879365421ca3490278c7640f48761961f1c9f992ad09052d"
     },
     "lib/task-graph.mjs": {
       "sha256": "6822653b81266965eebd3173016c4ed16a7c22c3b7316710f25c4111b20f2c43"

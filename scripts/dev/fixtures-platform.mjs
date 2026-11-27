@@ -13,9 +13,9 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
     probeGitHubEnv, resolveRemotesTopology, resolveWorkspaceIdentity,
   } = await import('../lib/platform/index.mjs')
 
-  // 1. 注册表边界：仅注册 github，且无远端 --probe-auth 可运行不报错
+  // 1. 注册表边界：内置 5 方言与 generic-git 兜底，且无远端 --probe-auth 可运行不报错
   const providers = listHostingProviders().map((p) => p.id)
-  if (providers.join(',') !== 'github' || !getHostingProvider('generic-git')) {
+  if (providers.join(',') !== 'github,gitlab,gitcode,gitee,gitea' || !getHostingProvider('generic-git')) {
     return `注册表或 generic-git 异常：${JSON.stringify(providers)}`
   }
 
@@ -557,6 +557,235 @@ cases.push(['Issue151 C4：匿名通用 HTTPS 远端判 undetermined、本地/fi
     rmTree(isoHome)
     rmTree(noIdRepo)
     rmTree(withIdRepo)
+  }
+}])
+
+cases.push(['C4/C5：10 键能力矩阵、5 方言多级群组 resolveRemoteTarget、SSRF/元地址/3xx 脱敏、4 字节守卫与纯 Buffer multipart', async () => {
+  const {
+    CAPABILITY_KEYS, getHostingProvider, listHostingProviders, resolveRemoteTarget,
+  } = await import('../../kit/skills/lib/platform.mjs')
+  const {
+    buildMultipartBody, platformHttpRequest, redactPlatformTokens, sanitizeFourByteChars,
+    validateRequestUrl,
+  } = await import('../../kit/skills/lib/platform-http.mjs')
+  const { createLabelViaApi } = await import('../../kit/skills/lib/github-labels.mjs')
+
+  // 1. 10 键能力矩阵与 5 方言元数据
+  if (CAPABILITY_KEYS.length !== 10 || listHostingProviders().map((p) => p.id).join(',') !== 'github,gitlab,gitcode,gitee,gitea') {
+    return `5 方言或 10 键能力矩阵异常：${JSON.stringify(CAPABILITY_KEYS)}`
+  }
+  if (getHostingProvider('gitlab')?.capabilities?.uploadAttachment !== true
+    || getHostingProvider('gitcode')?.capabilities?.uploadAttachment !== true
+    || getHostingProvider('github')?.capabilities?.uploadAttachment !== false
+    || getHostingProvider('gitee')?.capabilities?.checks !== false
+    || getHostingProvider('gitea')?.capabilities?.checks !== true) {
+    return '5 方言能力矩阵键值不符合契约'
+  }
+
+  // 2. resolveRemoteTarget：GitLab 多级群组、自建 providerHint、LAN 与本地 file://
+  const glTarget = resolveRemoteTarget({ origin: 'https://gitlab.com/org/sub/team/app.git' })
+  if (glTarget.providerId !== 'gitlab' || glTarget.repoSlug !== 'org/sub/team/app' || glTarget.mrRefPattern !== 'refs/merge-requests/{n}/head' || glTarget.apiBaseUrl !== 'https://gitlab.com/api/v4') {
+    return `GitLab 多级群组解析失败：${JSON.stringify(glTarget)}`
+  }
+  const lanTarget = resolveRemoteTarget(
+    { origin: 'http://192.168.1.25:8080/grp/sub/demo.git' },
+    { providerHint: 'gitlab', sshHostMap: false },
+  )
+  if (lanTarget.providerId !== 'gitlab' || !lanTarget.isLan || lanTarget.apiBaseUrl !== 'http://192.168.1.25:8080/api/v4' || lanTarget.repoSlug !== 'grp/sub/demo') {
+    return `LAN 自建 GitLab 解析失败：${JSON.stringify(lanTarget)}`
+  }
+  const localTarget = resolveRemoteTarget({ origin: 'file:///srv/git/local.git' }, { sshHostMap: false })
+  if (!localTarget.isLocal || localTarget.providerId !== 'generic-git' || localTarget.apiBaseUrl !== null) {
+    return `本地 file:// 解析失败：${JSON.stringify(localTarget)}`
+  }
+
+  // 3. SSRF 与协议 Fail-Closed：公网 http://、云元数据 169.254.169.254、链路本地 fe80::1 必拒；RFC1918/loopback 放行
+  const pubHttp = await platformHttpRequest({ method: 'GET', url: 'http://example.com/api/v4/version' })
+  if (!pubHttp.blocked || pubHttp.code !== 'ERR_INSECURE_PUBLIC_HTTP') {
+    return `公网明文 http:// 未被 Fail-Closed 拦截：${JSON.stringify(pubHttp)}`
+  }
+  for (const blockedUrl of ['http://169.254.169.254/latest/meta-data', 'https://169.254.169.254/latest', 'http://[fe80::1]/api', 'http://172.32.0.1/api']) {
+    const r = validateRequestUrl(blockedUrl)
+    if (r.ok) return `危险地址未拦截：${blockedUrl}`
+  }
+  for (const lanOk of ['http://127.0.0.1:8080/api', 'http://localhost:3000/api', 'http://10.0.0.5/api', 'http://172.16.1.2/api', 'http://192.168.10.2/api']) {
+    const r = validateRequestUrl(lanOk)
+    if (!r.ok) return `合法回环/RFC1918 地址被误拦截：${lanOk} -> ${JSON.stringify(r)}`
+  }
+
+  // 4. 全平台令牌脱敏、4 字节字符守卫与纯 Buffer multipart（filename 清洗 + 二进制 PNG 零损毁）
+  const rawLeak = 'bare=glpat-baresecret12345 PRIVATE-TOKEN: ptok987654 Authorization: Bearer ghp_abc1234567890 ?private_token=tok999&access_token=gt888'
+  const safeText = redactPlatformTokens(rawLeak)
+  if (/glpat-baresecret|ptok987654|ghp_abc|tok999|gt888/.test(safeText)) return `全平台令牌脱敏漏网：${safeText}`
+  const fourByte = `标题\uD83D\uDE80正文`
+  const cleaned = sanitizeFourByteChars(fourByte)
+  if (cleaned !== '标题正文') return `4 字节字符守卫失效：${cleaned}`
+
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe, 0x80, 0x7f])
+  const mp = buildMultipartBody({ fieldName: 'file', filename: '../../evil"\r\nX-Hdr: 1.png', contentType: 'image/png', buffer: pngBytes })
+  if (mp.filename.includes('\r') || mp.filename.includes('\n') || mp.filename.includes('"') || mp.filename.includes('/')) {
+    return `multipart filename 清洗失效：${JSON.stringify(mp.filename)}`
+  }
+  if (!mp.body.includes(pngBytes)) return 'multipart 二进制 PNG 字节被损毁'
+
+  // 5. github-labels.mjs 去除 gh-cli/node-https-token 硬编码，支持 provider-api 通道
+  const lblRes = await createLabelViaApi({
+    tier: 'provider-api', repo: 'org/repo', name: 'in-progress',
+    callHttps: async () => ({ ok: true, status: 201 }),
+  })
+  if (!lblRes.ok || !lblRes.created) return `github-labels 未放行统一 provider-api 通道：${JSON.stringify(lblRes)}`
+  return true
+}])
+
+cases.push(['C5/C6：纯 Node Mock Forge 5 方言鉴权头、429 退避、GitLab uploads、真 SHA + shaSource、GitCode 守卫、分支过滤与 RemoteApiBackend', async () => {
+  const http = await import('node:http')
+  const { platformHttpRequest } = await import('../../kit/skills/lib/platform-http.mjs')
+  const { createProviderClient } = await import('../../kit/skills/lib/platform-providers.mjs')
+  const { RemoteApiBackend, createTaskBackend } = await import('../../kit/skills/lib/task-backend.mjs')
+
+  const seenAuth = {}
+  const receivedBodies = []
+  let rateLimitHits = 0
+  let uploadedRaw = null
+
+  const server = http.createServer((req, res) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => {
+      const rawBuf = Buffer.concat(chunks)
+      const urlObj = new URL(req.url, 'http://127.0.0.1')
+      const path = urlObj.pathname
+      const sendJson = (code, obj, extraHeaders = {}) => {
+        res.writeHead(code, { 'Content-Type': 'application/json', ...extraHeaders })
+        res.end(JSON.stringify(obj))
+      }
+
+      if (path === '/redirect-leak') {
+        res.writeHead(302, { Location: 'https://evil.example/cb?private_token=glpat-redirsecret999' })
+        res.end()
+        return
+      }
+      if (path === '/api/v4/projects/group%2Fsub%2Frepo/uploads' && req.method === 'POST') {
+        seenAuth.gitlab = req.headers['private-token']
+        uploadedRaw = rawBuf
+        return sendJson(201, { alt: 'shot.png', url: '/uploads/abc/shot.png', full_path: '/group/sub/repo/uploads/abc/shot.png', markdown: '![shot.png](/uploads/abc/shot.png)' })
+      }
+      if (path === '/api/v4/projects/group%2Fsub%2Frepo/merge_requests/7') {
+        return sendJson(200, { iid: 7, title: 'MR7', state: 'opened', source_branch: 'feat/x', target_branch: 'main', sha: '1111111111111111111111111111111111111111', web_url: 'http://127.0.0.1/mr/7' })
+      }
+      if (path === '/api/v4/projects/group%2Fsub%2Frepo/merge_requests/99') {
+        return sendJson(200, { iid: 99, title: 'MR99', state: 'opened', source_branch: 'feat/y', target_branch: 'main', sha: '2222222222222222222222222222222222222222', web_url: 'http://127.0.0.1/mr/99' })
+      }
+      if (path === '/api/v4/projects/group%2Fsub%2Frepo/merge_requests') {
+        return sendJson(200, [
+          { iid: 7, title: 'Right', state: 'opened', source_branch: 'feat/x', target_branch: 'main', web_url: 'http://127.0.0.1/mr/7' },
+          { iid: 8, title: 'WrongBranch', state: 'opened', source_branch: 'feat/other', target_branch: 'main', web_url: 'http://127.0.0.1/mr/8' },
+        ])
+      }
+      if (path === '/api/v4/projects/org%2Fcode-repo/issues' && req.method === 'POST') {
+        seenAuth.gitcode = req.headers['private-token']
+        receivedBodies.push(JSON.parse(rawBuf.toString('utf8')))
+        return sendJson(201, { iid: 3, title: 'ok', state: 'opened', description: 'clean', web_url: 'http://127.0.0.1/issues/3' })
+      }
+      if (path === '/api/v5/repos/org/ge-repo/issues/1') {
+        seenAuth.gitee = req.headers.authorization
+        return sendJson(200, { number: 1, title: 'GiteeIssue', state: 'open', body: '' })
+      }
+      if (path === '/api/v1/repos/org/gt-repo/issues/1') {
+        seenAuth.gitea = req.headers.authorization
+        if (rateLimitHits === 0) {
+          rateLimitHits += 1
+          return sendJson(429, { message: 'rate limited' }, { 'Retry-After': '120' })
+        }
+        return sendJson(200, { number: 1, title: 'GiteaIssue', state: 'open', body: '' })
+      }
+      if (path === '/repos/org/gh-repo/issues/1') {
+        seenAuth.github = req.headers.authorization
+        return sendJson(200, { number: 1, title: 'GhIssue', state: 'open', body: '' })
+      }
+      return sendJson(404, { message: 'not found' })
+    })
+  })
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  const base = `http://127.0.0.1:${port}`
+  const bareDir = tmpProject({})
+  const workDir = tmpProject({ 'README.md': '# mr-sha\n' })
+  try {
+    // 准备真实裸仓与 refs/merge-requests/7/head 引用
+    gitSync(bareDir, ['init', '--bare'])
+    gitInit(workDir, { branch: 'main', name: 'dev', email: 'dev@example.com', origin: bareDir.replace(/\\/g, '/') })
+    gitSync(workDir, ['push', '-u', 'origin', 'main'])
+    const realSha = gitSync(workDir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+    gitSync(bareDir, ['update-ref', 'refs/merge-requests/7/head', realSha])
+
+    // 1. 3xx 拒重定向 + Location 脱敏
+    const redir = await platformHttpRequest({ method: 'GET', url: `${base}/redirect-leak` })
+    if (!redir.isRedirect || redir.status !== 302 || String(redir.redirectLocation ?? '').includes('glpat-redirsecret999')) {
+      return `3xx 重定向未拦截或 Location 未脱敏：${JSON.stringify(redir)}`
+    }
+
+    // 2. GitLab RemoteApiBackend：uploadAttachment 二进制安全 + getPr 真 SHA/回退 + 客户端分支过滤
+    const glBackend = createTaskBackend({
+      role: 'maintainer', providerId: 'gitlab', targetRepo: 'group/sub/repo',
+      apiBaseUrl: `${base}/api/v4`, token: 'glpat-mocktoken123', mainRoot: workDir,
+    })
+    if (!(glBackend instanceof RemoteApiBackend) || glBackend.kind !== 'gitlab') {
+      return `createTaskBackend 未为 gitlab 返回 RemoteApiBackend：${glBackend?.kind}`
+    }
+    const pngBuf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe])
+    const up = await glBackend.uploadAttachment({ filename: 'shot.png', contentType: 'image/png', buffer: pngBuf })
+    if (!up.ok || !up.markdown?.includes('/uploads/abc/shot.png') || !uploadedRaw?.includes(pngBuf)) {
+      return `GitLab /uploads 二进制安全上传失败：${JSON.stringify(up)}`
+    }
+    const pr7 = await glBackend.getPr(7)
+    if (!pr7.ok || pr7.headRefOid !== realSha || pr7.shaSource !== 'git-ls-remote') {
+      return `GitLab getPr 未校验 refs/merge-requests/7/head 真 SHA：${JSON.stringify(pr7)}`
+    }
+    const pr99 = await glBackend.getPr(99)
+    if (!pr99.ok || pr99.headRefOid !== '2222222222222222222222222222222222222222' || pr99.shaSource !== 'rest-fallback') {
+      return `GitLab getPr 缺 ref 时未安全回退 rest-fallback：${JSON.stringify(pr99)}`
+    }
+    const found = await glBackend.findOpenPrForBranch('group/sub/repo', 'feat/x', { base: 'main' })
+    if (!found.ok || found.prs.length !== 1 || found.prs[0].number !== 7) {
+      return `findOpenPrForBranch 客户端分支二次过滤失效：${JSON.stringify(found)}`
+    }
+
+    // 3. GitCode 4 字节守卫自动剥离 + PRIVATE-TOKEN
+    const gcClient = createProviderClient({ providerId: 'gitcode', apiBaseUrl: `${base}/api/v4`, repoSlug: 'org/code-repo', token: 'gc-tok-1' })
+    const gcRes = await gcClient.createIssue({ title: '测试\uD83D\uDE80标题', body: '内容\uD83C\uDF89' })
+    if (!gcRes.ok || receivedBodies[0]?.title !== '测试标题' || receivedBodies[0]?.description !== '内容') {
+      return `GitCode 写请求 4 字节守卫失效：${JSON.stringify({ gcRes, body: receivedBodies[0] })}`
+    }
+
+    // 4. Gitee / Gitea / GitHub 鉴权头 + 429 Retry-After 封顶 + Gitee/Gitea 能力降级
+    const waits = []
+    const giteaClient = createProviderClient({
+      providerId: 'gitea', apiBaseUrl: `${base}/api/v1`, repoSlug: 'org/gt-repo', token: 'gt-tok-1',
+      maxRetries: 2, sleep: async (ms) => { waits.push(ms) },
+    })
+    const giteaIssue = await giteaClient.getIssue('org/gt-repo', 1)
+    if (!giteaIssue.ok || waits[0] !== 60000) return `429 Retry-After 封顶 60s 失败：${JSON.stringify({ giteaIssue, waits })}`
+
+    const giteeBackend = createTaskBackend({ role: 'maintainer', providerId: 'gitee', targetRepo: 'org/ge-repo', apiBaseUrl: `${base}/api/v5`, token: 'ge-tok-1' })
+    const geIssue = await giteeBackend.getIssue(1)
+    const geChecks = await giteeBackend.getCommitChecks({ ref: 'abc' })
+    const geUp = await giteeBackend.uploadAttachment({ filename: 'a.png', buffer: pngBuf })
+    if (!geIssue.ok || !geChecks.skipped || !geUp.unsupported) {
+      return `Gitee 降级契约异常：${JSON.stringify({ geIssue, geChecks, geUp })}`
+    }
+
+    const ghClient = createProviderClient({ providerId: 'github', apiBaseUrl: base, repoSlug: 'org/gh-repo', token: 'gh-tok-1' })
+    await ghClient.getIssue('org/gh-repo', 1)
+    if (seenAuth.github !== 'Bearer gh-tok-1' || seenAuth.gitlab !== 'glpat-mocktoken123' || seenAuth.gitcode !== 'gc-tok-1' || seenAuth.gitee !== 'Bearer ge-tok-1' || seenAuth.gitea !== 'token gt-tok-1') {
+      return `5 方言鉴权头不匹配：${JSON.stringify(seenAuth)}`
+    }
+    return true
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmTree(bareDir)
+    rmTree(workDir)
   }
 }])
 

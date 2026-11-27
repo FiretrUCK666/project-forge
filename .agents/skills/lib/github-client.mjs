@@ -5,11 +5,11 @@
  */
 
 import { unlinkSync, writeFileSync } from 'node:fs'
-import https from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { execSafe } from './git.mjs'
+import { platformHttpRequest } from './platform-http.mjs'
 import { assertWellFormedMarkdownBody } from './pr-template-hydrate.mjs'
 import {
   DEFAULT_GITHUB_CONCURRENCY, addLabelsWithEnsureAndReadback, closePrViaRest,
@@ -38,52 +38,21 @@ function defaultSleep(ms) {
 }
 
 export function githubHttpsRequest(method, apiPath, token, bodyObj, { timeoutMs = 10000, redirect = 'manual' } = {}) {
-  return new Promise((done) => {
-    let settled = false
-    const finish = (res) => { if (!settled) { settled = true; done(res) } }
-    const payload = bodyObj === undefined ? null : Buffer.from(JSON.stringify(bodyObj), 'utf8')
-    const headers = {
-      'User-Agent': 'dev-flow-kit',
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    }
-    if (token) headers.Authorization = `Bearer ${token}`
-    if (payload) {
-      headers['Content-Type'] = 'application/json; charset=utf-8'
-      headers['Content-Length'] = String(payload.length)
-    }
-    const signal = timeoutMs > 0 && typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(timeoutMs) : undefined
-    const req = https.request({
-      hostname: 'api.github.com', path: apiPath, method, headers, timeout: timeoutMs, redirect, ...(signal ? { signal } : {}),
-    }, (res) => {
-      const chunks = []
-      res.on('data', (c) => chunks.push(c))
-      res.on('end', () => {
-        const status = res.statusCode ?? 0
-        const resHeaders = res.headers ?? {}
-        if (status >= 300 && status < 400) {
-          finish({ ok: false, status, headers: resHeaders, isRedirect: true, redirectLocation: resHeaders.location ?? null, data: { message: `Redirect rejected (HTTP ${status})` } })
-          return
-        }
-        const raw = Buffer.concat(chunks).toString('utf8')
-        let data = null
-        try { data = raw ? JSON.parse(raw) : null } catch { data = raw }
-        finish({ ok: status >= 200 && status < 300, status, headers: resHeaders, data })
-      })
-    })
-    req.on('timeout', () => {
-      req.destroy()
-      finish({ ok: false, status: 408, timedOut: true, headers: {}, data: { message: 'GitHub API timeout' } })
-    })
-    req.on('error', (err) => {
-      const isAbort = err?.name === 'TimeoutError' || err?.name === 'AbortError'
-      finish({
-        ok: false, status: isAbort ? 408 : 0, timedOut: isAbort, code: err?.code ?? null, headers: {},
-        data: { message: redactGhTokens(err?.message ?? 'request-error') },
-      })
-    })
-    if (payload) req.write(payload)
-    req.end()
+  const headers = {
+    'User-Agent': 'dev-flow-kit',
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const cleanPath = String(apiPath ?? '').startsWith('/') ? String(apiPath) : `/${String(apiPath ?? '')}`
+  return platformHttpRequest({
+    method,
+    url: `https://api.github.com${cleanPath}`,
+    headers,
+    body: bodyObj,
+    timeoutMs,
+    redirect,
+    allowInsecureLan: false,
   })
 }
 

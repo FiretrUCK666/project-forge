@@ -1,14 +1,14 @@
 /**
- * task-backend.mjs —— 统一 17 接口 TaskBackend 抽象层与注册表分发（GitHubBackend / GenericRemoteBackend / LocalOnlyBackend）。
+ * task-backend.mjs —— 统一 TaskBackend 抽象层与注册表分发（RemoteApiBackend / GitHubBackend / GenericRemoteBackend / LocalOnlyBackend）。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），统一三态后端契约：
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），统一三态后端契约（17 标准接口 + `uploadAttachment`）：
  *   claimTask, releaseTask, postComment, addLabels, removeLabel, createIssue, getIssue, listIssues,
- *   closeIssue, findOpenPrForBranch, createPr, updatePrBase, getPr, listComments, getCommitChecks, mergePr, closePr
+ *   closeIssue, findOpenPrForBranch, createPr, updatePrBase, getPr, listComments, getCommitChecks, mergePr, closePr, uploadAttachment
  */
 
 import { buildClaimComments } from './doc-comments.mjs'
 import { createGitHubClient } from './github-client.mjs'
-import { getHostingProvider } from './platform.mjs'
+import { NONE_CAPABILITIES, createProviderClient, getHostingProvider } from './platform.mjs'
 import {
   GenericRemoteBackend,
   LocalOnlyBackend,
@@ -30,15 +30,39 @@ export {
   WORKFLOW_STATE_LABELS,
 }
 
-export class GitHubBackend {
-  constructor({ targetRepo = null, client = null, pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null } = {}) {
-    this.kind = 'github'
+/** 统一多远端 API TaskBackend（覆盖 GitHub / GitLab / GitCode / Gitee / Gitea 及注册表扩展适配器）。 */
+export class RemoteApiBackend {
+  constructor({
+    providerId = 'github',
+    targetRepo = null,
+    apiBaseUrl = null,
+    client = null,
+    pushRemote = 'origin',
+    mainRoot = process.cwd(),
+    gitDir = null,
+    token = null,
+    capabilities = null,
+  } = {}) {
+    const pid = String(providerId || 'github').trim().toLowerCase()
+    const provider = getHostingProvider(pid)
+    this.kind = pid
+    this.providerId = pid
     this.targetRepo = targetRepo
+    this.apiBaseUrl = apiBaseUrl ?? provider?.defaultApiBase ?? null
     this.pushRemote = pushRemote
     this.mainRoot = mainRoot
     this.gitDir = gitDir
-    this.client = client ?? createGitHubClient({ cwd: mainRoot })
-    this.capabilities = Object.freeze({ api: true, pr: true, issues: true, labels: true, milestones: true, checks: true, releases: true, mention: true })
+    this.capabilities = capabilities ?? provider?.capabilities ?? NONE_CAPABILITIES
+    this.client = client ?? (pid === 'github'
+      ? createGitHubClient({ cwd: mainRoot, repo: targetRepo, token })
+      : createProviderClient({
+          providerId: pid,
+          apiBaseUrl: this.apiBaseUrl,
+          repoSlug: targetRepo,
+          token,
+          remoteName: pushRemote,
+          repoRoot: mainRoot,
+        }))
   }
 
   _call(method, args, fallback = { ok: false, skipped: true, reason: 'client-unsupported' }) {
@@ -55,21 +79,9 @@ export class GitHubBackend {
     const results = []
     const rendered = buildClaimComments({
       action: takeover ? 'takeover' : 'claim',
-      taskId,
-      account,
-      verifiedPlatformLogin,
-      agent,
-      actor,
-      actorDisplay,
-      branch,
-      previousActor,
-      previousAccount,
-      previousVerifiedPlatformLogin,
-      previousAgent,
-      reason,
-      issues: issueList,
-      prNumber,
-      capabilities: this.capabilities,
+      taskId, account, verifiedPlatformLogin, agent, actor, actorDisplay, branch,
+      previousActor, previousAccount, previousVerifiedPlatformLogin, previousAgent,
+      reason, issues: issueList, prNumber, capabilities: this.capabilities,
     })
     const effectiveAgent = agent ?? actor ?? null
     const baseState = {
@@ -82,20 +94,15 @@ export class GitHubBackend {
       ...(takeover && reason ? { reason } : {}),
     }
     for (const num of issueList) {
-      const comment = await this.postComment({
-        repo, number: num,
-        body: rendered.issueCommentBody,
-        statePayload: baseState,
-      })
+      const comment = await this.postComment({ repo, number: num, body: rendered.issueCommentBody, statePayload: baseState })
       const label = await this.syncStateLabel({ repo, number: num, state: 'in-progress', fallbackLabels: labels })
       results.push({ issue: num, action: takeover ? 'takeover' : 'claim', comment, label })
     }
     let prResult = null
     if (takeover && prNumber) {
       prResult = await this.postComment({
-        repo, number: prNumber,
-        body: rendered.prCommentBody,
-        statePayload: { ...baseState, prNumber },
+        repo, number: prNumber, isPr: true,
+        body: rendered.prCommentBody, statePayload: { ...baseState, prNumber },
       })
     }
     return { ok: true, results, prResult }
@@ -106,30 +113,18 @@ export class GitHubBackend {
     const repo = this.targetRepo
     const results = []
     const rendered = buildClaimComments({
-      action: 'release',
-      taskId,
-      account,
-      verifiedPlatformLogin,
-      agent,
-      actor,
-      actorDisplay,
-      branch,
-      reason,
-      issues: issueList,
-      capabilities: this.capabilities,
+      action: 'release', taskId, account, verifiedPlatformLogin, agent, actor, actorDisplay,
+      branch, reason, issues: issueList, capabilities: this.capabilities,
     })
     const effectiveAgent = agent ?? actor ?? null
     for (const num of issueList) {
       const comment = await this.postComment({
-        repo, number: num,
-        body: rendered.issueCommentBody,
+        repo, number: num, body: rendered.issueCommentBody,
         statePayload: {
-          taskId,
-          action: 'release',
+          taskId, action: 'release',
           ...(account ? { account, verifiedPlatformLogin: Boolean(verifiedPlatformLogin) } : {}),
           ...(effectiveAgent ? { agent: effectiveAgent } : {}),
-          branch: branch ?? null,
-          ...(reason ? { reason } : {}),
+          branch: branch ?? null, ...(reason ? { reason } : {}),
         },
       })
       const labelRemoved = await this.removeLabel({ repo, number: num, label: 'in-progress' })
@@ -138,16 +133,16 @@ export class GitHubBackend {
     return { ok: true, results }
   }
 
-  postComment({ repo, number, body, statePayload = {}, deduplicate = true, existingComments = null } = {}) {
-    return this._call('postComment', [{ repo: repo ?? this.targetRepo, number, body, statePayload, deduplicate, existingComments }])
+  postComment({ repo, number, body, isPr = false, statePayload = {}, deduplicate = true, existingComments = null } = {}) {
+    return this._call('postComment', [{ repo: repo ?? this.targetRepo, number, body, isPr, statePayload, deduplicate, existingComments }])
   }
 
   addLabels({ repo, number, labels = [], isPr = false } = {}) {
     return this._call('addLabels', [{ repo: repo ?? this.targetRepo, number, labels, isPr }])
   }
 
-  removeLabel({ repo, number, label } = {}) {
-    return this._call('removeLabel', [{ repo: repo ?? this.targetRepo, number, label }])
+  removeLabel({ repo, number, label, isPr = false } = {}) {
+    return this._call('removeLabel', [{ repo: repo ?? this.targetRepo, number, label, isPr }])
   }
 
   async syncStateLabel({ repo, number, state, fallbackLabels = [] } = {}) {
@@ -215,10 +210,23 @@ export class GitHubBackend {
     return this._call('listComments', [{ ...norm, repo: norm.repo ?? this.targetRepo }], { ok: false, comments: [], skipped: true, reason: 'client-unsupported' })
   }
   getCommitChecks({ repo, ref } = {}) {
+    if (this.capabilities?.checks === false) {
+      return Promise.resolve({ ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true, reason: 'checks-unsupported' })
+    }
     return this._call('getCommitChecks', [{ repo: repo ?? this.targetRepo, ref }], { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true })
   }
   mergePr({ repo, number, method = 'merge', sha } = {}) {
     return this._call('mergePr', [{ repo: repo ?? this.targetRepo, number, method, ...(sha ? { sha } : {}) }])
+  }
+  uploadAttachment({ repo, filePath, filename, buffer, contentType = 'application/octet-stream' } = {}) {
+    if (this.capabilities?.uploadAttachment !== true) {
+      return Promise.resolve({ ok: false, unsupported: true, reason: 'upload-attachment-unsupported', providerId: this.providerId })
+    }
+    return this._call(
+      'uploadAttachment',
+      [{ repo: repo ?? this.targetRepo, filePath, filename, buffer, contentType }],
+      { ok: false, unsupported: true, reason: 'client-unsupported', providerId: this.providerId },
+    )
   }
 
   async closePr(arg, maybeOpts = {}) {
@@ -227,16 +235,12 @@ export class GitHubBackend {
     if (!Number.isInteger(cfg.prNumber) || cfg.prNumber <= 0) return { ok: false, error: 'invalid-pr-number' }
     if (cfg.dryRun) {
       return {
-        ok: true,
-        dryRun: true,
-        repo: targetRepo,
-        number: cfg.prNumber,
-        state: 'OPEN',
+        ok: true, dryRun: true, repo: targetRepo, number: cfg.prNumber, state: 'OPEN',
         planned: { comment: Boolean(cfg.comment), labels: cfg.labels, close: true },
       }
     }
     const commentResult = cfg.comment
-      ? await this.postComment({ repo: targetRepo, number: cfg.prNumber, body: cfg.comment, statePayload: cfg.statePayload })
+      ? await this.postComment({ repo: targetRepo, number: cfg.prNumber, isPr: true, body: cfg.comment, statePayload: cfg.statePayload })
       : null
     const labelResult = cfg.labels.length > 0
       ? await this.addLabels({ repo: targetRepo, number: cfg.prNumber, labels: cfg.labels, isPr: true })
@@ -251,12 +255,19 @@ export class GitHubBackend {
   }
 }
 
+/** GitHub 兼容导出子类（保持既有 `instanceof GitHubBackend` 与 `GitHubTaskBackend` 契约）。 */
+export class GitHubBackend extends RemoteApiBackend {
+  constructor(opts = {}) {
+    super({ ...opts, providerId: 'github' })
+  }
+}
+
 export { GitHubBackend as GitHubTaskBackend }
 
-/** 根据身份角色与 HostingProvider 注册表分发构造统一的 17 方法 TaskBackend。 */
+/** 根据身份角色与 HostingProvider 注册表分发构造统一的 TaskBackend。 */
 export function createTaskBackend({
-  role = 'local-only', providerId = 'none', targetRepo = null, client = null,
-  pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null, baseBranch = null,
+  role = 'local-only', providerId = 'none', targetRepo = null, apiBaseUrl = null, client = null,
+  pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null, baseBranch = null, token = null,
 } = {}) {
   if (role === 'local-only' || providerId === 'none') {
     return new LocalOnlyBackend({ mainRoot, gitDir, baseBranch })
@@ -265,8 +276,21 @@ export function createTaskBackend({
   if (provider && typeof provider.createTaskBackend === 'function') {
     return provider.createTaskBackend({ role, providerId, targetRepo, client, pushRemote, mainRoot, gitDir, baseBranch })
   }
-  if (role === 'generic-git' || !provider || provider.id !== 'github' || provider.capabilities?.api !== true || !targetRepo) {
+  if (role === 'generic-git' || !provider || provider.capabilities?.api !== true || !targetRepo) {
     return new GenericRemoteBackend({ targetRepo, pushRemote, mainRoot, gitDir })
   }
-  return new GitHubBackend({ targetRepo, client, pushRemote, mainRoot, gitDir })
+  if (provider.id === 'github') {
+    return new GitHubBackend({ targetRepo, apiBaseUrl, client, pushRemote, mainRoot, gitDir, token })
+  }
+  return new RemoteApiBackend({
+    providerId: provider.id,
+    targetRepo,
+    apiBaseUrl,
+    client,
+    pushRemote,
+    mainRoot,
+    gitDir,
+    token,
+    capabilities: provider.capabilities,
+  })
 }

@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: 零 Token 多图视觉 Studio 与第一性原理 UI 重构
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
 issue: 219
@@ -20,12 +20,12 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 关联 Issue / PR | #219 / 未关联 |
 | 提出方 / 负责人 | `plan-studio-b` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联设计 / 任务单 | 1:N 总控 PRD，拆分为 3 份切片 `SPEC + Todo`（Wave 1 -> Wave 2 -> Wave 3） |
+| 关联设计 / 任务单 | `docs/archive/specs/261127-issue219-studio-ux-lazy-renderer-spec.md` / `docs/archive/todo/261127-issue219-studio-ux-lazy-renderer-todo.md` |
 
 - **目标读者**：实现者、独立审查者与维护者
 

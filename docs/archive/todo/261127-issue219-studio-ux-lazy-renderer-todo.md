@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 第一性原理 Studio 交互界面与纯矢量懒渲染引擎
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
 issue: 219
@@ -10,7 +10,7 @@ branch: feat/studio-ux-lazy-renderer
 owner: plan-studio-b
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-27
 task_id: studio-ux-lazy-renderer
 planned_at: 76795202dbd2d328d379fbff506b7dad39753133
 related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-issue219-studio-ux-lazy-renderer-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / 基线 | `feat/studio-ux-lazy-renderer` @ `7679520` |
 | 任务编号 | `studio-ux-lazy-renderer` |
 | 负责人 / 审批 | plan-studio-b / `false` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 Issue / PR / SPEC | #219 / 未关联 / `docs/specs/261127-issue219-studio-ux-lazy-renderer-spec.md` |
+| 关联 Issue / PR / SPEC | #219 / 未关联 / `docs/archive/specs/261127-issue219-studio-ux-lazy-renderer-spec.md` |
 
 - **断点恢复**：接手人先核对 Wave 1 与 Wave 2 均已合入 `main`，且用户已通过 `oil-ui-pro` 3 方向对比页拍板主题 Token 并完成本切片 `approve`。
 
@@ -62,7 +62,7 @@ related_spec: ../specs/261127-issue219-studio-ux-lazy-renderer-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（并在 `approve` 前完成 `oil-ui-pro` 3 方向主题选型）
+- **当前状态**：`已完成 (done)`（并在 `approve` 前完成 `oil-ui-pro` 3 方向主题选型）
 - **待拍板事项**：无
 - **下一步第一件事**：Wave 1/2 合入并确认主题 Token 后，拆分 `kit/skills/lib/visual-brief-store.mjs` (new) 与 `kit/skills/dev-verify-tools/scripts/verify-tools-render.mjs` (new)，并补齐 `scripts/dev/fixtures-studio-ux.mjs` (new) 失败断言。
 
@@ -82,5 +82,5 @@ related_spec: ../specs/261127-issue219-studio-ux-lazy-renderer-spec.md
   - `node scripts/dev/merge-gate.mjs`：12/12 PASS（含 `fixtures-studio-ux.mjs`、`fixtures-visual-engine.mjs`、`fixtures-living-brief.mjs`、`fixtures-sandbox-dual-loop.mjs` 与 `cli-parity`）。
   - `node scripts/dev/verify-injections.mjs --jobs 4`：100% PASS（含 `I961..I964`、`I986` 及 Wave 3 新增 `I1021..I1024`）。
   - 真浏览器 `oil-ui-pro/scripts/shoot.mjs` 浅/深色及 `1440x900`/`1024x768`/`768x900`/`390x844` 多视口截图人工目检：0 console 错误、0 横向溢出、0 按钮文字裁切、0 可读性告警。
-- **文档同步检查**：已同步 `docs/feature-map.json`、`docs/architecture-map.html`、`docs/TDD.md`、`README.md`、`README.en.md` 与 `docs/specs/261127-issue219-studio-ux-lazy-renderer-spec.md`。
+- **文档同步检查**：已同步 `docs/feature-map.json`、`docs/architecture-map.html`、`docs/TDD.md`、`README.md`、`README.en.md` 与 `docs/archive/specs/261127-issue219-studio-ux-lazy-renderer-spec.md`。
 - **遗留问题**：无。

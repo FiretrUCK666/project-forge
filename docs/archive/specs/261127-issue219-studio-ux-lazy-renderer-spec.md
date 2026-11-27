@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 第一性原理 Studio 交互界面与纯矢量懒渲染引擎
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
@@ -11,7 +11,7 @@ branch: feat/studio-ux-lazy-renderer
 owner: plan-studio-b
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-studio-b-r2, round=2, sha=c73c4d063993, summary=All 3 Round 1 major blockers genuinely closed: CLI triple-parity & verify-tools-render.mjs split, tree.nodes[].diffState compatibility + v5 fixture migration + 4 unique Wave 3 injections, and explicit <=650L rendering budgets with visual-render-client-diagrams.mjs split & external shoot.mjs clarification.)"
 related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
 related_todo: ../todo/261127-issue219-studio-ux-lazy-renderer-todo.md
@@ -27,13 +27,13 @@ depends_on: [zero-token-static-analyzer, multi-diagram-layout-engine]
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（前端渲染架构推翻重做、多文件模块拆分与全仓长青资产收口；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / Issue / PR | `feat/studio-ux-lazy-renderer` / #219 / 未关联 |
 | 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/todo/261127-issue219-studio-ux-lazy-renderer-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/archive/todo/261127-issue219-studio-ux-lazy-renderer-todo.md` |
 
 - **变更一句话**：推翻旧 AI 模板 DOM 渲染，交付纯矢量 SVG `viewBox` 相机画布、单源索引压缩 JSON 懒渲染、模块化非文字墙 Change Blueprint、6 项 Studio 交互升级与真浏览器浅/深色实证闭环。
 

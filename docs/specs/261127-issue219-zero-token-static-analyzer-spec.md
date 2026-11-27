@@ -7,7 +7,7 @@ created: 2026-11-27
 updated: 2026-11-27
 issue: 219
 pr: null
-branch: feat/visual-studio-archify-v2
+branch: feat/zero-token-static-analyzer
 owner: plan-studio-b
 plan_mode: interactive
 approved: true
@@ -30,7 +30,7 @@ depends_on: []
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块公共库契约新增与高风险路径 `kit/` 演进；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/visual-studio-archify-v2` / #219 / 未关联 |
+| 分支 / Issue / PR | `feat/zero-token-static-analyzer` / #219 / 未关联 |
 | 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
 | 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/todo/261127-issue219-zero-token-static-analyzer-todo.md` |
@@ -173,5 +173,10 @@ flowchart LR
 ## 实现说明
 
 - **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+  - 将多语言导入解析从 `kit/skills/lib/static-gates.mjs` 下沉至 `kit/skills/lib/import-graph.mjs`（236 行），`static-gates.mjs` 瘦身至 651 行；在 `kit/skills/lib/doc-graph.mjs` 导出既有 Tarjan `findSccs`。
+  - 新增 `kit/skills/lib/static-analyzer.mjs`（371 行）：统一构建模块导入图、耦合指标（`fanIn`/`fanOut`/`inCycle`/`sccId`）、SCC 环与 Git 热度/标签/合并记录，按 `relPath + blobSha/mtime/size` 原子缓存于 `<gitCommonDir>/project-forge-flow/analysis-cache.json`（非 Git 回退 `.worktrees/.state/analysis-cache.json`），损坏自动重建且零工作区污染。
+  - 新增 `kit/skills/lib/static-evidence.mjs`（701 行）：对 3 层 10 类图表执行严格证据门控（Tier 1 常驻，Tier 2 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据归入 `skippedTabs` 零空 Tab，Tier 3 `waterfall` 仅真实实测 `telemetrySpans` 激活）。
+  - 新增 `kit/skills/lib/diff-materiality.mjs`（247 行）：基于 `git merge-base` 与 3-dot `<mergeBase>...<headRef>` 过滤 Schema/迁移必触发与纯文档/锁文件/`R100` 跳过，输出 1-hop 邻域并集与有界 `-`/`+` hunk。
+  - 加固 `kit/skills/lib/architecture-map.mjs`（292 行）：保持 `renderArchitectureMapFromRepo` 既有参数契约，在 `verifyArchitectureMapSync` 单点新增 `detectDirtyDiffOverlay` 双层校验（解析 `pf-visual-data` JSON + 剥离 `<style>`/`<script>` 扫描 DOM），以既有 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`reason: 'dirty-diff-overlay'`）精准拦截脏图。
+- **与草案的差异**：无设计偏离；`static-evidence.mjs` 合并覆盖 Prisma/SQL/TypeORM/Drizzle/SQLAlchemy/GORM/Diesel 与多语言类型抽取后为 701 行，严守单文件 `<= 800` 行及 `< 730` 紧文件红线。
+- **关联同步文件**：`scripts/dev/fixtures-static-analyzer.mjs`、`scripts/dev/injections-data-static-analyzer.mjs`、`docs/feature-map.json`、`docs/architecture-map.html`、`.agents/skills/`（经 `node scripts/equip.mjs .` 同步）。

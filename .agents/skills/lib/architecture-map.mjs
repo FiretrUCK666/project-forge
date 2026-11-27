@@ -44,6 +44,50 @@ export function containsHomedirLeak(text) {
   return false
 }
 
+const DIRTY_DIFF_CLASS_RE = /\bpf-diff-(?:added|modified|removed|impacted)\b/
+const DIRTY_DIFF_ATTR_RE = /\bdata-diff-state\s*=\s*["'](?:added|modified|removed|impacted)["']/i
+const VISUAL_DATA_SCRIPT_RE = /<script\b[^>]*\bid=["']pf-visual-data["'][^>]*>([\s\S]*?)<\/script>/i
+
+/**
+ * 校验常青 `docs/architecture-map.html` 是否残留临时 diff 脏态（两层校验，免疫 `<style>` 静态 CSS 声明）：
+ * 1. 解析 `pf-visual-data` JSON，阻断 `hasActiveDiff === true` 或任意非 `context` 的 `diffState` 节点；
+ * 2. 剥离全部 `<style>` 与 `<script>` 块后扫描 DOM 是否残留 `pf-diff-*` 或 `data-diff-state` 脏态。
+ */
+export function detectDirtyDiffOverlay(html) {
+  const raw = String(html || '')
+  if (!raw) return { dirty: false, detail: null }
+
+  const dataMatch = VISUAL_DATA_SCRIPT_RE.exec(raw)
+  if (dataMatch) {
+    try {
+      const payload = JSON.parse(dataMatch[1])
+      if (payload?.hasActiveDiff === true) {
+        return { dirty: true, detail: 'pf-visual-data hasActiveDiff=true' }
+      }
+      const nodeLists = [
+        Array.isArray(payload?.tree?.nodes) ? payload.tree.nodes : [],
+        Array.isArray(payload?.diagrams?.architecture?.nodes) ? payload.diagrams.architecture.nodes : [],
+      ]
+      for (const list of nodeLists) {
+        const hit = list.find((n) => n?.diffState && n.diffState !== 'context')
+        if (hit) {
+          return { dirty: true, detail: `pf-visual-data node "${hit.id || 'unknown'}" diffState=${hit.diffState}` }
+        }
+      }
+    } catch { /* ignore unparseable script block; fall through to DOM strip check */ }
+  }
+
+  const strippedDom = raw
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+  const classHit = DIRTY_DIFF_CLASS_RE.exec(strippedDom)
+  if (classHit) return { dirty: true, detail: `DOM class ${classHit[0]}` }
+  const attrHit = DIRTY_DIFF_ATTR_RE.exec(strippedDom)
+  if (attrHit) return { dirty: true, detail: `DOM attr ${attrHit[0]}` }
+
+  return { dirty: false, detail: null }
+}
+
 function stripHomedirLeaks(text) {
   let out = String(text || '')
   for (const marker of getHomeMarkers()) {
@@ -221,6 +265,18 @@ export function verifyArchitectureMapSync(repoRoot, {
       exitCode: EXIT.FACT,
       reason: 'homedir-leak',
       message: `${relPath} contains a machine-specific home directory path`,
+      relPath,
+    }
+  }
+
+  const dirtyCheck = detectDirtyDiffOverlay(html)
+  if (dirtyCheck.dirty) {
+    return {
+      ok: false,
+      code: 'BLOCKED_ARCHITECTURE_MAP_DRIFT',
+      exitCode: EXIT.FACT,
+      reason: 'dirty-diff-overlay',
+      message: `${relPath} contains temporary diff overlay state (${dirtyCheck.detail})`,
       relPath,
     }
   }

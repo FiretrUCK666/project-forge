@@ -569,6 +569,7 @@
       ],
       "modules": [
         "kit/skills/dev-edit/scripts/edit-gate.mjs",
+        "kit/skills/lib/import-graph.mjs",
         "kit/skills/lib/static-gates.mjs",
         "kit/skills/lib/static-gates-assertions.mjs",
         "kit/skills/lib/static-gates-comment-hygiene.mjs",
@@ -775,6 +776,10 @@
         "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs",
         "kit/skills/lib/feature-map.mjs",
         "kit/skills/lib/feature-map-graph.mjs",
+        "kit/skills/lib/import-graph.mjs",
+        "kit/skills/lib/static-analyzer.mjs",
+        "kit/skills/lib/static-evidence.mjs",
+        "kit/skills/lib/diff-materiality.mjs",
         "kit/skills/lib/visual-layout.mjs",
         "kit/skills/lib/visual-render-panels.mjs",
         "kit/skills/lib/visual-render.mjs",
@@ -816,7 +821,9 @@
         "scripts/dev/injections-data-health-sweep.mjs",
         "scripts/dev/fixtures-feature-map-v2.mjs",
         "scripts/dev/fixtures-visual-engine.mjs",
-        "scripts/dev/injections-data-visual-engine.mjs"
+        "scripts/dev/injections-data-visual-engine.mjs",
+        "scripts/dev/fixtures-static-analyzer.mjs",
+        "scripts/dev/injections-data-static-analyzer.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全",
@@ -1050,7 +1057,9 @@
         "scripts/dev/injections-data-health-sweep.mjs",
         "scripts/dev/fixtures-feature-map-v2.mjs",
         "scripts/dev/fixtures-visual-engine.mjs",
-        "scripts/dev/injections-data-visual-engine.mjs"
+        "scripts/dev/injections-data-visual-engine.mjs",
+        "scripts/dev/fixtures-static-analyzer.mjs",
+        "scripts/dev/injections-data-static-analyzer.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"

@@ -332,7 +332,7 @@ function extractMarkdownLinksAndRefs(repoRoot, fromRel, text, vitePressRoots, re
   return { mdLinks, backtickRefs, isThinStub: meaningfulLines > 0 && meaningfulLines <= 6 }
 }
 
-function findSccs(nodes, adj) {
+export function findSccs(nodes, adj) {
   let index = 0
   const indices = new Map()
   const lowlink = new Map()

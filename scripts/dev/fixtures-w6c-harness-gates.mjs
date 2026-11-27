@@ -419,13 +419,38 @@ export function registerW6cHarnessGatesCases(cases) {
       const mRes = await runAbsAsync('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', pnpmDir, '--worktree', wtAbs, '--json'], { cwd: pnpmDir })
       if (mRes.status !== 0) return `worktree-deps mount 失败：${mRes.stderr || mRes.stdout}`
       const mj = JSON.parse(mRes.stdout)
-      if (mj.envHints?.npm_config_verify_deps_before_run !== 'false' || !mj.hints?.some((h) => h.includes('server.fs.allow'))) {
-        return `pnpm/Vite 提示缺失：${mRes.stdout}`
+      if (mj.mode !== 'class-r-global-store'
+        || mj.envHints?.npm_config_verify_deps_before_run !== 'false'
+        || mj.envHints?.PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN !== 'false'
+        || !mj.hints?.some((h) => h.includes('server.fs.allow'))) {
+        return `pnpm Class R / Vite 提示缺失：${mRes.stdout}`
       }
       const afterLedger = readTaskLedger(pnpmDir, 'w-pnpm')
-      if (!afterLedger?.mountedDepsByWorktree?.[wtRel]?.includes('node_modules')) {
-        return `worktree-deps mount 未同步回写 mountedDepsByWorktree：${JSON.stringify(afterLedger)}`
+      if (afterLedger?.depsMode !== 'class-r-global-store') {
+        return `worktree-deps Class R mount 未同步回写 depsMode：${JSON.stringify(afterLedger)}`
       }
+
+      // 同用例增补 npm Class S dep-pool 挂载验证 mountedDepsByWorktree 回写
+      const npmDir = tmpProject({
+        '.gitignore': '.worktrees/\nnode_modules/\n',
+        'package.json': '{"name":"npm-app","dependencies":{"pkg":"^1.0.0"}}\n',
+        'package-lock.json': '{"lockfileVersion":3}\n',
+      })
+      gitInit(npmDir, { branch: 'main', name: 'dev', email: 'dev@p.test' })
+      mkdirSync(join(npmDir, 'node_modules', 'pkg'), { recursive: true })
+      writeFileSync(join(npmDir, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1\n', 'utf8')
+      try {
+        const npmWtRel = '.worktrees/impl-w-npm'
+        const npmWtAbs = join(npmDir, npmWtRel)
+        gitSync(npmDir, ['worktree', 'add', '-b', 'feat/w-npm', npmWtAbs, 'HEAD'])
+        await writeTaskLedger(npmDir, { taskId: 'w-npm', slug: 'w-npm', worktreePath: npmWtRel, branch: 'feat/w-npm', baseBranch: 'main' })
+        const npmRes = await runAbsAsync('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', npmDir, '--worktree', npmWtAbs, '--json'], { cwd: npmDir })
+        if (npmRes.status !== 0) return `npm Class S mount 失败：${npmRes.stderr || npmRes.stdout}`
+        const npmLedger = readTaskLedger(npmDir, 'w-npm')
+        if (!npmLedger?.mountedDepsByWorktree?.[npmWtRel]?.includes('node_modules')) {
+          return `npm Class S mount 未同步回写 mountedDepsByWorktree：${JSON.stringify(npmLedger)}`
+        }
+      } finally { rmTree(npmDir) }
 
       // 游离 HEAD 下的 edit-gate --base main 消费验证
       writeFileSync(join(wtAbs, 'src-ok.mjs'), 'export const ok = 1\n', 'utf8')

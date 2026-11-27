@@ -41,7 +41,7 @@ function printHelp() {
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
     '  explore   [--task <id>] [--focus <subdir>] [--mode <mode>] [--agent <id>] [--json]',
-    '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
+    '  intake    [--pr <M> | --issue <N>] [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--context-basis <sha256>] [--apply | --dry-run] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--sandbox] [--write-scope <glob,...>] [--issue <N>] [--create-issue --title "<标题>"] [--no-issue --reason "<原因>"] [--body "<内容>" | --body-file <路径>] [--spec <path>] [--todo <path>] [--prd <path>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files <a,b>] [--parallel] [--planning] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--allow-plan-bootstrap] [--force] [--json]',
     '  promote   [--task <id>] [--issue <N>] [--issues <a,b>] [--body "<内容>" | --body-file <路径>] [--todo <path>] [--no-issue --reason "<原因>"] [--conflicts-tdd] [--agent <id>] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--case <1..5>] [--spec <path>] [--todo <path>] [--prd <path>] [--files <a,b>] [--body "<内容>" | --body-file <路径>] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
@@ -84,7 +84,7 @@ async function main(argv) {
         'agent', 'note', 'mode', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'body-file', 'comment', 'state',
         'labels', 'method', 'reason', 'into', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus',
         'milestone', 'due', 'due-on', 'description',
-        'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
+        'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of', 'context-basis',
         'visual-blocked-reason', 'host-mode', 'reviewer-id', 'preview-hash', 'write-scope',
       ],
       aliases: {

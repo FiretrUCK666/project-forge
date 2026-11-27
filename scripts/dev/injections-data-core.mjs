@@ -248,10 +248,10 @@ export const INJECTIONS_CORE = [
   },
   {
     id: 'I22',
-    what: '跳过 worktree-deps unmountSharedDeps 的 unlinkSync 解绑',
+    what: '跳过 worktree-deps unmountSharedDeps 的 unlinkLinkSafe 解绑',
     file: 'kit/skills/dev-flow/scripts/worktree-deps.mjs',
-    from: `    unlinkSync(abs)\n    if (lstatSafe(abs) !== null) throw new Error(\`解绑链接失败，路径仍然存在：\${abs}\`)`,
-    to: '    // 安全操作被跳过（未执行 unlinkSync 解绑）',
+    from: `    unlinkLinkSafe(abs)\n    if (lstatSafe(abs) !== null) throw new Error(\`解绑链接失败，路径仍然存在：\${abs}\`)`,
+    to: '    // 安全操作被跳过（未执行 unlinkLinkSafe 解绑）',
     expect: 'unmount 后 worktree node_modules 依然存在',
   },
   {

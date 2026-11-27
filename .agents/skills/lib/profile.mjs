@@ -36,6 +36,11 @@ export const DEV_PROFILE_KEYS = Object.freeze([
   'do-not-edit',
 ])
 
+export const OPTIONAL_DEV_PROFILE_KEYS = Object.freeze([
+  'evergreen-docs',
+  'worktree-shared-readonly',
+])
+
 const EXPLICIT_NONE_RE = /^(?:none|\(none\)|null|n\/a|无|\(无\)|暂无|-)$/i
 
 function stripWrapQuotes(val) {
@@ -355,6 +360,7 @@ export function parseAgentsProfile(repoRoot) {
     highRisk: [],
     doNotEdit: [],
     evergreenDocs: [],
+    worktreeSharedReadonly: [],
     mergeAuthority: 'reviewer',
     explicitNone,
     decisions: new Set(),
@@ -382,10 +388,13 @@ export function parseAgentsProfile(repoRoot) {
               ? 'do-not-edit'
               : activeListKey === 'evergreenDocs'
                 ? 'evergreen-docs'
-                : 'arch-rules'
+                : activeListKey === 'worktreeSharedReadonly'
+                  ? 'worktree-shared-readonly'
+                  : 'arch-rules'
+          const isOptionalList = activeListKey === 'evergreenDocs' || activeListKey === 'worktreeSharedReadonly'
           if (isExplicitNoneValue(item)) {
             explicitNone.add(activeRawKey)
-            if (activeListKey !== 'evergreenDocs') declaredKeys.add(activeRawKey)
+            if (!isOptionalList) declaredKeys.add(activeRawKey)
           } else if (item && !isAnglePlaceholder(item)) {
             if (activeListKey === 'archRules') {
               const parsed = parseArchRuleItem(item)
@@ -395,7 +404,7 @@ export function parseAgentsProfile(repoRoot) {
               }
             } else {
               profile[activeListKey].push(item)
-              if (activeListKey !== 'evergreenDocs') declaredKeys.add(activeRawKey)
+              if (!isOptionalList) declaredKeys.add(activeRawKey)
             }
           }
           continue
@@ -409,13 +418,15 @@ export function parseAgentsProfile(repoRoot) {
 
       const kv = /^(?:[-*]\s+)?`?(quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit)`?\s*:\s*(.*)$/i.exec(trimmed)
       if (!kv) {
-        const optEv = /^(?:[-*]\s+)?`?evergreen-docs`?\s*:\s*(.*)$/i.exec(trimmed)
+        const optEv = /^(?:[-*]\s+)?`?(evergreen-docs|worktree-shared-readonly)`?\s*:\s*(.*)$/i.exec(trimmed)
         if (optEv) {
-          const rawEv = stripInlineYamlComment(optEv[1])
-          if (rawEv === '') activeListKey = 'evergreenDocs'
-          else if (isExplicitNoneValue(rawEv)) explicitNone.add('evergreen-docs')
+          const optKey = optEv[1].toLowerCase()
+          const optProp = optKey === 'evergreen-docs' ? 'evergreenDocs' : 'worktreeSharedReadonly'
+          const rawOpt = stripInlineYamlComment(optEv[2])
+          if (rawOpt === '') activeListKey = optProp
+          else if (isExplicitNoneValue(rawOpt)) explicitNone.add(optKey)
           else {
-            for (const item of parseListValue(rawEv)) profile.evergreenDocs.push(item)
+            for (const item of parseListValue(rawOpt)) profile[optProp].push(item)
           }
         }
         continue
@@ -487,6 +498,7 @@ export function parseAgentsProfile(repoRoot) {
   profile.highRisk = [...new Set(profile.highRisk)]
   profile.doNotEdit = [...new Set(profile.doNotEdit)]
   profile.evergreenDocs = [...new Set(profile.evergreenDocs)]
+  profile.worktreeSharedReadonly = [...new Set(profile.worktreeSharedReadonly)]
   const seenRules = new Set()
   profile.archRules = profile.archRules.filter((r) => {
     if (seenRules.has(r.raw)) return false
@@ -537,6 +549,7 @@ export function parseDevProfile(repoRoot) {
     'high-risk': [...p.highRisk],
     'do-not-edit': [...p.doNotEdit],
     'evergreen-docs': [...p.evergreenDocs],
+    'worktree-shared-readonly': [...p.worktreeSharedReadonly],
     explicitNone: p.explicitNone,
     mergeAuthority: p.mergeAuthority,
   }

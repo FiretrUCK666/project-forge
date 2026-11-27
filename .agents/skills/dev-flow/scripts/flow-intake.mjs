@@ -6,16 +6,18 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 
 import { flushAndExit, assertNoAsciiControlChars, parseStandardCli, printNextStep, withNextSteps } from '../../lib/cli.mjs'
-import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
+import { isMainModule, resolveRepoRoots, sha256Text, withFileLock } from '../../lib/git.mjs'
 import { stripPfStateTags } from '../../lib/github-client.mjs'
 import {
   INTAKE_DECISIONS,
+  computeIntakeContextBasis,
   evaluateIntakeTriage,
   isApprovedInternalPlan,
   readIntakeRecord,
+  resolveIntakeDir,
   writeIntakeRecord,
 } from '../../lib/intake-triage.mjs'
 import { readTaskLedger, sanitizeTaskId } from '../../lib/ledger.mjs'
@@ -115,8 +117,9 @@ async function hydrateTargetMetadata({
   state,
   targetRepo,
   ledger,
+  forceRemote = false,
 }) {
-  const platform = { title: '', body: '', branch: '', labels: [], closedIssues: [] }
+  const platform = { title: '', body: '', branch: '', state: '', headSha: '', commentsDigest: '', labels: [], closedIssues: [] }
   const failures = []
 
   const localClosed = listLocalIssues({ mainRoot, gitDir, state: 'closed' })
@@ -126,9 +129,11 @@ async function hydrateTargetMetadata({
   const local = targetType === 'issue'
     ? getLocalIssue({ mainRoot, gitDir, number: targetNumber })
     : getLocalPr({ mainRoot, gitDir, number: targetNumber })
-  if (local.ok) {
+  if (local.ok && !forceRemote) {
     platform.title = String(local.title ?? '').trim() || platform.title
     if (targetType === 'issue') platform.body = String(local.body ?? '').trim() || platform.body
+    if (local.state) platform.state = String(local.state).trim()
+    if (local.headSha) platform.headSha = String(local.headSha).trim()
     if (Array.isArray(local.labels) && local.labels.length > 0) platform.labels = [...local.labels]
     if (!platform.branch) platform.branch = String(local.headBranch ?? local.branch ?? '').trim()
   }
@@ -136,7 +141,7 @@ async function hydrateTargetMetadata({
   const shouldTryRemoteRead = Boolean(
     targetRepo
     && (state.github?.providerId === 'github' || opts._ghClient || opts._ghProbe)
-    && (!platform.title || !platform.body),
+    && (forceRemote || !platform.title || !platform.body),
   )
   if (shouldTryRemoteRead) {
     const readClient = await resolveReadClient({
@@ -155,11 +160,22 @@ async function hydrateTargetMetadata({
             : null)
         if (fetched?.ok) {
           platform.title = String(fetched.title ?? '').trim() || platform.title
-          if (targetType === 'issue') platform.body = String(fetched.body ?? '').trim() || platform.body
+          if (targetType === 'issue' || fetched.body) platform.body = String(fetched.body ?? '').trim() || platform.body
+          if (fetched.state) platform.state = String(fetched.state).trim()
+          if (fetched.headRefOid || fetched.headSha) platform.headSha = String(fetched.headRefOid ?? fetched.headSha).trim()
           if (!platform.branch && fetched.headBranch) platform.branch = fetched.headBranch
-          if (platform.labels.length === 0 && Array.isArray(fetched.labels)) platform.labels = [...fetched.labels]
+          if ((forceRemote || platform.labels.length === 0) && Array.isArray(fetched.labels)) platform.labels = [...fetched.labels]
         } else {
           failures.push(`远端读取 ${targetType === 'pr' ? 'PR' : 'Issue'} #${targetNumber} 未返回可用元数据`)
+        }
+        if (typeof readClient.listComments === 'function') {
+          const cmRes = await readClient.listComments(targetRepo, targetNumber)
+          if (cmRes?.ok && Array.isArray(cmRes.comments) && cmRes.comments.length > 0) {
+            platform.commentsDigest = sha256Text(JSON.stringify(cmRes.comments.map((c) => ({
+              id: c?.id ?? null,
+              body: String(c?.body ?? '').replace(/\r\n/g, '\n').trim(),
+            }))))
+          }
         }
         if (typeof readClient.listIssues === 'function') {
           const remoteClosed = await readClient.listIssues({ repo: targetRepo, state: 'closed', perPage: 30 })
@@ -192,10 +208,25 @@ async function hydrateTargetMetadata({
     supplemented.push({ field: 'labels', reason: failures.join('；') || '平台侧未提供标签' })
   }
 
+  const contextBasis = computeIntakeContextBasis({
+    targetType,
+    targetNumber,
+    state: platform.state,
+    title,
+    body,
+    labels,
+    commentsDigest: platform.commentsDigest,
+    headSha: platform.headSha,
+  })
+
   return {
     title,
     body,
     branch: branch || null,
+    state: platform.state,
+    headSha: platform.headSha,
+    commentsDigest: platform.commentsDigest,
+    contextBasis,
     labels,
     files: parseCsvList(opts.files),
     closedIssues: platform.closedIssues,
@@ -293,6 +324,10 @@ export async function handleIntake(opts = {}, rootsArg = null) {
     targetNumber,
     title: hydrated.title,
     body: hydrated.body,
+    state: hydrated.state,
+    headSha: hydrated.headSha,
+    commentsDigest: hydrated.commentsDigest,
+    contextBasis: hydrated.contextBasis,
     files: hydrated.files,
     branch: hydrated.branch,
     taskId: opts.task ?? ledger?.taskId ?? null,
@@ -317,93 +352,123 @@ export async function handleIntake(opts = {}, rootsArg = null) {
   let delegated = false
 
   if (applyMode) {
+    const expectedBasis = String(opts['context-basis'] ?? opts.contextBasis ?? '').trim().toLowerCase()
+    const applyLockPath = join(resolveIntakeDir(mainRoot, gitDir), 'intake-apply.lock')
+    const staleBlocked = await withFileLock(applyLockPath, async () => {
+      const recheck = await hydrateTargetMetadata({
+        mainRoot, gitDir, targetType, targetNumber, opts, state, targetRepo, ledger,
+        forceRemote: Boolean(useRemoteGh || opts._ghClient || opts._ghProbe),
+      })
+      const latestBasis = String(recheck.contextBasis ?? '').toLowerCase()
+      const baseline = expectedBasis || String(hydrated.contextBasis ?? '').toLowerCase()
+      if (baseline && latestBasis && baseline !== latestBasis) {
+        return {
+          ok: false,
+          blocked: true,
+          code: 'BLOCKED_STALE_INTAKE_CONTEXT',
+          exitCode: EXIT.FACT,
+          targetType,
+          targetNumber,
+          expectedContextBasis: baseline,
+          actualContextBasis: latestBasis,
+          reason: `BLOCKED_STALE_INTAKE_CONTEXT: 目标 ${targetType.toUpperCase()} #${targetNumber} 上下文指纹已漂移（expected=${baseline.slice(0, 12)}, actual=${latestBasis.slice(0, 12)}），已中止写回；请重新 dry-run 核对最新内容后再 --apply。`,
+        }
+      }
 
-    const cleanComment = stripPfStateTags(evaluation.commentBody)
-    actions = { backend: backend.kind, comment: null, labels: null, close: null }
+      const cleanComment = stripPfStateTags(evaluation.commentBody)
+      actions = { backend: backend.kind, comment: null, labels: null, close: null }
 
-    if (targetType === 'pr' && evaluation.shouldClose) {
-      const closeRes = await backend.closePr(targetNumber, {
-        repo: targetRepo,
-        comment: cleanComment,
-        labels: evaluation.labels,
-        statePayload: evaluation.statePayload,
-        reason: evaluation.reason,
+      if (targetType === 'pr' && evaluation.shouldClose) {
+        const closeRes = await backend.closePr(targetNumber, {
+          repo: targetRepo,
+          comment: cleanComment,
+          labels: evaluation.labels,
+          statePayload: evaluation.statePayload,
+          reason: evaluation.reason,
+          decision: evaluation.decision,
+          taskId: opts.task ?? ledger?.taskId ?? null,
+          dryRun: false,
+        })
+        actions.close = closeRes
+        actions.comment = closeRes?.commentResult ?? null
+        actions.labels = closeRes?.labelResult ?? null
+        if (closeRes?.delegated) delegated = true
+      } else if (targetType === 'issue' && evaluation.shouldClose) {
+        actions.comment = await backend.postComment({
+          repo: targetRepo,
+          number: targetNumber,
+          body: cleanComment,
+          statePayload: evaluation.statePayload,
+        })
+        if (evaluation.labels.length > 0) {
+          actions.labels = await backend.addLabels({
+            repo: targetRepo,
+            number: targetNumber,
+            labels: evaluation.labels,
+          })
+        }
+        actions.close = await backend.closeIssue({
+          repo: targetRepo,
+          number: targetNumber,
+          reason: evaluation.reason,
+        })
+        if (actions.comment?.delegated || actions.close?.delegated) delegated = true
+      } else {
+        actions.comment = await backend.postComment({
+          repo: targetRepo,
+          number: targetNumber,
+          body: cleanComment,
+          statePayload: evaluation.statePayload,
+        })
+        if (evaluation.labels.length > 0) {
+          actions.labels = await backend.addLabels({
+            repo: targetRepo,
+            number: targetNumber,
+            labels: evaluation.labels,
+            isPr: targetType === 'pr',
+          })
+        }
+        if (actions.comment?.delegated) delegated = true
+      }
+
+      const saved = await writeIntakeRecord(mainRoot, {
+        targetType,
+        targetNumber,
+        title: evaluation.title,
+        contextBasis: latestBasis || evaluation.contextBasis,
         decision: evaluation.decision,
-        taskId: opts.task ?? ledger?.taskId ?? null,
-        dryRun: false,
-      })
-      actions.close = closeRes
-      actions.comment = closeRes?.commentResult ?? null
-      actions.labels = closeRes?.labelResult ?? null
-      if (closeRes?.delegated) delegated = true
-    } else if (targetType === 'issue' && evaluation.shouldClose) {
-      actions.comment = await backend.postComment({
-        repo: targetRepo,
-        number: targetNumber,
-        body: cleanComment,
-        statePayload: evaluation.statePayload,
-      })
-      if (evaluation.labels.length > 0) {
-        actions.labels = await backend.addLabels({
-          repo: targetRepo,
-          number: targetNumber,
-          labels: evaluation.labels,
-        })
-      }
-      actions.close = await backend.closeIssue({
-        repo: targetRepo,
-        number: targetNumber,
+        ruleDecision: evaluation.ruleDecision,
+        decisionSource: evaluation.decisionSource,
+        exempt: evaluation.exempt,
+        matchedDoc: evaluation.matchedDoc,
+        labels: evaluation.labels,
+        shouldClose: evaluation.shouldClose,
+        closed: evaluation.shouldClose && Boolean(actions.close?.ok),
         reason: evaluation.reason,
-      })
-      if (actions.comment?.delegated || actions.close?.delegated) delegated = true
-    } else {
-      actions.comment = await backend.postComment({
-        repo: targetRepo,
-        number: targetNumber,
-        body: cleanComment,
-        statePayload: evaluation.statePayload,
-      })
-      if (evaluation.labels.length > 0) {
-        actions.labels = await backend.addLabels({
-          repo: targetRepo,
-          number: targetNumber,
-          labels: evaluation.labels,
-          isPr: targetType === 'pr',
-        })
-      }
-      if (actions.comment?.delegated) delegated = true
+        rationale: evaluation.rationale,
+        duplicateOf: evaluation.duplicateOf,
+        featureRef: evaluation.featureRef,
+        tddRefs: evaluation.tddRefs,
+        supplemented: evaluation.supplemented,
+        duplicates: evaluation.duplicates,
+        dimensions: evaluation.dimensions,
+        rollbackHint: evaluation.rollbackHint,
+        account: actorLayers.account,
+        verifiedPlatformLogin: actorLayers.verifiedPlatformLogin,
+        agent: actorLayers.agent,
+        actor: actorLayers.agent || actorLayers.account || null,
+        applied: true,
+        delegated,
+        backend: backend.kind,
+      }, { gitDir })
+      recordPath = saved.path ?? null
+      return null
+    })
+    if (staleBlocked) {
+      if (opts.json) process.stdout.write(`${JSON.stringify(staleBlocked, null, 2)}\n`)
+      process.stderr.write(`${staleBlocked.reason}\n`)
+      return { exitCode: EXIT.FACT, result: staleBlocked }
     }
-
-    const saved = await writeIntakeRecord(mainRoot, {
-      targetType,
-      targetNumber,
-      title: evaluation.title,
-      decision: evaluation.decision,
-      ruleDecision: evaluation.ruleDecision,
-      decisionSource: evaluation.decisionSource,
-      exempt: evaluation.exempt,
-      matchedDoc: evaluation.matchedDoc,
-      labels: evaluation.labels,
-      shouldClose: evaluation.shouldClose,
-      closed: evaluation.shouldClose && Boolean(actions.close?.ok),
-      reason: evaluation.reason,
-      rationale: evaluation.rationale,
-      duplicateOf: evaluation.duplicateOf,
-      featureRef: evaluation.featureRef,
-      tddRefs: evaluation.tddRefs,
-      supplemented: evaluation.supplemented,
-      duplicates: evaluation.duplicates,
-      dimensions: evaluation.dimensions,
-      rollbackHint: evaluation.rollbackHint,
-      account: actorLayers.account,
-      verifiedPlatformLogin: actorLayers.verifiedPlatformLogin,
-      agent: actorLayers.agent,
-      actor: actorLayers.agent || actorLayers.account || null,
-      applied: true,
-      delegated,
-      backend: backend.kind,
-    }, { gitDir })
-    recordPath = saved.path ?? null
   }
 
   const result = {
@@ -442,11 +507,12 @@ function printHelp() {
     '  --pr <M>                  目标 PR 编号或 URL',
     '  --issue <N>               目标 Issue 编号或 URL',
     '  --task <id>               已绑定 Issue/PR 的任务 ID',
-    '  --decision <d>            人工分诊裁决（accept | defer | reject-out-of-scope | reject-duplicate | needs-info）',
+    '  --decision <d>            人工分诊裁决（accept | reject | merge-duplicate | needs-info | defer）',
     '  --rationale <text>        裁决理由说明',
     '  --rationale-file <path>   从 UTF-8 文件读取裁决理由',
     '  --duplicate-of <N>        重复指向的原 Issue/PR 编号',
     '  --feature-ref <id>        关联 Feature Map 条目',
+    '  --context-basis <sha256>  写前复核上下文 SHA-256 指纹（防并发脏写）',
     '  --title <text>            离线补充标题',
     '  --body <text>             离线补充正文',
     '  --files <a,b>             补充涉及路径（逗号分隔）',
@@ -466,7 +532,7 @@ export async function runFlowIntake(repoRoot = process.cwd(), argv = []) {
     booleanFlags: ['apply', 'dry-run', 'help'],
     valueFlags: [
       'pr', 'issue', 'feature-ref', 'decision', 'rationale', 'rationale-file',
-      'duplicate-of', 'task', 'title', 'body', 'files', 'branch', 'labels', 'agent',
+      'duplicate-of', 'context-basis', 'task', 'title', 'body', 'files', 'branch', 'labels', 'agent',
     ],
     aliases: { actor: 'agent' },
     usageHint: 'flow-intake.mjs (--pr <M> | --issue <N>) [--decision <d>] [--rationale "<text>"] [--rationale-file <path>] [--duplicate-of <#N>] [--feature-ref <id>] [--apply] [--dry-run] [--json]',

@@ -4,10 +4,10 @@ title: 多 Worktree 三类并发依赖池、Windows 批处理硬化与策略单�
 status: approved
 tier: L3
 created: 2026-11-27
-updated: 2026-11-27
+updated: 2026-11-28
 issue: 227
 pr: null
-branch: feat/multi-forge-worktree-perf-v1
+branch: feat/worktree-dep-pool-policy
 owner: plan-c-master
 plan_mode: interactive
 approved: true
@@ -29,8 +29,8 @@ scope_files: [kit/skills/lib/worktree-dep-pool.mjs, kit/skills/dev-flow/scripts/
 | --- | --- |
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（涉及 `kit/` 依赖池、命令安全边界、退出码注册与单向门策略；未 `approved` 前不编码） |
-| 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/multi-forge-worktree-perf-v1` / #227 / 未关联 |
+| 创建 / 更新 | `2026-11-27` / `2026-11-28` |
+| 分支 / Issue / PR | `feat/worktree-dep-pool-policy` / #227 / 未关联 |
 | 负责人 / 内审状态 | plan-c-master / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
 | 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/todo/261127-issue227-worktree-dep-pool-policy-todo.md` |
@@ -146,9 +146,9 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C7: 新增 `kit/skills/lib/worktree-dep-pool.mjs` (new) 并瘦身升级 `kit/skills/dev-flow/scripts/worktree-deps.mjs`（`<= 600` 行）：落地 Class R（含独立 `CARGO_TARGET_DIR`）/ Class S（仓外只读 `dep-pool` 按 `sha256(lockfiles+清单依赖段)` + `.prisma`/POSIX shebang 隔离 + `detach`/`reconcile` 漂移自动脱钩 + `pool-refs.json` 引用计数 GC + Windows NTFS 递归撤只读位 `0o777`/`0o666` 后再 `rmSync` 防 `EPERM` + Windows junction 非递归清理兜底 + `scanOutboundLinks` 放行 `dep-pool` 为 `tool-mounted`）/ Class I（构建与 DB/NoSQL 卷严格隔离），同步对齐 `kit/skills/lib/profile.mjs`（`worktree-shared-readonly:`）、`scripts/dev/fixtures-w6c-harness-gates.mjs` 与 `injections-data-core.mjs`/`gates.mjs` 锚点。
-- [ ] C8: 升级 `kit/skills/lib/exec.mjs`：`computeWorktreeEnv` 统一重定向 `VITE_CACHE_DIR`/`JEST_CACHE_DIR`/`BABEL_CACHE_PATH`/`ESLINT_CACHE_LOCATION`/`CARGO_TARGET_DIR` 至独立 `PF_CACHE_DIR` 并透传 `PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false`；CVE-2024-27980 硬化优先对 `npm`/`pnpm`/`npx`/`yarn` `.cmd` 解析底层 JS 直调 `node`，其余 `.cmd`/`.bat` 放行含空格/括号的合法路径与测试垫片正常参数并严格拦截命令拼接元字符，且在 `execSafe` `try/catch` 内捕获返回已登记于 `kit/skills/lib/exit-codes.mjs` `USAGE_CODES` 的 `BLOCKED_UNSAFE_WIN_BATCH_ARG`（维护 `execSafe` 永不抛异常契约）。
-- [ ] C9: 升级 `kit/skills/lib/workflow-policy.mjs`（扩展 `isOneWayBoundaryFile` 覆盖 NoSQL/ORM/KV/向量库、Proto/GraphQL/OpenAPI、Docker/K8s/Helm/Terraform；双向兼容修复 `resolveScopedVerificationGate` `dirRel/ecosystems` 字段错位与 `quickTest` 读取）与 `kit/skills/dev-flow/scripts/flow.mjs`/`flow-intake.mjs`/`kit/skills/lib/intake-triage.mjs`（`contextBasis` SHA-256 写前防脏写复核，漂移抛出登记于 `FACT_CODES` 的 `BLOCKED_STALE_INTAKE_CONTEXT`，修正帮助文案并过 `scripts/dev/subcommand-parity.mjs`），新增 `scripts/dev/fixtures-worktree-policy-v2.mjs` (new) 与 `scripts/dev/injections-data-worktree-policy-v2.mjs` (new)，`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --domain worktree-policy-v2` 与 `node scripts/dev/merge-gate.mjs` 退出码 `0`。
+- [x] C7: 新增 `kit/skills/lib/worktree-dep-pool.mjs` (new) 并瘦身升级 `kit/skills/dev-flow/scripts/worktree-deps.mjs`（`<= 600` 行）：落地 Class R（含独立 `CARGO_TARGET_DIR`）/ Class S（仓外只读 `dep-pool` 按 `sha256(lockfiles+清单依赖段)` + `.prisma`/POSIX shebang 隔离 + `detach`/`reconcile` 漂移自动脱钩 + `pool-refs.json` 引用计数 GC + Windows NTFS 递归撤只读位 `0o777`/`0o666` 后再 `rmSync` 防 `EPERM` + Windows junction 非递归清理兜底 + `scanOutboundLinks` 放行 `dep-pool` 为 `tool-mounted`）/ Class I（构建与 DB/NoSQL 卷严格隔离），同步对齐 `kit/skills/lib/profile.mjs`（`worktree-shared-readonly:`）、`scripts/dev/fixtures-w6c-harness-gates.mjs` 与 `injections-data-core.mjs`/`gates.mjs` 锚点。
+- [x] C8: 升级 `kit/skills/lib/exec.mjs`：`computeWorktreeEnv` 统一重定向 `VITE_CACHE_DIR`/`JEST_CACHE_DIR`/`BABEL_CACHE_PATH`/`ESLINT_CACHE_LOCATION`/`CARGO_TARGET_DIR` 至独立 `PF_CACHE_DIR` 并透传 `PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false`；CVE-2024-27980 硬化优先对 `npm`/`pnpm`/`npx`/`yarn` `.cmd` 解析底层 JS 直调 `node`，其余 `.cmd`/`.bat` 放行含空格/括号的合法路径与测试垫片正常参数并严格拦截命令拼接元字符，且在 `execSafe` `try/catch` 内捕获返回已登记于 `kit/skills/lib/exit-codes.mjs` `USAGE_CODES` 的 `BLOCKED_UNSAFE_WIN_BATCH_ARG`（维护 `execSafe` 永不抛异常契约）。
+- [x] C9: 升级 `kit/skills/lib/workflow-policy.mjs`（扩展 `isOneWayBoundaryFile` 覆盖 NoSQL/ORM/KV/向量库、Proto/GraphQL/OpenAPI、Docker/K8s/Helm/Terraform；双向兼容修复 `resolveScopedVerificationGate` `dirRel/ecosystems` 字段错位与 `quickTest` 读取）与 `kit/skills/dev-flow/scripts/flow.mjs`/`flow-intake.mjs`/`kit/skills/lib/intake-triage.mjs`（`contextBasis` SHA-256 写前防脏写复核，漂移抛出登记于 `FACT_CODES` 的 `BLOCKED_STALE_INTAKE_CONTEXT`，修正帮助文案并过 `scripts/dev/subcommand-parity.mjs`），新增 `scripts/dev/fixtures-worktree-policy-v2.mjs` (new) 与 `scripts/dev/injections-data-worktree-policy-v2.mjs` (new)，`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --domain worktree-policy-v2` 与 `node scripts/dev/merge-gate.mjs` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -164,5 +164,8 @@ flowchart LR
 ## 实现说明
 
 - **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+  - 新增 `kit/skills/lib/worktree-dep-pool.mjs`（795 行）并瘦身升级 `kit/skills/dev-flow/scripts/worktree-deps.mjs`（526 行，<= 600 行），落地 Class R / S / I 三类依赖隔离、仓外只读 `dep-pool`、`removeReadOnlyTreeSync`（递归 `0o777`/`0o666` 防 Windows NTFS `EPERM`）、`.prisma`/POSIX shebang 毒化隔离、`detach`/`reconcile` 漂移脱钩、`pool-refs.json` 引用计数与损坏重建 GC、Windows junction 非递归卸载兜底；`kit/skills/lib/profile.mjs` 新增可选 `worktree-shared-readonly:` 解析；钩子分别接入 `edit-gate.mjs`（740 行）、`flow-lifecycle-helpers.mjs`（780 行）、`flow-sync.mjs`（222 行）与 `flow-cleanup.mjs`（605 行），未触碰 `flow-lifecycle.mjs`（787 行）。
+  - 升级 `kit/skills/lib/exec.mjs`（774 行）：`computeWorktreeEnv` 重定向 `VITE`/`JEST`/`BABEL`/`ESLINT`/`CARGO_TARGET_DIR` 并透传 `PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false`；CVE-2024-27980 两层硬化优先对 `npm`/`pnpm`/`npx`/`yarn` `.cmd` 解析 JS 直调 `node`，其余 `.cmd`/`.bat` 放行含括号路径与常规参数、严拦命令拼接元字符并在 `execSafe` `try/catch` 内返回 `code: EXIT.USAGE` + `blockedCode: 'BLOCKED_UNSAFE_WIN_BATCH_ARG'`。
+  - 升级 `kit/skills/lib/workflow-policy.mjs`（778 行）扩展 `isOneWayBoundaryFile` 与修复 `resolveScopedVerificationGate` 字段错位；升级 `kit/skills/lib/intake-triage.mjs`（792 行）、`kit/skills/dev-flow/scripts/flow-intake.mjs`（556 行）、`kit/skills/dev-flow/scripts/flow.mjs`（260 行）实现 `contextBasis` SHA-256 写前防脏写复核（`BLOCKED_STALE_INTAKE_CONTEXT`）；新增 `scripts/dev/fixtures-worktree-policy-v2.mjs` 与 `scripts/dev/injections-data-worktree-policy-v2.mjs`（`I1121..I1126`）。
+- **与草案的差异**：`profile.mjs` 将 `worktree-shared-readonly` 与 `evergreen-docs` 一并纳入 `OPTIONAL_DEV_PROFILE_KEYS` 保持既有 7 个必选 `DEV_PROFILE_KEYS` 向后兼容；同步对齐 `scripts/dev/fixtures-heterogeneous-dual-loop.mjs` Profile 2 使用 `package-lock.json` 验证 Class S 多包共享挂载；`injections-data-worktree-policy-v2.mjs` 选用无冲突编号 `I1121..I1126`。
+- **关联同步文件**：已执行 `node scripts/equip.mjs .` 同步 `.agents/skills/` 与 `.agents/skills/.pf-manifest.json`，并通过 `merge-gate.mjs` 12/12 步全绿实证。

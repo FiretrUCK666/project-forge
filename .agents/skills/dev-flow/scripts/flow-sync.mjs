@@ -18,6 +18,7 @@ import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
 import { resolveEffectiveBaseSha } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext } from './flow-inspect.mjs'
+import { reconcileWorktreeDeps } from '../../lib/worktree-dep-pool.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 export async function handleSync(opts = {}, roots) {
@@ -92,6 +93,9 @@ export async function handleSync(opts = {}, roots) {
   const alreadyBasedOnTarget = Boolean(alreadyAnc.ok)
   let depMount = { mode: ledger.depsMode ?? 'none' }
 
+  if (alreadyBasedOnTarget && ledger.tier === 2 && implRoot !== roots.mainRoot) {
+    try { reconcileWorktreeDeps(roots.mainRoot, implRoot, { ledger }) } catch { /* non-fatal */ }
+  }
   if (!alreadyBasedOnTarget) {
     if (ledger.tier === 2) {
       const mountedForImpl = ledger.mountedDepsByWorktree?.[ledger.worktreePath] ?? ledger.mountedDeps ?? []

@@ -39,6 +39,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { ARCHITECTURE_MAP_REL, isArchitectureMapOptedOut, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
 import { FEATURE_MAP_REL } from '../../lib/feature-map.mjs'
 import { collectGateReceiptKey, writeGateReceipt } from '../../lib/gate-receipt.mjs'
+import { reconcileWorktreeDeps } from '../../lib/worktree-dep-pool.mjs'
 
 export { EXIT }
 const VALID_MODES = new Set(['verify', 'pre-edit', 'standalone'])
@@ -283,6 +284,9 @@ export async function runEditGate(opts = {}) {
   }
 
   const devProfile = parseDevProfile(workTreeRoot)
+  if (mode !== 'pre-edit' && roots.isWorktree && mainRoot !== workTreeRoot) {
+    try { reconcileWorktreeDeps(mainRoot, workTreeRoot) } catch { /* non-fatal drift hook */ }
+  }
   const defaultBranch = isGit ? await resolveDefaultBranch(workTreeRoot) : null
   const doNotEditGlobs = devProfile['do-not-edit'] ?? []
   const highRiskGlobs = devProfile['high-risk'] ?? []

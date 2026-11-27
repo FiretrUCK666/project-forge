@@ -12,7 +12,7 @@ import { readPlanCritiqueEntrySync } from './critique-rounds.mjs'
 import { buildIntakeDecisionComments } from './doc-comments.mjs'
 import { parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { resolveApprovalBasis } from './plan-exit-gate.mjs'
-import { posixPath, readJsonSafe, readTextSafe, withFileLock, writeJsonAtomic } from './git.mjs'
+import { posixPath, readJsonSafe, readTextSafe, sha256Text, withFileLock, writeJsonAtomic } from './git.mjs'
 import { parseBodyRelations, parsePfStateTags } from './github-parse.mjs'
 import { listTaskLedgers, sanitizeTaskId } from './ledger.mjs'
 import { listLocalIssues, resolveEffectiveCommonGitDir } from './local-issues.mjs'
@@ -64,6 +64,45 @@ export function readIntakeRecord(repoRoot, targetType, targetNumber, { gitDir = 
   const { filePath } = intakeRecordPath(repoRoot, targetType, targetNumber, gitDir)
   const data = readJsonSafe(filePath)
   return data && typeof data === 'object' ? data : null
+}
+
+/** 计算目标 Issue/PR 的确定性上下文 SHA-256 指纹（供 `flow intake --apply --context-basis` 写前防脏写复核）。 */
+export function computeIntakeContextBasis({
+  targetType = 'issue',
+  targetNumber = null,
+  state = '',
+  title = '',
+  body = '',
+  labels = [],
+  commentsDigest = '',
+  comments = null,
+  headSha = '',
+} = {}) {
+  const kind = String(targetType ?? 'issue').toLowerCase() === 'pr' ? 'pr' : 'issue'
+  const numVal = Number(targetNumber)
+  const num = Number.isInteger(numVal) && numVal > 0 ? numVal : null
+  const normLabels = [...new Set(
+    (Array.isArray(labels) ? labels : [])
+      .map((l) => String(typeof l === 'string' ? l : l?.name ?? '').trim().toLowerCase())
+      .filter(Boolean),
+  )].sort()
+  let digest = String(commentsDigest ?? '').trim()
+  if (!digest && Array.isArray(comments) && comments.length > 0) {
+    digest = sha256Text(JSON.stringify(comments.map((c) => ({
+      id: c?.id ?? null,
+      body: String(c?.body ?? '').replace(/\r\n/g, '\n').trim(),
+    }))))
+  }
+  return sha256Text(JSON.stringify({
+    targetType: kind,
+    targetNumber: num,
+    state: String(state ?? '').trim().toUpperCase(),
+    title: String(title ?? '').replace(/\r\n/g, '\n').trim(),
+    body: String(body ?? '').replace(/\r\n/g, '\n').trim(),
+    labels: normLabels,
+    commentsDigest: digest,
+    headSha: String(headSha ?? '').trim(),
+  }))
 }
 
 /** 原子持久化分诊记录至 `<effectiveGitDir>/project-forge-flow/intake/`。 */
@@ -705,11 +744,24 @@ export function evaluateIntakeTriage(repoRoot, input = {}) {
     actorDisplay: input.actorDisplay ?? null,
   })
 
+  const contextBasis = String(input.contextBasis ?? '').trim() || computeIntakeContextBasis({
+    targetType,
+    targetNumber,
+    state: input.state ?? '',
+    title,
+    body,
+    labels: input.labels ?? [],
+    commentsDigest: input.commentsDigest ?? '',
+    comments: input.comments ?? null,
+    headSha: input.headSha ?? '',
+  })
+
   return {
     ok: true,
     targetType,
     targetNumber,
     title,
+    contextBasis,
     decision,
     ruleDecision,
     decisionSource,

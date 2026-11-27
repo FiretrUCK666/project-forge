@@ -73,6 +73,9 @@ related_spec: ../specs/261127-issue219-zero-token-static-analyzer-spec.md
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：待全量门禁与故障注入实跑后补齐。
-- **文档同步检查**：已同步 `docs/feature-map.json`、`docs/architecture-map.html`、`.agents/skills/`（`equip.mjs .`）与 SPEC `## 实现说明`。
+- **实际验证命令与结果**：
+  - `node scripts/dev/fixtures.mjs --domain static-analyzer`：9/9 通过（覆盖 7 类异构仓库栈正反双向断言）
+  - `node scripts/dev/merge-gate.mjs`：12/12 通过（含 `preflight` 42/42、`gap-coverage`、全量 `fixtures`、`bench`、`e2e-zip-harness`、全量 `verify-injections --jobs 4`、`compose-agents --check`、`equip --check`、`sync-toc --check`、包清单校验、`review`、`govern-audit`）
+  - `node .agents/skills/dev-edit/scripts/edit-gate.mjs --final --json`：`ok: true`，0 blockers
+- **文档同步检查**：已同步 `docs/feature-map.json`、`docs/architecture-map.html`（0 脏 diff 节点）、`.agents/skills/`（`equip.mjs . --check` 通过）与 SPEC `## 实现说明`。
 - **遗留问题**：无。

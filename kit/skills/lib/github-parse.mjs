@@ -78,6 +78,20 @@ export function parseBodyRelations(body) {
  *   绝不从 `--agent`/`--reviewer-id` 写入，绝不硬造 `'maintainer'`；
  * - `agent` 仅来自显式代理标识（或 `ledgerAgent`），零黑名单正则过滤，任意自定义名称原样保留。
  */
+export const VERIFIED_API_TIERS = Object.freeze(new Set([
+  'gh-cli',
+  'node-https-token',
+  'authenticated',
+  'provider-api',
+  'api-token',
+  'cli-auth',
+]))
+
+/** 判断平台通道层级是否为已认证的本地 API 通道（供身份归属与标签/PR 写操作共享）。 */
+export function isVerifiedTier(tier) {
+  return typeof tier === 'string' && VERIFIED_API_TIERS.has(tier)
+}
+
 export function resolveIdentityLayers({
   ghLogin = null,
   ghTier = null,
@@ -90,8 +104,8 @@ export function resolveIdentityLayers({
 } = {}) {
   const clean = (v) => String(v ?? '').replace(/<[^>]*>/g, '').trim().replace(/^`+|`+$/g, '').replace(/^@+/, '').trim()
   const cleanGh = clean(ghLogin)
-  const isVerifiedTier = ghTier === 'gh-cli' || ghTier === 'node-https-token' || ghTier === 'authenticated'
-  const ghVerified = Boolean(cleanGh && (verifiedPlatformLogin === true || (verifiedPlatformLogin !== false && isVerifiedTier)))
+  const verifiedTier = isVerifiedTier(ghTier)
+  const ghVerified = Boolean(cleanGh && (verifiedPlatformLogin === true || (verifiedPlatformLogin !== false && verifiedTier)))
 
   let account = null
   let isPlatformVerified = false
@@ -336,8 +350,17 @@ export const RETRYABLE_NET_CODES = new Set([
 export const MAX_RETRY_DELAY_MS = 60000
 
 export function redactGhTokens(text) {
-  return String(text ?? '').replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '[redacted]')
+  return String(text ?? '')
+    .replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '[redacted]')
+    .replace(/\bglpat-[A-Za-z0-9_-]{8,}\b/g, '[redacted]')
+    .replace(/(\b(?:PRIVATE-TOKEN|JOB-TOKEN|X-Auth-Token)\s*[:=]\s*)[^\s"'&;]+/gi, '$1[redacted]')
+    .replace(/(\bAuthorization\s*:\s*(?:Bearer|token|Basic)\s+)[^\s"'&;]+/gi, '$1[redacted]')
+    .replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1[redacted]')
+    .replace(/([?&](?:access_token|private_token|token)=)[^&#\s]+/gi, '$1[redacted]')
+    .replace(/(https?:\/\/[^/\s:@]+:)[^@\s/]+(@)/gi, '$1[redacted]$2')
 }
+
+export { redactGhTokens as redactPlatformTokens }
 
 export function parseRetryAfterMs(headers, capMs = MAX_RETRY_DELAY_MS) {
   if (!headers || typeof headers !== 'object') return null

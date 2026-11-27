@@ -1,6 +1,6 @@
 /**
  * 平台适配入口。
- * 产品层唯一注册并导出 GitHub 适配器，同时经注册表提供 `generic-git` 安全降级与多远端拓扑解析。
+ * 单源导出 5 方言（GitHub/GitLab/GitCode/Gitee/Gitea）+ `generic-git` 安全降级、10 键能力矩阵与多远端拓扑解析。
  */
 
 export {
@@ -20,7 +20,13 @@ export {
 } from './github.mjs'
 
 export {
+  BUILTIN_PROVIDER_IDS,
+  CAPABILITY_KEYS,
   GENERIC_GIT_PROVIDER,
+  GITCODE_PROVIDER,
+  GITEA_PROVIDER,
+  GITEE_PROVIDER,
+  GITLAB_PROVIDER,
   NONE_CAPABILITIES,
   classifyTopologyIdentity as classifyWorkspaceIdentity,
   getHostingProvider,
@@ -33,3 +39,8 @@ export {
   resolveRemotesTopology,
   resolveTopologyIdentity as resolveWorkspaceIdentity,
 } from './registry.mjs'
+
+export {
+  createProviderClient,
+  resolveRemoteTarget,
+} from '../../../kit/skills/lib/platform.mjs'

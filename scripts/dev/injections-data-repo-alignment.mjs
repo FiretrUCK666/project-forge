@@ -70,7 +70,7 @@ export const INJECTIONS_REPO_ALIGNMENT = [
     alsoDropIn: ['.agents/skills/lib/platform-registry.mjs'],
     from: "  const key = String(id).trim().toLowerCase()",
     to: "  const key = String(id)",
-    expect: 'C3：platform-registry.mjs 双端 8 键能力、trim/toLowerCase、file:// 与 registerHostingProvider 对等',
+    expect: 'C3：platform-registry.mjs 双端 10 键能力、5 方言、trim/toLowerCase、file:// 与 registerHostingProvider 对等',
   },
   {
     id: 'I394',

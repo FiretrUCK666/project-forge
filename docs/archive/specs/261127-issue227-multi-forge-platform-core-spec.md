@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: 多远端平台统一能力内核与协议方言适配器
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
 issue: 227
 pr: null
-branch: feat/multi-forge-worktree-perf-v1
+branch: feat/multi-forge-platform-core
 owner: plan-c-master
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-c-r2, round=2, sha=36becb38992e, summary=R2 verified all 3 R1 major findings closed: preflight-suite.mjs:383 AbortSignal.timeout + fixtures-repo-alignment.mjs + injections-data-repo-alignment.mjs (I391/I393) + injections-data-kernel-dedup.mjs (I372/I373) + github-labels.mjs (L110/168/357) all covered; platform-http.mjs fail-closed public http:// & 169.254.169.254/fe80:: + 3xx Location redaction + pure Buffer.concat multipart; platform-providers.mjs 5 dialect auth headers, 429 cap, and refs/merge-requests/<iid>/head with offline/shallow shaSource fallback; 0 overlap with Wave 1A.)"
-related_prd: ../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
+related_prd: ../../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
 related_todo: ../todo/261127-issue227-multi-forge-platform-core-todo.md
 high_risk_paths: [kit/, scripts/lib/]
 task_id: multi-forge-platform-core
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/platform-registry.mjs, kit/skills/lib/platform-http
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨 `kit/skills/lib/` 与 `scripts/lib/platform/` 的多平台协议抽象与契约升级；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/multi-forge-worktree-perf-v1` / #227 / 未关联 |
+| 分支 / Issue / PR | `feat/multi-forge-platform-core` / #227 / 未关联 |
 | 负责人 / 内审状态 | plan-c-master / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/todo/261127-issue227-multi-forge-platform-core-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/archive/todo/261127-issue227-multi-forge-platform-core-todo.md` |
 
 - **变更一句话**：将双端平台注册表升级为 10 键能力矩阵与 5 类协议方言适配器（`github`/`gitlab`/`gitcode`/`gitee`/`gitea`）+ `generic-git` 兜底，建成零依赖 `platform-http.mjs` (new)、`platform-providers.mjs` (new)、`resolveRemoteTarget` 与统一 `RemoteApiBackend`，同步清除 `github-labels.mjs` 硬编码并全量对齐既有平台门禁与注入锚点。
 
@@ -150,9 +150,9 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C4: `kit/skills/lib/platform-registry.mjs` 与 `scripts/lib/platform/registry.mjs` 升级为单源 10 键能力矩阵（新增 `uploadAttachment`、`checks`）并注册 5 内置方言（`github`/`gitlab`/`gitcode`/`gitee`/`gitea`）+ `generic-git` 兜底，零私域域名硬编码；同步升级 `scripts/dev/preflight-suite.mjs`（L355-359 双端注册表对齐与 L383 `AbortSignal.timeout` 校验对齐，且保留全部 SSH 安全断言）、`scripts/dev/fixtures-platform.mjs`、`scripts/dev/fixtures-repo-alignment.mjs`、`scripts/dev/injections-data-repo-alignment.mjs`（`I391`/`I393`）与 `scripts/dev/injections-data-kernel-dedup.mjs`（`I372`/`I373`）。
-- [ ] C5: 新增零依赖 `kit/skills/lib/platform-http.mjs` (new)（`node:http`+`node:https`、公网 `http://` 与 `169.254.169.254`/`fe80::` Fail-Closed 拦截、仅允许 loopback/RFC1918 局域网 `http://`、`AbortSignal.timeout`、`redirect: 'manual'` + 3xx `Location` 脱敏、全平台令牌脱敏、4 字节字符守卫、随机 boundary + filename CRLF/引号清洗 + 纯 `Buffer.concat` multipart）与 `kit/skills/lib/platform-providers.mjs` (new)（5 方言鉴权头、429 退避上限、GitLab/GitCode `/uploads` multipart 上传、`refs/merge-requests/<iid>/head` 真 SHA 校验含离线/浅仓回退与 `shaSource` 标注、客户端分支二次过滤），升级 `kit/skills/lib/platform-probe.mjs`（`<= 700` 行）、`kit/skills/lib/github-parse.mjs`、`kit/skills/lib/github-client.mjs`、`kit/skills/lib/github-labels.mjs` 与 `scripts/lib/platform/*`。
-- [ ] C6: `kit/skills/lib/platform.mjs` 新增 `resolveRemoteTarget`（完整支持 GitLab 多级群组 `group/sub/repo` 与 LAN/离线识别），`kit/skills/lib/task-backend.mjs` 落地统一 `RemoteApiBackend` 取代 `provider.id !== 'github'` 硬退化；通过纯 Node 本地 `node:http` Mock Forge 在 `scripts/dev/fixtures-platform.mjs` 与 `scripts/dev/injections-data-platform-core.mjs` (new) 完成正反双向实证与故障注入，`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --domain platform`、`node scripts/dev/fixtures.mjs --domain repo-alignment` 与 `node scripts/dev/merge-gate.mjs` 退出码 `0`。
+- [x] C4: `kit/skills/lib/platform-registry.mjs` 与 `scripts/lib/platform/registry.mjs` 升级为单源 10 键能力矩阵（新增 `uploadAttachment`、`checks`）并注册 5 内置方言（`github`/`gitlab`/`gitcode`/`gitee`/`gitea`）+ `generic-git` 兜底，零私域域名硬编码；同步升级 `scripts/dev/preflight-suite.mjs`（L355-359 双端注册表对齐与 L383 `AbortSignal.timeout` 校验对齐，且保留全部 SSH 安全断言）、`scripts/dev/fixtures-platform.mjs`、`scripts/dev/fixtures-repo-alignment.mjs`、`scripts/dev/injections-data-repo-alignment.mjs`（`I391`/`I393`）与 `scripts/dev/injections-data-kernel-dedup.mjs`（`I372`/`I373`）。
+- [x] C5: 新增零依赖 `kit/skills/lib/platform-http.mjs` (new)（`node:http`+`node:https`、公网 `http://` 与 `169.254.169.254`/`fe80::` Fail-Closed 拦截、仅允许 loopback/RFC1918 局域网 `http://`、`AbortSignal.timeout`、`redirect: 'manual'` + 3xx `Location` 脱敏、全平台令牌脱敏、4 字节字符守卫、随机 boundary + filename CRLF/引号清洗 + 纯 `Buffer.concat` multipart）与 `kit/skills/lib/platform-providers.mjs` (new)（5 方言鉴权头、429 退避上限、GitLab/GitCode `/uploads` multipart 上传、`refs/merge-requests/<iid>/head` 真 SHA 校验含离线/浅仓回退与 `shaSource` 标注、客户端分支二次过滤），升级 `kit/skills/lib/platform-probe.mjs`（`<= 700` 行）、`kit/skills/lib/github-parse.mjs`、`kit/skills/lib/github-client.mjs`、`kit/skills/lib/github-labels.mjs` 与 `scripts/lib/platform/*`。
+- [x] C6: `kit/skills/lib/platform.mjs` 新增 `resolveRemoteTarget`（完整支持 GitLab 多级群组 `group/sub/repo` 与 LAN/离线识别），`kit/skills/lib/task-backend.mjs` 落地统一 `RemoteApiBackend` 取代 `provider.id !== 'github'` 硬退化；通过纯 Node 本地 `node:http` Mock Forge 在 `scripts/dev/fixtures-platform.mjs` 与 `scripts/dev/injections-data-platform-core.mjs` (new) 完成正反双向实证与故障注入，`node scripts/dev/preflight.mjs`、`node scripts/dev/fixtures.mjs --domain platform`、`node scripts/dev/fixtures.mjs --domain repo-alignment` 与 `node scripts/dev/merge-gate.mjs` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -167,6 +167,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：双端注册表提供 10 键 `NONE_CAPABILITIES` 与 5 方言（`github`/`gitlab`/`gitcode`/`gitee`/`gitea`）+ `generic-git`；`kit/skills/lib/platform-http.mjs` 承载 SSRF/公网 `http://`/链路本地与云元地址拦截、`AbortSignal.timeout`、3xx 拒重定向与 `Location` 脱敏、全平台令牌脱敏、4 字节字符守卫及纯 `Buffer.concat` multipart；`kit/skills/lib/platform-providers.mjs` 实现 5 方言鉴权头、429 退避封顶、GitLab/GitCode `/uploads`、真 SHA（`git-ls-remote` / `rest-fallback`）与客户端分支二次过滤；`kit/skills/lib/platform-probe.mjs` 保持 689 行；`kit/skills/lib/task-backend.mjs` 提供统一 `RemoteApiBackend` 并保留 `GitHubBackend` 兼容子类。
+- **与草案的差异**：`resolveRemoteTarget` 置于 `kit/skills/lib/platform-registry.mjs` 并经 `kit/skills/lib/platform.mjs` 与 `scripts/lib/platform/index.mjs` 单源重导出，使 `platform.mjs` 稳定保持在 740 行；`preflight-suite.mjs` `checkPlatformLock` 仅对多平台内核模块豁免旧版单平台锁定。
+- **关联同步文件**：经 `node scripts/equip.mjs .` 同步 `.agents/skills/lib/*` 与 `.agents/skills/.pf-manifest.json`。

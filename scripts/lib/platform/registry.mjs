@@ -15,7 +15,13 @@ import {
 } from '../text.mjs'
 import { normalizeDeclaredRepo } from '../../../kit/skills/lib/platform.mjs'
 import {
+  BUILTIN_PROVIDER_IDS,
+  CAPABILITY_KEYS,
   GENERIC_GIT_PROVIDER as CORE_GENERIC_GIT_PROVIDER,
+  GITCODE_PROVIDER as CORE_GITCODE_PROVIDER,
+  GITEA_PROVIDER as CORE_GITEA_PROVIDER,
+  GITEE_PROVIDER as CORE_GITEE_PROVIDER,
+  GITLAB_PROVIDER as CORE_GITLAB_PROVIDER,
   NONE_CAPABILITIES,
   getHostingProvider as coreGetHostingProvider,
   listHostingProviders,
@@ -23,6 +29,7 @@ import {
   registerHostingProvider,
   resolveRemoteDescriptor,
 } from '../../../kit/skills/lib/platform-registry.mjs'
+import { createProviderClient, probePlatformEnvCore } from '../../../kit/skills/lib/platform.mjs'
 import {
   GITHUB_PROVIDER,
   detectGitModeMarkers,
@@ -31,6 +38,8 @@ import {
 } from './github.mjs'
 
 export {
+  BUILTIN_PROVIDER_IDS,
+  CAPABILITY_KEYS,
   NONE_CAPABILITIES,
   listHostingProviders,
   registerHostingProvider,
@@ -406,7 +415,47 @@ export async function probeTopologyEnv(opts = {}) {
   return { ...res, providerId: provider.id, capabilities: provider.capabilities }
 }
 
-// 产品层严格仅注册 GitHub 适配器
-registerHostingProvider(GITHUB_PROVIDER)
+function createEngineDialectProvider(coreProvider) {
+  return Object.freeze({
+    ...coreProvider,
+    async probeTransport() {
+      return { state: coreProvider.id, reason: `${coreProvider.label} 远端：复用统一平台探测` }
+    },
+    async probeAuth(ctx = {}) {
+      const core = await probePlatformEnvCore({
+        ...ctx,
+        providerId: coreProvider.id,
+        apiBaseUrl: ctx.apiBaseUrl ?? coreProvider.defaultApiBase,
+        repoSlug: ctx.repoSlug ?? ctx.topology?.primary?.repoSlug ?? null,
+        host: ctx.host ?? ctx.topology?.primary?.resolvedHost ?? ctx.topology?.primary?.host ?? null,
+      })
+      return {
+        probed: true,
+        providerId: coreProvider.id,
+        https: core.httpsPublic,
+        ssh: core.ssh,
+        apiChannel: core.apiChannel,
+      }
+    },
+    classifyIdentity(facts = {}) {
+      const base = GENERIC_GIT_PROVIDER.classifyIdentity(facts)
+      if (base.role === 'local-only') return base
+      return { ...base, providerId: coreProvider.id, capabilities: coreProvider.capabilities }
+    },
+    createClient(authCtx = {}) {
+      return createProviderClient({ ...authCtx, providerId: coreProvider.id })
+    },
+  })
+}
+
+export const GITLAB_PROVIDER = createEngineDialectProvider(CORE_GITLAB_PROVIDER)
+export const GITCODE_PROVIDER = createEngineDialectProvider(CORE_GITCODE_PROVIDER)
+export const GITEE_PROVIDER = createEngineDialectProvider(CORE_GITEE_PROVIDER)
+export const GITEA_PROVIDER = createEngineDialectProvider(CORE_GITEA_PROVIDER)
+
+// 双端单源注册 5 类内置方言适配器（零私域硬编码）
+for (const adapter of [GITHUB_PROVIDER, GITLAB_PROVIDER, GITCODE_PROVIDER, GITEE_PROVIDER, GITEA_PROVIDER]) {
+  registerHostingProvider(adapter)
+}
 
 export { normalizeDeclaredRepo, parseSshConfigHostMap }

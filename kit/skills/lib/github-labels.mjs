@@ -1,8 +1,10 @@
 /**
  * github-labels.mjs —— 有限并发执行器、自动建标写后回读、HTTP 403 显式降级与 PR 关闭辅助。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），供 github-client.mjs 复用。
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），供 github-client.mjs 与多平台适配器复用。
  */
+
+import { isVerifiedTier } from './github-parse.mjs'
 
 export const DEFAULT_GITHUB_CONCURRENCY = 4
 
@@ -107,12 +109,13 @@ export async function createLabelViaApi({
   const cleanName = String(name ?? '').trim()
   if (!cleanRepo || !cleanName) return { ok: false, error: 'missing-repo-or-label-name' }
   const payload = buildLabelPayload(cleanName, { color, description })
-  if (tier !== 'gh-cli' && tier !== 'node-https-token') {
+  if (!isVerifiedTier(tier)) {
     return typeof makeMcpDelegate === 'function'
       ? makeMcpDelegate('create_label', { repo: cleanRepo, ...payload })
       : { ok: false, delegated: true, action: 'create_label', repo: cleanRepo, ...payload }
   }
-  const res = tier === 'node-https-token'
+  const useRest = tier !== 'gh-cli' && typeof callHttps === 'function'
+  const res = useRest
     ? await callHttps('POST', `/repos/${cleanRepo}/labels`, payload)
     : await withTempFile('pf-create-label', JSON.stringify(payload), (tmp) => (
         callGh(['api', `repos/${cleanRepo}/labels`, '-X', 'POST', '--input', tmp])
@@ -165,14 +168,14 @@ export async function addLabelsWithEnsureAndReadback({
   if (cleanLabels.length === 0) return { ok: true, skipped: true, labels: [], verifiedReadback: true }
   const num = Number(number)
   if (!repo || !Number.isInteger(num) || num <= 0) return { ok: false, error: 'missing-repo-or-number' }
-  if (tier !== 'gh-cli' && tier !== 'node-https-token') {
+  if (!isVerifiedTier(tier)) {
     return typeof makeMcpDelegate === 'function'
       ? makeMcpDelegate('add_labels', { repo, number: num, labels: cleanLabels })
       : { ok: false, delegated: true, action: 'add_labels', repo, number: num, labels: cleanLabels }
   }
 
   const postLabels = async () => {
-    if (tier === 'node-https-token') {
+    if (tier !== 'gh-cli' && typeof callHttps === 'function') {
       return callHttps('POST', `/repos/${repo}/issues/${num}/labels`, { labels: cleanLabels })
     }
     const apiRes = await withTempFile('pf-add-labels', JSON.stringify({ labels: cleanLabels }), (tmp) => (
@@ -354,7 +357,7 @@ export async function closePrViaRest({
     }
   }
 
-  if (tier !== 'gh-cli' && tier !== 'node-https-token') {
+  if (!isVerifiedTier(tier)) {
     const delegated = typeof makeMcpDelegate === 'function'
       ? makeMcpDelegate('close_pr', {
           repo,
@@ -402,7 +405,7 @@ export async function closePrViaRest({
   }
 
   let closeRes
-  if (tier === 'node-https-token') {
+  if (tier !== 'gh-cli' && typeof callHttps === 'function') {
     closeRes = await callHttps('PATCH', `/repos/${repo}/pulls/${num}`, { state: 'closed' })
   } else {
     closeRes = await withTempFile('pf-close-pr', JSON.stringify({ state: 'closed' }), (tmp) => (

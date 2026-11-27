@@ -13,11 +13,12 @@ import {
   detectRemoteProtocol,
   parseSshConfigDetails,
   probeGitHubEnvCore,
+  probePlatformEnvCore,
   probeSshTransport,
 } from '../../../kit/skills/lib/platform-probe.mjs'
 import { parseSshConfigHostMap } from '../text.mjs'
 
-export { probeSshTransport }
+export { probePlatformEnvCore, probeSshTransport }
 
 /**
  * 并发双轨探测本机 GitHub 传输（Track A）与 API 四级降级通道（Track B）。

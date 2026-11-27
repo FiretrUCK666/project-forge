@@ -182,7 +182,7 @@ export function registerRepoAlignmentCases(cases) {
     if (topoClass.providerId !== 'none' || topoRes.providerId !== 'none' || topoEnv.providerId !== 'none') {
       return `无远端拓扑 providerId 未返回 none：class=${topoClass.providerId}, res=${topoRes.providerId}, env=${topoEnv.providerId}`
     }
-    for (const key of ['api', 'pr', 'issues', 'releases', 'labels', 'milestones', 'branchProtection', 'mention']) {
+    for (const key of ['api', 'pr', 'issues', 'releases', 'labels', 'milestones', 'branchProtection', 'mention', 'uploadAttachment', 'checks']) {
       if (topoClass.capabilities?.[key] !== false || topoRes.capabilities?.[key] !== false || topoEnv.capabilities?.[key] !== false) {
         return `无远端拓扑能力位 ${key} 伪装为 true`
       }
@@ -203,7 +203,7 @@ export function registerRepoAlignmentCases(cases) {
     return true
   }])
 
-  cases.push(['C3：platform-registry.mjs 双端 8 键能力、trim/toLowerCase、file:// 与 registerHostingProvider 对等（正反双向）', async () => {
+  cases.push(['C3：platform-registry.mjs 双端 10 键能力、5 方言、trim/toLowerCase、file:// 与 registerHostingProvider 对等（正反双向）', async () => {
     const kitPlatform = await import('../../kit/skills/lib/platform.mjs')
     const engineRegistry = await import('../lib/platform/registry.mjs')
 
@@ -212,11 +212,22 @@ export function registerRepoAlignmentCases(cases) {
     if (!kitGh || !engGh || kitGh.id !== 'github' || engGh.id !== 'github') {
       return 'getHostingProvider 未实现 trim/toLowerCase 归一化'
     }
-    if (kitGh.capabilities?.mention !== true || engGh.capabilities?.mention !== true) {
-      return '双端 GitHub provider capabilities 缺少 mention: true'
+    const expectedKeys = ['api', 'pr', 'issues', 'releases', 'labels', 'milestones', 'branchProtection', 'mention', 'uploadAttachment', 'checks']
+    for (const k of expectedKeys) {
+      if (typeof kitGh.capabilities?.[k] !== 'boolean' || typeof engGh.capabilities?.[k] !== 'boolean') {
+        return `双端 GitHub provider capabilities 缺少 10 键能力位 ${k}`
+      }
+    }
+    if (kitGh.capabilities?.mention !== true || engGh.capabilities?.mention !== true || kitGh.capabilities?.uploadAttachment !== false || kitGh.capabilities?.checks !== true) {
+      return '双端 GitHub provider 10 键能力位取值异常'
+    }
+    const kitGl = kitPlatform.getHostingProvider('gitlab')
+    const kitGe = kitPlatform.getHostingProvider('gitee')
+    if (kitGl?.capabilities?.uploadAttachment !== true || kitGe?.capabilities?.checks !== false) {
+      return 'GitLab/Gitee 10 键能力位异常'
     }
     const fileDesc = kitPlatform.resolveRemoteDescriptor('file:///srv/git/team-repo.git')
-    if (fileDesc.providerId !== 'generic-git' || fileDesc.repoSlug !== 'git/team-repo' || fileDesc.capabilities?.mention !== false) {
+    if (fileDesc.providerId !== 'generic-git' || fileDesc.repoSlug !== 'git/team-repo' || fileDesc.capabilities?.mention !== false || fileDesc.capabilities?.uploadAttachment !== false || fileDesc.capabilities?.checks !== false) {
       return `file:// 描述符解析异常：${JSON.stringify(fileDesc)}`
     }
     if (engGh !== engineRegistry.getHostingProvider('github')) {

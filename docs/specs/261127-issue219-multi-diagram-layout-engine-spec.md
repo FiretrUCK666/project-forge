@@ -5,16 +5,16 @@ status: approved
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
-issue: null
+issue: 219
 pr: null
-branch: feat/visual-studio-archify-v2
+branch: feat/multi-diagram-layout-engine
 owner: plan-studio-b
 plan_mode: interactive
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-studio-b-r1, round=1, sha=efe524442738, summary=Wave 2 SPEC verified clean: C5..C8 1:1 with PRD/Todo, visual-layout.mjs (691L -> <=620L) and 4 new modules all <=800L, zero npm/Chrome per-render deps, backward-compatible tree/flow fields + I964 sanitizeSafeHref anchor preserved, self-contained Wave 2 CI with feature-map/architecture-map/equip sync.)"
 related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
-related_todo: ../todo/261127-multi-diagram-layout-engine-todo.md
+related_todo: ../todo/261127-issue219-multi-diagram-layout-engine-todo.md
 high_risk_paths: [kit/]
 task_id: multi-diagram-layout-engine
 scope_files: [kit/skills/lib/visual-router.mjs, kit/skills/lib/visual-layout-diagrams.mjs, kit/skills/lib/visual-layout-charts.mjs, kit/skills/lib/visual-geometry-check.mjs, kit/skills/lib/visual-layout.mjs, scripts/dev/fixtures-visual-layout-v2.mjs, scripts/dev/injections-data-visual-layout-v2.mjs, docs/feature-map.json, docs/architecture-map.html]
@@ -30,10 +30,10 @@ depends_on: [zero-token-static-analyzer]
 | 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块布局与路由引擎重构，触及高风险路径 `kit/`；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/visual-studio-archify-v2` / 未关联 / 未关联 |
+| 分支 / Issue / PR | `feat/multi-diagram-layout-engine` / #219 / 未关联 |
 | 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `../prd/261127-issue219-visual-studio-archify-v2-prd.md` / `../todo/261127-multi-diagram-layout-engine-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/todo/261127-issue219-multi-diagram-layout-engine-todo.md` |
 
 - **变更一句话**：以 MIT Clean-Room 纯 Node 18+ 模块化引擎实现 10 类图表的确定性坐标布局、端口散布 + 干线捆绑 + 避障网格 Dijkstra 正交路由，以及零浏览器依赖的纯 Node 几何自检器。
 
@@ -141,10 +141,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C5: Clean-Room 布局引擎（`kit/skills/lib/visual-layout.mjs`、`kit/skills/lib/visual-layout-diagrams.mjs`、`kit/skills/lib/visual-layout-charts.mjs`，每文件 `<= 800` 行且零 npm 依赖）完整实现 `architecture`、`workflow`、`tree`（轮廓排布 + `>= 3` 叶子叠放）、`erd`、`class`（半列步进）、`sequence`、`lifecycle`（主干脊柱 + 顶弧）、`dataflow`、`timeline`（静默断口压缩）与实测 `waterfall` 共 10 类图表布局，重复执行输出字节级一致。
-- [ ] C6: `kit/skills/lib/visual-router.mjs` 实现端口防重叠散布、同侧共享干线捆绑与紧凑避障网格 Dijkstra 正交路由，复杂有障碍布局中连线穿盒次数为 `0` 且同侧多边端口互不重合。
-- [ ] C7: `kit/skills/lib/visual-geometry-check.mjs` 在零浏览器依赖下确定性检出 `NODE_OVERLAP`、`OUT_OF_BOUNDS`、`EDGE_CROSSES_BOX` 与 `EMPTY_ACTIVE_DIAGRAM`，正向 10 类图全过、负向人工注入重叠或穿盒必报违例。
-- [ ] C8: `scripts/dev/fixtures-visual-layout-v2.mjs` 与 `scripts/dev/injections-data-visual-layout-v2.mjs` 正反双向断言及故障注入全绿，且既有 `fixtures-visual-engine.mjs` 零回归；同步 `docs/feature-map.json`、`docs/architecture-map.html` 与 `equip.mjs . --check`，`node scripts/dev/preflight.mjs` 退出码 `0`。
+- [x] C5: Clean-Room 布局引擎（`kit/skills/lib/visual-layout.mjs`、`kit/skills/lib/visual-layout-diagrams.mjs`、`kit/skills/lib/visual-layout-charts.mjs`，每文件 `<= 800` 行且零 npm 依赖）完整实现 `architecture`、`workflow`、`tree`（轮廓排布 + `>= 3` 叶子叠放）、`erd`、`class`（半列步进）、`sequence`、`lifecycle`（主干脊柱 + 顶弧）、`dataflow`、`timeline`（静默断口压缩）与实测 `waterfall` 共 10 类图表布局，重复执行输出字节级一致。
+- [x] C6: `kit/skills/lib/visual-router.mjs` 实现端口防重叠散布、同侧共享干线捆绑与紧凑避障网格 Dijkstra 正交路由，复杂有障碍布局中连线穿盒次数为 `0` 且同侧多边端口互不重合。
+- [x] C7: `kit/skills/lib/visual-geometry-check.mjs` 在零浏览器依赖下确定性检出 `NODE_OVERLAP`、`OUT_OF_BOUNDS`、`EDGE_CROSSES_BOX` 与 `EMPTY_ACTIVE_DIAGRAM`，正向 10 类图全过、负向人工注入重叠或穿盒必报违例。
+- [x] C8: `scripts/dev/fixtures-visual-layout-v2.mjs` 与 `scripts/dev/injections-data-visual-layout-v2.mjs` 正反双向断言及故障注入全绿，且既有 `fixtures-visual-engine.mjs` 零回归；同步 `docs/feature-map.json`、`docs/architecture-map.html` 与 `equip.mjs . --check`，`node scripts/dev/preflight.mjs` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -159,6 +159,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：以零第三方依赖 MIT Clean-Room 纯 Node 18+ 模块实现 10 类图表布局与避障正交路由：`kit/skills/lib/visual-router.mjs`（418L，端口散布、同侧共享干线捆绑、紧凑非均匀避障网格二叉堆 Dijkstra 路由、共线合并与 1 位小数舍入圆角正交路径）、`kit/skills/lib/visual-layout-diagrams.mjs`（280L，`tree` 轮廓排布与 `>= 3` 叶子垂直叠放、`erd` 分层实体与基数标签、`class` 半列步进、`sequence` 生命线与自调用环）、`kit/skills/lib/visual-layout-charts.mjs`（266L，`lifecycle` 最长无环主干脊柱与顶部跳弧、`dataflow` 分阶段通道、`timeline` 超过中位间隔 4x 自动压缩断口、`waterfall` 实测非负有限 span 甘特条）、`kit/skills/lib/visual-geometry-check.mjs`（247L，零 Chrome 纯 Node 确定性检出 `NODE_OVERLAP`/`OUT_OF_BOUNDS`/`EDGE_CROSSES_BOX`/`EMPTY_ACTIVE_DIAGRAM`），并瘦身升级 `kit/skills/lib/visual-layout.mjs`（691L -> 458L）接入正交路由器与 10 类图分发同时完整保留向后兼容字段及 `I964` `sanitizeSafeHref` 安全锚点。
+- **与草案的差异**：将 `expandLayoutBounds`、`displayWidth`、`truncateLabel` 与 `kahnTopoSort` 下沉至 `visual-router.mjs` 供 `visual-layout*.mjs` 共享，消除跨模块重复实现并进一步压低单文件行数；故障注入除草案要求的 4 类外新增 `I1015` 单独锁定 `EDGE_CROSSES_BOX` 违例检出。
+- **关联同步文件**：`scripts/dev/fixtures-visual-layout-v2.mjs`、`scripts/dev/injections-data-visual-layout-v2.mjs`、`docs/feature-map.json`、`docs/architecture-map.html`、`.agents/skills/`（`node scripts/equip.mjs .` 字节同步）。

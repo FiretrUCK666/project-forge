@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-27T03:09:30.367Z",
+  "installedAt": "2026-11-27T04:02:03.092Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -498,8 +498,17 @@
     "lib/visual-brief.mjs": {
       "sha256": "38113fa665935a721726402caa070d54a4126133e5a43c74e6cff685bf5d1164"
     },
+    "lib/visual-geometry-check.mjs": {
+      "sha256": "9f006c9079ad28bd40de76372b83e8bd9e06d21a195b860359f5ab7c6d14bcb7"
+    },
+    "lib/visual-layout-charts.mjs": {
+      "sha256": "cecbe3235869f8041f1e9d48f8453770e5eee0f356f92499e294c1ff3db6b20f"
+    },
+    "lib/visual-layout-diagrams.mjs": {
+      "sha256": "dd5c9a19e0ea5788fa30c92f2b6c9df5ff4d701e7dd79567015738b059352214"
+    },
     "lib/visual-layout.mjs": {
-      "sha256": "2c7bf0df196bcaf5b6f01063a0ead91574acb8d67d008a3d4c5049aa68a1a71b"
+      "sha256": "f522b7811fab806732dce7633435b29e1eca1eb4a29739a6975d2ca537ed8b5c"
     },
     "lib/visual-render-assets.mjs": {
       "sha256": "c7522132561f2e41e0f81f3a38a3aed200c9352c3ac94f8c020037058719444f"
@@ -509,6 +518,9 @@
     },
     "lib/visual-render.mjs": {
       "sha256": "3f687348c8835a24db705c3fa8f5171330cef6435b7794f872d9ba9e01d90616"
+    },
+    "lib/visual-router.mjs": {
+      "sha256": "bb56f3f850c60a3534f02d4984b18f2fc6259166f2de87f6838b6c95159b35b7"
     },
     "lib/workflow-helpers.mjs": {
       "sha256": "3a13249912a9d650ae3ce2a6f6e85bf891514b146f1fbfb2e9c0b05d12fc50a2"

@@ -300,7 +300,7 @@ export function buildClientCoreScript({ isBrief = true } = {}) {
     if(c('#walk-next')){S.wi=(S.wi+1)%wk.length;return renderWalk();}
     if(c('#walk-close'))return closeWalk();
     if(c('#btn-followup-ctx')||c('[data-followup-panel]'))return openQa('');
-    if(c('#prompt-copy-btn'))return copyText((G('prompt-dialog-text')||{}).value||'');
+    const pcb=c('#prompt-copy-btn');if(pcb){flashCopied(pcb);return copyText((G('prompt-dialog-text')||{}).value||'','已复制提问内容');}
     if(c('#prompt-close-btn'))return H(G('prompt-dialog'),true);
     const ab=c('[data-act]'),act=A(ab,'data-act');if(!act)return;
     if(act==='close-inspector')clearSelection();

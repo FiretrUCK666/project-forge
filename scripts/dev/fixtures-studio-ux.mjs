@@ -180,6 +180,9 @@ export function registerStudioUxCases(cases) {
       for (const inspText of ['居中放大', '一键复制提示词', '编辑后提问', '上游依赖', '下游波及']) {
         if (!js.includes(inspText)) return `统一右侧详情抽屉缺少核心控件：${inspText}`
       }
+      if (/<textarea[^>]*id="prompt-dialog-text"[^>]*readonly/i.test(html)) {
+        return '#prompt-dialog-text 违规带有 readonly 属性，导致「编辑后提问」无法输入编辑'
+      }
 
       // 6. 所有内联脚本必须通过 vm.Script 合法性解析
       for (const code of extractInlineScripts(html)) {

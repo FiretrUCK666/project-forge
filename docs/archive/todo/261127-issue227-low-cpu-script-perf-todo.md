@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 全仓脚本低 CPU 调度原语与热点瘦身
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-27
 issue: 227
@@ -10,10 +10,10 @@ branch: feat/low-cpu-script-perf
 owner: plan-c-master
 plan_mode: interactive
 approved: false
-done_at: null
+done_at: 2026-11-27
 task_id: low-cpu-script-perf
 planned_at: 7785ef3c55cb5251cbca39c6b312b414ab4841f5
-related_prd: ../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
+related_prd: ../../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
 related_spec: ../specs/261127-issue227-low-cpu-script-perf-spec.md
 ---
 
@@ -23,13 +23,13 @@ related_spec: ../specs/261127-issue227-low-cpu-script-perf-spec.md
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / 基线 | `feat/low-cpu-script-perf` @ `7785ef3` |
 | 任务编号 | `low-cpu-script-perf` |
 | 负责人 / 审批 | plan-c-master / `false` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 Issue / PR / SPEC | #227 / 未关联 / `docs/specs/261127-issue227-low-cpu-script-perf-spec.md` |
+| 关联 Issue / PR / SPEC | #227 / 未关联 / `docs/archive/specs/261127-issue227-low-cpu-script-perf-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与关联 SPEC 审批状态。
 
@@ -60,7 +60,7 @@ related_spec: ../specs/261127-issue227-low-cpu-script-perf-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`（已按 R1 独立审查意见修订完毕，待 R2 独立 Critique 与维护者 `approve` 后开工）
+- **当前状态**：`已完成 (done)`（已按 R1 独立审查意见修订完毕，待 R2 独立 Critique 与维护者 `approve` 后开工）
 - **待拍板事项**：无
 - **下一步第一件事**：完成 R2 独立 Critique 与 `approve` 后，先建失败测试 `scripts/dev/fixtures-perf-budget.mjs` (new) 再落地 `kit/skills/lib/proc-budget.mjs` (new)。
 

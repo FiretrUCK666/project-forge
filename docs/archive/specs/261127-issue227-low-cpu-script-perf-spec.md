@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 全仓脚本低 CPU 调度原语与热点瘦身
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
@@ -11,9 +11,9 @@ branch: feat/low-cpu-script-perf
 owner: plan-c-master
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-c-r2, round=2, sha=179cb9737e8b, summary=R2 verified all 4 R1 major findings closed: scripts/sync-toc.mjs & scripts/update.mjs runCli exports in scope for single-child checkHelps; fixtures-helpers.mjs mod.runCli ?? mod.main verified compatible with equip-ci.mjs main(); fixtures.mjs --only cross-file import closure + --domain lazy loading + 0-match fallback; readBlobBatch sunk to kit/skills/lib/git-fast-objects.mjs keeping edit-gate.mjs <=755L; 0 overlap with Wave 1B.)"
-related_prd: ../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
+related_prd: ../../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
 related_todo: ../todo/261127-issue227-low-cpu-script-perf-todo.md
 high_risk_paths: [kit/, scripts/lib/]
 task_id: low-cpu-script-perf
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/proc-budget.mjs, kit/skills/lib/git-fast-objects.mj
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨 `kit/`、`scripts/lib/` 与 `scripts/dev/` 的并发调度与热点重构；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
 | 分支 / Issue / PR | `feat/low-cpu-script-perf` / #227 / 未关联 |
 | 负责人 / 内审状态 | plan-c-master / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/todo/261127-issue227-low-cpu-script-perf-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/archive/todo/261127-issue227-low-cpu-script-perf-todo.md` |
 
 - **变更一句话**：建立零依赖进程并发预算与低优先级调度原语 `kit/skills/lib/proc-budget.mjs` (new)，实现 `fixtures.mjs` `--only`（含跨文件 `import` 闭包）与 `--domain` 懒加载、`sync-toc`/`update` 导出 `runCli` 支撑单子进程 `--help` 批量校验，以及 `readBlobBatch` 下沉 `git-fast-objects.mjs` 瘦身 `edit-gate.mjs`，在零弱化门禁前提下显著降低 CPU 峰值与总耗时。
 

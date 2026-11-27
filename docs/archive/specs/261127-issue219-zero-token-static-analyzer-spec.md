@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: 零 Token 增量静态分析与多图证据抽取引擎
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-27
 issue: 219
 pr: null
-branch: feat/visual-studio-archify-v2
+branch: feat/zero-token-static-analyzer
 owner: plan-studio-b
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-studio-b-r3, round=3, sha=759b2d9b5ece, summary=Round 3 PASS: F1/F3/F4 genuinely closed (renderArchitectureMapFromRepo preserves caller diffOverlay/changedFiles contract keeping I986 + [Sandbox-C8] + checkExitCodeParity intact; BLOCKED_DIRTY_EVERGREEN_ARCHITECTURE_MAP removed; verifyArchitectureMapSync enforces zero-dirty-overlay via registered BLOCKED_ARCHITECTURE_MAP_DRIFT with parsed pf-visual-data JSON + stripped style/script inspection).)"
-related_prd: ../prd/261127-issue219-visual-studio-archify-v2-prd.md
+related_prd: ../../prd/261127-issue219-visual-studio-archify-v2-prd.md
 related_todo: ../todo/261127-issue219-zero-token-static-analyzer-todo.md
 high_risk_paths: [kit/]
 task_id: zero-token-static-analyzer
@@ -27,13 +27,13 @@ depends_on: []
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（跨模块公共库契约新增与高风险路径 `kit/` 演进；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-27` |
-| 分支 / Issue / PR | `feat/visual-studio-archify-v2` / #219 / 未关联 |
+| 分支 / Issue / PR | `feat/zero-token-static-analyzer` / #219 / 未关联 |
 | 负责人 / 内审状态 | plan-studio-b / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/todo/261127-issue219-zero-token-static-analyzer-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261127-issue219-visual-studio-archify-v2-prd.md` / `docs/archive/todo/261127-issue219-zero-token-static-analyzer-todo.md` |
 
 - **变更一句话**：提供零 LLM Token、纯 Node 18+ 的增量静态分析器、3 层 10 类图表证据抽取器、3-dot PR Materiality 差分过滤器及常青架构图零脏态校验，为 Wave 2 布局引擎与 Wave 3 Studio UI 提供统一实证数据底座。
 
@@ -154,10 +154,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C1: `kit/skills/lib/static-analyzer.mjs` 复用 `import-graph.mjs` 与 `doc-graph.mjs` 的 `findSccs`，在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 实现按 `relPath + blobSha/mtime` 的增量缓存，准确输出依赖图、`fanIn`/`fanOut`/cycles 与 Git 热度，工作区 `git status --porcelain` 保持为空（`node scripts/dev/fixtures.mjs --domain static-analyzer` 通过）。
-- [ ] C2: `kit/skills/lib/static-evidence.mjs` 对 10 类图表严格执行 3 层证据门控（Tier 1 常驻，Tier 2 中 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据不激活且返回空 Tab 为 0，Tier 3 `waterfall` 仅真实实测 span 激活），正反双向断言全过。
-- [ ] C3: `kit/skills/lib/diff-materiality.mjs` 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 保持 `renderArchitectureMapFromRepo` 既有参数契约（保 `I986` 与 `checkExitCodeParity` 有效），并单点由 `verifyArchitectureMapSync` 解析 `pf-visual-data` JSON 与剥离 `<style>`/`<script>` 后以既有 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`reason: 'dirty-diff-overlay'`）精准拦截含脏 diff 节点的常青 `docs/architecture-map.html`。
-- [ ] C4: `scripts/dev/fixtures-static-analyzer.mjs` 与 `scripts/dev/injections-data-static-analyzer.mjs` 覆盖 7 类异构仓库栈正反双向验证并全量捕获注入故障；同步更新 `docs/feature-map.json`、`docs/architecture-map.html` 与 `node scripts/equip.mjs . --check`，`node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs --domain static-analyzer` 退出码 `0`。
+- [x] C1: `kit/skills/lib/static-analyzer.mjs` 复用 `import-graph.mjs` 与 `doc-graph.mjs` 的 `findSccs`，在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 实现按 `relPath + blobSha/mtime` 的增量缓存，准确输出依赖图、`fanIn`/`fanOut`/cycles 与 Git 热度，工作区 `git status --porcelain` 保持为空（`node scripts/dev/fixtures.mjs --domain static-analyzer` 通过）。
+- [x] C2: `kit/skills/lib/static-evidence.mjs` 对 10 类图表严格执行 3 层证据门控（Tier 1 常驻，Tier 2 中 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据不激活且返回空 Tab 为 0，Tier 3 `waterfall` 仅真实实测 span 激活），正反双向断言全过。
+- [x] C3: `kit/skills/lib/diff-materiality.mjs` 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 保持 `renderArchitectureMapFromRepo` 既有参数契约（保 `I986` 与 `checkExitCodeParity` 有效），并单点由 `verifyArchitectureMapSync` 解析 `pf-visual-data` JSON 与剥离 `<style>`/`<script>` 后以既有 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`reason: 'dirty-diff-overlay'`）精准拦截含脏 diff 节点的常青 `docs/architecture-map.html`。
+- [x] C4: `scripts/dev/fixtures-static-analyzer.mjs` 与 `scripts/dev/injections-data-static-analyzer.mjs` 覆盖 7 类异构仓库栈正反双向验证并全量捕获注入故障；同步更新 `docs/feature-map.json`、`docs/architecture-map.html` 与 `node scripts/equip.mjs . --check`，`node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs --domain static-analyzer` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -173,5 +173,10 @@ flowchart LR
 ## 实现说明
 
 - **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+  - 将多语言导入解析从 `kit/skills/lib/static-gates.mjs` 下沉至 `kit/skills/lib/import-graph.mjs`（236 行），`static-gates.mjs` 瘦身至 651 行；在 `kit/skills/lib/doc-graph.mjs` 导出既有 Tarjan `findSccs`。
+  - 新增 `kit/skills/lib/static-analyzer.mjs`（371 行）：统一构建模块导入图、耦合指标（`fanIn`/`fanOut`/`inCycle`/`sccId`）、SCC 环与 Git 热度/标签/合并记录，按 `relPath + blobSha/mtime/size` 原子缓存于 `<gitCommonDir>/project-forge-flow/analysis-cache.json`（非 Git 回退 `.worktrees/.state/analysis-cache.json`），损坏自动重建且零工作区污染。
+  - 新增 `kit/skills/lib/static-evidence.mjs`（701 行）：对 3 层 10 类图表执行严格证据门控（Tier 1 常驻，Tier 2 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据归入 `skippedTabs` 零空 Tab，Tier 3 `waterfall` 仅真实实测 `telemetrySpans` 激活）。
+  - 新增 `kit/skills/lib/diff-materiality.mjs`（247 行）：基于 `git merge-base` 与 3-dot `<mergeBase>...<headRef>` 过滤 Schema/迁移必触发与纯文档/锁文件/`R100` 跳过，输出 1-hop 邻域并集与有界 `-`/`+` hunk。
+  - 加固 `kit/skills/lib/architecture-map.mjs`（292 行）：保持 `renderArchitectureMapFromRepo` 既有参数契约，在 `verifyArchitectureMapSync` 单点新增 `detectDirtyDiffOverlay` 双层校验（解析 `pf-visual-data` JSON + 剥离 `<style>`/`<script>` 扫描 DOM），以既有 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`reason: 'dirty-diff-overlay'`）精准拦截脏图。
+- **与草案的差异**：无设计偏离；`static-evidence.mjs` 合并覆盖 Prisma/SQL/TypeORM/Drizzle/SQLAlchemy/GORM/Diesel 与多语言类型抽取后为 701 行，严守单文件 `<= 800` 行及 `< 730` 紧文件红线。
+- **关联同步文件**：`scripts/dev/fixtures-static-analyzer.mjs`、`scripts/dev/injections-data-static-analyzer.mjs`、`docs/feature-map.json`、`docs/architecture-map.html`、`.agents/skills/`（经 `node scripts/equip.mjs .` 同步）。

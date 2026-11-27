@@ -19,6 +19,8 @@ import { listTaskLedgers } from './ledger.mjs'
 import { analyzePendingDecisions } from './pending-decisions.mjs'
 import { indexPlanDocs, isPlanDocApproved } from './plan-index.mjs'
 import { readSessionState, setTopicBriefKey } from './session-state.mjs'
+import { collectRepoVisualEvidenceSync } from './architecture-map.mjs'
+import { extractPlanDocProjection, selectRelevantPlanDocs } from './visual-brief-doc-extract.mjs'
 import {
   ALLOWED_PROTOTYPE_SCHEMES,
   BRIEF_SCHEMA_VERSION,
@@ -175,11 +177,17 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
         .map((s) => ({ key: s.key, rel: s.rel, status: s.status, done: s.done, dependsOn: s.dependsOn, scopeCount: s.scopeFiles.length }))
     : []
 
-  const relevantDocs = allDocs.filter((d) => !d.archived && (
-    (norm.taskId && d.taskId === norm.taskId)
-    || (masterRel && posixPath(d.rel) === posixPath(masterRel))
-    || (masterRel && d.kind === 'spec' && typeof d.data?.related_prd === 'string' && d.data.related_prd.includes(basename(masterRel)))
-  ))
+  const relevantDocs = selectRelevantPlanDocs({ allDocs, norm, masterRel, effWork })
+  const docProj = extractPlanDocProjection({
+    relevantDocs,
+    featureMap,
+    manualFeatureChanges: norm.featureChanges,
+  })
+
+  const mergedGoals = uniqClean([...norm.goals, ...docProj.goals])
+  const allMergedDecisions = uniqClean([...mergedDecisions, ...docProj.decisions])
+  const allMergedNonGoals = uniqClean([...mergedNonGoals, ...docProj.nonGoals])
+  const allTopicAnchors = uniqClean([...topicAnchors, ...docProj.scopeFiles])
 
   const livePendingDecisions = []
   const liveCritiqueRounds = []
@@ -192,7 +200,15 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
     })
     const rounds = parseCritiqueRounds(d.data, d.text, entry)
     if (rounds.length > 0) {
-      liveCritiqueRounds.push({ file: d.rel, rounds: rounds.length, lastVerdict: rounds[rounds.length - 1].verdict ?? 'unknown', approved: isPlanDocApproved(d) })
+      const last = rounds[rounds.length - 1]
+      const roundNum = Math.max(rounds.length, Number(last.round) || 0)
+      liveCritiqueRounds.push({
+        file: d.rel,
+        rounds: rounds.length,
+        lastRound: roundNum,
+        lastVerdict: last.verdict ?? 'unknown',
+        approved: isPlanDocApproved(d),
+      })
     }
   }
 
@@ -204,14 +220,32 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
   const confirmedState = resolveConfirmedState(norm, briefFingerprint)
   const featureList = Array.isArray(featureMap?.features) ? featureMap.features : []
   const domainAffected = norm.affectedDomains.length > 0 ? featureList.filter((f) => norm.affectedDomains.includes(f?.domain)).map((f) => f.id) : []
-  const modifiedFeatureIds = uniqClean([...norm.affectedFeatures, ...domainAffected])
+  const modifiedFeatureIds = uniqClean([...norm.affectedFeatures, ...domainAffected, ...docProj.autoModifiedFeatureIds])
   const verdictStatus = confirmedState === 'confirmed' ? '已确认' : (confirmedState === 'stale' ? '待重审' : '草稿')
+
+  const latestCritique = liveCritiqueRounds.length > 0
+    ? liveCritiqueRounds.reduce((best, cur) => ((cur.lastRound || 0) >= (best.lastRound || 0) ? cur : best), liveCritiqueRounds[0])
+    : null
+  const critiqueStatusText = latestCritique
+    ? (latestCritique.lastVerdict === 'passed'
+        ? `内审 R${latestCritique.lastRound} 通过`
+        : (latestCritique.lastVerdict === 'rejected' ? `内审 R${latestCritique.lastRound} 待返工` : `内审 R${latestCritique.lastRound}`))
+    : '未内审'
+
   const verdictSummary = norm.verdict || (confirmedState === 'stale'
     ? '简报在确认后发生变更，请复核更新并重新确认。'
-    : `${norm.title} — ${mergedDecisions.length} 项已拍板，${mergedOpen.length + livePendingDecisions.length} 项待确认，${childSlices.length} 个切片。`)
+    : (norm.kind === 'master-prd'
+        ? `${norm.title} — ${allMergedDecisions.length} 项已拍板，${mergedOpen.length + livePendingDecisions.length} 项待确认，${childSlices.length} 个切片。`
+        : `${norm.title} — 验收项 ${docProj.criteria.length} 条 · 涉及 ${docProj.scopeFiles.length} 文件 · ${critiqueStatusText}。`))
 
   const walkthrough = buildPerStepWalkthrough({
-    norm, mergedDecisions, mergedOpen, livePendingDecisions, childSlices, modifiedFeatureIds, featureList,
+    norm: { ...norm, goals: mergedGoals },
+    mergedDecisions: allMergedDecisions,
+    mergedOpen,
+    livePendingDecisions,
+    childSlices: norm.kind === 'master-prd' ? childSlices : [],
+    modifiedFeatureIds,
+    featureList,
   })
 
   // Pure relative parent/child brief links (zero absolute paths or homedir leaks)
@@ -232,17 +266,29 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
     : []
 
   const masterPrdInfo = matchingMasterPrd ? { rel: matchingMasterPrd.rel, status: matchingMasterPrd.status, approved: isPlanDocApproved(matchingMasterPrd) } : null
+  const evBundle = featureMapSource !== 'none'
+    ? collectRepoVisualEvidenceSync({
+        workRoot: effWork,
+        cacheRoot: effMain,
+        featureMap,
+        analysis,
+        evidence,
+      })
+    : { analysis, evidence }
+  const resolvedAnalysis = evBundle.analysis
+  const resolvedEvidence = evBundle.evidence
+
   const visualModel = buildVisualModel({
     featureMap,
-    analysis,
-    evidence,
+    analysis: resolvedAnalysis,
+    evidence: resolvedEvidence,
     diffOverlay: {
       modified: modifiedFeatureIds,
       impacted: prDiff?.impactedFeatures ?? [],
-      changedFiles: topicAnchors,
+      changedFiles: allTopicAnchors,
       addedNodes: norm.addedFeatures,
       removed: norm.removedFeatures,
-      featureChanges: norm.featureChanges,
+      featureChanges: docProj.mergedFeatureChanges,
     },
     mode: 'visual-brief',
     title: `${norm.title} — 实时规划简报`,
@@ -253,15 +299,19 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
       scopeChips: [
         `简报:${norm.briefKey}`, `类型:${norm.kind}`, `状态:${verdictStatus}`, `拓扑:${featureMapSource}`,
         ...(norm.parentBriefKey ? [`父简报:${norm.parentBriefKey}`] : []),
-        ...(childSlices.length > 0 ? [`切片:${childSlices.filter((s) => s.done).length}/${childSlices.length}`] : []),
-        `原型:${norm.prototypes.length}`,
+        ...(norm.kind === 'master-prd' && childSlices.length > 0 ? [`切片:${childSlices.filter((s) => s.done).length}/${childSlices.length}`] : []),
+        ...(norm.kind !== 'master-prd' && docProj.criteria.length > 0 ? [`验收项:${docProj.criteria.length}`] : []),
+        ...(docProj.scopeFiles.length > 0 ? [`文件:${docProj.scopeFiles.length}`] : []),
+        ...(norm.prototypes.length > 0 ? [`原型:${norm.prototypes.length}`] : []),
       ],
       metrics: [
         { label: '状态', value: verdictStatus },
         { label: '受影响模块', value: String(modifiedFeatureIds.length + norm.addedFeatures.length + norm.removedFeatures.length) },
-        { label: '已拍板', value: String(mergedDecisions.length) },
+        { label: '已拍板', value: String(allMergedDecisions.length) },
         { label: '待确认', value: String(mergedOpen.length + livePendingDecisions.length) },
-        { label: '切片进度', value: `${childSlices.filter((s) => s.done).length}/${childSlices.length}` },
+        norm.kind === 'master-prd'
+          ? { label: '切片进度', value: `${childSlices.filter((s) => s.done).length}/${childSlices.length}` }
+          : { label: '验收清单', value: `${docProj.criteria.filter((c) => c.checked).length}/${docProj.criteria.length}` },
         { label: '方案原型', value: String(norm.prototypes.length) },
       ],
       walkthrough: walkthrough.length > 0 ? walkthrough : undefined,
@@ -270,22 +320,27 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
         kind: norm.kind,
         confirmedState,
         verdict: verdictSummary,
-        goals: norm.goals,
-        nonGoals: mergedNonGoals,
+        specSummaryLine: docProj.specSummaryLine || '',
+        goals: mergedGoals,
+        nonGoals: allMergedNonGoals,
         flowDeltas: norm.flowDeltas,
         masterPrd: masterPrdInfo,
         parentBriefHref,
         childBriefLinks,
-        childSlices,
+        childSlices: norm.kind === 'master-prd' ? childSlices : [],
         activeWorktrees,
-        mergedDecisions,
+        mergedDecisions: allMergedDecisions,
         mergedOpen,
         pendingDecisions: livePendingDecisions,
         critiqueRounds: liveCritiqueRounds,
+        critiqueStatusText: latestCritique ? critiqueStatusText : '',
+        criteria: docProj.criteria,
+        scopeFiles: docProj.scopeFiles,
         prDiff,
       },
     },
   })
+  visualModel.analysis = resolvedAnalysis || null
   if (visualModel.briefData) {
     const groups = { added: [], modified: [], removed: [], impacted: [] }
     for (const n of visualModel.tree.nodes) {
@@ -302,7 +357,8 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
       childBriefLinks,
       childSlices, sliceGraphOk: sliceEval.ok, sliceGraphErrors: sliceEval.errors.length,
       activeWorktrees, pendingDecisions: livePendingDecisions, critiqueRounds: liveCritiqueRounds,
-      mergedDecisions, mergedNonGoals, mergedOpen,
+      mergedDecisions: allMergedDecisions, mergedNonGoals: allMergedNonGoals, mergedOpen,
+      criteria: docProj.criteria, scopeFiles: docProj.scopeFiles,
     },
     visualModel,
   }

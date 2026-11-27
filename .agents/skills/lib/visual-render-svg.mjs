@@ -399,8 +399,18 @@ export function buildIndexedVisualPayload(model, {
         if (cpl.cycleMembers?.length) item.cycleMembers = cpl.cycleMembers
         if (cpl.churnCommits) item.churnCommits = cpl.churnCommits
         if (n.description) item.description = n.description
-        if (n.changeDetail) item.changeDetail = n.changeDetail
-        if (n.impactReasons?.length) item.impactReasons = n.impactReasons
+        if (item.diffState !== 'context' && n.changeDetail && typeof n.changeDetail === 'object') {
+          const cd = {}
+          if (n.changeDetail.before) cd.before = n.changeDetail.before
+          if (n.changeDetail.after) cd.after = n.changeDetail.after
+          if (n.changeDetail.note) cd.note = n.changeDetail.note
+          if (n.changeDetail.reason) cd.reason = n.changeDetail.reason
+          if (n.changeDetail.replacementId) cd.replacementId = n.changeDetail.replacementId
+          if (Array.isArray(n.changeDetail.scopeFiles) && n.changeDetail.scopeFiles.length > 0) cd.scopeFiles = n.changeDetail.scopeFiles.slice(0, 10)
+          if (Array.isArray(n.changeDetail.criteriaRefs) && n.changeDetail.criteriaRefs.length > 0) cd.criteriaRefs = n.changeDetail.criteriaRefs.slice(0, 8)
+          if (Object.keys(cd).length > 0) item.changeDetail = cd
+        }
+        if (item.diffState !== 'context' && n.impactReasons?.length) item.impactReasons = n.impactReasons.slice(0, 4)
         if (entries.length) item.entrypoints = entries
         if (mods.length) item.modules = mods
         if (tests.length) item.tests = tests
@@ -412,7 +422,7 @@ export function buildIndexedVisualPayload(model, {
         const es = e.edgeState && e.edgeState !== 'context' ? e.edgeState : ''
         return mode === 'architecture-map' && LAZY_TAB_RENDER
           ? { fromId: e.fromId, toId: e.toId, ...(es ? { edgeState: es } : {}) }
-          : { fromId: e.fromId, toId: e.toId, ...(es ? { edgeState: es } : {}), d: e.pathD || '' }
+          : { fromId: e.fromId, toId: e.toId, ...(es ? { edgeState: es } : {}), d: roundPathD(e.pathD) }
       }),
     },
     diagrams,

@@ -11,7 +11,7 @@ import { basename, join, resolve } from 'node:path'
 
 import { readFeatureMapSafe } from './feature-map.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
-import { MAX_ANALYZE_FILE_BYTES, analyzeRepoStatic } from './static-analyzer.mjs'
+import { MAX_ANALYZE_FILE_BYTES, analyzeRepoStatic, analyzeRepoStaticSync } from './static-analyzer.mjs'
 import { stripCodeCommentsLines } from './static-gates-lexer.mjs'
 
 export const DIAGRAM_TIERS = Object.freeze({
@@ -654,15 +654,17 @@ function extractWaterfallEvidence(telemetrySpans) {
 }
 
 /**
- * 3 层 10 类图表静态证据抽取主入口：返回 `{ activeTabs, skippedTabs, diagrams }`，确保零空 Tab。
+ * 同步 3 层 10 类图表静态证据抽取主入口：返回 `{ activeTabs, skippedTabs, diagrams }`，确保零空 Tab。
  */
-export async function extractMultiDiagramEvidence(repoRoot, {
+export function extractMultiDiagramEvidenceSync(repoRoot, {
   analysis = null,
   featureMap = null,
   telemetrySpans = null,
+  cacheRoot = null,
+  useCache = true,
 } = {}) {
   const root = resolve(String(repoRoot || process.cwd()))
-  const resolvedAnalysis = analysis ?? await analyzeRepoStatic(root)
+  const resolvedAnalysis = analysis ?? analyzeRepoStaticSync(root, { cacheRoot, useCache })
   const fmLoaded = featureMap ? { data: featureMap } : readFeatureMapSafe(root)
   const fmData = fmLoaded?.data ?? null
 
@@ -707,4 +709,25 @@ export async function extractMultiDiagramEvidence(repoRoot, {
   }
 
   return { activeTabs, skippedTabs, diagrams }
+}
+
+/**
+ * 3 层 10 类图表静态证据抽取主入口（异步）：返回 `{ activeTabs, skippedTabs, diagrams }`，确保零空 Tab。
+ */
+export async function extractMultiDiagramEvidence(repoRoot, {
+  analysis = null,
+  featureMap = null,
+  telemetrySpans = null,
+  cacheRoot = null,
+  useCache = true,
+} = {}) {
+  const root = resolve(String(repoRoot || process.cwd()))
+  const resolvedAnalysis = analysis ?? await analyzeRepoStatic(root, { cacheRoot, useCache })
+  return extractMultiDiagramEvidenceSync(root, {
+    analysis: resolvedAnalysis,
+    featureMap,
+    telemetrySpans,
+    cacheRoot,
+    useCache,
+  })
 }

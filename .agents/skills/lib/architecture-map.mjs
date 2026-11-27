@@ -8,8 +8,8 @@ import { FEATURE_MAP_REL, readFeatureMapStatus } from './feature-map.mjs'
 import { computeFeatureMapFingerprint, verifyArchitectureMapHeader } from './feature-map-graph.mjs'
 import { posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { readDecisions } from './profile.mjs'
-import { analyzeRepoStatic } from './static-analyzer.mjs'
-import { extractMultiDiagramEvidence } from './static-evidence.mjs'
+import { analyzeRepoStatic, analyzeRepoStaticSync } from './static-analyzer.mjs'
+import { extractMultiDiagramEvidenceSync } from './static-evidence.mjs'
 import { buildVisualModel } from './visual-layout.mjs'
 import { renderVisualHtml } from './visual-render.mjs'
 
@@ -220,6 +220,66 @@ export function renderArchitectureMapFromRepo(repoRoot, {
   }
 }
 
+/** 单源视觉证据采集原语（异步，供 `architecture-map.html` 与 `verify-tools render` 共用）。 */
+export async function collectRepoVisualEvidence({
+  workRoot,
+  cacheRoot = null,
+  featureMap = null,
+  telemetrySpans = null,
+  useCache = true,
+  analysis = null,
+  evidence = null,
+} = {}) {
+  let resolvedAnalysis = analysis || null
+  let resolvedEvidence = evidence || null
+  if (!workRoot || (resolvedAnalysis && resolvedEvidence)) {
+    return { analysis: resolvedAnalysis, evidence: resolvedEvidence }
+  }
+  try {
+    if (!resolvedAnalysis) resolvedAnalysis = await analyzeRepoStatic(workRoot, { useCache, cacheRoot })
+    if (!resolvedEvidence) {
+      resolvedEvidence = extractMultiDiagramEvidenceSync(workRoot, {
+        analysis: resolvedAnalysis,
+        featureMap,
+        telemetrySpans,
+        cacheRoot,
+        useCache,
+      })
+    }
+  } catch { /* 静态分析异常时安全降级为功能地图常驻两图 */ }
+  return { analysis: resolvedAnalysis, evidence: resolvedEvidence }
+}
+
+/** 单源视觉证据采集原语（同步，供 `visual-brief.mjs` 实时投影与 `architecture-map.html` 同源对齐）。 */
+export function collectRepoVisualEvidenceSync({
+  workRoot,
+  cacheRoot = null,
+  featureMap = null,
+  telemetrySpans = null,
+  useCache = true,
+  analysis = null,
+  evidence = null,
+} = {}) {
+  let resolvedAnalysis = analysis || null
+  let resolvedEvidence = evidence || null
+  if (!workRoot || (resolvedAnalysis && resolvedEvidence)) {
+    return { analysis: resolvedAnalysis, evidence: resolvedEvidence }
+  }
+  try {
+    if (!resolvedAnalysis) resolvedAnalysis = analyzeRepoStaticSync(workRoot, { useCache, cacheRoot })
+    if (!resolvedEvidence) {
+      resolvedEvidence = extractMultiDiagramEvidenceSync(workRoot, {
+        analysis: resolvedAnalysis,
+        featureMap,
+        telemetrySpans,
+        cacheRoot,
+        useCache,
+      })
+    }
+  } catch { /* 静态分析异常时安全降级为功能地图常驻两图 */ }
+  return { analysis: resolvedAnalysis, evidence: resolvedEvidence }
+}
+
 /** 异步全量静态分析 + 3 层 10 类图表证据抽取，渲染干净常青 Studio `docs/architecture-map.html`。 */
 export async function renderArchitectureMapAsync(repoRoot, {
   outRel = ARCHITECTURE_MAP_REL,
@@ -236,16 +296,12 @@ export async function renderArchitectureMapAsync(repoRoot, {
   if (!fmStatus.exists || fmStatus.corrupt || !fmStatus.raw) {
     return renderArchitectureMapFromRepo(root, { outRel, ignoreOptOut, write })
   }
-  let analysis = null
-  let evidence = null
-  try {
-    analysis = await analyzeRepoStatic(root, { useCache })
-    evidence = await extractMultiDiagramEvidence(root, {
-      analysis,
-      featureMap: fmStatus.raw,
-      telemetrySpans,
-    })
-  } catch { /* 静态分析异常时安全降级为功能地图常驻两图 */ }
+  const { analysis, evidence } = await collectRepoVisualEvidence({
+    workRoot: root,
+    featureMap: fmStatus.raw,
+    telemetrySpans,
+    useCache,
+  })
 
   return renderArchitectureMapFromRepo(root, {
     outRel,

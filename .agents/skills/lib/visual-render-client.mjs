@@ -3,7 +3,7 @@
 export const SAFE_FROM_BRIEF_RE_SRC = '^[a-z0-9\\u4e00-\\u9fa5._-]{1,80}$'
 
 /** 返回核心交互脚本（单一选中模型、全拓扑图卡片拖拽重连边、按图能力动态底栏、统一 6 段右侧抽屉与一键复制）。 */
-export function buildClientCoreScript({ isBrief = true } = {}) {
+export function buildClientCoreScript({ isBrief = true, hasDiff = isBrief } = {}) {
   return `
   const D=document,W=window,M=Math,G=(i)=>D.getElementById(i),Q=(s,r)=>(r||D).querySelectorAll(s),CL=(t,s)=>t&&t.closest?t.closest(s):null;
   const A=(e,k)=>e?e.getAttribute(k):'',SA=(e,k,v)=>{if(e)e.setAttribute(k,v);},T=(e,c,b)=>{if(e)e.classList.toggle(c,Boolean(b));},H=(e,b)=>{if(e)e.hidden=Boolean(b);};
@@ -166,10 +166,25 @@ export function buildClientCoreScript({ isBrief = true } = {}) {
     const rel=(ls,em)=>ls.length?dv('pp-rel-list',ls.slice(0,10).map((it)=>bt('pp-jump','data-jump-tab="'+E(it.tab)+'" data-jump-id="'+E(it.id)+'"','<span class="pp-jump-main">'+E(it.label)+'</span>'+(it.meta?'<span class="pp-jump-meta">'+E(it.meta)+'</span>':'')+'<span class="pp-jump-arr">-&gt;</span>')).join('')):dv('pp-empty-hint',em);
     const anc=(ls)=>ls.length?'<ul class="pp-list">'+ls.map((a)=>a.copy?'<li>'+bt('pp-copy-row','data-copy-path="'+E(a.copy)+'" title="点击复制路径"','<span class="mono-path'+(a.isDoc?' is-doc':'')+'">'+E(a.text)+'</span><span class="pp-copy-st">'+CP_ICO+'</span>')+'</li>':'<li class="mono-path'+(a.isDoc?' is-doc':'')+'">'+E(a.text)+'</li>').join('')+'</ul>':'';
     const exA=t===AR?bt('pf-btn-sec'+(S.re?' '+IA:''),'data-act="toggle-reach"','追踪波及 ('+(sp.reachCount||0)+')')+bt('pf-btn-sec'+(S.rm?' '+IA:''),'data-act="start-route"','路径探测 (R)'):(sp.archHitId?bt('pf-btn-sec','data-jump-node="'+E(sp.archHitId)+'"','查看所属架构模块 -&gt;'):'');
+    ${hasDiff ? `const isDiffNode=Boolean(sp.diffState&&sp.diffState!=='context');
+    let chgSec='';
+    if(isDiffNode){
+      const cd=sp.changeDetail||{},irs=sp.impactReasons||[],cp=[];
+      if(cd.before&&cd.after)cp.push('<div class="pf-diff-pair"><div class="pf-before"><span class="pf-tag-before">改前</span><span>'+E(cd.before)+'</span></div><div class="pf-after"><span class="pf-tag-after">改后</span><span>'+E(cd.after)+'</span></div></div>');
+      else if(cd.reason)cp.push('<p class="pp-desc">'+E(cd.reason)+(cd.replacementId?' · 替代：'+E(cd.replacementId):'')+'</p>');
+      else if(cd.note)cp.push('<p class="pp-desc">'+E(cd.note)+'</p>');
+      if(irs.length)cp.push('<p class="pp-desc pp-impact-line">波及原因：'+E(irs.join('；'))+'</p>');
+      if(cd.criteriaRefs&&cd.criteriaRefs.length)cp.push('<div class="pp-criteria-row">'+cd.criteriaRefs.map((c)=>'<span class="pf-tag-crit">'+E(c)+'</span>').join('')+'</div>');
+      if(cd.scopeFiles&&cd.scopeFiles.length)cp.push(dv('pp-scope-block','<div class="pp-sub-lbl">命中变更文件 ('+cd.scopeFiles.length+')</div>'+anc(cd.scopeFiles.slice(0,4).map((f)=>({text:f,copy:f})))+(cd.scopeFiles.length>4?'<details class="pf-more-fold"><summary>展开其余 '+(cd.scopeFiles.length-4)+' 个文件</summary>'+anc(cd.scopeFiles.slice(4).map((f)=>({text:f,copy:f})))+'</details>':'')));
+      if(!cp.length)cp.push('<p class="pp-desc">当前模块处于「'+E(sp.pill)+'」状态。</p>');
+      chgSec=dv('pp-section pp-change-sec',dv('pp-sec-title','本次变更与波及说明')+cp.join(''));
+    }
+    const bpBtn=${isBrief ? `isDiffNode?bt('pf-btn-emph','data-jump-blueprint="'+E(sp.id)+'"','查看变更蓝图 -&gt;'):''` : `''`};` : ''}
     ht.innerHTML=dv('pp-header',dv('pp-eyebrow','<span class="mono-id">'+E(sp.id)+'</span><div style="display:flex;align-items:center;gap:6px"><span class="pf-pill'+(sp.pillCls?' '+E(sp.pillCls):'')+'">'+E(sp.pill)+'</span>'+bt('pf-btn-icon','id="pf-insp-close" data-act="close-inspector" title="关闭详情 (Esc)"','x')+'</div>')+'<h2 class="pp-title">'+E(sp.title)+'</h2>'+(sp.desc?'<p class="pp-desc">'+E(sp.desc)+'</p>':''))
       +dv('pp-metrics',sp.metrics.map(([v,l,w])=>dv('pp-metric','<span class="pp-m-val'+(w?' is-warn':'')+'">'+E(v)+'</span><span class="pp-m-lbl">'+E(l)+'</span>')).join(''))
+      +dv('pp-actions',bt('pf-btn-emph','data-act="zoom-node"','居中放大')${hasDiff ? '+bpBtn' : ''}+exA)
+      ${hasDiff ? '+chgSec' : ''}
       +(sp.cycleWarn?dv('pp-section',dv('pp-sec-title','循环成员告警')+dv('mono-path',E(sp.cycleWarn))):'')
-      +dv('pp-actions',bt('pf-btn-emph','data-act="zoom-node"','居中放大')+exA)
       +dv('pp-section',dv('pp-sec-title',E(sp.upTitle))+rel(sp.upItems,sp.upEmpty))
       +dv('pp-section',dv('pp-sec-title',E(sp.dnTitle))+rel(sp.dnItems,sp.dnEmpty))
       +(sp.anchors&&sp.anchors.length?dv('pp-section',dv('pp-sec-title',E(sp.anchorTitle))+anc(sp.anchors)):'')
@@ -290,10 +305,11 @@ export function buildClientCoreScript({ isBrief = true } = {}) {
     const cp=c('[data-copy-path]');if(cp){flashCopied(cp,cp.querySelector('.pp-copy-st'));return copyText(A(cp,'data-copy-path'),'已复制路径');}
     const ib=c('[data-intent]');if(ib){S.ai=A(ib,'data-intent');return renderInsp();}
     const qb=c('[data-qa-intent]');if(qb){S.ai=A(qb,'data-qa-intent');return openQa(lastEx);}
-    ${isBrief ? `const df=c('[data-domain-filter]');if(df){S.df=A(df,'data-domain-filter')||'all';Q('[data-domain-filter]').forEach((b)=>T(b,IA,(A(b,'data-domain-filter')||'all')===S.df));Q('[data-slice-domain]').forEach((x)=>H(x,S.df!=='all'&&A(x,'data-slice-domain')!==S.df));return;}
-    const ff=c('[data-diff-filter]');if(ff){const s=A(ff,'data-diff-filter')||'';S.ff=S.ff===s?'':s;Q('[data-diff-filter]').forEach((b)=>T(b,IA,Boolean(S.ff)&&A(b,'data-diff-filter')===S.ff));Q('[data-diff-state]').forEach((x)=>H(x,Boolean(S.ff)&&A(x,'data-diff-state')!==S.ff));return;}
+    ${isBrief ? `const df=c('[data-domain-filter]');if(df){S.df=A(df,'data-domain-filter')||'all';Q('[data-domain-filter]').forEach((b)=>T(b,IA,(A(b,'data-domain-filter')||'all')===S.df));Q('[data-slice-domain]').forEach((x)=>H(x,(S.df!=='all'&&A(x,'data-slice-domain')!==S.df)||(Boolean(S.ff)&&A(x,'data-diff-state')!==S.ff)));return;}
+    const ff=c('[data-diff-filter]');if(ff){const s=A(ff,'data-diff-filter')||'';S.ff=S.ff===s?'':s;Q('[data-diff-filter]').forEach((b)=>T(b,IA,Boolean(S.ff)&&A(b,'data-diff-filter')===S.ff));Q('[data-diff-state]').forEach((x)=>H(x,(S.df!=='all'&&A(x,'data-slice-domain')!==S.df)||(Boolean(S.ff)&&A(x,'data-diff-state')!==S.ff)));return;}
+    const jbp=c('[data-jump-blueprint]');if(jbp){const tid=A(jbp,'data-jump-blueprint');S.v='brief';S.df='all';S.ff='';Q('[data-domain-filter]').forEach((b)=>T(b,IA,(A(b,'data-domain-filter')||'all')==='all'));Q('[data-diff-filter]').forEach((b)=>T(b,IA,false));Q('[data-slice-id]').forEach((x)=>H(x,false));syncUI();const card=Array.from(Q('[data-slice-id]')).find((x)=>A(x,'data-slice-id')===tid);if(card){if(card.scrollIntoView)card.scrollIntoView({behavior:'smooth',block:'center'});T(card,'is-flash-focus',false);void card.offsetWidth;T(card,'is-flash-focus',true);clearTimeout(card._ft);card._ft=setTimeout(()=>T(card,'is-flash-focus',false),1600);}return;}
     const pt=c('[data-proto-tab]'),pm=c('[data-proto-mode]');if(pt||pm){const gd=G('pf-proto-grid');if(!gd)return;Q('[data-proto-tab],[data-proto-mode]').forEach((b)=>T(b,IA,false));if(pm){T(pm,IA,true);T(gd,'is-compare',true);Q('.pf-proto-card',gd).forEach((x)=>H(x,false));}else{T(pt,IA,true);T(gd,'is-compare',false);const ix=A(pt,'data-proto-tab');Q('.pf-proto-card',gd).forEach((x)=>H(x,A(x,'data-proto-index')!==ix));}return;}
-    if(c('#btn-jump-diff-tree')){S.v='canvas';S.d=AR;return syncUI();}` : ''}
+    if(c('#btn-jump-diff-tree')){S.v='canvas';S.d=AR;if(DM.hasActiveDiff)S.od=true;const fd=nodes.find((n)=>n.diffState==='added'||n.diffState==='modified'||n.diffState==='removed')||nodes.find((n)=>n.diffState==='impacted');if(fd){S.sel={tab:AR,id:fd.id};S.io=true;tabChips(AR);}syncUI();if(fd)focusCam(AR,fd.id);return;}` : ''}
     if(c('#btn-cmdk'))return openCmdk();if(c('#cmdk-close'))return H(G('pf-cmdk'),true);
     if(c('#btn-walk-start')){S.wi=0;return renderWalk();}
     if(c('#walk-prev')){S.wi=(S.wi-1+wk.length)%wk.length;return renderWalk();}

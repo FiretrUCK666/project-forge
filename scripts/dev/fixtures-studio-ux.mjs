@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Script } from 'node:vm'
 
-import { renderArchitectureMapAsync, renderArchitectureMapFromRepo } from '../../kit/skills/lib/architecture-map.mjs'
+import { detectDirtyDiffOverlay, renderArchitectureMapAsync, renderArchitectureMapFromRepo } from '../../kit/skills/lib/architecture-map.mjs'
 import { extractMultiDiagramEvidence } from '../../kit/skills/lib/static-evidence.mjs'
 import { analyzeRepoStatic } from '../../kit/skills/lib/static-analyzer.mjs'
 import { buildVisualModel } from '../../kit/skills/lib/visual-layout.mjs'
@@ -421,6 +421,69 @@ export function registerStudioUxCases(cases) {
       const asyncArch = await renderArchitectureMapAsync(dir, { write: false })
       if (!asyncArch.ok || asyncArch.bytes >= 180 * 1024) {
         return `renderArchitectureMapAsync 异常：ok=${asyncArch.ok} bytes=${asyncArch.bytes}`
+      }
+      return true
+    } finally {
+      rmTree(dir)
+    }
+  }])
+
+  cases.push(['[StudioUX-BriefParity] Brief 多图证据对齐、右侧抽屉变更说明与双向回跳、干净 architecture-map 反例', async () => {
+    const dir = makeRichMultiDiagramRepo()
+    try {
+      // 1. 正向：Brief 未显式传 analysis/evidence 时自动对齐多图静态证据，并具备双向跳转与抽屉变更说明
+      const res = upsertVisualBrief(dir, {
+        briefKey: 'parity-check',
+        kind: 'task',
+        taskId: 'parity-check',
+        title: '多图对齐与抽屉回跳实证',
+        affectedFeatures: ['auth'],
+        featureChanges: {
+          auth: { state: 'modified', before: '旧鉴权基线', after: '无状态双轨令牌' },
+        },
+      })
+      const briefHtml = readFileSync(res.htmlPath, 'utf8')
+      if (res.bytes >= 180 * 1024) return `自动注入多图证据后的 Brief HTML 超出 180 KB：${res.bytes} bytes`
+
+      const briefData = parseVisualDataJson(briefHtml)
+      if (!briefData || !Array.isArray(briefData.activeTabs) || briefData.activeTabs.length < 4) {
+        return `Brief 未自动对齐多图证据 Tab（期望 >=4）：${JSON.stringify(briefData?.activeTabs)}`
+      }
+      const tabIds = briefData.activeTabs.map((t) => t.id)
+      for (const expectedTab of ['architecture', 'workflow', 'tree', 'erd']) {
+        if (!tabIds.includes(expectedTab)) return `Brief 缺少对齐证据 Tab "${expectedTab}"：${JSON.stringify(tabIds)}`
+      }
+      const authNode = briefData.tree?.nodes?.find((n) => n.id === 'auth')
+      const stateNode = briefData.tree?.nodes?.find((n) => n.id === 'state-engine')
+      if (!authNode?.changeDetail?.before || !authNode?.changeDetail?.after) {
+        return `pf-visual-data 缺少修改节点 changeDetail：${JSON.stringify(authNode)}`
+      }
+      if (stateNode?.diffState !== 'impacted' || !(stateNode?.impactReasons?.length > 0)) {
+        return `pf-visual-data 缺少受波及节点 impactReasons：${JSON.stringify(stateNode)}`
+      }
+      if (!briefHtml.includes('data-slice-id="auth"') || !briefHtml.includes('data-slice-id="state-engine"')) {
+        return '变更蓝图切片卡片缺少 data-slice-id 双向跳转锚点'
+      }
+      const briefJs = extractInlineScripts(briefHtml).join('\n')
+      for (const token of ['本次变更与波及说明', 'data-jump-blueprint', '查看变更蓝图', 'is-flash-focus', 'data-slice-id']) {
+        if (!briefJs.includes(token)) return `Brief 客户端脚本缺少抽屉变更说明或双向回跳逻辑：${token}`
+      }
+      for (const code of extractInlineScripts(briefHtml)) {
+        try { new Script(code) } catch (err) { return `Brief 内联 <script> 语法错误：${err.message}` }
+      }
+
+      // 2. 反例：常青 architecture-map 必须保持 0 脏标、无虚假变更说明且无 Brief 专属回跳按钮
+      const cleanArch = await renderArchitectureMapAsync(dir, { write: false })
+      if (!cleanArch.ok || !cleanArch.html) return '常青 architecture-map 渲染失败'
+      const dirty = detectDirtyDiffOverlay(cleanArch.html)
+      if (dirty.dirty) return `常青 architecture-map 存在脏 diff 覆盖：${dirty.detail}`
+      const cleanData = parseVisualDataJson(cleanArch.html)
+      if (cleanData.tree.nodes.some((n) => n.diffState !== 'context' || n.changeDetail || (n.impactReasons && n.impactReasons.length > 0))) {
+        return '常青 architecture-map 节点不应出现非 context 或 changeDetail/impactReasons'
+      }
+      const cleanJs = extractInlineScripts(cleanArch.html).join('\n')
+      if (cleanJs.includes('data-jump-blueprint') || cleanJs.includes('查看变更蓝图')) {
+        return '常青 architecture-map 不应泄露 Brief 专属「查看变更蓝图」回跳按钮'
       }
       return true
     } finally {

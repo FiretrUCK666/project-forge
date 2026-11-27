@@ -196,7 +196,18 @@ export function computeDiffOverlay(featureMap, diffOverlay = {}) {
     if (!fc || typeof fc !== 'object') continue
     const st = DIFF_STATES.includes(fc.state) ? fc.state : (fc.reason || fc.replacementId ? 'removed' : 'modified')
     const prev = changeDetails.get(fid) || {}
-    changeDetails.set(fid, { state: st, note: String(fc.note ?? prev.note ?? '').trim(), before: String(fc.before ?? prev.before ?? '').trim(), after: String(fc.after ?? prev.after ?? '').trim(), reason: String(fc.reason ?? prev.reason ?? '').trim(), replacementId: String(fc.replacementId ?? prev.replacementId ?? '').trim() })
+    const scopeFiles = normRelArray(fc.scopeFiles ?? prev.scopeFiles)
+    const criteriaRefs = normArray(fc.criteriaRefs ?? prev.criteriaRefs)
+    changeDetails.set(fid, {
+      state: st,
+      note: String(fc.note ?? prev.note ?? '').trim(),
+      before: String(fc.before ?? prev.before ?? '').trim(),
+      after: String(fc.after ?? prev.after ?? '').trim(),
+      reason: String(fc.reason ?? prev.reason ?? '').trim(),
+      replacementId: String(fc.replacementId ?? prev.replacementId ?? '').trim(),
+      ...(scopeFiles.length > 0 ? { scopeFiles } : {}),
+      ...(criteriaRefs.length > 0 ? { criteriaRefs } : {}),
+    })
     if (st === 'removed') removedSet.add(fid)
     else if (st === 'added') addedSet.add(fid)
     else if (st === 'modified') modifiedSet.add(fid)

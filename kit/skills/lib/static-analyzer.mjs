@@ -6,15 +6,17 @@
  * 增量缓存落盘至 `<gitCommonDir>/project-forge-flow/analysis-cache.json`（零工作区污染）。
  */
 
-import { existsSync, statSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { findSccs } from './doc-graph.mjs'
 import {
-  BROAD_CODE_EXT_RE, gitLsFilesTextAndCode, gitRun, gitRunBuffer, posixPath,
-  readJsonSafe, readTextSafe, writeJsonAtomic,
+  BROAD_CODE_EXT_RE, COMMON_SKIP_DIRS, gitLsFilesTextAndCode, gitRun, gitRunBuffer,
+  isMacOsJunkPath, posixPath, readJsonSafe, readTextSafe, writeJsonAtomic,
 } from './git.mjs'
-import { readHeadFast, resolveGitDirFast } from './git-fast.mjs'
+import { readGitIndexPathsFast, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
+import { isCleanWorktreeFast } from './git-status-fast.mjs'
 import { buildDirFileIndex, extractImportsForArch, resolveGoModules, resolveLocalImportTarget } from './import-graph.mjs'
 import { extractSymbols, isSymbolCandidatePath } from './symbol-index.mjs'
 
@@ -37,8 +39,8 @@ function resolveCommonGitDir(repoRoot) {
  * Git 仓落在 `<gitCommonDir>/project-forge-flow/analysis-cache.json`，
  * 非 Git 仓回退 `<repoRoot>/.worktrees/.state/analysis-cache.json`。
  */
-export function resolveAnalysisCachePath(repoRoot) {
-  const root = resolve(String(repoRoot || process.cwd()))
+export function resolveAnalysisCachePath(repoRoot, cacheRoot = null) {
+  const root = resolve(String(cacheRoot || repoRoot || process.cwd()))
   const commonDir = resolveCommonGitDir(root)
   if (commonDir) return join(commonDir, 'project-forge-flow', 'analysis-cache.json')
   return join(root, '.worktrees', '.state', 'analysis-cache.json')
@@ -66,15 +68,11 @@ function loadAnalysisCache(cachePath) {
   return { files: raw.files, existed: true, recovered: false }
 }
 
-async function readGitIndexBlobShas(repoRoot) {
+function parseGitIndexBlobShas(lsBuf, diffBuf) {
   const shaMap = new Map()
   const dirtySet = new Set()
-  const [lsRes, diffRes] = await Promise.all([
-    gitRunBuffer(repoRoot, ['--no-optional-locks', 'ls-files', '-s', '-z']),
-    gitRunBuffer(repoRoot, ['--no-optional-locks', 'diff-files', '--name-only', '-z']),
-  ])
-  if (lsRes.ok && lsRes.stdout) {
-    for (const tok of lsRes.stdout.toString('utf8').split('\0')) {
+  if (lsBuf) {
+    for (const tok of lsBuf.toString('utf8').split('\0')) {
       if (!tok) continue
       const tab = tok.indexOf('\t')
       if (tab < 0) continue
@@ -84,13 +82,114 @@ async function readGitIndexBlobShas(repoRoot) {
       if (rel && sha && /^[0-9a-f]{40,64}$/i.test(sha)) shaMap.set(rel, sha)
     }
   }
-  if (diffRes.ok && diffRes.stdout) {
-    for (const tok of diffRes.stdout.toString('utf8').split('\0')) {
+  if (diffBuf) {
+    for (const tok of diffBuf.toString('utf8').split('\0')) {
       const rel = posixPath(tok).replace(/^\.\//, '')
       if (rel) dirtySet.add(rel)
     }
   }
   return { shaMap, dirtySet }
+}
+
+async function readGitIndexBlobShas(repoRoot) {
+  const [lsRes, diffRes] = await Promise.all([
+    gitRunBuffer(repoRoot, ['--no-optional-locks', 'ls-files', '-s', '-z']),
+    gitRunBuffer(repoRoot, ['--no-optional-locks', 'diff-files', '--name-only', '-z']),
+  ])
+  return parseGitIndexBlobShas(lsRes.ok ? lsRes.stdout : null, diffRes.ok ? diffRes.stdout : null)
+}
+
+function gitExecSyncSafe(cwd, args, asBuffer = false) {
+  try {
+    const out = execFileSync('git', args, {
+      cwd,
+      encoding: asBuffer ? 'buffer' : 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 8000,
+      maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true,
+    })
+    return { ok: true, stdout: out }
+  } catch {
+    return { ok: false, stdout: asBuffer ? Buffer.alloc(0) : '' }
+  }
+}
+
+function probeBinarySync(filePath) {
+  let fd
+  try {
+    const st = statSync(filePath)
+    if (!st.isFile()) return { exists: false, isBinary: false, size: 0 }
+    if (st.size === 0) return { exists: true, isBinary: false, size: 0 }
+    const len = Math.min(4096, st.size)
+    const buf = Buffer.allocUnsafe(len)
+    fd = openSync(filePath, 'r')
+    const n = readSync(fd, buf, 0, len, 0)
+    for (let i = 0; i < n; i += 1) if (buf[i] === 0) return { exists: true, isBinary: true, size: st.size }
+    return { exists: true, isBinary: false, size: st.size }
+  } catch {
+    return { exists: false, isBinary: false, size: 0 }
+  } finally {
+    if (fd !== undefined) try { closeSync(fd) } catch { /* ignore */ }
+  }
+}
+
+function listFilesSync(root, { isGit = true, maxFiles = 50000 } = {}) {
+  const files = []
+  let truncated = false
+  const pushFile = (relPath) => {
+    const rel = posixPath(relPath).replace(/^(?:\.\/)+/, '')
+    if (!rel || isMacOsJunkPath(rel)) return
+    const segs = rel.split('/')
+    if (segs.slice(0, -1).some((s) => COMMON_SKIP_DIRS.has(s))) return
+    const full = join(root, rel)
+    const probe = probeBinarySync(full)
+    if (!probe.exists) return
+    if (files.length >= maxFiles) { truncated = true; return }
+    files.push({ rel, name: basename(rel), full, size: probe.size, isBinary: probe.isBinary, isText: !probe.isBinary })
+  }
+
+  if (isGit) {
+    const fastIdxPaths = isCleanWorktreeFast(root)?.clean ? readGitIndexPathsFast(root) : null
+    if (fastIdxPaths) {
+      for (const p of [...fastIdxPaths].sort()) { if (truncated) break; pushFile(p) }
+      return { files, truncated }
+    }
+    const res = gitExecSyncSafe(root, ['--no-optional-locks', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], true)
+    if (res.ok) {
+      for (const p of res.stdout.toString('utf8').split('\0').filter(Boolean).sort()) {
+        if (truncated) break
+        pushFile(p)
+      }
+      return { files, truncated }
+    }
+  }
+
+  const queue = [root]
+  while (queue.length > 0 && !truncated) {
+    const dir = queue.shift()
+    let entries = []
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { continue }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    for (const entry of entries) {
+      if (entry.isSymbolicLink() || isMacOsJunkPath(entry.name)) continue
+      const full = join(dir, entry.name)
+      const rel = posixPath(relative(root, full))
+      if (entry.isDirectory()) {
+        if (!COMMON_SKIP_DIRS.has(entry.name)) queue.push(full)
+      } else if (entry.isFile()) {
+        pushFile(rel)
+        if (truncated) break
+      }
+    }
+  }
+  return { files, truncated }
+}
+
+function readGitIndexBlobShasSync(repoRoot) {
+  const lsRes = gitExecSyncSafe(repoRoot, ['--no-optional-locks', 'ls-files', '-s', '-z'], true)
+  const diffRes = gitExecSyncSafe(repoRoot, ['--no-optional-locks', 'diff-files', '--name-only', '-z'], true)
+  return parseGitIndexBlobShas(lsRes.ok ? lsRes.stdout : null, diffRes.ok ? diffRes.stdout : null)
 }
 
 function isCacheEntryFresh(cached, { blobSha, mtimeMs, size }) {
@@ -100,24 +199,10 @@ function isCacheEntryFresh(cached, { blobSha, mtimeMs, size }) {
   return !cached.blobSha && cached.mtimeMs === mtimeMs
 }
 
-async function collectGitHistory(repoRoot, maxChurnCommits) {
+function parseGitHistoryOutputs(logRes, tagRes) {
   const churn = {}
   const merges = []
   const tags = []
-  const limit = Math.max(1, Math.min(2000, Number(maxChurnCommits) || 200))
-
-  const [logRes, tagRes] = await Promise.all([
-    gitRun(repoRoot, [
-      '--no-optional-locks', 'log', '-n', String(limit),
-      '--name-only', '--format=__PF_C__%H%x1f%aI%x1f%P%x1f%s',
-    ]),
-    gitRun(repoRoot, [
-      '--no-optional-locks', 'for-each-ref', '--sort=-creatordate',
-      '--format=%(refname:short)%09%(creatordate:iso-strict)%09%(objectname:short)%09%(subject)',
-      'refs/tags',
-    ]),
-  ])
-
   let degradedReason = null
   if (!logRes.ok) {
     degradedReason = 'git-log-unavailable'
@@ -168,54 +253,55 @@ async function collectGitHistory(repoRoot, maxChurnCommits) {
   return { churn, merges, tags, degradedReason }
 }
 
-/**
- * 统一零 Token 增量静态分析入口：
- * 输出 `{ nodes, edges, coupling, cycles, churn, tags, merges, cacheStats, repoFiles, isGit, degradedReason }`。
- */
-export async function analyzeRepoStatic(repoRoot, {
-  useCache = true,
-  includeGitChurn = true,
-  maxChurnCommits = 200,
-} = {}) {
-  const root = resolve(String(repoRoot || process.cwd()))
-  const cachePath = resolveAnalysisCachePath(root)
-  if (!existsSync(root)) {
-    return {
-      repoRoot: root,
-      isGit: false,
-      degradedReason: 'missing-repo-root',
-      repoFiles: [],
-      nodes: [],
-      edges: [],
-      coupling: {},
-      cycles: [],
-      churn: {},
-      tags: [],
-      merges: [],
-      cacheStats: { hits: 0, misses: 0, total: 0, cachePath, useCache, recovered: false },
-    }
-  }
-
-  const wtGitDir = resolveGitDirFast(root)
-  const commonDir = resolveCommonGitDir(root)
-  const isGit = Boolean(wtGitDir && existsSync(wtGitDir))
-  const headInfo = isGit ? readHeadFast(wtGitDir, commonDir) : null
-  const isUnborn = Boolean(isGit && headInfo && !headInfo.oid)
-
-  const [listed, gitIndexState, history] = await Promise.all([
-    gitLsFilesTextAndCode(root, { isGit, probeBinary: true, maxFiles: 50000 }),
-    isGit ? readGitIndexBlobShas(root) : Promise.resolve({ shaMap: new Map(), dirtySet: new Set() }),
-    (isGit && includeGitChurn && !isUnborn)
-      ? collectGitHistory(root, maxChurnCommits)
-      : Promise.resolve({
-          churn: {},
-          merges: [],
-          tags: [],
-          degradedReason: !isGit ? 'non-git-repo' : (isUnborn ? 'unborn-head' : null),
-        }),
+async function collectGitHistory(repoRoot, maxChurnCommits) {
+  const limit = Math.max(1, Math.min(2000, Number(maxChurnCommits) || 200))
+  const [logRes, tagRes] = await Promise.all([
+    gitRun(repoRoot, [
+      '--no-optional-locks', 'log', '-n', String(limit),
+      '--name-only', '--format=__PF_C__%H%x1f%aI%x1f%P%x1f%s',
+    ]),
+    gitRun(repoRoot, [
+      '--no-optional-locks', 'for-each-ref', '--sort=-creatordate',
+      '--format=%(refname:short)%09%(creatordate:iso-strict)%09%(objectname:short)%09%(subject)',
+      'refs/tags',
+    ]),
   ])
+  return parseGitHistoryOutputs(logRes, tagRes)
+}
 
-  const validTextFiles = listed.files.filter((f) => !f.isBinary && f.size <= MAX_ANALYZE_FILE_BYTES)
+function collectGitHistorySync(repoRoot, maxChurnCommits) {
+  const limit = Math.max(1, Math.min(2000, Number(maxChurnCommits) || 200))
+  const logRes = gitExecSyncSafe(repoRoot, [
+    '--no-optional-locks', 'log', '-n', String(limit),
+    '--name-only', '--format=__PF_C__%H%x1f%aI%x1f%P%x1f%s',
+  ], false)
+  const tagRes = gitExecSyncSafe(repoRoot, [
+    '--no-optional-locks', 'for-each-ref', '--sort=-creatordate',
+    '--format=%(refname:short)%09%(creatordate:iso-strict)%09%(objectname:short)%09%(subject)',
+    'refs/tags',
+  ], false)
+  return parseGitHistoryOutputs(logRes, tagRes)
+}
+
+function buildEmptyAnalysis(root, cachePath, useCache) {
+  return {
+    repoRoot: root,
+    isGit: false,
+    degradedReason: 'missing-repo-root',
+    repoFiles: [],
+    nodes: [],
+    edges: [],
+    coupling: {},
+    cycles: [],
+    churn: {},
+    tags: [],
+    merges: [],
+    cacheStats: { hits: 0, misses: 0, total: 0, cachePath, useCache, recovered: false },
+  }
+}
+
+function finalizeAnalysisGraph({ root, cachePath, isGit, listedFiles, gitIndexState, history, useCache }) {
+  const validTextFiles = listedFiles.filter((f) => !f.isBinary && f.size <= MAX_ANALYZE_FILE_BYTES)
   const repoFiles = validTextFiles.map((f) => f.rel).sort()
   const codeFiles = validTextFiles.filter((f) => isCodeAnalyzable(f.rel))
 
@@ -368,4 +454,73 @@ export async function analyzeRepoStatic(repoRoot, {
       recovered: cacheState.recovered,
     },
   }
+}
+
+/**
+ * 统一零 Token 增量静态分析入口（异步）：
+ * 输出 `{ nodes, edges, coupling, cycles, churn, tags, merges, cacheStats, repoFiles, isGit, degradedReason }`。
+ */
+export async function analyzeRepoStatic(repoRoot, {
+  useCache = true,
+  cacheRoot = null,
+  includeGitChurn = true,
+  maxChurnCommits = 200,
+} = {}) {
+  const root = resolve(String(repoRoot || process.cwd()))
+  const cachePath = resolveAnalysisCachePath(root, cacheRoot)
+  if (!existsSync(root)) return buildEmptyAnalysis(root, cachePath, useCache)
+
+  const wtGitDir = resolveGitDirFast(root)
+  const commonDir = resolveCommonGitDir(root)
+  const isGit = Boolean(wtGitDir && existsSync(wtGitDir))
+  const headInfo = isGit ? readHeadFast(wtGitDir, commonDir) : null
+  const isUnborn = Boolean(isGit && headInfo && !headInfo.oid)
+
+  const [listed, gitIndexState, history] = await Promise.all([
+    gitLsFilesTextAndCode(root, { isGit, probeBinary: true, maxFiles: 50000 }),
+    isGit ? readGitIndexBlobShas(root) : Promise.resolve({ shaMap: new Map(), dirtySet: new Set() }),
+    (isGit && includeGitChurn && !isUnborn)
+      ? collectGitHistory(root, maxChurnCommits)
+      : Promise.resolve({
+          churn: {},
+          merges: [],
+          tags: [],
+          degradedReason: !isGit ? 'non-git-repo' : (isUnborn ? 'unborn-head' : null),
+        }),
+  ])
+
+  return finalizeAnalysisGraph({ root, cachePath, isGit, listedFiles: listed.files, gitIndexState, history, useCache })
+}
+
+/**
+ * 同步零 Token 增量静态分析入口（与 `analyzeRepoStatic` 共享同一缓存与构图管线，供同步投影复用）。
+ */
+export function analyzeRepoStaticSync(repoRoot, {
+  useCache = true,
+  cacheRoot = null,
+  includeGitChurn = true,
+  maxChurnCommits = 200,
+} = {}) {
+  const root = resolve(String(repoRoot || process.cwd()))
+  const cachePath = resolveAnalysisCachePath(root, cacheRoot)
+  if (!existsSync(root)) return buildEmptyAnalysis(root, cachePath, useCache)
+
+  const wtGitDir = resolveGitDirFast(root)
+  const commonDir = resolveCommonGitDir(root)
+  const isGit = Boolean(wtGitDir && existsSync(wtGitDir))
+  const headInfo = isGit ? readHeadFast(wtGitDir, commonDir) : null
+  const isUnborn = Boolean(isGit && headInfo && !headInfo.oid)
+
+  const listed = listFilesSync(root, { isGit, maxFiles: 50000 })
+  const gitIndexState = isGit ? readGitIndexBlobShasSync(root) : { shaMap: new Map(), dirtySet: new Set() }
+  const history = (isGit && includeGitChurn && !isUnborn)
+    ? collectGitHistorySync(root, maxChurnCommits)
+    : {
+        churn: {},
+        merges: [],
+        tags: [],
+        degradedReason: !isGit ? 'non-git-repo' : (isUnborn ? 'unborn-head' : null),
+      }
+
+  return finalizeAnalysisGraph({ root, cachePath, isGit, listedFiles: listed.files, gitIndexState, history, useCache })
 }

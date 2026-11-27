@@ -97,7 +97,7 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
   const verdictLabel = escapeHtml(localizeVerdictStatus(verdict.status || '已同步'))
   const tree = model.tree || { width: 680, height: 400, domains: [], nodes: [], edges: [] }
   const prototypes = Array.isArray(model.prototypes) ? model.prototypes : []
-  const showProtoTab = prototypes.length > 0 || isBrief
+  const showProtoTab = prototypes.length > 0
   const hasWalkthrough = Array.isArray(model.walkthrough) && model.walkthrough.length > 0
 
   const couplingMap = computeNodeCouplingMap(tree.nodes, tree.edges, model.analysis || null)
@@ -126,15 +126,16 @@ export function renderVisualHtml({ visualModel, featureMapSha256 = '', mode = 'a
   const parentBarHidden = parentBriefHref ? '' : ' hidden'
   const parentHrefAttr = parentBriefHref ? escapeHtml(parentBriefHref) : '#'
 
+  const hasDiff = isBrief || Boolean(model.hasActiveDiff) || (tree?.edges || []).some((e) => e.edgeState && e.edgeState !== 'context')
   const compactJs = (src) => String(src || '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).join('\n')
   const allTabIds = activeTabs.map((t) => t.id)
   const lazyTabIds = allTabIds.filter((id) => isBrief || !LAZY_TAB_RENDER || id !== 'architecture')
-  const clientJs = `(()=>{\n${compactJs(buildClientDiagramsScript(lazyTabIds, allTabIds))}\n${compactJs(buildClientCoreScript({ isBrief }))}\n})();`
+  const clientJs = `(()=>{\n${compactJs(buildClientDiagramsScript(lazyTabIds, allTabIds))}\n${compactJs(buildClientCoreScript({ isBrief, hasDiff }))}\n})();`
 
   const html = [
     headerLine,
     '<!DOCTYPE html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />',
-    `<title>${title}</title><style>${buildStylesCss({ isBrief, showProto: showProtoTab })}</style></head>`,
+    `<title>${title}</title><style>${buildStylesCss({ isBrief, showProto: showProtoTab, hasDiff })}</style></head>`,
     `<body data-mode-canvas="${isBrief ? '0' : '1'}"><div class="pf-shell">`,
     isBrief || parentBriefHref ? `<div id="pf-parent-bar" class="pf-parent-bar"${parentBarHidden}><a id="pf-parent-link" class="pf-parent-link" href="${parentHrefAttr}">&lt;- 返回总控 PRD 简报</a><span class="mono-id">1:N 上下文导航</span></div>` : '',
     `<header class="pf-topbar"><div class="pf-brand"><span class="pf-mark" aria-hidden="true"></span><h1 class="pf-title" title="${title}">${title}</h1><span class="pf-verdict-pill" data-tone="${escapeHtml(verdict.tone || 'pass')}">${verdictLabel}</span></div>${topTabsHtml}<div class="pf-controls"><button id="btn-cmdk" class="pf-btn-sec" type="button">搜索 ⌘K</button>${hasWalkthrough ? '<button id="btn-walk-start" class="pf-btn-icon" type="button" title="分步导览">导览</button>' : ''}<button id="btn-theme" class="pf-btn-icon" type="button" title="切换浅深色主题" aria-label="切换浅深色主题">${themeSvg}</button><button id="btn-followup-ctx" class="pf-btn-primary" type="button" data-followup-panel="${defaultFollowup}">向 AI 提问</button></div></header>`,

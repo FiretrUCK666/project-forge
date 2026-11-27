@@ -143,7 +143,7 @@ export function buildClientDiagramsScript(lazySvgTabIds = null, allActiveTabIds 
         '上游依赖（直接 '+up.length+' · 追溯 '+r.upstream.size+'）','无直接上游模块',up.map((x)=>{const t=ab.get(x);return J(st,x,(t&&(t.shortTitle||t.title))||x,x);}),
         '下游波及（直接 '+dn.length+' · 多跳 '+r.downstream.size+'）','无直接下游模块',dn.map((x)=>{const t=ab.get(x);return J(st,x,(t&&(t.shortTitle||t.title))||x,x);}),
         '验真源码与文档锚点',ps.map((p)=>({text:p,copy:p})).concat(dc.map((a)=>({text:a,copy:a,isDoc:true}))),
-        {pillCls:f.diffState&&f.diffState!=='context'?'pf-pill-'+f.diffState:'',cycleWarn:f.inCycle&&(f.cycleMembers||[]).length?(f.cycleMembers||[]).join(' -> '):'',reachCount:r.upstream.size+r.downstream.size,archHitId:st==='architecture'?'':f.id,tests:f.tests||[],risk:f.risk||'medium',modCount:(f.modules||[]).length,domainLabel:f.domainTitle||f.domain});
+        {pillCls:f.diffState&&f.diffState!=='context'?'pf-pill-'+f.diffState:'',diffState:f.diffState,changeDetail:f.changeDetail,impactReasons:f.impactReasons,cycleWarn:f.inCycle&&(f.cycleMembers||[]).length?(f.cycleMembers||[]).join(' -> '):'',reachCount:r.upstream.size+r.downstream.size,archHitId:st==='architecture'?'':f.id,tests:f.tests||[],risk:f.risk||'medium',modCount:(f.modules||[]).length,domainLabel:f.domainTitle||f.domain});
     };
     if(tid==='architecture'){const f=ab.get(id);return f?mkA(f,'architecture'):null;}
     const d=DM.diagrams&&DM.diagrams[tid];if(!d)return null;

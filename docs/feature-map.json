@@ -781,6 +781,10 @@
         "kit/skills/lib/static-evidence.mjs",
         "kit/skills/lib/diff-materiality.mjs",
         "kit/skills/lib/visual-layout.mjs",
+        "kit/skills/lib/visual-router.mjs",
+        "kit/skills/lib/visual-layout-diagrams.mjs",
+        "kit/skills/lib/visual-layout-charts.mjs",
+        "kit/skills/lib/visual-geometry-check.mjs",
         "kit/skills/lib/visual-render-panels.mjs",
         "kit/skills/lib/visual-render.mjs",
         "kit/skills/lib/visual-render-assets.mjs",
@@ -823,7 +827,9 @@
         "scripts/dev/fixtures-visual-engine.mjs",
         "scripts/dev/injections-data-visual-engine.mjs",
         "scripts/dev/fixtures-static-analyzer.mjs",
-        "scripts/dev/injections-data-static-analyzer.mjs"
+        "scripts/dev/injections-data-static-analyzer.mjs",
+        "scripts/dev/fixtures-visual-layout-v2.mjs",
+        "scripts/dev/injections-data-visual-layout-v2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全",
@@ -1059,7 +1065,9 @@
         "scripts/dev/fixtures-visual-engine.mjs",
         "scripts/dev/injections-data-visual-engine.mjs",
         "scripts/dev/fixtures-static-analyzer.mjs",
-        "scripts/dev/injections-data-static-analyzer.mjs"
+        "scripts/dev/injections-data-static-analyzer.mjs",
+        "scripts/dev/fixtures-visual-layout-v2.mjs",
+        "scripts/dev/injections-data-visual-layout-v2.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"

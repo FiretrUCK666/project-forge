@@ -154,10 +154,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C1: `kit/skills/lib/static-analyzer.mjs` 复用 `import-graph.mjs` 与 `doc-graph.mjs` 的 `findSccs`，在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 实现按 `relPath + blobSha/mtime` 的增量缓存，准确输出依赖图、`fanIn`/`fanOut`/cycles 与 Git 热度，工作区 `git status --porcelain` 保持为空（`node scripts/dev/fixtures.mjs --domain static-analyzer` 通过）。
-- [ ] C2: `kit/skills/lib/static-evidence.mjs` 对 10 类图表严格执行 3 层证据门控（Tier 1 常驻，Tier 2 中 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据不激活且返回空 Tab 为 0，Tier 3 `waterfall` 仅真实实测 span 激活），正反双向断言全过。
-- [ ] C3: `kit/skills/lib/diff-materiality.mjs` 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 保持 `renderArchitectureMapFromRepo` 既有参数契约（保 `I986` 与 `checkExitCodeParity` 有效），并单点由 `verifyArchitectureMapSync` 解析 `pf-visual-data` JSON 与剥离 `<style>`/`<script>` 后以既有 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`reason: 'dirty-diff-overlay'`）精准拦截含脏 diff 节点的常青 `docs/architecture-map.html`。
-- [ ] C4: `scripts/dev/fixtures-static-analyzer.mjs` 与 `scripts/dev/injections-data-static-analyzer.mjs` 覆盖 7 类异构仓库栈正反双向验证并全量捕获注入故障；同步更新 `docs/feature-map.json`、`docs/architecture-map.html` 与 `node scripts/equip.mjs . --check`，`node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs --domain static-analyzer` 退出码 `0`。
+- [x] C1: `kit/skills/lib/static-analyzer.mjs` 复用 `import-graph.mjs` 与 `doc-graph.mjs` 的 `findSccs`，在 `<gitCommonDir>/project-forge-flow/analysis-cache.json` 实现按 `relPath + blobSha/mtime` 的增量缓存，准确输出依赖图、`fanIn`/`fanOut`/cycles 与 Git 热度，工作区 `git status --porcelain` 保持为空（`node scripts/dev/fixtures.mjs --domain static-analyzer` 通过）。
+- [x] C2: `kit/skills/lib/static-evidence.mjs` 对 10 类图表严格执行 3 层证据门控（Tier 1 常驻，Tier 2 中 `erd`/`class >= 3`/`sequence >= 3 跳`/`lifecycle`/`dataflow`/`timeline >= 2` 缺证据不激活且返回空 Tab 为 0，Tier 3 `waterfall` 仅真实实测 span 激活），正反双向断言全过。
+- [x] C3: `kit/skills/lib/diff-materiality.mjs` 基于 `merge-base(base, HEAD)...HEAD` 3-dot 差异精确识别 Schema/迁移必触发、纯文档/锁文件/纯重命名跳过，输出 1-hop 邻域与有界 hunk；`architecture-map.mjs` 保持 `renderArchitectureMapFromRepo` 既有参数契约（保 `I986` 与 `checkExitCodeParity` 有效），并单点由 `verifyArchitectureMapSync` 解析 `pf-visual-data` JSON 与剥离 `<style>`/`<script>` 后以既有 `BLOCKED_ARCHITECTURE_MAP_DRIFT`（`reason: 'dirty-diff-overlay'`）精准拦截含脏 diff 节点的常青 `docs/architecture-map.html`。
+- [x] C4: `scripts/dev/fixtures-static-analyzer.mjs` 与 `scripts/dev/injections-data-static-analyzer.mjs` 覆盖 7 类异构仓库栈正反双向验证并全量捕获注入故障；同步更新 `docs/feature-map.json`、`docs/architecture-map.html` 与 `node scripts/equip.mjs . --check`，`node scripts/dev/preflight.mjs` 与 `node scripts/dev/fixtures.mjs --domain static-analyzer` 退出码 `0`。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径

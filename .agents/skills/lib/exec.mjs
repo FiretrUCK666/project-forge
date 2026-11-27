@@ -11,11 +11,20 @@ import {
   accessSync, closeSync, constants, existsSync, mkdirSync, openSync,
   readFileSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
-import { dirname, extname, join, resolve } from 'node:path'
+import { basename, dirname, extname, join, resolve } from 'node:path'
+
+import { EXIT } from './exit-codes.mjs'
 
 const WIN_CMD_BATCH_EXT_RE = /\.(?:cmd|bat)$/i
 const WIN_GIT_WRAPPER_RE = /[\\/]cmd[\\/]git\.exe$/i
 const SAFE_BARE_ARG_RE = /^[A-Za-z0-9_./:=+-]+$/
+const UNSAFE_WIN_BATCH_ARG_RE = /[\r\n\0&|<>^%!"]/
+const WIN_NODE_PKG_MGR_ENTRIES = Object.freeze({
+  'npm.cmd': Object.freeze(['node_modules/npm/bin/npm-cli.js']),
+  'npx.cmd': Object.freeze(['node_modules/npm/bin/npx-cli.js']),
+  'pnpm.cmd': Object.freeze(['node_modules/pnpm/bin/pnpm.cjs', 'node_modules/corepack/dist/pnpm.js', '../pnpm/bin/pnpm.cjs']),
+  'yarn.cmd': Object.freeze(['node_modules/yarn/bin/yarn.js', 'node_modules/corepack/dist/yarn.js', '../yarn/bin/yarn.js']),
+})
 const resolveCache = new Map()
 const MAX_CACHE_ENTRIES = 128
 
@@ -232,15 +241,71 @@ export function killProcessTree(child, useProcessGroup = true) {
 }
 
 /**
- * 按平台解析外部命令调用参数（Windows `.cmd`/`.bat` 转经 `cmd.exe /d /s /c`，
- * Git-for-Windows 包装器直通真实二进制减少双重进程开销）。
+ * 第一层 CVE-2024-27980 防护：对常见 Node 包管理器 `.cmd` 静态解析官方 JS CLI 入口，
+ * 直接以 `process.execPath`（node）执行，彻底绕开 `cmd.exe` 二次解释。
  */
-export function prepareExecInvocation(cmd, args = [], { cwd, env = process.env } = {}) {
-  if (process.platform !== 'win32') {
+export function resolveNodePkgManagerJsEntry(batchPath) {
+  const base = basename(String(batchPath ?? '')).toLowerCase()
+  const candidates = WIN_NODE_PKG_MGR_ENTRIES[base]
+  if (!candidates) return null
+  const dir = dirname(batchPath)
+  for (const rel of candidates) {
+    const abs = resolve(dir, rel)
+    if (isRegularFile(abs)) return abs
+  }
+  try {
+    const head = readFileSync(batchPath, 'utf8').slice(0, 4096)
+    const m = /%(?:~dp0|dp0%)\\?([^\r\n"']+\.(?:c?js|mjs))/i.exec(head)
+    if (m) {
+      const abs = resolve(dir, m[1].replace(/\\/g, '/'))
+      if (isRegularFile(abs)) return abs
+    }
+  } catch { /* ignore unreadable batch */ }
+  return null
+}
+
+/**
+ * 第二层 CVE-2024-27980 防护：其余 `.cmd`/`.bat` 放行含空格/括号合法路径与常规垫片参数，
+ * 严格拦截批处理命令拼接、变量展开、控制字符与闭合引号的嵌入式双引号。
+ */
+export function validateWinBatchArgs(args = []) {
+  for (let i = 0; i < (args ?? []).length; i += 1) {
+    const raw = String(args[i] ?? '')
+    if (UNSAFE_WIN_BATCH_ARG_RE.test(raw)) {
+      const err = new Error(`BLOCKED_UNSAFE_WIN_BATCH_ARG: Windows 批处理参数包含禁止的命令拼接/元字符（arg[${i}]）`)
+      err.code = 'BLOCKED_UNSAFE_WIN_BATCH_ARG'
+      err.blockedCode = 'BLOCKED_UNSAFE_WIN_BATCH_ARG'
+      err.exitCode = EXIT.USAGE
+      throw err
+    }
+  }
+}
+
+/**
+ * 按平台解析外部命令调用参数（Windows 包管理器 `.cmd` 优先直调 node，其余 `.cmd`/`.bat`
+ * 经元字符拦截后转 `cmd.exe /d /s /c`；Git-for-Windows 包装器直通真实二进制减少双重进程开销）。
+ */
+export function prepareExecInvocation(cmd, args = [], { cwd, env = process.env, platform = process.platform } = {}) {
+  if (platform !== 'win32') {
     return { cmd, args, env, windowsVerbatimArguments: false }
   }
-  const resolved = resolveExecutable(cmd, { cwd, env })
+  let resolved = process.platform === 'win32' ? resolveExecutable(cmd, { cwd, env }) : null
+  if (!resolved && (String(cmd ?? '').includes('/') || String(cmd ?? '').includes('\\'))) {
+    const abs = resolve(cwd || process.cwd(), String(cmd))
+    if (isRegularFile(abs)) resolved = { path: abs, isBatch: WIN_CMD_BATCH_EXT_RE.test(abs) }
+  }
   if (resolved?.isBatch) {
+    const directJs = resolveNodePkgManagerJsEntry(resolved.path)
+    if (directJs) {
+      return {
+        cmd: process.execPath,
+        args: [directJs, ...(args ?? [])],
+        env,
+        windowsVerbatimArguments: false,
+        directNodeBypass: true,
+      }
+    }
+    validateWinBatchArgs(args)
     return {
       cmd: env.ComSpec || process.env.ComSpec || 'cmd.exe',
       args: ['/d', '/s', '/c', buildWindowsCmdLine(resolved.path, args)],
@@ -292,14 +357,12 @@ export function execSafe(cmd, args = [], opts = {}) {
     const isBuffer = Boolean(opts.buffer)
     const timeoutMs = opts.timeout ?? 15000
     const maxBuffer = opts.maxBuffer ?? 16 * 1024 * 1024
-    const inv = prepareExecInvocation(cmd, args, { cwd: opts.cwd, env })
-    const execCmd = inv.cmd
-    const execArgs = inv.args
     const hasInput = opts.input !== undefined
 
     let child
     try {
-      child = spawn(execCmd, execArgs, {
+      const inv = prepareExecInvocation(cmd, args, { cwd: opts.cwd, env, ...(opts._platform ? { platform: opts._platform } : {}) })
+      child = spawn(inv.cmd, inv.args, {
         cwd: opts.cwd,
         env: inv.env,
         windowsHide: true,
@@ -309,6 +372,19 @@ export function execSafe(cmd, args = [], opts = {}) {
       })
       attachChildStreamErrorGuards(child)
     } catch (err) {
+      if (err?.blockedCode === 'BLOCKED_UNSAFE_WIN_BATCH_ARG' || err?.code === 'BLOCKED_UNSAFE_WIN_BATCH_ARG') {
+        done({
+          ok: false,
+          code: EXIT.USAGE,
+          status: EXIT.USAGE,
+          blockedCode: 'BLOCKED_UNSAFE_WIN_BATCH_ARG',
+          missing: false,
+          timedOut: false,
+          stdout: isBuffer ? Buffer.alloc(0) : '',
+          stderr: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
       done({
         ok: false,
         code: 1,
@@ -688,5 +764,11 @@ export function computeWorktreeEnv({ mainRoot, gitDir, taskId = 'default', slotI
     PF_PORT_OFFSET: String(portOffset),
     PF_PORT: String(port),
     PF_CACHE_DIR: cacheDir,
+    VITE_CACHE_DIR: join(cacheDir, 'vite'),
+    JEST_CACHE_DIR: join(cacheDir, 'jest'),
+    BABEL_CACHE_PATH: join(cacheDir, 'babel', 'cache.json'),
+    ESLINT_CACHE_LOCATION: join(cacheDir, 'eslint'),
+    CARGO_TARGET_DIR: join(cacheDir, 'cargo-target'),
+    PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false',
   }
 }

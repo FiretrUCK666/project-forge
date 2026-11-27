@@ -43,6 +43,7 @@ import { appendGovernSignal } from '../../lib/signals.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, isUiVisualFile, matchGlob } from '../../lib/static-gates.mjs'
 import { getChangedFiles } from './flow-inspect.mjs'
 import { runVerifyPrecheck } from './flow-lifecycle-hooks.mjs'
+import { reconcileWorktreeDeps } from '../../lib/worktree-dep-pool.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 export function computeFlowCoupledSync(implRoot, mainRoot, changedFiles) {
@@ -642,6 +643,9 @@ export async function collectTaskRuntimeSnapshot({
   const implRel = ledger?.worktreePath || (ledger?.role === 'inbound-external-pr' ? ledger?.reviewWorktreePath : null)
   const implRoot = implRel ? resolve(mainRoot, implRel) : mainRoot
   const exists = existsSync(implRoot)
+  if (exists && implRel && implRoot !== mainRoot) {
+    try { reconcileWorktreeDeps(mainRoot, implRoot, { ledger }) } catch { /* non-fatal */ }
+  }
   const profile = preProfile ?? parseAgentsProfile(mainRoot)
   const effectiveHasDevReview = hasDevReview !== undefined ? hasDevReview : hasSkillSupport(mainRoot, 'dev-review')
   const effectiveGitDir = gitDir ?? resolveGitDirFast(mainRoot)

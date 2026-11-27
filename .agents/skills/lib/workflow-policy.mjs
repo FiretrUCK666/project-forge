@@ -134,12 +134,15 @@ function isLowRiskExcluded(rel, highRiskGlobs, doNotEditGlobs, ownArchivedSet) {
   return false
 }
 
-function isOneWayBoundaryFile(rel) {
+export function isOneWayBoundaryFile(rel) {
   const base = (rel.split('/').pop() ?? '').toLowerCase()
   if (GATE_WORKFLOW_FILE_RE.test(rel) || EXTRA_CI_FILE_RE.test(rel)) return true
   if (rel.startsWith('.husky/') || rel.startsWith('.githooks/') || rel.startsWith('.agents/skills/')) return true
   if (LOCKFILE_NAMES.has(base) || MANIFEST_HIGH_BASENAMES.has(base)) return true
   if (/(?:^|\/)(?:migrations?|migrate|schema|auth|rbac|acl|security|secrets?)(?:\/|\.)/i.test(rel) || /\.sql$/i.test(rel)) return true
+  if (/\.(?:prisma|cql|cypher|proto|graphql|gql|tf|tfvars)$/i.test(base)) return true
+  if (/^(?:firestore\.rules|redis[^/]*\.conf|(?:openapi|swagger)[^/]*\.ya?ml|(?:docker-)?compose[^/]*\.ya?ml|dockerfile(?:\.[^/]+)?)$/i.test(base)) return true
+  if (/(?:^|\/)(?:drizzle|k8s|kubernetes|helm|terraform)\/|(?:^|\/)(?:qdrant|milvus|chroma)(?:\/|[._-])/i.test(rel)) return true
   return false
 }
 
@@ -682,32 +685,38 @@ export function resolveScopedVerificationGate({ repoRoot = null, changedFiles = 
     runtimeStacks.add(st)
   }
 
+  const pkgDirOf = (p) => posixPath(String(p?.dirRel ?? p?.dir ?? '')).replace(/^\.\//, '').replace(/\/+$/, '')
+  const pkgEcosOf = (p) => (Array.isArray(p?.ecosystems) ? p.ecosystems : (p?.ecosystem ? [p.ecosystem] : []))
+
   const affectedPackages = []
   for (const f of normFiles) {
     if (inferFileStack(f) === 'doc') continue
     const matches = rawPkgs
-      .filter((p) => {
-        const dir = posixPath(String(p?.dir ?? '')).replace(/^\.\//, '').replace(/\/+$/, '')
-        return !dir || f.startsWith(`${dir}/`) || f === dir
-      })
-      .sort((a, b) => String(b?.dir ?? '').length - String(a?.dir ?? '').length)
+      .filter((p) => { const dir = pkgDirOf(p); return !dir || f.startsWith(`${dir}/`) || f === dir })
+      .sort((a, b) => pkgDirOf(b).length - pkgDirOf(a).length)
     const hit = matches[0]
     if (hit) {
-      const dir = posixPath(String(hit.dir ?? '')).replace(/^\.\//, '').replace(/\/+$/, '')
-      if (!affectedPackages.some((x) => x.dir === dir && x.ecosystem === hit.ecosystem)) {
-        affectedPackages.push({ dir, name: hit.name ?? (dir || 'root'), ecosystem: hit.ecosystem ?? null })
+      const dir = pkgDirOf(hit)
+      const ecos = pkgEcosOf(hit)
+      const eco = ecos[0] ?? null
+      if (!affectedPackages.some((x) => x.dir === dir && x.ecosystem === eco)) {
+        affectedPackages.push({ dir, dirRel: dir, name: hit.name ?? (dir || 'root'), ecosystem: eco, ecosystems: ecos })
       }
     }
   }
 
   const repoStacks = new Set()
   for (const p of rawPkgs) {
-    const st = mapEcosystemToStack(p?.ecosystem)
-    if (st) repoStacks.add(st)
+    for (const eco of pkgEcosOf(p)) {
+      const st = mapEcosystemToStack(eco)
+      if (st) repoStacks.add(st)
+    }
   }
   if (profile && typeof profile === 'object') {
-    for (const key of ['quick-test', 'smoke-verify', 'full-test', 'merge-gate']) {
-      for (const raw of profile[key] ?? []) {
+    for (const key of ['quick-test', 'quickTest', 'smoke-verify', 'smokeVerify', 'full-test', 'fullTest', 'merge-gate', 'mergeGate']) {
+      const rawVal = profile[key]
+      const list = Array.isArray(rawVal) ? rawVal : (typeof rawVal === 'string' && rawVal ? [rawVal] : [])
+      for (const raw of list) {
         for (const seg of String(raw ?? '').split(/\s*&&\s*/)) {
           const cs = inferCommandStack(seg)
           if (cs) repoStacks.add(cs)

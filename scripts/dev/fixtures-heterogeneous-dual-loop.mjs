@@ -275,12 +275,11 @@ export function registerHeterogeneousDualLoopCases(cases) {
       'AGENTS.md': makeBaseProfileAgents('minimal-repo'),
       'hello.mjs': 'export const greet = () => "hi"\n',
     })
-    // Profile 2: Node/TS 单包与 Monorepo（pnpm-workspace.yaml + 根与子包未跟踪共享依赖）
+    // Profile 2: Node/TS 单包与 Monorepo（npm workspaces + 根与子包未跟踪共享依赖 Class S dep-pool）
     const monoDir = tmpProject({
       ...makeSkillStubs(),
       'package.json': JSON.stringify({ name: 'mono-root', private: true, workspaces: ['packages/*'] }, null, 2),
-      'pnpm-workspace.yaml': 'packages:\n  - "packages/*"\n',
-      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+      'package-lock.json': JSON.stringify({ name: 'mono-root', lockfileVersion: 3 }, null, 2),
       'AGENTS.md': makeBaseProfileAgents('mono-root'),
       'packages/web/package.json': JSON.stringify({ name: '@mono/web', version: '1.0.0' }, null, 2),
       'packages/web/src/index.ts': 'export const version: number = 1\n',

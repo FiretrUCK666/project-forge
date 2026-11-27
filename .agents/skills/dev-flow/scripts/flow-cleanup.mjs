@@ -33,6 +33,7 @@ import { buildTargetRepoContext } from './flow-inspect.mjs'
 import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
 import { releaseGitClaimLease } from './flow-merge-claim.mjs'
 import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
+import { gcUnusedDepPools } from '../../lib/worktree-dep-pool.mjs'
 import { unmountSharedDeps } from './worktree-deps.mjs'
 
 function isCwdInside(wtAbs) {
@@ -161,6 +162,7 @@ async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isA
       })),
     })
   }
+  try { gcUnusedDepPools(roots.mainRoot) } catch { /* non-fatal pool GC */ }
   return { ok: true, removedWorktrees }
 }
 

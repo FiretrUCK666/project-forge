@@ -21,7 +21,7 @@ import {
 import { createExploredEvidence, recordMountedDepsInLedger } from '../../lib/ledger.mjs'
 import { evaluatePlanExitGate, formatPlanExitGate, PLAN_BOOTSTRAP_FLAG } from '../../lib/plan-exit-gate.mjs'
 import { indexPlanDocs } from '../../lib/plan-index.mjs'
-import { githubRepoFull, probeForWrite, resolveIdentityLayers } from '../../lib/platform.mjs'
+import { probeForWrite, resolveIdentityLayers, resolveRemoteTarget } from '../../lib/platform.mjs'
 import { readDecisions } from '../../lib/profile.mjs'
 import { findBlockingTriageDowngrade, markTriageConsumed, readSessionState } from '../../lib/session-state.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -478,16 +478,15 @@ export function runStartPlanGate(gateRoot, { caseType, slug, taskId, issue, docs
 }
 
 export async function ackInboundExternalPr(roots, state, prNumber, opts = {}) {
-  const originFull = githubRepoFull(state.remoteUrls?.origin)
-  const upstreamFull = githubRepoFull(state.remoteUrls?.upstream)
-  const targetRepo = upstreamFull ?? state.declaredRepo ?? originFull ?? null
+  const target = resolveRemoteTarget(state.remoteUrls ?? {}, { role: 'contributor-fork', declaredRepo: state.declaredRepo })
+  const targetRepo = target.repoSlug ?? state.declaredRepo ?? null
   let client = opts._ghClient ?? opts._ghProbe?.client ?? null
-  if (!client && !opts._backend && targetRepo) {
+  if (!client && !opts._backend && targetRepo && target.capabilities?.api === true) {
     const probe = await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} }).catch(() => null)
     client = probe?.client ?? null
   }
   const backend = opts._backend ?? createTaskBackend({
-    role: 'maintainer', providerId: state.identity?.providerId ?? 'none', targetRepo, client, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+    role: 'maintainer', providerId: state.identity?.providerId ?? target.providerId ?? 'none', targetRepo, client, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
   })
   if (!backend?.capabilities?.api || (!client && !opts._backend)) {
     return { synced: false, labelSynced: false, skipped: true, reason: 'offline-or-no-client' }

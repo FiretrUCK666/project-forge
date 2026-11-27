@@ -58,9 +58,11 @@ export function computeNavigation(facts) {
   }
 
   const wf = docs.workflowFacts ?? {}
+  const caps = git.capabilities ?? null
   const onGithub = git.providerId
     ? (git.providerId === 'github' || Boolean(git.topology?.providerIds?.includes('github')))
     : (typeof git.remote === 'string' && /github\.com/i.test(git.remote))
+  const hasNativePlatformApi = Boolean(caps?.known === true && caps?.api === true)
   const remoteTriggers = [
     (git.remotes ?? []).length === 0,
     !wf.hasCheck,
@@ -73,8 +75,9 @@ export function computeNavigation(facts) {
       + '`pull_request_target` 那一条尤其要读：写错等于让陌生人拿你的密钥跑他的代码')
   }
   if (git.present === true && (git.remotes ?? []).length > 0 && !onGithub) {
-    items.push('**远端不在 GitHub 上**：本工具的远端/CI/发布自动化仅面向 GitHub——'
-      + '当前远端不适用平台流水线配置，仅执行本地 Git、`docs/`、`AGENTS.md` 与 `.agents/skills/` 治理')
+    items.push(hasNativePlatformApi
+      ? `**远端不在 GitHub 上（${git.providerId}）**：当前远端不适用 GitHub Actions 流水线配置；已启用该平台原生 API 协议适配（Issue / PR-MR${caps?.uploadAttachment ? ' / 附件直传' : ''}），完整执行本地 Git、\`docs/\`、\`AGENTS.md\` 与 \`.agents/skills/\` 治理`
+      : '**远端不在 GitHub 上**：当前远端属于通用 Git（`generic-git`），不适用平台流水线配置，仅执行本地 Git、`docs/`、`AGENTS.md` 与 `.agents/skills/` 治理')
   }
 
   if ((git.remotes ?? []).length > 0 && git.present === true) {

@@ -7,6 +7,7 @@ import { extractCriteria } from './criteria-lock.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { parseDocFrontmatter } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
+import { resolvePlanBootstrapDirOrder, resolvePrimaryPlanDocOrder } from './master-criteria-sync.mjs'
 import { parseAgentsProfile } from './profile.mjs'
 import { getVisualBriefSummary } from './visual-brief.mjs'
 
@@ -224,18 +225,21 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   }
   let criteria = []
   let sourceDoc = null
-  for (const [txt, rel] of [[specText, specRel], [todoText, todoRel], [prdText, prdRel]]) {
+  const primaryPairs = { spec: [specText, specRel], todo: [todoText, todoRel], prd: [prdText, prdRel] }
+  for (const kind of resolvePrimaryPlanDocOrder(ledger)) {
+    const [txt, rel] = primaryPairs[kind]
     if (!txt) continue
     const list = extractCriteria(txt)
     if (list.length > 0) { criteria = list; sourceDoc = rel; break }
   }
   if (criteria.length === 0 && ledger?.planBootstrap === true) {
+    const dirOrder = resolvePlanBootstrapDirOrder(ledger)
     const cands = []
     for (const f of Array.isArray(ledger?.files) ? ledger.files : []) {
       const nf = posixPath(f).replace(/^\.\//, '')
       if (/^docs\/(?:specs|todo|prd)\/.*\.md$/.test(nf)) cands.push(nf)
     }
-    for (const dirRel of ['docs/specs', 'docs/todo', 'docs/prd']) {
+    for (const dirRel of dirOrder) {
       for (const root of docRoots) {
         const dirAbs = join(root, dirRel)
         if (!existsSync(dirAbs)) continue
@@ -246,11 +250,7 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
         } catch { /* ignore */ }
       }
     }
-    const ordered = [
-      ...cands.filter((p) => p.startsWith('docs/specs/')),
-      ...cands.filter((p) => p.startsWith('docs/todo/')),
-      ...cands.filter((p) => p.startsWith('docs/prd/')),
-    ]
+    const ordered = dirOrder.flatMap((dir) => cands.filter((p) => p.startsWith(`${dir}/`)))
     for (const cand of [...new Set(ordered)]) {
       const txt = readFromDocRoots(cand)
       const list = extractCriteria(txt)
@@ -275,7 +275,12 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
       sourceDoc = prNum ? `pr#${prNum}` : 'prContext'
     }
   }
-  if (!sourceDoc) sourceDoc = specText ? specRel : (todoText ? todoRel : (prdText ? prdRel : null))
+  if (!sourceDoc) {
+    for (const kind of resolvePrimaryPlanDocOrder(ledger)) {
+      const [txt, rel] = primaryPairs[kind]
+      if (txt) { sourceDoc = rel; break }
+    }
+  }
   const paths = [...new Set([...fmScopeFiles, ...extractDocPaths(specText), ...extractDocPaths(todoText), ...extractDocPaths(prdText)])]
   // 去重要按「说了同一件事」判，不是按字符串相等：
   // SPEC 写「不引入第三方解析器（零依赖是不变量）；不做 LSP 级语义分析」，

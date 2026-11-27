@@ -149,6 +149,7 @@ export async function syncMergedIssuesAndEscalations({
             masterPrdRel: closeGuard.masterPrd,
             ledger,
             taskId,
+            includeSelf: true,
           })
           const summaryMeta = collectPlanSummaryMeta({
             repoRoot: docRoot,
@@ -558,18 +559,15 @@ export async function handleMerge(opts, roots) {
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
-
-  const canUseGhApi = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+  const originFull = targetCtx.targetRepo ?? targetCtx.originFull
+  const pushRemote = targetCtx.pushRemote
+  const effectiveProviderId = ledger.providerId && ledger.providerId !== 'none' ? ledger.providerId : targetCtx.providerId
+  const canUseGhApi = Boolean(ledger.role === 'maintainer' && targetCtx.capabilities?.api === true && originFull)
   const ghProbe = canUseGhApi ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))) : null
   const backend = createTaskBackend({
-    role: ledger.role,
-    providerId: ledger.providerId,
-    targetRepo: originFull,
-    client: opts._ghClient ?? ghProbe?.client,
-    pushRemote,
-    mainRoot: roots.mainRoot,
-    gitDir: roots.gitDir,
+    role: ledger.role, providerId: effectiveProviderId, targetRepo: originFull,
+    client: opts._ghClient ?? ghProbe?.client, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
   })
 
   const gate = await assertPreMergeGates({
@@ -634,105 +632,42 @@ export async function handleMerge(opts, roots) {
         : (mergeRes.mergeBlocked ? `405 合并受阻(${mergeRes.error ?? ''})` : (mergeRes.state ?? mergeRes.error))
       throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
     }
-    // 先同步 mainRoot，确保 1:N 总控 Issue 关单保护读取到最新主线切片终态，并提升已验证槽位缓存。
     if (!opts._ghProbe) {
-      await syncLocalDefaultBranchAfterMerge({
-        mainRoot: roots.mainRoot,
-        gitDir: roots.gitDir,
-        remote: pushRemote,
-        baseBranch,
-        fetch: true,
-      })
+      await syncLocalDefaultBranchAfterMerge({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, remote: pushRemote, baseBranch, fetch: true })
     }
     await syncVerifyCacheOnMerge({
-      gitCommonDir: roots.gitDir,
-      mainRoot: roots.mainRoot,
-      slotKeys: [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean),
-      verifiedSha: currentHead,
+      gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot,
+      slotKeys: [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean), verifiedSha: currentHead,
     }).catch(() => null)
     await syncPostMergeTargets({
-      backend,
-      repo: originFull,
-      mainRoot: roots.mainRoot,
-      implRoot,
-      ledger,
-      taskId,
-      baseBranch,
-      currentHead,
-      mergeRes,
-      effectiveReviewer,
-      stopLossActive,
-      gateFindings,
-      ghLogin: ghProbe?.env?.trackB?.login,
-      ghTier: ghProbe?.env?.trackB?.tier,
-      includePrComment: true,
-      mergeComments,
-      syncFailures,
-      issueCloseDecisions,
+      backend, repo: originFull, mainRoot: roots.mainRoot, implRoot, ledger, taskId, baseBranch, currentHead, mergeRes,
+      effectiveReviewer, stopLossActive, gateFindings, ghLogin: ghProbe?.env?.trackB?.login, ghTier: ghProbe?.env?.trackB?.tier,
+      includePrComment: true, mergeComments, syncFailures, issueCloseDecisions,
     })
-  } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git' || backend?.kind === 'local-only') {
-    const isGenericRemote = ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git'
-    if (isGenericRemote) {
-      mergeRes = await backend.mergePr({
-        humanApproved: Boolean(opts['human-approved']),
-        reason: opts.reason ?? '',
-        ledger,
-        branch: ledger.branch,
-        baseBranch,
-      })
-    } else {
-      mergeRes = await backend.mergePr({
-        ledger,
-        mainRoot: roots.mainRoot,
-        baseBranch,
-        profile,
-        evidence,
-        policy,
-        changedFiles: changed,
-        runVerify: true,
-        trialMerger: runTrialMerge,
-      })
-    }
+  } else if (ledger.branch || ledger.role === 'generic-git' || targetCtx.capabilities?.api !== true || backend?.kind === 'generic-git' || backend?.kind === 'local-only') {
+    const isGenericRemote = ledger.role === 'generic-git' || backend?.kind === 'generic-git'
+    mergeRes = isGenericRemote
+      ? await backend.mergePr({ humanApproved: Boolean(opts['human-approved']), reason: opts.reason ?? '', ledger, branch: ledger.branch, baseBranch })
+      : await backend.mergePr({ ledger, mainRoot: roots.mainRoot, baseBranch, profile, evidence, policy, changedFiles: changed, runVerify: true, trialMerger: runTrialMerge })
     if (mergeRes.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
       process.stderr.write(`${mergeRes.message}\n`)
       return { exitCode: mergeRes.exitCode ?? EXIT.FACT, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
     }
     if (isGenericRemote && mergeRes?.merged && !opts._ghProbe) {
-      genericSyncRes = await syncLocalDefaultBranchAfterMerge({
-        mainRoot: roots.mainRoot,
-        gitDir: roots.gitDir,
-        remote: pushRemote,
-        baseBranch,
-        fetch: Boolean(mergeRes?.fetched),
-      })
+      genericSyncRes = await syncLocalDefaultBranchAfterMerge({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, remote: pushRemote, baseBranch, fetch: Boolean(mergeRes?.fetched) })
     }
     const mergedConfirmed = isConfirmedMergeResult(mergeRes)
     if (mergedConfirmed) {
       await syncVerifyCacheOnMerge({
-        gitCommonDir: roots.gitDir,
-        mainRoot: roots.mainRoot,
-        slotKeys: [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean),
-        verifiedSha: currentHead,
+        gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot,
+        slotKeys: [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean), verifiedSha: currentHead,
       }).catch(() => null)
     }
     if (((ledger.linkedIssues ?? []).length > 0 || (ledger.escalatedIssues ?? []).length > 0) && mergedConfirmed) {
       await syncPostMergeTargets({
-        backend,
-        mainRoot: roots.mainRoot,
-        implRoot,
-        ledger,
-        taskId,
-        baseBranch,
-        currentHead,
-        mergeRes,
-        effectiveReviewer,
-        stopLossActive,
-        gateFindings,
-        includePrComment: false,
-        mergeComments,
-        syncFailures,
-        issueCloseDecisions,
+        backend, mainRoot: roots.mainRoot, implRoot, ledger, taskId, baseBranch, currentHead, mergeRes,
+        effectiveReviewer, stopLossActive, gateFindings, includePrComment: false, mergeComments, syncFailures, issueCloseDecisions,
       })
     }
   }

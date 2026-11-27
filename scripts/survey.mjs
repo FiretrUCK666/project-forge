@@ -232,7 +232,8 @@ export function computeArtifactPlan(facts) {
   } else if (git.role === 'contributor-fork') {
     items.push({ id: 'ci-check', artifact: '.github/workflows/check.yml', status: 'Fork 贡献者仓', action: 'skip', detail: 'Fork 贡献者不擅自改动或新增上游 CI 工作流' })
   } else if (Boolean(git.remote) && !onGithub) {
-    items.push({ id: 'ci-check', artifact: '.github/workflows/check.yml', status: '通用 Git 远端（generic-git）', action: 'skip', detail: '远端非 GitHub，跳过 GitHub Actions 检查工作流，仅维持本地门禁验证' })
+    const provLabel = git.providerId && git.providerId !== 'generic-git' ? `非 GitHub 托管平台（${git.providerId}）` : '通用 Git 远端（generic-git）'
+    items.push({ id: 'ci-check', artifact: '.github/workflows/check.yml', status: provLabel, action: 'skip', detail: '远端非 GitHub，跳过 GitHub Actions 检查工作流，仅维持本地门禁与托管原生流水线' })
   } else if (Boolean(git.remote) && Object.keys(commands).length > 0) {
     items.push({ id: 'ci-check', artifact: '.github/workflows/check.yml', status: '缺失', action: 'create', detail: '有 GitHub 远端且已探测到可执行校验命令，补充最小检查工作流' })
   } else {
@@ -264,7 +265,8 @@ export function computeArtifactPlan(facts) {
   } else if (git.role === 'contributor-fork') {
     items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: 'Fork 贡献者仓', action: 'skip', detail: 'Fork 贡献者不配置发布工作流' })
   } else if (Boolean(git.remote) && (!onGithub || !canReleasePlatform)) {
-    items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: '通用 Git 远端（generic-git）', action: 'skip', detail: '远端非 GitHub 或不支持 Release API，跳过 GitHub Release 发布流水线' })
+    const provLabel = git.providerId && git.providerId !== 'generic-git' ? `非 GitHub 托管平台（${git.providerId}）` : '通用 Git 远端（generic-git）'
+    items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: provLabel, action: 'skip', detail: '远端非 GitHub 或不支持 GitHub Release API，跳过 GitHub Release 发布流水线' })
   } else if (Boolean(git.remote) && hasReleaseEvidence) {
     items.push({
       id: 'ci-release',
@@ -380,22 +382,23 @@ function isDocsOnlyByDocuments(ws, docs) {
  */
 export function summarizeRemoteCapabilities(role, gitFacts) {
   const providerId = role?.providerId ?? gitFacts?.providerId ?? null
-  if (!providerId) return { known: false, providerId: null, issues: null, pullRequests: null, releases: null, checks: null, branchProtection: null }
+  if (!providerId) return { known: false, providerId: null, api: null, issues: null, pullRequests: null, releases: null, checks: null, branchProtection: null, uploadAttachment: null }
   if (providerId === 'none') {
-    return { known: true, providerId, issues: false, pullRequests: false, releases: false, checks: false, branchProtection: false }
+    return { known: true, providerId, api: false, issues: false, pullRequests: false, releases: false, checks: false, branchProtection: false, uploadAttachment: false }
   }
   const provider = getHostingProvider(providerId)
   const caps = provider?.capabilities
-  if (!caps) return { known: false, providerId, issues: null, pullRequests: null, releases: null, checks: null, branchProtection: null }
+  if (!caps) return { known: false, providerId, api: null, issues: null, pullRequests: null, releases: null, checks: null, branchProtection: null, uploadAttachment: null }
   return {
     known: true,
     providerId,
+    api: caps.api === true,
     issues: caps.issues === true,
     pullRequests: caps.pr === true,
     releases: caps.releases === true,
-    // 「能不能读 CI 检查状态」在平台声明里没有单独位，只有 api 通不通。api 不通一律算不能。
-    checks: caps.api === true && caps.pr === true,
+    checks: caps.checks === true,
     branchProtection: caps.branchProtection === true,
+    uploadAttachment: caps.uploadAttachment === true,
   }
 }
 

@@ -23,10 +23,11 @@ import { isProfileExplicitNone, parseAgentsProfile, resolveTierCommand, TIER_PRO
 import { detectGateWeakening, gitDiffRawEntriesAndText, isUiVisualFile } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
+import { stageAndSyncTaskArtifacts } from '../../lib/empirical-artifacts.mjs'
 import {
   buildSubmitNextSteps, determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
   readVerificationEvidence, redactDiagnosticText, resolveEffectiveBaseSha, resolveReadablePrTitleWithSource,
-  runLowRiskDocStaticCheck, validateVerificationEvidence,
+  runLowRiskDocStaticCheck, validateVerificationEvidence, verificationEvidencePath,
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
 import { handleFinalize } from './flow-lifecycle-finalize.mjs'
@@ -152,14 +153,8 @@ export async function handleVerify(opts, roots) {
   if (Number(ledger.caseType) === 2) {
     const snapC2 = await collectTaskRuntimeSnapshot({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, ledger, profile, hasDevReview, evaluateNext: false })
     const c2Drift = await checkCase2StructuralDriftOnVerify({
-      mainRoot: roots.mainRoot,
-      implRoot,
-      ledger,
-      opts,
-      effectiveBase: snapC2.effectiveBaseSha,
-      changedFiles: snapC2.changedFiles,
-      statusEntries: snapC2.statusEntries,
-      diffText: snapC2.diffText,
+      mainRoot: roots.mainRoot, implRoot, ledger, opts,
+      effectiveBase: snapC2.effectiveBaseSha, changedFiles: snapC2.changedFiles, statusEntries: snapC2.statusEntries, diffText: snapC2.diffText,
     })
     if (!c2Drift.ok) {
       if (opts.json) process.stdout.write(`${JSON.stringify(c2Drift, null, 2)}\n`)
@@ -173,46 +168,25 @@ export async function handleVerify(opts, roots) {
   const isExplicitNone = !opts.cmd && isProfileExplicitNone(profile, profileKey)
 
   let cmd = opts.cmd
-  // 层级到 Dev Profile 键的对应与降级链只在 profile.mjs 一处，这里不再自己拼一遍。
   if (!cmd && !isExplicitNone) cmd = resolveTierCommand(profile, mode, { fallback: true })
 
   const computeVerifyPolicy = async () => {
-    const snap = await collectTaskRuntimeSnapshot({
-      mainRoot: roots.mainRoot,
-      gitDir: roots.gitDir,
-      ledger,
-      profile,
-      hasDevReview,
-      evaluateNext: false,
-    })
+    const snap = await collectTaskRuntimeSnapshot({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, ledger, profile, hasDevReview, evaluateNext: false })
     const dirty = snap.dirty > 0
-    const stStdout = (snap.statusEntries ?? []).map((e) => `${e.xy} ${e.file}`).join('\n')
     return {
-      currentHead: snap.headSha,
-      dirty,
-      stStdout,
-      changedFiles: snap.changedFiles,
-      policy: snap.policy,
-      diffText: !dirty ? snap.diffText : undefined,
+      currentHead: snap.headSha, dirty,
+      stStdout: (snap.statusEntries ?? []).map((e) => `${e.xy} ${e.file}`).join('\n'),
+      changedFiles: snap.changedFiles, policy: snap.policy, diffText: !dirty ? snap.diffText : undefined,
     }
   }
 
-  // 证据只取人说过的原文（`--e2e-evidence` / `--visual-evidence`）。裸 `--visual-checked` 只是口头声明、
-  // 不带观察内容；这里不替它编一句「observed and verified」——编出来的句子会被当成观察写进
-  // evidence.json 并一路通过后面的门禁，而谁也没说看到了什么。缺什么就让它缺着，交给校验入口要求补齐。
   const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
     || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
     || ''
   const artifactsInput = normalizeArtifactList(opts.artifact)
   const visualCheckedRawInput = Boolean(opts['visual-checked'])
   const visualBlockedReasonInput = typeof opts['visual-blocked-reason'] === 'string' ? opts['visual-blocked-reason'].trim() : ''
-  const hasVisualCheckFlag = Boolean(
-    visualCheckedRawInput
-    || opts['visual-evidence']
-    || opts['e2e-evidence']
-    || artifactsInput.length > 0
-    || visualBlockedReasonInput,
-  )
+  const hasVisualCheckFlag = Boolean(visualCheckedRawInput || opts['visual-evidence'] || opts['e2e-evidence'] || artifactsInput.length > 0 || visualBlockedReasonInput)
 
   if (!cmd && isExplicitNone) {
     const { currentHead, dirty, stStdout, changedFiles, policy, diffText } = await computeVerifyPolicy()
@@ -347,18 +321,9 @@ export async function handleVerify(opts, roots) {
     : wtEnv)
   const prePolicySnap = preRunSnap ?? await computeVerifyPolicy()
   const preRunPrecheck = runVerifyPrecheck({
-    repoRoot: implRoot,
-    gitCommonDir: roots.gitDir,
-    headSha: prePolicySnap.currentHead,
-    policy: prePolicySnap.policy,
-    taskId,
-    dirty: prePolicySnap.dirty,
-    mode,
-    exitCode: 0,
-    artifacts: artifactsInput,
-    visualCheckedRaw: visualCheckedRawInput,
-    visualBlockedReason: visualBlockedReasonInput,
-    observationSummary: e2eEvidenceInput,
+    repoRoot: implRoot, gitCommonDir: roots.gitDir, headSha: prePolicySnap.currentHead, policy: prePolicySnap.policy,
+    taskId, dirty: prePolicySnap.dirty, mode, exitCode: 0,
+    artifacts: artifactsInput, visualCheckedRaw: visualCheckedRawInput, visualBlockedReason: visualBlockedReasonInput, observationSummary: e2eEvidenceInput,
   })
   if (preRunPrecheck?.blocked) {
     const preMsg = `${preRunPrecheck.code ?? 'BLOCKED_VERIFY_PRECHECK'}: ${preRunPrecheck.reason ?? preRunPrecheck.message ?? '实证前置校验未通过'}`
@@ -423,6 +388,14 @@ export async function handleVerify(opts, roots) {
       cmd: smokeCmdUsed ?? cmd, runRes: smokeRunRes, currentHead, changedFiles, opts,
     })
   }
+  if (allOk && roots.gitDir && artifactsInput.length > 0) {
+    await stageAndSyncTaskArtifacts({
+      repoRoot: implRoot, gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot, taskId,
+      evidencePath: verificationEvidencePath(roots.gitDir, taskId),
+      records: readVerificationEvidence(roots.gitDir, taskId)?.artifacts ?? [],
+      artifacts: artifactsInput, backend: null, observationSummary: e2eEvidenceInput,
+    }).catch(() => null)
+  }
   const visualFilesChanged = policy.visualFilesChanged
   const empiricalVisualCheckRequired = visualFilesChanged.length > 0
 
@@ -436,9 +409,6 @@ export async function handleVerify(opts, roots) {
   ledger.empiricalVisualCheckRequired = empiricalVisualCheckRequired
   if (allOk && hasVisualCheckFlag) {
     ledger.visualVerifiedHead = currentHead
-    // 这个字段只接受入参原文或既有真实记录；两者都没有就不写。它不得由任何开关派生：
-    // 给裸 `--visual-checked` 拼一句「已声明核验」，会让「核验过」在账本里有了文字，而文字
-    // 不是观察。开关的语义由 `visualVerifiedHead` / `empiricalVisualCheckRequired` 表达。
     const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
     ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
@@ -580,10 +550,8 @@ export async function handleSubmit(opts, roots) {
     if ((ledger.linkedIssues ?? []).length === 0) return
     const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId ?? 'none', targetRepo, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
     const submitLayers = resolveIdentityLayers({
-      explicitAgent: opts.agent,
-      ledgerAccount: ledger.account,
-      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
-      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+      explicitAgent: opts.agent, ledgerAccount: ledger.account,
+      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId, ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
     })
     const submitDisplay = formatAttribution({ ...submitLayers, capabilities: localBackend.capabilities })
     const submitActorId = submitLayers.agent || submitLayers.account || undefined
@@ -593,21 +561,13 @@ export async function handleSubmit(opts, roots) {
       isRework: isReworkLocal, round: nextRound, shortHead: currentHead?.slice(0, 7) ?? 'unknown', actorDisplay: submitDisplay,
       branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: null, linkedIssues: ledger.linkedIssues ?? [], recentRebuts,
     })
+    const baseState = {
+      taskId, action: isReworkLocal ? 'rework-submitted' : actionFallback, round: nextRound, headSha: currentHead,
+      ...(submitLayers.account ? { account: submitLayers.account, verifiedPlatformLogin: submitLayers.verifiedPlatformLogin } : {}),
+      ...(submitLayers.agent ? { agent: submitLayers.agent } : {}),
+    }
     for (const iss of ledger.linkedIssues ?? []) {
-      await localBackend.postComment({
-        taskId,
-        number: iss,
-        body: issueCommentBodyFor(iss),
-        author: submitActorId,
-        statePayload: {
-          taskId,
-          action: isReworkLocal ? 'rework-submitted' : actionFallback,
-          round: nextRound,
-          ...(submitLayers.account ? { account: submitLayers.account, verifiedPlatformLogin: submitLayers.verifiedPlatformLogin } : {}),
-          ...(submitLayers.agent ? { agent: submitLayers.agent } : {}),
-          headSha: currentHead,
-        },
-      })
+      await localBackend.postComment({ taskId, number: iss, body: issueCommentBodyFor(iss), author: submitActorId, statePayload: baseState })
       if (typeof localBackend.syncStateLabel === 'function') await Promise.resolve(localBackend.syncStateLabel({ taskId, number: iss, state: 'in-review' })).catch(() => null)
     }
   }
@@ -640,14 +600,15 @@ export async function handleSubmit(opts, roots) {
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { originFull, originLower, upstreamLower, targetRepo, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+  const { originFull, originLower, upstreamLower, targetRepo, pushRemote } = targetCtx
 
   if (ledger.role === 'contributor-fork' && originLower && upstreamLower && originLower === upstreamLower) {
     process.stderr.write('BLOCKED_FORK_REMOTE_LOCK: origin 与 upstream 指向相同仓，禁止直接向正本推送。\n')
     return { exitCode: EXIT.FACT }
   }
 
-  const isGenericGit = ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || !targetRepo
+  const isGenericGit = ledger.role === 'generic-git' || targetCtx.capabilities?.api !== true || !targetRepo
   let deferredPush = Boolean(opts.offline && isGenericGit)
   let deferredPushReason = opts.offline ? '显式指定 --offline 离线审校' : null
   if (!deferredPush) {
@@ -690,12 +651,22 @@ export async function handleSubmit(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  // 提审要开 PR，那是平台写操作。用「不联网」的探测结果判断「能不能写」，必然得到「不能」，然后安静地只记账本、看起来像成功。
   const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
+  const effectiveProviderId = ledger.providerId && ledger.providerId !== 'none' ? ledger.providerId : targetCtx.providerId
   const backend = createTaskBackend({
-    role: ledger.role, providerId: ledger.providerId, targetRepo,
+    role: ledger.role, providerId: effectiveProviderId, targetRepo,
     client: opts._ghClient ?? ghProbe.client, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
   })
+  let submitEvidence = evidence
+  if (Array.isArray(submitEvidence?.artifacts) && submitEvidence.artifacts.length > 0) {
+    const syncArt = await stageAndSyncTaskArtifacts({
+      repoRoot: implRoot, gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot, taskId,
+      evidencePath: roots.gitDir ? verificationEvidencePath(roots.gitDir, taskId) : null,
+      records: submitEvidence.artifacts, backend, targetRepo,
+      observationSummary: submitEvidence?.e2eObservation?.summary ?? submitEvidence?.visual?.observation ?? '',
+    }).catch(() => null)
+    if (syncArt?.records) submitEvidence = { ...submitEvidence, artifacts: syncArt.records }
+  }
   const submitLayers = resolveIdentityLayers({
     ghLogin: ghProbe.env?.trackB?.login,
     ghTier: ghProbe.env?.trackB?.tier,
@@ -751,8 +722,7 @@ export async function handleSubmit(opts, roots) {
   } else {
     const { title, titleSource } = resolveReadablePrTitleWithSource(implRoot, ledger, opts.title)
     ledger.prTitleSource = titleSource
-    // 提案正文由账本与模板确定性生成：正文里排着的实证上下文都能从账本读出来，一旦允许传 `--body`，实证栏就成了「他说的」，不是「记录里的」。
-    const body = hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
+    const body = hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence: submitEvidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
     prResult = await backend.createPr({ targetRepo, head: headSpec, base: ledger.baseBranch, title, body, draft: Boolean(opts.draft) })
     if (prResult.ok && prResult.number) {
       ledger.prNumber = prResult.number

@@ -95,8 +95,9 @@ export const INJECTIONS_CONV_S1 = [
     id: 'I912',
     what: 'syncIssueCriteriaCheckboxes 在 markAllCriteriaDone 为 true 时跳过勾选剩余 C* 验收标准',
     file: 'kit/skills/lib/plan-sync.mjs',
-    from: '      else if (markAllCriteriaDone === true) nextChecked = true',
-    to: '      else if (false && markAllCriteriaDone === true) nextChecked = true',
+    alsoDropIn: ['.agents/skills/lib/plan-sync.mjs'],
+    from: '      } else if (markAllCriteriaDone === true) {\n        nextChecked = true',
+    to: '      } else if (false && markAllCriteriaDone === true) {\n        nextChecked = true',
     expect: 'IssueChecklistSync',
   },
   {

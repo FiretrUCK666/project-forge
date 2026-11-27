@@ -11,7 +11,7 @@ import { NON_API_CLIENT_TIERS } from '../../lib/github-client.mjs'
 import { hasIntakeBlockingSignal, readIntakeRecord } from '../../lib/intake-triage.mjs'
 import { getLocalPr } from '../../lib/local-issues.mjs'
 import {
-  detectDeclaredRepo, githubRepoFull, parseRemoteUrls, probeGitHubEnv,
+  detectDeclaredRepo, parseRemoteUrls, probePlatformEnv, resolveRemoteTarget,
 } from '../../lib/platform.mjs'
 
 /** 判断任务账本是否属于外部 PR / 隔离 PR 审查位（禁止经 `--task` 绕过 PR 检查）。 */
@@ -20,15 +20,8 @@ export function isExternalPrTaskLedger(task) {
   return task.role === 'inbound-external-pr' || task.isolation === 'review-pr' || Boolean(task.externalPr)
 }
 
-function buildPrTargetRepo(task, remoteUrls, declaredRepo) {
-  const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
-  const upstreamRaw = remoteUrls.upstream
-  const originFull = githubRepoFull(originRaw)
-  const upstreamFull = githubRepoFull(upstreamRaw)
-  if (task?.role === 'contributor-fork') {
-    return upstreamFull ?? declaredRepo ?? originFull
-  }
-  return originFull ?? declaredRepo ?? upstreamFull
+function resolvePrRemoteCtx(task, remoteUrls, declaredRepo) {
+  return resolveRemoteTarget(remoteUrls ?? {}, { role: task?.role, declaredRepo, providerHint: task?.providerId })
 }
 
 export function emitPrUnresolvedBlock({ opts, exitCode, prArg, reason, message }) {
@@ -165,18 +158,19 @@ export async function resolvePrForReviewPack({ mainRoot, roots, prNo, task, opts
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(mainRoot)
-  const targetRepo = buildPrTargetRepo(task, remoteUrls, declaredRepo)
+  const remoteTarget = resolvePrRemoteCtx(task, remoteUrls, declaredRepo)
+  const targetRepo = remoteTarget.repoSlug ?? declaredRepo ?? null
 
   let client = opts._ghClient ?? null
   let probeTier = opts._ghProbe?.env?.trackB?.tier ?? null
   if (!client && opts._ghProbe) {
     client = opts._ghProbe.client ?? null
   }
-  if (!client && targetRepo) {
+  if (!client && targetRepo && remoteTarget.capabilities?.api === true) {
     try {
-      const ghProbe = await probeGitHubEnv({ cwd: mainRoot, remoteUrls, probeNetwork: true })
-      client = ghProbe?.client ?? null
-      probeTier = ghProbe?.env?.trackB?.tier ?? probeTier
+      const probe = await probePlatformEnv({ cwd: mainRoot, remoteUrls, probeNetwork: true })
+      client = probe?.client ?? null
+      probeTier = probe?.env?.trackB?.tier ?? probeTier
     } catch {
       client = null
     }
@@ -190,8 +184,8 @@ export async function resolvePrForReviewPack({ mainRoot, roots, prNo, task, opts
       code: 'BLOCKED_PR_UNRESOLVED',
       prNumber: num,
       reason: 'no-api-channel',
-      message: `BLOCKED_PR_UNRESOLVED: 拉不到 PR #${num} 的真实信息（无可用 GitHub API 通道或缺少仓库声明）。`
-        + '不能假装审过或退回本地分支对比：请先配好 GitHub 凭据（gh auth login 或 GH_TOKEN）再重跑。',
+      message: `BLOCKED_PR_UNRESOLVED: 拉不到 PR #${num} 的真实信息（无可用托管平台 API 通道或缺少仓库声明）。`
+        + '不能假装审过或退回本地分支对比：请先配好平台凭据或令牌后再重跑。',
     }
   }
 
@@ -275,6 +269,8 @@ export async function resolvePrForReviewPack({ mainRoot, roots, prNo, task, opts
     ok: true,
     prNumber: num,
     targetRepo,
+    mrRefPattern: remoteTarget.mrRefPattern ?? null,
+    pushRemote: remoteTarget.pushRemote ?? 'origin',
     baseRefOid,
     headRefOid,
     baseBranch: pr.baseBranch ?? null,
@@ -288,10 +284,11 @@ export async function resolvePrForReviewPack({ mainRoot, roots, prNo, task, opts
 
 /** 验证 PR 的 `baseRefOid` 与 `headRefOid` 在本地 Git 对象库可达；不可达时按需尝试拉取 PR head，不静默退回分支名。 */
 export async function ensurePrShasLocallyResolvable({ reviewRoot, mainRoot, prResolution, opts = {} }) {
-  const { prNumber, baseRefOid, headRefOid } = prResolution
+  const { prNumber, baseRefOid, headRefOid, mrRefPattern, pushRemote } = prResolution
   let hasHead = (await gitRun(reviewRoot, ['rev-parse', '--verify', `${headRefOid}^{commit}`])).ok
   if (!hasHead && process.env.PF_NO_REAL_AUTH_PROBE !== '1' && !opts._ghClient && !opts._ghProbe) {
-    await gitRun(mainRoot, ['fetch', 'origin', `pull/${prNumber}/head`])
+    const refSpec = (mrRefPattern ?? 'refs/pull/{id}/head').replace(/\{id\}/g, String(prNumber)).replace(/^refs\//, '')
+    await gitRun(mainRoot, ['fetch', pushRemote || 'origin', refSpec])
     hasHead = (await gitRun(reviewRoot, ['rev-parse', '--verify', `${headRefOid}^{commit}`])).ok
   }
   const hasBase = (await gitRun(reviewRoot, ['rev-parse', '--verify', `${baseRefOid}^{commit}`])).ok

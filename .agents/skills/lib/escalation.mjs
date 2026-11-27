@@ -12,7 +12,7 @@ import { validateIssueBodyQuality } from './issue-quality.mjs'
 import { hydrateIssueBody } from './issue-template-hydrate.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { readTaskLedger, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
-import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from './platform.mjs'
+import { detectGitModeMarkers, isVerifiedTier, parseRemoteUrls, parseRemotesTopology, probeForWrite, resolveRemoteTarget } from './platform.mjs'
 import { createTaskBackend } from './task-backend.mjs'
 
 const EXPLICIT_WORK_PREFIX_RE = /^(?:(?:docs|fix|feat|refactor|chore|test|ci|build|perf|style|revert)(?:\([^)]+\))?:\s+|\[[^\]]+\]\s*)/i
@@ -401,12 +401,12 @@ export async function resolveEscalationBackend(repoRoot, opts = {}) {
   const remotes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(repoRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remotes.stdout)
   const topology = parseRemotesTopology(remotes.stdout)
-  const originUrl = remoteUrls.origin ?? Object.values(remoteUrls)[0]
-  const targetRepo = githubRepoFull(originUrl)
+  const remoteTarget = resolveRemoteTarget(remoteUrls)
+  const targetRepo = remoteTarget.repoSlug ?? null
   const hasRemote = Boolean(remotes.ok && Object.keys(remoteUrls).length > 0)
   const markers = fastGitDir ? detectGitModeMarkers(fastGitDir, { hasRemote }) : { localMode: false }
-  const isLocal = !hasRemote || markers.localMode || topology.providerId === 'none'
-  const isGeneric = hasRemote && !markers.localMode && (topology.providerId === 'generic-git' || !targetRepo)
+  const isLocal = !hasRemote || markers.localMode || remoteTarget.providerId === 'none'
+  const isGeneric = hasRemote && !markers.localMode && (remoteTarget.capabilities?.issues !== true || !targetRepo)
 
   if (isLocal || isGeneric) {
     return {
@@ -422,13 +422,15 @@ export async function resolveEscalationBackend(repoRoot, opts = {}) {
     }
   }
   const probe = opts._ghProbe ?? (opts._ghClient
-    ? { env: { providerId: 'github', trackB: { tier: opts._ghClient.tier ?? 'gh-cli' } }, client: opts._ghClient }
+    ? { env: { providerId: remoteTarget.providerId, trackB: { tier: opts._ghClient.tier ?? 'gh-cli' } }, client: opts._ghClient }
     : await probeForWrite({ cwd: repoRoot, remoteUrls }))
-  if (probe.env.trackB.tier !== 'gh-cli' && probe.env.trackB.tier !== 'node-https-token') {
+  if (!isVerifiedTier(probe?.env?.trackB?.tier)) {
     return {
       ok: false,
       targetRepo,
-      error: '`gh` CLI / GitHub token is not available; sign in to GitHub first.',
+      error: remoteTarget.providerId === 'github'
+        ? '`gh` CLI / GitHub token is not available; sign in to GitHub first.'
+        : `Platform API credentials for ${remoteTarget.providerId} are not available; configure token or CLI auth first.`,
     }
   }
   return {
@@ -436,7 +438,7 @@ export async function resolveEscalationBackend(repoRoot, opts = {}) {
     targetRepo,
     backend: createTaskBackend({
       role: 'maintainer',
-      providerId: 'github',
+      providerId: remoteTarget.providerId,
       targetRepo,
       client: probe.client,
       mainRoot: repoRoot,

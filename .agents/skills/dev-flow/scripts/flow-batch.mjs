@@ -352,15 +352,17 @@ async function handleMergeQueue(opts, roots) {
       const ledger = readTaskLedger(roots.mainRoot, taskId)
       if (!ledger) throw new Error(`合并队列找不到任务账本：${taskId}`)
 
-      const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
-      const canUseGhApi = Boolean(ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull)
+      const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+      const originFull = targetCtx.targetRepo ?? targetCtx.originFull
+      const pushRemote = targetCtx.pushRemote
+      const canUseGhApi = Boolean(ledger.role === 'maintainer' && targetCtx.capabilities?.api === true && originFull)
       const needsOnlineRemoteMerge = Boolean(canUseGhApi && ledger.prNumber && !opts['trial-local'])
       if (needsOnlineRemoteMerge && !sharedGhProbe && !opts._ghClient) {
         sharedGhProbe = await probeForWrite({ cwd: roots.mainRoot, remoteUrls })
       }
       const backend = createTaskBackend({
         role: ledger.role,
-        providerId: ledger.providerId,
+        providerId: ledger.providerId && ledger.providerId !== 'none' ? ledger.providerId : targetCtx.providerId,
         targetRepo: originFull,
         client: opts._ghClient ?? sharedGhProbe?.client,
         pushRemote,

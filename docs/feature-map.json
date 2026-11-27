@@ -105,8 +105,11 @@
         "scripts/lib/render.mjs",
         "scripts/lib/text.mjs",
         "kit/skills/lib/platform-registry.mjs",
+        "kit/skills/lib/platform-http.mjs",
+        "kit/skills/lib/platform-providers.mjs",
         "kit/skills/lib/platform.mjs",
         "kit/skills/lib/platform-probe.mjs",
+        "kit/skills/lib/proc-budget.mjs",
         "kit/skills/lib/git-core.mjs",
         "kit/skills/lib/git.mjs",
         "kit/skills/lib/git-index-fast.mjs",
@@ -549,7 +552,10 @@
         "scripts/dev/fixtures-studio-ux.mjs",
         "scripts/dev/injections-data-studio-ux.mjs",
         "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
-        "scripts/dev/injections-data-triage-parity.mjs"
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
@@ -660,6 +666,8 @@
         "kit/skills/dev-flow/scripts/flow-context.mjs",
         "kit/skills/dev-flow/scripts/flow-explore.mjs",
         "kit/skills/dev-flow/scripts/worktree-deps.mjs",
+        "kit/skills/lib/worktree-dep-pool.mjs",
+        "kit/skills/lib/master-criteria-sync.mjs",
         "kit/skills/lib/doc-comments.mjs",
         "kit/skills/lib/empirical-artifacts.mjs",
         "kit/skills/lib/github-client.mjs",
@@ -750,7 +758,10 @@
         "scripts/dev/fixtures-sandbox-dual-loop.mjs",
         "scripts/dev/injections-data-sandbox-flow.mjs",
         "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
-        "scripts/dev/injections-data-triage-parity.mjs"
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -932,7 +943,10 @@
         "scripts/dev/fixtures-sandbox-dual-loop.mjs",
         "scripts/dev/injections-data-sandbox-flow.mjs",
         "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
-        "scripts/dev/injections-data-triage-parity.mjs"
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -1162,7 +1176,10 @@
         "scripts/dev/fixtures-sandbox-dual-loop.mjs",
         "scripts/dev/injections-data-sandbox-flow.mjs",
         "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
-        "scripts/dev/injections-data-triage-parity.mjs"
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"
@@ -1361,7 +1378,10 @@
         "scripts/dev/fixtures-sandbox-dual-loop.mjs",
         "scripts/dev/injections-data-sandbox-flow.mjs",
         "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
-        "scripts/dev/injections-data-triage-parity.mjs"
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#全链路自证与门禁矩阵"

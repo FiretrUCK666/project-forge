@@ -9,12 +9,13 @@
  */
 
 import { EXIT } from './exit-codes.mjs'
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { verifyArchitectureMapHeader } from './feature-map-graph.mjs'
 import { posixPath, readJsonSafe, readTextSafe, sha256File, writeJsonAtomic } from './git.mjs'
 import { SYNTHETIC_OBSERVATION_TEXTS, evaluateTextSubstance, isSyntheticObservationText } from './evidence-substance.mjs'
+import { stageTaskArtifact } from './verify-state.mjs'
 
 export { SYNTHETIC_OBSERVATION_TEXTS }
 
@@ -306,21 +307,169 @@ export function evaluateStoredVisualEvidence({ evidence = null, policy = null, h
   return { ok: true, code: null, reason: null, unclaimed: true, uiFiles }
 }
 
-/** 合并新旧附件记录：同一 relPath 以最新一次为准，其余按路径排序，便于稳定比对。 */
+/** 合并新旧附件记录：同一 relPath 以最新一次为准并保留同指纹已上传缓存，按路径稳定排序。 */
 export function mergeArtifactRecords(previous = [], next = []) {
   const byPath = new Map()
   for (const rec of [...(Array.isArray(previous) ? previous : []), ...(Array.isArray(next) ? next : [])]) {
     const relPath = posixPath(String(rec?.relPath ?? '')).trim()
     if (!relPath) continue
+    const prev = byPath.get(relPath)
+    const sha = String(rec.sha256Prefix ?? prev?.sha256Prefix ?? '')
+    const sameHash = Boolean(prev && sha && prev.sha256Prefix === sha)
+    const stagedPath = rec.stagedPath ?? (sameHash ? prev?.stagedPath : undefined)
+    const observation = rec.observation ?? (sameHash ? prev?.observation : undefined)
+    const uploaded = rec.uploaded ?? (sameHash ? prev?.uploaded : undefined)
     byPath.set(relPath, {
       relPath,
-      bytes: Number(rec.bytes ?? 0),
-      sha256Prefix: String(rec.sha256Prefix ?? ''),
-      capturedAt: String(rec.capturedAt ?? ''),
-      ...(rec.external ? { external: true } : {}),
+      bytes: Number(rec.bytes ?? prev?.bytes ?? 0),
+      sha256Prefix: sha,
+      capturedAt: String(rec.capturedAt ?? prev?.capturedAt ?? ''),
+      ...(rec.external || prev?.external ? { external: true } : {}),
+      ...(stagedPath ? { stagedPath: posixPath(String(stagedPath)) } : {}),
+      ...(observation ? { observation: String(observation).trim() } : {}),
+      ...(uploaded && typeof uploaded === 'object' ? { uploaded } : {}),
     })
   }
   return [...byPath.values()].sort((a, b) => a.relPath.localeCompare(b.relPath))
+}
+
+const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)$/i
+
+export function guessArtifactContentType(filename) {
+  switch (extname(String(filename ?? '')).toLowerCase()) {
+    case '.png': return 'image/png'
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg'
+    case '.webp': return 'image/webp'
+    case '.gif': return 'image/gif'
+    case '.svg': return 'image/svg+xml'
+    case '.mp4': return 'video/mp4'
+    case '.webm': return 'video/webm'
+    case '.json': return 'application/json'
+    case '.md':
+    case '.txt':
+    case '.log': return 'text/plain; charset=utf-8'
+    default: return 'application/octet-stream'
+  }
+}
+
+/**
+ * 暂存实证附件至仓外 `<gitCommonDir>/project-forge-flow/artifacts/<taskId>/`，
+ * 并在托管平台声明 `capabilities.uploadAttachment === true` 时原生上传且缓存至 `evidence.json` 防重传。
+ * 不支持附件上传的托管平台直接保留本地元数据摘要，不询问图床。
+ */
+export async function stageAndSyncTaskArtifacts({
+  repoRoot = null,
+  gitCommonDir = null,
+  mainRoot = null,
+  taskId = null,
+  evidencePath = null,
+  records = [],
+  artifacts = [],
+  backend = null,
+  targetRepo = null,
+  observationSummary = '',
+} = {}) {
+  const seedRecords = Array.isArray(records) && records.length > 0
+    ? records.map((r) => ({ ...r }))
+    : (Array.isArray(artifacts) && artifacts.length > 0
+        ? normalizeArtifactRecords({ repoRoot, artifacts }).records
+        : [])
+  if (seedRecords.length === 0) {
+    return { ok: true, records: [], uploadedCount: 0, cachedCount: 0, skippedUpload: true, warnings: [] }
+  }
+
+  const canUpload = Boolean(backend?.capabilities?.uploadAttachment === true && typeof backend.uploadAttachment === 'function')
+  const providerKey = String(backend?.providerId ?? backend?.kind ?? '').trim().toLowerCase()
+  const warnings = []
+  let uploadedCount = 0
+  let cachedCount = 0
+  const updated = []
+
+  for (const rawRec of seedRecords) {
+    const rec = { ...rawRec }
+    const obsClean = String(observationSummary ?? '').trim()
+    if (obsClean && !rec.observation) rec.observation = obsClean
+
+    let resolvedAbs = null
+    if (rec.stagedPath && existsSync(rec.stagedPath)) {
+      resolvedAbs = rec.stagedPath
+    } else if (rec.relPath) {
+      const cand = isAbsolute(rec.relPath) ? resolve(rec.relPath) : (repoRoot ? resolve(repoRoot, rec.relPath) : resolve(rec.relPath))
+      if (existsSync(cand)) resolvedAbs = cand
+    }
+
+    if (gitCommonDir && taskId && resolvedAbs) {
+      try {
+        const staged = stageTaskArtifact(gitCommonDir, taskId, resolvedAbs, mainRoot ?? repoRoot ?? process.cwd(), { maxBytes: ARTIFACT_MAX_BYTES })
+        if (staged.ok) {
+          rec.stagedPath = staged.stagedPath
+          if (!rec.sha256Prefix) rec.sha256Prefix = staged.sha256Prefix
+          if (!rec.bytes) rec.bytes = staged.bytes
+          resolvedAbs = staged.stagedPath
+        }
+      } catch (err) {
+        warnings.push(`暂存附件 ${rec.relPath} 失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    if (canUpload) {
+      const cached = rec.uploaded
+        && String(rec.uploaded.providerId ?? '').toLowerCase() === providerKey
+        && String(rec.uploaded.sha256Prefix ?? '') === String(rec.sha256Prefix ?? '')
+        && Boolean(rec.uploaded.url || rec.uploaded.markdown)
+      if (cached) {
+        cachedCount += 1
+      } else if (resolvedAbs && existsSync(resolvedAbs)) {
+        try {
+          const filename = basename(rec.relPath || resolvedAbs)
+          const buffer = readFileSync(resolvedAbs)
+          const contentType = guessArtifactContentType(filename)
+          const upRes = await backend.uploadAttachment({
+            repo: targetRepo,
+            filePath: resolvedAbs,
+            filename,
+            buffer,
+            contentType,
+          })
+          if (upRes?.ok && (upRes.url || upRes.markdown)) {
+            const url = upRes.url ?? null
+            const md = upRes.markdown ?? (url ? (IMAGE_EXT_RE.test(filename) ? `![${filename}](${url})` : `[${filename}](${url})`) : null)
+            rec.uploaded = {
+              providerId: providerKey,
+              url,
+              markdown: md,
+              sha256Prefix: String(rec.sha256Prefix ?? ''),
+              uploadedAt: new Date().toISOString(),
+            }
+            uploadedCount += 1
+          } else {
+            warnings.push(`附件 ${filename} 上传失败（已回退为本地元数据摘要）：${upRes?.error ?? upRes?.reason ?? 'unknown'}`)
+          }
+        } catch (err) {
+          warnings.push(`附件 ${rec.relPath} 上传异常（已回退为本地元数据摘要）：${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    }
+    updated.push(rec)
+  }
+
+  let persisted = updated
+  if (evidencePath) {
+    const prev = readJsonSafe(evidencePath)
+    if (prev && typeof prev === 'object') {
+      persisted = mergeArtifactRecords(prev.artifacts ?? [], updated)
+      writeJsonAtomic(evidencePath, { ...prev, artifacts: persisted, updatedAt: new Date().toISOString() })
+    }
+  }
+  return {
+    ok: true,
+    records: persisted,
+    uploadedCount,
+    cachedCount,
+    skippedUpload: !canUpload,
+    warnings,
+  }
 }
 
 /**
@@ -367,14 +516,30 @@ export function precheckVisualAndArtifacts({
  * 一条铁律：**没有附件记录就不能说「已附附件」**。`satisfiedBy` 只描述证据形态，
  * 真附件是否存在以 `records` 为准——两者不一致时按最保守的一侧渲染。
  */
+function escapeMdCell(raw, maxLen = 80) {
+  const clean = String(raw ?? '').replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').trim()
+  if (!clean) return '-'
+  return clean.length > maxLen ? `${clean.slice(0, maxLen - 1)}…` : clean
+}
+
 export function formatArtifactEvidenceLines({ records = [], visual = null } = {}) {
   const lines = []
   const list = Array.isArray(records) ? records : []
   if (list.length > 0) {
-    lines.push('', '| 实证附件 | 字节数 | 校验指纹 |', '| --- | --- | --- |')
+    lines.push('', '| 实证附件 | 字节数 | 校验指纹 | 实证观察摘要 | 附件展示 |', '| --- | --- | --- | --- | --- |')
+    const defaultObs = visual?.observation
+      || (visual?.blockedReason ? `环境阻塞：${visual.blockedReason}` : '已验非空常规文件')
     for (const rec of list) {
       const name = posixPath(String(rec.relPath ?? '(unknown)'))
-      lines.push(`| \`${name}\` | ${Number(rec.bytes ?? 0)} | \`${String(rec.sha256Prefix ?? '')}\` |`)
+      const base = basename(name)
+      const obsCell = escapeMdCell(rec.observation || defaultObs, 80)
+      let displayCell = `仅本地元数据（\`${base}\`）`
+      if (rec.uploaded?.markdown) {
+        displayCell = String(rec.uploaded.markdown).replace(/\|/g, '\\|')
+      } else if (rec.uploaded?.url) {
+        displayCell = IMAGE_EXT_RE.test(base) ? `![${base}](${rec.uploaded.url})` : `[${base}](${rec.uploaded.url})`
+      }
+      lines.push(`| \`${name}\` | ${Number(rec.bytes ?? 0)} | \`${String(rec.sha256Prefix ?? '')}\` | ${obsCell} | ${displayCell} |`)
     }
     lines.push('', `- **实证附件合计**：${list.length} 个（元数据登记在仓外 \`evidence.json\`，不改动被跟踪文件）`)
   }

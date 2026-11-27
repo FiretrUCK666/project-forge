@@ -16,7 +16,7 @@ import {
 import { buildMultiTaskWavePlan, scanUnstartedReadySlices } from '../../lib/doc-slice-graph.mjs'
 import { destroyTaskScratchDir, findAffectedFeatures, readFeatureMap } from '../../lib/feature-map.mjs'
 import { computeCleanupPreviewHash, isSafeBranchDelete, verifyCleanupPreviewHash } from '../../lib/gate-enforcement.mjs'
-import { reclaimVerifySlotCache } from '../../lib/verify-state.mjs'
+import { destroyTaskArtifactsDir, reclaimVerifySlotCache } from '../../lib/verify-state.mjs'
 import {
   canonicalPath, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
   parseWorktreeListPorcelain, posixPath, readTextSafe, resolveDefaultBranch, samePath, writeAtomic,
@@ -24,7 +24,7 @@ import {
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { collectTaskLivenessBuckets, resolveTaskContext, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite,
+  detectDeclaredRepo, isVerifiedTier, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveRemoteTarget,
 } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { markTriageConsumed } from '../../lib/session-state.mjs'
@@ -216,24 +216,23 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
     : null
   const remoteBranchExists = Boolean(shouldProbeRemote && lsRes.ok && lsRes.stdout.trim() !== '')
 
-  const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git' && ledger.providerId !== 'generic-git')
+  const remoteTarget = resolveRemoteTarget(remoteUrls, { role: ledger.role, providerHint: ledger.providerId })
+  const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git' && remoteTarget.capabilities?.api === true)
   const ghProbe = _ghProbe
-    ?? (_ghClient ? { env: { providerId: 'github', trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
+    ?? (_ghClient ? { env: { providerId: remoteTarget.providerId, trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
     ?? (needGhApi ? await probeForWrite({ cwd: mainRoot, remoteUrls }) : null)
   const ghClient = _ghClient ?? ghProbe?.client
   const backend = createTaskBackend({
     role: ledger.role,
-    providerId: ledger.providerId,
+    providerId: ledger.providerId || remoteTarget.providerId,
     targetRepo,
     client: ghClient,
     pushRemote,
     mainRoot,
     gitDir,
   })
-  const canQueryGh = Boolean(_ghProbe || _ghClient)
-    || ghProbe?.env?.trackB?.tier === 'gh-cli'
-    || ghProbe?.env?.trackB?.tier === 'node-https-token'
-  const downstream = needGhApi && ghProbe?.env?.providerId === 'github' && typeof ghClient?.listOpenPrsByBase === 'function'
+  const canQueryGh = Boolean(_ghProbe || _ghClient) || isVerifiedTier(ghProbe?.env?.trackB?.tier)
+  const downstream = needGhApi && backend.capabilities?.pr === true && canQueryGh && typeof ghClient?.listOpenPrsByBase === 'function'
     ? await ghClient.listOpenPrsByBase(targetRepo, ledger.branch)
     : { ok: true, prs: [] }
 
@@ -370,6 +369,7 @@ export async function handleCleanup(opts, roots) {
   }
 
   const verifyScratchCleanup = await cleanupTaskVerifyScratch(roots, taskId, ledger, 'flow-cleanup')
+  const artifactsCleanup = destroyTaskArtifactsDir({ gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot, taskId })
   await releaseGitClaimLease(roots.mainRoot, taskId, { remoteUrls, role: ledger.role, opts })
   ledger.status = (keptWorktrees.length === 0 && !keepLocalBr && !keepRemoteBr) ? 'cleaned' : ledger.status
   ledger.cleanedAt = new Date().toISOString()
@@ -378,7 +378,7 @@ export async function handleCleanup(opts, roots) {
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
   let briefPrune = null
   try { briefPrune = pruneStaleBriefs(roots.mainRoot, { taskId }) } catch { /* non-fatal */ }
-  const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, verifyScratchCleanup, ...(briefPrune?.pruned?.length ? { prunedBriefs: briefPrune.pruned } : {}), status: ledger.status }
+  const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, verifyScratchCleanup, artifactsCleanup, ...(briefPrune?.pruned?.length ? { prunedBriefs: briefPrune.pruned } : {}), status: ledger.status }
   const cleanupDoneNext = ['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。']
   if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps(summary, cleanupDoneNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   else {
@@ -534,7 +534,8 @@ export async function handleAbort(opts, roots) {
     }
   }
   const verifyScratchCleanup = await cleanupTaskVerifyScratch(roots, taskId, ledger, 'flow-abort')
-  const removedArtifacts = []
+  const artifactsCleanup = destroyTaskArtifactsDir({ gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot, taskId })
+  const removedArtifacts = artifactsCleanup.destroyed ? ['artifacts'] : []
   const cleanFileOrDir = (absTarget, label) => {
     if (!absTarget || !existsSync(absTarget)) return
     rmSync(absTarget, { recursive: true, force: true })
@@ -596,10 +597,10 @@ export async function handleAbort(opts, roots) {
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
   try { pruneStaleBriefs(roots.mainRoot, { taskId }) } catch { /* non-fatal */ }
-  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', droppedDocs, removedWorktrees, verifyScratchCleanup, removedArtifacts }, null, 2)}\n`)
+  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', droppedDocs, removedWorktrees, verifyScratchCleanup, artifactsCleanup, removedArtifacts }, null, 2)}\n`)
   else {
-    process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${droppedDocs.length ? `（已标记 ${droppedDocs.join(', ')} 为 dropped）` : ''}${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
+    process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${droppedDocs.length ? `（已标记 ${droppedDocs.join(', ')} 为 dropped）` : ''}${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}${artifactsCleanup?.destroyed ? `，并已销毁仓外实证附件 (${artifactsCleanup.fileCount} 文件)` : ''}。\n`)
     printUnmountedLinksText(removedWorktrees)
   }
-  return { exitCode: EXIT.OK, droppedDocs, removedWorktrees, verifyScratchCleanup, removedArtifacts }
+  return { exitCode: EXIT.OK, droppedDocs, removedWorktrees, verifyScratchCleanup, artifactsCleanup, removedArtifacts }
 }

@@ -34,10 +34,11 @@ import {
   recordMountedDepsInLedger, sanitizeTaskId, updateTaskLedger,
 } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
+import { filterBootstrapAutoAttachDocs, resolveBootstrapStartDocs } from '../../lib/master-criteria-sync.mjs'
 import {
-  cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
+  cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, isVerifiedTier, parseFlowInputs,
   parseIssueNumbers, parseMilestoneNumber, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeGitHubEnv, resolveWorkspaceIdentity,
+  parseRemoteUrls, probePlatformEnv, resolveRemoteTarget, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import {
@@ -47,7 +48,7 @@ import { analyzeIssueDependencies } from '../../lib/workflow-policy.mjs'
 import {
   buildTargetRepoContext, detectRemoteDriftWarnings, findMatchingDocStrict,
   getChangedFiles, migrateUncommittedPlanDocs, resolveAndHydrateTaskContexts,
-  resolvePreferredRemoteName, syncTaskDocsSafe,
+  resolvePreferredRemoteName, resolveStartBaseAndStack, syncTaskDocsSafe,
 } from './flow-context.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
 
@@ -157,10 +158,11 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
 
   const profile = parseAgentsProfile(mainRoot)
   const declaredRepo = detectDeclaredRepo(mainRoot)
-  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: mainRoot, remoteUrls, probeNetwork: Boolean(opts.probeAuth) }))
-  const originFull = githubRepoFull(remoteUrls.origin ?? Object.values(remoteUrls)[0])
-  const canQueryApi = Boolean(opts._ghClient || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token')
-  const shouldFetchRepoMeta = Boolean(opts.probeAuth) && originFull && canQueryApi
+  const remoteTarget = resolveRemoteTarget(remoteUrls, { declaredRepo })
+  const ghProbe = opts._ghProbe ?? (await probePlatformEnv({ cwd: mainRoot, remoteUrls, probeNetwork: Boolean(opts.probeAuth) }))
+  const originFull = remoteTarget.repoSlug ?? null
+  const canQueryApi = Boolean(opts._ghClient || isVerifiedTier(ghProbe.env?.trackB?.tier))
+  const shouldFetchRepoMeta = Boolean(opts.probeAuth) && originFull && canQueryApi && remoteTarget.capabilities?.api === true
   const apiClient = opts._ghClient ?? (canQueryApi ? ghProbe.client : null)
   const localIssueClient = apiClient ?? {
     getIssue: async (_repo, num) => getLocalIssue({ mainRoot, gitDir: roots.gitDir, number: num }),
@@ -484,60 +486,11 @@ export async function handleStart(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  let baseBranch = state.defaultBranch ?? (state.commits === 0 && state.branch && state.branch !== '(detached)' ? state.branch : null)
-  let baseSha = state.head
-  // 允许显式指定基线：工作全在一条特性分支上时（主线还没合），
-  // 新任务必须从那条分支起头，否则它看不到已有工作——一开会就少几十个提交。
-  const explicitBase = String(opts.base ?? '').trim()
-  if (explicitBase) {
-    let ok = false
-    for (const cand of [`refs/heads/${explicitBase}`, `refs/remotes/origin/${explicitBase}`, explicitBase]) {
-      const sha = resolveRefShaFast(roots.gitDir, cand)
-      if (sha) { baseBranch = explicitBase; baseSha = sha; ok = true; break }
-      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
-      if (r.ok && r.stdout.trim()) { baseBranch = explicitBase; baseSha = r.stdout.trim(); ok = true; break }
-    }
-    if (!ok) throw new Error(`--base 指定的分支不存在：${explicitBase}`)
-  } else if (!baseBranch && state.commits > 0 && !opts.after && !effectiveExternalPr) {
-    return emitBlockedStart(opts, { code: 'BLOCKED_MISSING_DEFAULT_BRANCH', exitCode: EXIT.FACT, reason: '找不到可用默认分支，请先检出默认分支或显式传入 --base。' })
-  } else if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
-    for (const candRef of [`refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`]) {
-      const fastSha = resolveRefShaFast(roots.gitDir, candRef)
-      if (fastSha) { baseSha = fastSha; break }
-      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', candRef])
-      if (r.ok && r.stdout.trim()) { baseSha = r.stdout.trim(); break }
-    }
+  const baseResolved = await resolveStartBaseAndStack(roots, state, opts, { effectiveExternalPr })
+  if (baseResolved.blocked) {
+    return emitBlockedStart(opts, { code: baseResolved.code, exitCode: EXIT.FACT, reason: baseResolved.reason })
   }
-  let stackFields = {}
-  if (opts.after) {
-    const rawAfter = String(opts.after).trim()
-    let parentLedger = null
-    try { parentLedger = readTaskLedger(roots.mainRoot, sanitizeTaskId(rawAfter)) } catch { /* branch name fallback */ }
-    if (!parentLedger) {
-      parentLedger = listTaskLedgers(roots.mainRoot, { includeTerminal: false }).find((t) => t.branch === rawAfter) ?? null
-    }
-    const parentBranch = parentLedger?.branch ?? rawAfter
-    let parentSha = resolveRefShaFast(roots.gitDir, `refs/heads/${parentBranch}`)
-    if (!parentSha) {
-      for (const cand of [`refs/heads/${parentBranch}`, parentBranch]) {
-        const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
-        if (r.ok && r.stdout.trim()) { parentSha = r.stdout.trim(); break }
-      }
-    }
-    if (!parentSha && parentLedger?.worktreePath && existsSync(join(roots.mainRoot, parentLedger.worktreePath))) {
-      const r = await gitRun(join(roots.mainRoot, parentLedger.worktreePath), ['rev-parse', 'HEAD'])
-      if (r.ok && r.stdout.trim()) parentSha = r.stdout.trim()
-    }
-    if (!parentSha) throw new Error(`找不到 --after 指定的父任务或父分支：${rawAfter}`)
-    baseBranch = parentBranch
-    baseSha = parentSha
-    stackFields = {
-      parentTaskId: parentLedger?.taskId ?? null,
-      parentBranch,
-      parentPrNumber: parentLedger?.prNumber ?? null,
-      stackTargetBase: parentLedger?.stackTargetBase ?? (state.defaultBranch ?? null),
-    }
-  }
+  const { baseBranch, baseSha, stackFields } = baseResolved
   const filesList = opts.files ? String(opts.files).split(/[\s,]+/).map((s) => posixPath(s).replace(/^\.\//, '').trim()).filter(Boolean) : []
   const depMeta = state.inputs?.graph?.externalDependencies?.length ? { dependsOn: state.inputs.graph.externalDependencies } : {}
   const { startIdentity, implementerId } = resolveStartIdentity({ isPlanning, state, opts })
@@ -545,7 +498,8 @@ export async function handleStart(opts, roots) {
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
 
   if (effectiveExternalPr) {
-    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+    const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, state.remotesTopology ? { origin: state.remotesTopology[0] } : null)
+    const { targetRepo } = targetCtx
     const {
       issueContext, issueContextUnavailable, prContext, prContextUnavailable, prPatch,
     } = await resolveAndHydrateTaskContexts({
@@ -556,13 +510,15 @@ export async function handleStart(opts, roots) {
     const reviewAbs = join(roots.mainRoot, reviewRel)
     let targetSha = opts['pr-ref'] ?? null
     if (!targetSha) {
-      const fetchRemote = resolvePreferredRemoteName(state.remotesTopology, state.identity.providerId ?? 'github')
-      const fetchRes = await gitRun(roots.mainRoot, ['fetch', fetchRemote, `pull/${effectiveExternalPr}/head`])
+      const fetchRemote = resolvePreferredRemoteName(state.remotesTopology, state.identity.providerId ?? targetCtx.providerId ?? 'github')
+      const fullRef = (targetCtx.mrRefPattern ?? 'refs/pull/{id}/head').replace(/\{id\}/g, String(effectiveExternalPr))
+      const fetchSpec = fullRef.replace(/^refs\//, '')
+      const fetchRes = await gitRun(roots.mainRoot, ['fetch', fetchRemote, fetchSpec])
       if (fetchRes.ok) {
         const fh = await gitRun(roots.mainRoot, ['rev-parse', 'FETCH_HEAD'])
         if (fh.ok) targetSha = fh.stdout.trim()
       } else {
-        const localRef = await gitRun(roots.mainRoot, ['rev-parse', '--verify', `refs/pull/${effectiveExternalPr}/head`])
+        const localRef = await gitRun(roots.mainRoot, ['rev-parse', '--verify', fullRef])
         if (localRef.ok) targetSha = localRef.stdout.trim()
       }
     }
@@ -611,11 +567,15 @@ export async function handleStart(opts, roots) {
 
   const isBootstrap = Boolean(opts['allow-plan-bootstrap'])
   const dirtyDocs = isBootstrap
-    ? (state.dirty ?? []).map((e) => posixPath(e.file ?? '')).filter((f) => /^docs\/(?:prd|specs|todo)\/.*\.md$/.test(f))
+    ? filterBootstrapAutoAttachDocs((state.dirty ?? []).map((e) => posixPath(e.file ?? '')), { isBootstrap, explicitSpec: opts.spec, explicitTodo: opts.todo })
     : []
-  const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/todo/')) ?? null
-  const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/specs/')) ?? null
-  const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/prd/')) ?? null
+  const initDocs = resolveBootstrapStartDocs({
+    root: roots.mainRoot, slug, taskId, linkedIssues, extraDocs: dirtyDocs,
+    current: { prdFile: existing?.prdFile, specFile: existing?.specFile, todoFile: existing?.todoFile },
+    explicit: { prd: opts.prd, spec: opts.spec, todo: opts.todo },
+    isBootstrap, findStrict: findMatchingDocStrict,
+  })
+  const { prdFile: initialPrd, specFile: initialSpec, todoFile: initialTodo } = initDocs
 
   const specIssueNew = collectDocIssueNumbers(roots, [initialSpec], roots.mainRoot)[0] ?? null
 
@@ -752,16 +712,18 @@ export async function handleStart(opts, roots) {
   recordMountedDepsInLedger(ledger, implRel, depMount)
 
   const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger, state.dirty)
-  if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/todo/')) ?? null
-  if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/specs/')) ?? null
-  if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId, linkedIssues) ?? dirtyDocs.find((f) => f.startsWith('docs/prd/')) ?? null
-  if (isBootstrap && (!ledger.todoFile || !ledger.specFile || !ledger.prdFile)) {
-    const wtSt = await gitStatusPorcelainZ(implAbs)
-    const wtDocs = (wtSt.entries ?? []).map((e) => posixPath(e.file ?? '')).filter((f) => /^docs\/(?:prd|specs|todo)\/.*\.md$/.test(f))
-    if (!ledger.prdFile) ledger.prdFile = wtDocs.find((f) => f.startsWith('docs/prd/')) ?? null
-    if (!ledger.specFile) ledger.specFile = wtDocs.find((f) => f.startsWith('docs/specs/')) ?? null
-    if (!ledger.todoFile) ledger.todoFile = wtDocs.find((f) => f.startsWith('docs/todo/')) ?? null
-  }
+  const wtExtraDocs = isBootstrap && !ledger.prdFile
+    ? filterBootstrapAutoAttachDocs(((await gitStatusPorcelainZ(implAbs)).entries ?? []).map((e) => posixPath(e.file ?? '')), { isBootstrap, explicitSpec: opts.spec, explicitTodo: opts.todo })
+    : []
+  const wtResolved = resolveBootstrapStartDocs({
+    root: implAbs, slug, taskId, linkedIssues, extraDocs: [...dirtyDocs, ...wtExtraDocs],
+    current: { prdFile: ledger.prdFile, specFile: ledger.specFile, todoFile: ledger.todoFile },
+    explicit: { prd: opts.prd, spec: opts.spec, todo: opts.todo },
+    isBootstrap, findStrict: findMatchingDocStrict,
+  })
+  ledger.prdFile = wtResolved.prdFile
+  ledger.specFile = wtResolved.specFile
+  ledger.todoFile = wtResolved.todoFile
   const specIssueWt = collectDocIssueNumbers(roots, [ledger.specFile], implAbs)[0] ?? null
   if (specIssueWt && !ledger.linkedIssues.includes(specIssueWt)) {
     ledger.linkedIssues = [...ledger.linkedIssues, specIssueWt]

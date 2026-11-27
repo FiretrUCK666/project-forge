@@ -12,8 +12,9 @@ import { gitRun, readJsonSafe, readTextSafe, sha256Text, writeJsonAtomic } from 
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from './ledger.mjs'
 import { getLocalIssue } from './local-issues.mjs'
+import { collectMasterIssueCriteriaState, renderCriteriaProgressTable } from './master-criteria-sync.mjs'
 import {
-  detectDeclaredRepo, githubRepoFull, parseRemoteUrls, probeForWrite, resolveRemoteDescriptor,
+  detectDeclaredRepo, parseRemoteUrls, probeForWrite, resolveRemoteTarget,
 } from './platform.mjs'
 import { createTaskBackend } from './task-backend.mjs'
 
@@ -44,7 +45,7 @@ const NUMBERED_CRITERIA_LINE_RE = /^(\s*[-*]\s*)\[([ xX])\](\s+(?:\*\*)?(C\d+)(?
 const UNNUMBERED_CRITERIA_LINE_RE = /^(\s*[-*]\s*)\[ \](.+)$/
 
 /** 确定性同步 Issue 正文中 `C<N>` 勾选框及（完成态时）验收章节内未编号勾选框，绝不触碰代码块与托管摘要区。 */
-export function syncIssueCriteriaCheckboxes(existingBody = '', { criteria = [], markAllCriteriaDone = false } = {}) {
+export function syncIssueCriteriaCheckboxes(existingBody = '', { criteria = [], markAllCriteriaDone = false, preserveChecked = false } = {}) {
   const criteriaMap = new Map()
   for (const item of Array.isArray(criteria) ? criteria : []) {
     const id = String(item?.id ?? '').trim().toUpperCase()
@@ -93,8 +94,12 @@ export function syncIssueCriteriaCheckboxes(existingBody = '', { criteria = [], 
       const id = numMatch[4].toUpperCase()
       const curChecked = numMatch[2].toLowerCase() === 'x'
       let nextChecked = curChecked
-      if (criteriaMap.has(id)) nextChecked = criteriaMap.get(id)
-      else if (markAllCriteriaDone === true) nextChecked = true
+      if (criteriaMap.has(id)) {
+        const desired = criteriaMap.get(id)
+        nextChecked = preserveChecked === true ? (curChecked || desired) : desired
+      } else if (markAllCriteriaDone === true) {
+        nextChecked = true
+      }
 
       if (nextChecked !== curChecked) {
         out.push(`${numMatch[1]}[${nextChecked ? 'x' : ' '}]${numMatch[3]}`)
@@ -300,7 +305,10 @@ export function collectPlanSummaryMeta({
     }
   }
 
-  const isMasterTarget = hasTargetNum && parsedDocs.some((d) => d.kind === 'PRD' && d.fm?.data?.multi_spec === true && Number(d.fm?.data?.issue) === targetNum)
+  const masterDoc = hasTargetNum
+    ? parsedDocs.find((d) => d.kind === 'PRD' && d.fm?.data?.multi_spec === true && Number(d.fm?.data?.issue) === targetNum)
+    : null
+  const isMasterTarget = Boolean(masterDoc)
   const fallbackKeys = hasSliceSpec && !isMasterTarget ? [ledger?.specFile, ledger?.todoFile].filter(Boolean) : []
   const scopedEntries = [...new Set([...docList, ...fallbackKeys])]
     .map((rel) => ledger?.planCritique?.[rel])
@@ -312,16 +320,25 @@ export function collectPlanSummaryMeta({
     critiqueText = `${last.verdict ?? 'recorded'} (round=${last.round ?? round})`
   }
   if (!critiqueText) critiqueText = round > 0 ? `Round ${round}` : '未开始'
-  const critList = Array.isArray(criteriaOverride)
-    ? [...criteriaOverride]
-      .map((c) => ({ ...c, id: String(c?.id ?? '').trim().toUpperCase(), checked: Boolean(c?.checked) }))
-      .filter((c) => c.id)
-      .sort((a, b) => Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)))
-    : [...critSeen.values()].sort((a, b) => Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)))
-  const doneCount = critList.filter((c) => c.checked).length
-  const criteriaText = critList.length > 0
-    ? `${doneCount}/${critList.length} 已完成（${critList.map((c) => `${c.checked ? '[x]' : '[ ]'} ${c.id}`).join('、')}）`
-    : '未定义 C1..Cn'
+  const masterAggCriteria = (!Array.isArray(criteriaOverride) && masterDoc && mainRoot)
+    ? collectMasterIssueCriteriaState({
+        mainRoot,
+        implRoot: repoRoot,
+        masterPrdRel: masterDoc.rel,
+        ledger,
+        taskId: ledger?.taskId ?? null,
+        includeSelf: false,
+      })
+    : []
+  const rawCritSource = Array.isArray(criteriaOverride)
+    ? criteriaOverride
+    : (masterAggCriteria.length > 0 ? masterAggCriteria : [...critSeen.values()])
+  const critList = [...rawCritSource]
+    .map((c) => ({ ...c, id: String(c?.id ?? '').trim().toUpperCase(), checked: Boolean(c?.checked) }))
+    .filter((c) => c.id)
+    .sort((a, b) => Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)))
+  const progressView = renderCriteriaProgressTable(critList)
+  const criteriaText = progressView.summaryLine
 
   const effectiveLabel = (phase === 'plan-backfill' || phase === 'clarify')
     ? (hasApproved ? 'approved' : (hasRejected ? 'changes-requested' : metaLabel))
@@ -335,6 +352,7 @@ export function collectPlanSummaryMeta({
     `- **文档路径**：${docDisplay}`,
     `- **Critique 轮次**：${critiqueText}`,
     `- **验收进度**：${criteriaText}`,
+    ...(progressView.block ? ['', progressView.block] : []),
   ].join('\n')
 
   return { docList, statusDisplay, critiqueText, criteriaText, effectiveLabel, summaryBlock, critList }
@@ -414,7 +432,7 @@ async function syncLabelsForTarget(backend, { taskId = null, repo, number, targe
 }
 
 export async function syncIssueSummaryBody(backend, {
-  repo, number, summaryBlock = null, renamedPaths = [], criteria = [], markAllCriteriaDone = false,
+  repo, number, summaryBlock = null, renamedPaths = [], criteria = [], markAllCriteriaDone = false, preserveChecked = false,
 }) {
   const hasCriteria = Array.isArray(criteria) && criteria.length > 0
   if ((!summaryBlock && !hasCriteria && !markAllCriteriaDone)
@@ -431,7 +449,7 @@ export async function syncIssueSummaryBody(backend, {
       baseBody = baseBody.split(item.from).join(item.to)
     }
   }
-  baseBody = syncIssueCriteriaCheckboxes(baseBody, { criteria, markAllCriteriaDone }).body
+  baseBody = syncIssueCriteriaCheckboxes(baseBody, { criteria, markAllCriteriaDone, preserveChecked }).body
   const nextBody = summaryBlock ? mergeManagedPlanSummary(baseBody, summaryBlock) : baseBody
   if (nextBody === curNorm) return true
   const upd = await Promise.resolve(backend.updateIssueBody({ repo, number, body: nextBody })).catch(() => null)
@@ -498,6 +516,8 @@ export async function syncPlanPhaseToBackend(opts = {}) {
   let backend = opts.backend ?? null
   let targetRepo = opts.targetRepo ?? null
   let tier = 'unknown'
+  let resolvedProviderId = opts.providerId ?? ledger?.providerId ?? 'none'
+  const preserveChecked = opts.preserveChecked !== undefined ? Boolean(opts.preserveChecked) : (phase !== 'clarify')
 
   if (!backend) {
     const fastCfg = detectedGitDir ? readGitConfigFast(detectedGitDir) : null
@@ -505,27 +525,37 @@ export async function syncPlanPhaseToBackend(opts = {}) {
     const remoteUrls = parseRemoteUrls(remoteText)
     let declaredRepo = null
     try { declaredRepo = detectDeclaredRepo(mainRoot) } catch { declaredRepo = null }
-    const originFull = githubRepoFull(remoteUrls.origin)
-    const upstreamFull = githubRepoFull(remoteUrls.upstream)
-    const primaryUrl = remoteUrls.upstream ?? remoteUrls.origin ?? declaredRepo
-    const providerId = opts.providerId ?? ledger?.providerId
-      ?? (primaryUrl ? (resolveRemoteDescriptor(primaryUrl)?.providerId ?? 'generic-git') : 'none')
     const role = opts.role ?? ledger?.role
       ?? ((remoteUrls.origin || remoteUrls.upstream) ? 'maintainer' : 'local-only')
-    targetRepo = targetRepo ?? (role === 'contributor-fork'
-      ? (upstreamFull ?? declaredRepo ?? originFull)
-      : (originFull ?? declaredRepo)) ?? null
+    const agentsText = readTextSafe(path.join(mainRoot, 'AGENTS.md')) ?? null
+    const target = resolveRemoteTarget(remoteUrls, {
+      role,
+      declaredRepo,
+      providerHint: opts.providerId ?? ledger?.providerId ?? null,
+      agentsText,
+    })
+    resolvedProviderId = opts.providerId ?? ledger?.providerId ?? target.providerId
+    targetRepo = targetRepo ?? target.repoSlug ?? null
 
-    let ghClient = opts._ghClient ?? null
-    if (!ghClient && providerId === 'github' && role !== 'local-only' && (issueNums.length > 0 || prNumber != null)) {
-      const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls }).catch(() => null))
-      ghClient = ghProbe?.client ?? null
-      tier = ghClient?.tier ?? ghProbe?.env?.trackB?.tier ?? 'offline'
-    } else if (ghClient) {
-      tier = ghClient.tier ?? 'direct'
+    let apiClient = opts._ghClient ?? null
+    if (!apiClient && target.capabilities?.api === true && role !== 'local-only' && (issueNums.length > 0 || prNumber != null)) {
+      const probe = opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls, agentsText }).catch(() => null))
+      apiClient = probe?.client ?? null
+      tier = apiClient?.tier ?? probe?.env?.trackB?.tier ?? 'offline'
+    } else if (apiClient) {
+      tier = apiClient.tier ?? 'direct'
     }
 
-    backend = createTaskBackend({ role, providerId, targetRepo, client: ghClient, mainRoot, gitDir })
+    backend = createTaskBackend({
+      role,
+      providerId: resolvedProviderId,
+      targetRepo,
+      apiBaseUrl: target.apiBaseUrl,
+      pushRemote: target.pushRemote || 'origin',
+      client: apiClient,
+      mainRoot,
+      gitDir,
+    })
   }
 
   const hasApi = Boolean(backend?.capabilities?.api)
@@ -556,6 +586,7 @@ export async function syncPlanPhaseToBackend(opts = {}) {
           renamedPaths,
           criteria: metaNum.critList,
           markAllCriteriaDone: false,
+          preserveChecked,
         })
       }
     } else if (taskId) {
@@ -583,11 +614,11 @@ export async function syncPlanPhaseToBackend(opts = {}) {
   }
 
   if (tier === 'offline' || tier === 'delegated') {
-    const failure = { target: targetRepo ?? 'github', phase, syncKey, error: `tier=${tier}`, at: new Date().toISOString() }
+    const failure = { target: targetRepo ?? resolvedProviderId, phase, syncKey, error: `tier=${tier}`, at: new Date().toISOString() }
     await recordSyncFailuresToLedger(mainRoot, taskId, [failure])
     return {
       ok: false, synced: false, status: tier === 'delegated' ? 'DELEGATED' : 'OFFLINE', notApplicable: false,
-      reason: `GitHub 通道当前为 ${tier}，未执行伪同步`, syncKey, phase, round, syncFailures: [failure],
+      reason: `远端平台（${resolvedProviderId}）通道当前为 ${tier}，未执行伪同步`, syncKey, phase, round, syncFailures: [failure],
     }
   }
 
@@ -620,6 +651,7 @@ export async function syncPlanPhaseToBackend(opts = {}) {
         renamedPaths,
         criteria: metaNum.critList,
         markAllCriteriaDone: false,
+        preserveChecked,
       })
       targets.push({ kind: 'issue', number: num, commentOk: true, labelOk: labelRes?.ok !== false, ...(bodyOk !== null ? { bodyOk } : {}) })
     } catch (err) {

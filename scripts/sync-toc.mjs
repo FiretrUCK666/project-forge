@@ -236,8 +236,8 @@ function readIntOption(flag, raw, min) {
   return n
 }
 
-function main() {
-  const args = process.argv.slice(2)
+export async function runCli(argv = process.argv.slice(2)) {
+  const args = [...argv]
   const files = []
   let check = false
   let maxLevel = 2
@@ -431,4 +431,6 @@ export { headings as markdownHeadings, slug as githubSlug }
 // 判据按**真实路径**归一（survey.mjs 的 isMainModule，全仓只此一份）：字面比较在经
 // junction / 符号链接调用时会**什么都不做并返回 0**，而「exit 0、零输出」与「目录
 // 已是最新」在调用方眼里长得一模一样——那正是这个工具最不该给出的答案。
-if (isMainModule(import.meta.url, process.argv[1])) void flushAndExit(main())
+if (isMainModule(import.meta.url, process.argv[1])) {
+  runCli(process.argv.slice(2)).then((code) => flushAndExit(code))
+}

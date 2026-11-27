@@ -29,48 +29,106 @@ function loadE2eDeps() {
   return e2eDepsPromise
 }
 
-function runAsync(ROOT, script, args, opts = {}) {
+const HELP_CHILD_CODE = [
+  'const targets = JSON.parse(process.env.PF_HELP_TARGETS || "[]");',
+  'const origOut = process.stdout.write.bind(process.stdout);',
+  'const origErr = process.stderr.write.bind(process.stderr);',
+  'const results = [];',
+  'for (const item of targets) {',
+  '  const outChunks = [];',
+  '  const errChunks = [];',
+  '  const cap = (b) => (c, enc, cb) => {',
+  '    if (typeof enc === "function") { cb = enc; enc = undefined; }',
+  '    b.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c), typeof enc === "string" ? enc : "utf8"));',
+  '    if (typeof cb === "function") cb();',
+  '    return true;',
+  '  };',
+  '  const prevExit = process.exitCode;',
+  '  process.exitCode = undefined;',
+  '  process.stdout.write = cap(outChunks);',
+  '  process.stderr.write = cap(errChunks);',
+  '  let status = 0;',
+  '  try {',
+  '    const mod = await import(item.url);',
+  '    const entry = typeof mod?.runCli === "function" ? mod.runCli : (typeof mod?.main === "function" ? mod.main : null);',
+  '    if (!entry) { errChunks.push(Buffer.from("missing runCli export\\n")); status = 1; }',
+  '    else {',
+  '      const code = await Promise.resolve(entry(["--help"]));',
+  '      status = typeof code === "number" ? code : (typeof process.exitCode === "number" ? process.exitCode : 0);',
+  '    }',
+  '  } catch (err) {',
+  '    errChunks.push(Buffer.from(err instanceof Error ? (err.message + "\\n") : (String(err) + "\\n")));',
+  '    status = 1;',
+  '  } finally {',
+  '    process.exitCode = prevExit;',
+  '    process.stdout.write = origOut;',
+  '    process.stderr.write = origErr;',
+  '  }',
+  '  results.push({',
+  '    name: item.name,',
+  '    status,',
+  '    stdout: Buffer.concat(outChunks).toString("utf8"),',
+  '    stderr: Buffer.concat(errChunks).toString("utf8"),',
+  '  });',
+  '}',
+  'origOut(JSON.stringify({ results }));',
+].join('\n')
+
+function runHelpsInSingleChild(targets) {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [join(ROOT, 'scripts', script), ...args], {
-      stdio: opts.stdio ?? ['ignore', 'pipe', 'pipe'],
+    const child = spawn(process.execPath, ['--input-type=module', '-e', HELP_CHILD_CODE], {
+      env: { ...process.env, PF_HELP_TARGETS: JSON.stringify(targets) },
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      ...opts,
     })
     const out = []
     const err = []
-    const timer = setTimeout(() => {
-      try { child.kill() } catch { /* ignore */ }
-    }, opts.timeout ?? 120000)
+    const timer = setTimeout(() => { try { child.kill() } catch { /* ignore */ } }, 25000)
     timer.unref?.()
     child.stdout?.on('data', (c) => out.push(c))
     child.stderr?.on('data', (c) => err.push(c))
     child.on('close', (code) => {
       clearTimeout(timer)
-      done({
-        status: typeof code === 'number' ? code : 1,
-        stdout: Buffer.concat(out).toString('utf8'),
-        stderr: Buffer.concat(err).toString('utf8'),
-      })
+      const stdout = Buffer.concat(out).toString('utf8')
+      const stderr = Buffer.concat(err).toString('utf8')
+      if (code !== 0) {
+        done({ error: `--help 批量校验子进程失败（退出 ${code}）：${(stderr || stdout).trim().split('\n')[0]}` })
+        return
+      }
+      try {
+        done(JSON.parse(stdout))
+      } catch (e) {
+        done({ error: `--help 批量校验子进程输出解析失败：${e.message}` })
+      }
     })
     child.on('error', (error) => {
       clearTimeout(timer)
-      done({ status: 1, stdout: '', stderr: error.message })
+      done({ error: `--help 批量校验子进程启动失败：${error.message}` })
     })
   })
 }
 
-async function checkHelps({ ROOT, fail }) {
+export async function checkHelps({ ROOT, fail }) {
   const names = ['survey.mjs', 'backup.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs', 'update.mjs', 'equip.mjs']
-  await Promise.all(names.map(async (name) => {
+  const targets = []
+  for (const name of names) {
     const p = join(ROOT, 'scripts', name)
-    if (!existsSync(p)) { fail(`缺脚本 ${name}`); return }
-    const res = await runAsync(ROOT, name, ['--help'], { timeout: 20000 })
+    if (!existsSync(p)) { fail(`缺脚本 ${name}`); continue }
+    targets.push({ name, url: pathToFileURL(p).href })
+  }
+  if (targets.length === 0) return
+  const batch = await runHelpsInSingleChild(targets)
+  if (batch.error) { fail(batch.error); return }
+  const byName = new Map((batch.results ?? []).map((r) => [r.name, r]))
+  for (const { name } of targets) {
+    const res = byName.get(name)
+    if (!res) { fail(`${name} --help 未返回校验结果`); continue }
     if (res.status !== 0) {
       fail(`${name} --help 跑不通（退出 ${res.status}）：${(res.stderr || '').trim().split('\n')[0]}`)
-      return
+      continue
     }
     if (!/用法/.test(res.stdout || '')) fail(`${name} --help 没打印用法`)
-  }))
+  }
 }
 
 async function checkTemplateRender({ ROOT, fail, note }) {

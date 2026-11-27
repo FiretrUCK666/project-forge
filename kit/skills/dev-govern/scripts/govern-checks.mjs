@@ -12,6 +12,7 @@ import { join, relative } from 'node:path'
 import {
   DEFAULT_WALK_SKIP_DIRS, gitRun, isMacOsJunkPath, posixPath, readTextSafe,
 } from '../../lib/git.mjs'
+import { readBlobBatch } from '../../lib/git-fast-objects.mjs'
 import { collectGateReceiptKey, hasReusableGateCheck } from '../../lib/gate-receipt.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import {
@@ -408,7 +409,12 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
   const agentsText = readTextSafe(join(workRoot, 'AGENTS.md'), 64 * 1024) ?? ''
   const forgeHooksConfig = loadForgeHooksConfig(mainRoot, workRoot)?.config ?? null
   const oversizedNonExemptFiles = []
+  const pendingRatchetFiles = []
   const codeRelList = []
+  const changedCodeRels = (isGit && changedSet)
+    ? files.filter((f) => CODE_EXT_RE.test(f.name) && changedSet.has(f.rel) && !isTestOrFixtureFile(f.rel)).map((f) => f.rel)
+    : []
+  const headBlobMap = changedCodeRels.length > 0 ? await readBlobBatch(workRoot, 'HEAD', changedCodeRels) : new Map()
 
   for (const f of files) {
     if (f.size > LARGE_FILE_BYTES) {
@@ -473,18 +479,9 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
         })
         if (structCheck.godFile) {
           const exempt = resolveOversizedExemption({ fileRel: f.rel, agentsText, forgeHooksConfig })
-          let ratchetPass = false
           if (!exempt.exempt && changedSet && changedSet.has(f.rel) && isGit) {
-            const cmpRef = defaultBranch && (await gitRun(workRoot, ['--no-optional-locks', 'rev-parse', '--verify', defaultBranch])).ok
-              ? (await gitRun(workRoot, ['--no-optional-locks', 'merge-base', 'HEAD', defaultBranch])).stdout?.trim() || 'HEAD'
-              : 'HEAD'
-            const baseShow = await gitRun(workRoot, ['--no-optional-locks', 'show', `${cmpRef}:${f.rel}`])
-            if (baseShow.ok && baseShow.stdout) {
-              const baseLineCount = countTextLines(baseShow.stdout)
-              if (baseLineCount > GOD_FILE_WARN_LINES && (lineCount - baseLineCount) <= 80) ratchetPass = true
-            }
-          }
-          if (!exempt.exempt && !ratchetPass) {
+            pendingRatchetFiles.push({ rel: f.rel, lineCount })
+          } else if (!exempt.exempt) {
             const isHigh = lineCount > GOD_FILE_HIGH_LINES
             oversizedNonExemptFiles.push({ rel: f.rel, lines: lineCount })
             addFinding(findings, {
@@ -538,8 +535,7 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
         }
       }
       if (changedSet && changedSet.has(f.rel) && !isTestOrFixtureFile(f.rel)) {
-        const showRes = isGit ? await gitRun(workRoot, ['show', `HEAD:${f.rel}`]) : null
-        const headText = showRes?.ok ? showRes.stdout : null
+        const headText = isGit ? (headBlobMap.get(f.rel) ?? null) : null
         for (const bp of scanBrokenCommentPaths({ repoRoot: workRoot, fileRel: f.rel, text: info.text, headText })) {
           addFinding(findings, {
             id: `hygiene.comment-broken-path.${f.rel}:${bp.line}`,
@@ -552,6 +548,32 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
             action: 'Update or remove stale backticked path references in comments.',
           })
         }
+      }
+    }
+  }
+
+  if (isGit && pendingRatchetFiles.length > 0) {
+    const cmpRef = defaultBranch && (await gitRun(workRoot, ['--no-optional-locks', 'rev-parse', '--verify', defaultBranch])).ok
+      ? (await gitRun(workRoot, ['--no-optional-locks', 'merge-base', 'HEAD', defaultBranch])).stdout?.trim() || 'HEAD'
+      : 'HEAD'
+    const ratchetBlobMap = cmpRef === 'HEAD'
+      ? headBlobMap
+      : await readBlobBatch(workRoot, cmpRef, pendingRatchetFiles.map((x) => x.rel))
+    for (const item of pendingRatchetFiles) {
+      const baseText = ratchetBlobMap.get(item.rel) ?? null
+      const baseLineCount = baseText ? countTextLines(baseText) : 0
+      const ratchetPass = Boolean(baseText && baseLineCount > GOD_FILE_WARN_LINES && (item.lineCount - baseLineCount) <= 80)
+      if (!ratchetPass) {
+        const isHigh = item.lineCount > GOD_FILE_HIGH_LINES
+        oversizedNonExemptFiles.push({ rel: item.rel, lines: item.lineCount })
+        addFinding(findings, {
+          id: `hygiene.god-file.${item.rel}`,
+          category: 'hygiene',
+          severity: isHigh ? 'high' : 'medium',
+          file: item.rel,
+          title: `Oversized source file (${item.lineCount} lines > ${isHigh ? GOD_FILE_HIGH_LINES : GOD_FILE_WARN_LINES}): ${item.rel}`,
+          action: 'Split cohesive responsibilities into smaller focused modules rather than expanding a god file.',
+        })
       }
     }
   }
@@ -604,7 +626,7 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
     })
   }
 
-  await auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findings, addFinding)
+  await auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findings, addFinding, opts.trackedSet ?? null)
 
   const wtReport = await inspectWorktrees(mainRoot, isGit, defaultBranch)
   for (const s of wtReport.stale) {

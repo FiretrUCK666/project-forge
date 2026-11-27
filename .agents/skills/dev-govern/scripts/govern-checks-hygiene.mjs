@@ -228,19 +228,45 @@ export function inspectManifest(repoRoot) {
   }
 }
 
-async function isPureTrackedSourceDir(workRoot, dirRel) {
+function hasUntrackedDiskFileInDir(workRoot, dirRel, trackedSet) {
+  const stack = [dirRel]
+  while (stack.length > 0) {
+    const relDir = stack.pop()
+    let entries
+    try { entries = readdirSync(join(workRoot, relDir), { withFileTypes: true }) } catch { return true }
+    for (const ent of entries) {
+      if (ent.isSymbolicLink() || isMacOsJunkPath(ent.name)) continue
+      const rel = `${relDir}/${ent.name}`
+      if (ent.isDirectory()) stack.push(rel)
+      else if (ent.isFile() && !trackedSet.has(rel)) return true
+    }
+  }
+  return false
+}
+
+async function isPureTrackedSourceDir(workRoot, dirRel, trackedSet = null) {
   if (!dirRel || dirRel === '.worktrees') return false
-  const trackedRes = await gitRunBuffer(workRoot, ['ls-files', '-z', '--', dirRel])
-  if (!trackedRes.ok || !trackedRes.stdout) return false
-  const hasTracked = trackedRes.stdout.toString('utf8').split('\0').some(Boolean)
-  if (!hasTracked) return false
+  if (trackedSet instanceof Set) {
+    const prefix = `${dirRel}/`
+    let hasTracked = false
+    for (const p of trackedSet) {
+      if (p.startsWith(prefix)) { hasTracked = true; break }
+    }
+    if (!hasTracked) return false
+    if (!hasUntrackedDiskFileInDir(workRoot, dirRel, trackedSet)) return true
+  } else {
+    const trackedRes = await gitRunBuffer(workRoot, ['ls-files', '-z', '--', dirRel])
+    if (!trackedRes.ok || !trackedRes.stdout) return false
+    const hasTracked = trackedRes.stdout.toString('utf8').split('\0').some(Boolean)
+    if (!hasTracked) return false
+  }
   const untrackedRes = await gitRunBuffer(workRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', dirRel])
   if (!untrackedRes.ok) return false
   const hasUntracked = untrackedRes.stdout.toString('utf8').split('\0').some(Boolean)
   return !hasUntracked
 }
 
-export async function auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findings, addFinding) {
+export async function auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findings, addFinding, trackedSet = null) {
   const presentOutputs = OUTPUT_DIRS.filter((d) => existsSync(join(workRoot, d)))
   if (!isGit || presentOutputs.length === 0) return
 
@@ -254,7 +280,7 @@ export async function auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findin
   const ignored = new Set((res.stdout || '').split('\0').filter(Boolean).map((s) => posixPath(s).replace(/\/$/, '')))
   for (const d of presentOutputs) {
     if (ignored.has(d)) continue
-    if (await isPureTrackedSourceDir(workRoot, d)) continue
+    if (await isPureTrackedSourceDir(workRoot, d, trackedSet)) continue
     addFinding(findings, {
       id: `hygiene.unignored-dir.${d}`,
       category: 'hygiene',

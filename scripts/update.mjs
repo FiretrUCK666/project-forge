@@ -484,7 +484,7 @@ function runDiskEquip(equipTarget, { quiet = false } = {}) {
   }
 }
 
-async function main(argv) {
+async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--help') || argv.includes('-h')) { process.stdout.write(usage()); return 0 }
   let checkOnly = false
   let quietFlag = false
@@ -699,6 +699,7 @@ export {
   readState,
   rememberState,
   resolveStatePath,
+  main as runCli,
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) {

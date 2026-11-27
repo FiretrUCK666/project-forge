@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 全业务流去 GitHub 硬假设、实证附件闭环、同步缺陷根治与多平台 E2E
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-27
 updated: 2026-11-28
@@ -11,7 +11,7 @@ branch: feat/multi-forge-flow-sync-e2e
 owner: plan-c-master
 plan_mode: interactive
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-c-r2, round=2, sha=ea65985593f9, summary=R2 verified all 4 R1 major findings closed: standalone kit/skills/lib/master-criteria-sync.mjs (~180L, keeps 714L doc-slice-graph.mjs untouched) with includeSelf=false default preventing non-terminal false checks; syncIssueCriteriaCheckboxes keeps default preserveChecked=false compatible with fixtures-issue-checklist-sync.mjs:158 & clarify --drop-criterion; flow-inspect.mjs blocks both L616-617 & L755-763 bootstrap auto-attach; concrete extractions keep flow-inspect/flow-merge/flow-lifecycle/review-empirical <=780L; plan-sync.mjs:508-520, scripts/lib/render.mjs:393 & fixtures-empirical-cycle.mjs 5-column table all covered.)"
 related_prd: ../prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md
 related_todo: ../todo/261127-issue227-multi-forge-flow-sync-e2e-todo.md
@@ -27,13 +27,13 @@ scope_files: [kit/skills/lib/master-criteria-sync.mjs, kit/skills/dev-flow/scrip
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `implemented`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3`（全业务流多平台切换、实证附件生命周期、三大同步缺陷根治与 Milestone C 终态收口；未 `approved` 前不编码） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-28` |
 | 分支 / Issue / PR | `feat/multi-forge-flow-sync-e2e` / #227 / 未关联 |
 | 负责人 / 内审状态 | plan-c-master / `passed` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联 PRD / Todo | `docs/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/todo/261127-issue227-multi-forge-flow-sync-e2e-todo.md` |
+| 关联 PRD / Todo | `docs/archive/prd/261127-issue227-multi-forge-worktree-perf-v1-prd.md` / `docs/archive/todo/261127-issue227-multi-forge-flow-sync-e2e-todo.md` |
 
 - **变更一句话**：将全部研发流与渲染脚本统一切换至 `resolveRemoteTarget` 与 10 键 `capabilities` 驱动，建成仓外实证附件生命周期与原生上传/摘要降级，新增独立单源模块 `kit/skills/lib/master-criteria-sync.mjs` (new) 根治 PR `#215` 与 Issue `#219` 同步缺陷并压低全部紧文件至 `<= 780` 行，落地纯 Node Mock Forge E2E 与全仓长青资产收口。
 

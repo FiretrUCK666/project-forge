@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: 多远端平台统一适配、并发 Worktree 依赖安全与全仓低 CPU 提速
-status: active
+status: done
 created: 2026-11-27
 updated: 2026-11-28
 issue: 227
@@ -20,12 +20,12 @@ multi_spec: true
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
+| 当前状态 | `done`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `2026-11-27` / `2026-11-28` |
 | 关联 Issue / PR | #227 / 未关联 |
 | 提出方 / 负责人 | `plan-c-master` |
 | 规划态 | `interactive`（逐题问到零拍板） |
-| 关联设计 / 任务单 | 4 份解耦切片 `SPEC + Todo`（见「切片波次总览」） |
+| 关联设计 / 任务单 | `docs/archive/specs/261127-issue227-multi-forge-flow-sync-e2e-spec.md` / `docs/archive/todo/261127-issue227-multi-forge-flow-sync-e2e-todo.md` |
 
 - **目标读者**：实现者、独立审查者与维护者
 
@@ -83,7 +83,7 @@ multi_spec: true
 | Wave 1A | `low-cpu-script-perf` | 无（`[]`） | `C1..C3` | `docs/specs/261127-issue227-low-cpu-script-perf-spec.md` |
 | Wave 1B | `multi-forge-platform-core` | 无（`[]`） | `C4..C6` | `docs/specs/261127-issue227-multi-forge-platform-core-spec.md` |
 | Wave 2 | `worktree-dep-pool-policy` | `low-cpu-script-perf`, `multi-forge-platform-core` | `C7..C9` | `docs/specs/261127-issue227-worktree-dep-pool-policy-spec.md` |
-| Wave 3 | `multi-forge-flow-sync-e2e` | `low-cpu-script-perf`, `multi-forge-platform-core`, `worktree-dep-pool-policy` | `C10..C13` | `docs/specs/261127-issue227-multi-forge-flow-sync-e2e-spec.md` |
+| Wave 3 | `multi-forge-flow-sync-e2e` | `low-cpu-script-perf`, `multi-forge-platform-core`, `worktree-dep-pool-policy` | `C10..C13` | `docs/archive/specs/261127-issue227-multi-forge-flow-sync-e2e-spec.md` |
 
 Wave 1A（19 文件）与 Wave 1B（20 文件）的 `scope_files` 保持 100% 零交集，可完全并行开发并按合入顺序回归验证；每片合入 `main` 均须执行 `node scripts/equip.mjs .` 与全量门禁保持绿灯，由 Wave 3 统一完成 `docs/TDD.md`、`docs/feature-map.json`、零脏态 `docs/architecture-map.html` 与双语 `README` 收口。
 

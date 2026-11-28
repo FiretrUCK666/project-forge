@@ -1,0 +1,50 @@
+# 本仓库 scripts 零依赖，只用运行环境内置模块。
+# 下面是各生态常见的依赖与产物目录，为协作者本地环境兜底，不代表本仓库需要它们。
+
+node_modules/
+.pnpm-store/
+.yarn/
+bower_components/
+
+# Python（scripts 目前全是 Node，保留以免将来混入）
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 编辑器与操作系统
+.vscode/
+.idea/
+.DS_Store
+._*
+__MACOSX/
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# 临时与产物
+*.log
+*.tmp
+*.tmp-*
+*.bak
+*.tar
+tmp/
+coverage/
+.cache/
+
+# 并行开发与独立审查用的 worktree：它检出的是同一条历史，不该进版本库。
+# 建之前必须确认这条规则在，否则 `.worktrees/` 会被当成待提交的新文件。
+.worktrees/
+
+# 用户包核对的中间清单：`git archive ... | tar -t > package-list.txt` 的产物。
+# 必须忽略，否则这个未跟踪文件会落进自检的检查域，让「本地跑一遍等于 CI 过」失效。
+package-list.txt

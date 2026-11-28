@@ -312,9 +312,12 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
         if (kitInstalled) {
           const parsedProfile = parseAgentsProfile(root)
           if (!parsedProfile.hasDevProfile) {
+            const composeCmd = (facts.docs.agentsMarkers?.regions?.length ?? 0) === 0
+              ? 'node scripts/compose-agents.mjs . --upgrade'
+              : 'node scripts/compose-agents.mjs .'
             add(finding('missing', 'agents', 'agents.handwritten-missing-dev-profile',
               `${facts.docs.agents.file} 为手写契约且已装配 \`.agents/skills/\`，但缺少有效 Dev Profile——`
-              + '本地技能需要读取 quick-test / full-test / smoke-verify / merge-gate（或显式 none）；请补齐 `## Dev Profile` 块或运行 `node scripts/compose-agents.mjs .` 同步模板', {
+              + `本地技能需要读取 quick-test / full-test / smoke-verify / merge-gate（或显式 none）；请补齐 \`## Dev Profile\` 块或运行 \`${composeCmd}\` 无损追加模板受管区`, {
                 ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
               }))
           }

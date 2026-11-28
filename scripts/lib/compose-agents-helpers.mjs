@@ -131,7 +131,11 @@ export async function maybePreWriteBackup(root, existingText, noBackup) {
 }
 
 export function formatOversizeBreakdown(sizeInfo) {
-  return `total=${sizeInfo.bytes}B（受管区 managed=${sizeInfo.managedBytes}B + 自定义/正文 custom=${sizeInfo.customBytes}B，上限 ${AGENTS_MAX_BYTES}B / 30KB）；建议将长篇子模块规范外置到 <subdir>/AGENTS.md 或 docs/TDD.md`
+  const canBypass = sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0
+  const bypassHint = canBypass
+    ? '；若需完整保留既有自定义长文，可加 `--allow-custom-oversize` 放行'
+    : ''
+  return `total=${sizeInfo.bytes}B（受管区 managed=${sizeInfo.managedBytes}B + 自定义/正文 custom=${sizeInfo.customBytes}B，上限 ${AGENTS_MAX_BYTES}B / 30KB）；建议将长篇子模块规范外置到 <subdir>/AGENTS.md 或 docs/TDD.md${bypassHint}`
 }
 
 export function readManifestSafe(root) {

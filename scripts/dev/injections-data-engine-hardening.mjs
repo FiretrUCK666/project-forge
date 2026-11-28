@@ -31,10 +31,10 @@ export const INJECTIONS_ENGINE_HARDENING = [
   },
   {
     id: 'I228',
-    what: '跳过 agents-defaults.mjs renderKitRoutingRows 的自有技能表格行注入',
+    what: '跳过 agents-defaults.mjs customSkillsBlock 的自有技能块渲染',
     file: 'scripts/lib/agents-defaults.mjs',
-    from: '  for (const cs of customSkills ?? []) {',
-    to: '  for (const cs of []) {',
+    from: "  const custom = customSkillsOf(facts)\n  if (custom.length === 0) return ''",
+    to: "  const custom = []\n  if (custom.length === 0) return ''",
     expect: 'C2：新增自定义技能单次运行 compose-agents.mjs',
   },
   {

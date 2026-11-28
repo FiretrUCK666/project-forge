@@ -339,12 +339,16 @@ function detectAiConventions(root, files = null, fileSet = null) {
 }
 
 function parseAgentMarkers(root, agents, textByRel = null) {
-  if (!agents) return { marks: 0, fills: [] }
+  if (!agents) return { marks: 0, regions: [], fills: [], hasDevProfile: false, hasIntentRouting: false }
   const text = textByRel?.get(agents) ?? readTextSafe(join(root, agents)) ?? ''
   const markers = parseMarkers(text, agents)
+  const { regions } = protocol.markerRegions(text, agents)
   return {
     marks: markers.length,
+    regions: regions.map((r) => r.id),
     fills: markers.filter((m) => m.kind === 'fill').map((m) => ({ line: m.line, what: m.what })),
+    hasDevProfile: /^#{2,3}\s+Dev\s+Profile\b/im.test(text),
+    hasIntentRouting: /^#{2,3}\s+(?:意图路由|Intent\s+Routing\b)/im.test(text),
   }
 }
 

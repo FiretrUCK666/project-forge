@@ -89,7 +89,7 @@ node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown --probe
 node "<本 skill 目录>/scripts/backup.mjs" create "<项目目录>" --label pre-forge
 # S3 统一装配 / 无损升级套件（空目录加 --bootstrap-empty [--stack <universal|node|python|go|rust|java|docs|...>] --name <name>；加 --with-hooks 装局部 .githooks/pre-push）
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
-# S3 生成或无损刷新紧凑 AGENTS.md（--check / --upgrade / --clean / --no-backup）
+# S3 生成或无损刷新紧凑 AGENTS.md（--check / --upgrade / --allow-custom-oversize / --clean / --no-backup）
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
 # S3 把 CI 骨架按勘察事实落盘或配开关 A 分支保护（--kind check|release | --protect-branch [--branch <分支>]；非 GitHub 仓安全退出 0）
 node "<本 skill 目录>/scripts/equip-ci.mjs" "<项目目录>" --kind check

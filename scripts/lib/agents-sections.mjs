@@ -412,16 +412,19 @@ export function collectMissingSections(rendered, existing) {
   return out
 }
 
+export const HANDWRITTEN_MIN_CHARS = 80
+
 export function handWrittenCoverage(text) {
   const body = String(text ?? '').replace(/\r\n/g, '\n')
+  const lowerBody = body.toLowerCase()
   const contentLines = body.split('\n').filter((line) => line.trim() !== '' && !/^#/.test(line))
   const chars = contentLines.join('').replace(/\s/g, '').length
-  const has = (words) => words.some((w) => body.includes(w))
+  const has = (words) => words.some((w) => lowerBody.includes(w.toLowerCase()))
   const missing = []
   if (!has(['定位', '简介', '概述', '做什么', 'Overview', 'About', 'Introduction'])) missing.push('项目定位')
   if (!has(['构建', '安装', '运行', '测试', '命令', 'Setup', 'Install', 'Build', 'Test', 'Commands'])) missing.push('构建与验证')
   if (!has(['守则', '规范', '约定', '红线', '高风险', 'Rules', 'Guidelines', 'Conventions', 'Standards'])) missing.push('修改边界')
-  return { chars, missing, ok: chars >= 80 && missing.length === 0 }
+  return { chars, missing, ok: chars >= HANDWRITTEN_MIN_CHARS && missing.length === 0 }
 }
 
 function normalizedFileSha(filePath) {

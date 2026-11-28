@@ -462,7 +462,7 @@ function appendNavigation(lines, facts) {
 function appendS3NextStep(lines, facts) {
   const nextStep = facts.nextStep ?? computeS3NextStep(facts)
   if (!nextStep) return
-  lines.push('## S3 推荐落盘入口')
+  lines.push(nextStep.blockedByNeedsHuman ? '## S2 待拍板停步门禁' : '## S3 推荐落盘入口')
   lines.push('')
   lines.push(`${nextStep.text}`)
   if (nextStep.reason) lines.push(`- 决策依据：${nextStep.reason}`)

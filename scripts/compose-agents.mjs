@@ -26,6 +26,7 @@ import {
   driftRegions,
   findMissingIntentRoutingSkills,
   filterIntentRouting,
+  HANDWRITTEN_MIN_CHARS,
   handWrittenCoverage,
   headingLines,
   refreshRegions,
@@ -297,7 +298,7 @@ async function main(argv) {
       const coverage = handWrittenCoverage(info.text ?? '')
       if (!coverage.ok) {
         const why = []
-        if (coverage.chars < 400) why.push(`正文只有 ${coverage.chars} 个字符`)
+        if (coverage.chars < HANDWRITTEN_MIN_CHARS) why.push(`正文只有 ${coverage.chars} 个字符`)
         if (coverage.missing.length > 0) why.push(`缺这几类内容：${coverage.missing.join('、')}`)
         process.stderr.write(`${agentsName} 是手写的，但它还不算一份契约：${why.join('；')}\n`
           + '  加 `--upgrade` 会追加缺的节，原有内容一个字节不动。\n')

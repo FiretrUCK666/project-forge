@@ -126,8 +126,9 @@ export function registerEngineHardeningCases(cases) {
       const updated = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
       const intentBlock = /<!-- project-forge: begin 意图路由 -->([\s\S]*?)<!-- project-forge: end 意图路由 -->/.exec(updated)?.[1] ?? ''
       const stratBlock = /<!-- project-forge: begin 探索策略 -->([\s\S]*?)<!-- project-forge: end 探索策略 -->/.exec(updated)?.[1] ?? ''
-      if (!intentBlock.includes('.agents/skills/my-audit/SKILL.md') || !intentBlock.includes('| my-audit：')) {
-        return `单次运行后 意图路由 未包含新技能路由行：${intentBlock.slice(0, 400)}`
+      const auditHits = (intentBlock.match(/\.agents\/skills\/my-audit\/SKILL\.md/g) ?? []).length
+      if (auditHits !== 1 || !intentBlock.includes('`my-audit`')) {
+        return `单次运行后 意图路由 自有技能注入异常（命中 ${auditHits} 次）：${intentBlock.slice(0, 600)}`
       }
       if (!stratBlock.includes('conventions-and-skills')) {
         return `单次运行后 探索策略 未同步更新 conventions-and-skills：${stratBlock}`

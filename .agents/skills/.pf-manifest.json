@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-28T06:34:28.367Z",
+  "installedAt": "2026-11-28T07:21:39.125Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -133,7 +133,7 @@
       "sha256": "92e9b8fba820fde1d21f57787b81b4de56fd39bba02fd454b1ff073a6025acad"
     },
     "dev-iterate/scripts/iterate.mjs": {
-      "sha256": "8daa47b96f5f42c90325e99fd93eb82599df2da12ce94eb86017b48dadea4dcc"
+      "sha256": "b2351af5e3d7a60f4fa0cfb23ebe882d15e7e024822c9f739e66cd59d3d3dd56"
     },
     "dev-plan/SKILL.md": {
       "sha256": "fcd2f61f5f8069306754014f1ed06c3645668dc496738ffe48341a18c133daf0"
@@ -469,7 +469,7 @@
       "sha256": "38db28223d3557d6bfb5b3e9e3e9b26b6e37c38561dd943a45396f9ba500c826"
     },
     "lib/suite-inventory.mjs": {
-      "sha256": "efc4fbe9ce5a3ab73ad1f820a410da0f185480360628978d62ff9f2dec91b107"
+      "sha256": "54ea597cb2512ddf9d0a5dc8c5cb2fb60da10097f1ff5acacbaf0717ceda1aa8"
     },
     "lib/symbol-index.mjs": {
       "sha256": "dbb78f4195f8d0d1507fed07d75f8cf3cedb362ba11841bc9e471e69bcb0bb71"

@@ -18,16 +18,30 @@ import {
   readTextSafe, samePath, sha256Text,
 } from '../../lib/git.mjs'
 import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
+import { listTaskLedgers } from '../../lib/ledger.mjs'
 import { isAllowedExtensionPath } from '../../lib/overlay.mjs'
 import { ARCHITECTURE_MAP_REL, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
 
 const OUTPUT_DIRS = [...COMMON_OUTPUT_DIRS, '.worktrees']
 
-export async function inspectWorktrees(mainRoot, isGit, defaultBranch) {
+export async function inspectWorktrees(mainRoot, isGit, defaultBranch, { currentWorkRoot = null } = {}) {
   const stale = []
   const worktreeEntries = []
   const counts = { merged: 0, squash_or_rebase_merged: 0, no_own_commits: 0, unmerged: 0, prunable: 0, orphan_dir: 0 }
   if (!isGit) return { total: 0, counts, entries: worktreeEntries, stale }
+
+  const activeLedgerRoots = []
+  try {
+    for (const ldg of listTaskLedgers(mainRoot, { includeTerminal: false })) {
+      if (ldg?.worktreePath) activeLedgerRoots.push(canonicalPath(resolve(mainRoot, ldg.worktreePath)))
+      if (ldg?.reviewWorktreePath) activeLedgerRoots.push(canonicalPath(resolve(mainRoot, ldg.reviewWorktreePath)))
+    }
+  } catch { /* non-fatal */ }
+  const currentCanon = currentWorkRoot ? canonicalPath(currentWorkRoot) : null
+  const isActiveOwnOrLedgerWt = (wtAbs) => (
+    (currentCanon && samePath(wtAbs, currentCanon))
+    || activeLedgerRoots.some((ar) => samePath(wtAbs, ar))
+  )
 
   const fastWtList = readWorktreeListFast(mainRoot)
   let rawEntries = fastWtList
@@ -89,7 +103,8 @@ export async function inspectWorktrees(mainRoot, isGit, defaultBranch) {
           ? `no_own_commits: no unique commits ahead of ${defaultBranch || 'main'} (dirty=${dirty}; ask human before cleaning)`
           : `${st}: ${mergeInfo.reason}`,
       }
-      inspected[idx] = { stateKey: st, item, isStale: st !== 'unmerged' }
+      const activeExcluded = isActiveOwnOrLedgerWt(e.path) && (st === 'no_own_commits' || st === 'unmerged')
+      inspected[idx] = { stateKey: st, item, isStale: st !== 'unmerged' && !activeExcluded }
     }
   }
   await Promise.all(Array.from({ length: Math.min(2, dotWorktreeEntries.length) }, inspectOneWt))

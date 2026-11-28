@@ -24,9 +24,10 @@
  */
 
 import { existsSync, statSync } from 'node:fs'
-import { join, relative, resolve, sep } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep, withNextSteps } from '../../lib/cli.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from '../../lib/concurrency-radar.mjs'
 import { buildContextBrief, extractDocPaths, formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { buildPlanHandoff, evaluatePlanNextState } from '../../lib/plan-next.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
@@ -119,9 +120,9 @@ function printHelp() {
     '',
     '子命令：',
     '  next               [--file <docPath>] [--task <id>] [--plan-only] [--handoff] [--json]',
-    '  note               [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
+    '  note               [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--dead-end <已证伪死路>...] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
     '  brief              [--topic <主题>] [--task <id>] [--title <标题>] [--verdict <结论>] [--affected-feature <模块或改前改后>...] [--add-feature "<id|domain|title|summary>"...] [--remove-feature "<id|reason>"...] [--flow-delta <变化>...] [--prototype "<标题>=<路径或URL>"...] [--select-prototype <id>] [--source-skill <名称>] [--pr-diff-base <ref>] [--parent-brief <key>] [--confirm] [--open-browser] [--json]',
-    '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
+    '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--dead-end <已证伪死路>...] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
     '  init               --kind <prd|spec|todo|tdd|pair|all> --slug <slug> --title <标题> --agent <id> [--topic <主题>] [--allow-open-draft] [--spec-slug <slug>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--case <1..5>] [--multi-spec] [--host-mode <m>] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
     '  slice              --prd <prdPath> --spec-slug <slug> --title <标题> [--kind <spec|pair>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--agent <id>] [--host-mode <m>] [--topic <主题>] [--allow-open-draft] [--worktree | --in-place] [--json]',
     '  clarify            --file <docPath> [--decision <结论> | --drop-criterion <C条目> --reason <原因>] [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
@@ -163,7 +164,7 @@ async function main(argv) {
       subcommands: SUBCOMMANDS,
       booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree', 'in-place', 'multi-spec', 'handoff', 'plan-only', 'run-commands', 'reset', 'allow-open-draft', 'confirm', 'open-browser'],
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'spec-slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'drop-criterion', 'reason', 'milestone', 'plan-mode', 'host-mode', 'case', 'agent', 'topic', 'verdict', 'select-prototype', 'source-skill', 'pr-diff-base', 'parent-brief'],
-      multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open', 'fact', 'resolve', 'drop', 'scope', 'criteria', 'depends-on', 'prototype', 'affected-feature', 'add-feature', 'remove-feature', 'flow-delta'],
+      multiFlags: ['findings', 'finding', 'should-fix', 'resolved', 'rebut-accepted', 'exclude', 'anchor', 'open', 'fact', 'resolve', 'drop', 'dead-end', 'scope', 'criteria', 'depends-on', 'prototype', 'affected-feature', 'add-feature', 'remove-feature', 'flow-delta'],
       aliases: { type: 'kind', owner: 'agent' },
       flagPresets: { 'single-session': { flag: 'host-mode', value: 'single-session', keepBoolean: true } },
       usageHint: `doc-plan.mjs <${SUBCOMMANDS.join('|')}>`,
@@ -256,6 +257,9 @@ async function main(argv) {
       res.contextBrief = buildContextBrief(res.writeRoot ?? repoRoot, {
         paths: opts.spec ? [opts.spec] : [], keywords: [opts.title, effectiveSlug, opts.task].filter(Boolean), excludeFiles: res.files ?? [],
       })
+      res.concurrencyRadar = projectConcurrencyRadar(mainRoot, {
+        currentTaskId: res.taskId ?? opts.task ?? null, currentWorkRoot: res.writeRoot ?? repoRoot, currentFiles: opts.scope ?? [],
+      })
       const initNextSteps = [{ skill: 'dev-plan', text: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${res.file}"` }]
       if (cli.json) process.stdout.write(`${JSON.stringify(withNextSteps(res, initNextSteps, { repoRoot: mainRoot }), null, 2)}\n`)
       else {
@@ -263,6 +267,8 @@ async function main(argv) {
         if (res.visualBrief?.htmlUri) {
           process.stdout.write(`- Living Visual Brief (${res.visualBrief.confirmedState}): ${res.visualBrief.htmlUri}\n`)
         }
+        const radarLines = formatConcurrencyRadarLines(res.concurrencyRadar)
+        if (radarLines.length > 0) process.stdout.write(`${radarLines.join('\n')}\n`)
         const briefLines = formatContextBriefLines(res.contextBrief)
         if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
         printNextStep(initNextSteps, { repoRoot: mainRoot })
@@ -391,17 +397,26 @@ async function main(argv) {
         const statusLow = String(fm.data?.status ?? '').toLowerCase()
         const isTerminalDoc = ['done', 'archived', 'superseded', 'dropped', 'implemented'].includes(statusLow)
           || posixPath(res.file).startsWith('docs/archive/')
+        const docAbs = resolve(repoRoot, res.file)
+        const { entry: auditCritiqueEntry } = readPlanCritiqueEntrySync({
+          repoRoot, mainRoot, gitDir: roots.gitDir, taskId: opts.task ?? fm.data?.task_id ?? null, fmData: fm.data, relDoc: res.file,
+        })
+        const auditPriorRounds = parseCritiqueRounds(fm.data, docText, auditCritiqueEntry)
+        const nextRound = auditPriorRounds.reduce((m, r) => Math.max(m, Number(r.round) || 0), 0) + 1
+        const repoSpecPath = fm.data?.related_spec
+          ? posixPath(relative(repoRoot, resolve(dirname(docAbs), String(fm.data.related_spec).trim())))
+          : null
         if (isTerminalDoc) {
           // 已归档或终态文档不再引导新建隔离实施，避免对历史产物误导开工
         } else if (res.docType === 'prd' && !['active', 'done', 'dropped'].includes(statusLow)) {
           auditNextSteps = [
-            { skill: 'dev-plan', text: `1. 先派发独立只读 Critic 运行范围核查：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${res.file}" --reviewer <criticId> --round 1` },
-            { skill: 'dev-plan', text: `2. PRD 须经独立只读 Plan Critique 后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` },
+            { skill: 'dev-plan', text: `1. 先派发独立只读 Critic 运行范围核查：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${res.file}" --reviewer <criticId> --round ${nextRound}` },
+            { skill: 'dev-plan', text: `2. PRD 须经独立只读 Plan Critique 后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round ${nextRound}` },
           ]
         } else if (res.docType === 'tdd') {
           auditNextSteps = [
-            { skill: 'dev-plan', text: `1. 先派发独立只读 Critic 运行范围核查：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${res.file}" --reviewer <criticId> --round 1` },
-            { skill: 'dev-plan', text: `2. TDD 架构基线须经独立架构 Critique 确认与 AGENTS.md 模块边界、arch-rules 对齐【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` },
+            { skill: 'dev-plan', text: `1. 先派发独立只读 Critic 运行范围核查：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${res.file}" --reviewer <criticId> --round ${nextRound}` },
+            { skill: 'dev-plan', text: `2. TDD 架构基线须经独立架构 Critique 确认与 AGENTS.md 模块边界、arch-rules 对齐【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round ${nextRound}` },
           ]
         } else if (res.docType === 'todo' && !fm.data?.related_spec) {
           auditNextSteps = [
@@ -409,12 +424,12 @@ async function main(argv) {
           ]
         } else if (res.docType === 'todo') {
           auditNextSteps = [
-            { skill: 'dev-flow', text: `Todo 自审通过（关联 SPEC 走 Case 4 审批流），移交 dev-flow 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 4 --spec "${fm.data.related_spec}" --todo "${res.file}" --agent <id>` },
+            { skill: 'dev-flow', text: `Todo 自审通过（关联 SPEC 走 Case 4 审批流），移交 dev-flow 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 4 --spec "${repoSpecPath ?? fm.data.related_spec}" --todo "${res.file}" --agent <id>` },
           ]
         } else if (res.docType === 'spec' && statusLow !== 'approved') {
           auditNextSteps = [
-            { skill: 'dev-plan', text: `1. 先由独立只读 Critic 运行 critique-scope：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${res.file}" --reviewer <criticId> --round 1` },
-            { skill: 'dev-plan', text: `2. 独立只读 Critique 通过后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` },
+            { skill: 'dev-plan', text: `1. 先由独立只读 Critic 运行 critique-scope：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "${res.file}" --reviewer <criticId> --round ${nextRound}` },
+            { skill: 'dev-plan', text: `2. 独立只读 Critique 通过后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round ${nextRound}` },
           ]
         }
       }
@@ -481,13 +496,18 @@ async function main(argv) {
       return 0
     }
 
+    const mergeFindingFlags = (plural, singular) => [...new Set([
+      ...(Array.isArray(plural) ? plural : (plural ? [plural] : [])),
+      ...(Array.isArray(singular) ? singular : (singular ? [singular] : [])),
+    ])]
+
     if (sub === 'critique-pass') {
       if (!opts.file || !opts.reviewer) throw new Error('critique-pass 需要 --file <docPath> 与 --reviewer <reviewerId>')
-      const findingArg = opts.findings ?? opts.finding ?? []
+      const findingArg = mergeFindingFlags(opts.findings, opts.finding)
       const res = await critiquePassDoc({
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         file: opts.file, reviewer: opts.reviewer, round: opts.round ?? null,
-        summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
+        summary: opts.summary ?? '', findings: findingArg,
         shouldFix: opts['should-fix'] ?? [], resolved: opts.resolved ?? [], rebutAccepted: opts['rebut-accepted'] ?? [],
         auditDoc, docType: null, taskId: opts.task ?? null,
       })
@@ -513,11 +533,11 @@ async function main(argv) {
 
     if (sub === 'critique-reject') {
       if (!opts.file || !opts.reviewer) throw new Error('critique-reject 需要 --file <docPath> 与 --reviewer <reviewerId>')
-      const findingArg = opts.findings ?? opts.finding ?? []
+      const findingArg = mergeFindingFlags(opts.findings, opts.finding)
       const res = await critiqueRejectDoc({
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         file: opts.file, reviewer: opts.reviewer, round: opts.round ?? null,
-        summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
+        summary: opts.summary ?? '', findings: findingArg,
         resolved: opts.resolved ?? [], rebutAccepted: opts['rebut-accepted'] ?? [], auditDoc,
         taskId: opts.task ?? null,
       })

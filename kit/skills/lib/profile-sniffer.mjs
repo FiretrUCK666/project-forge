@@ -72,15 +72,48 @@ const TASKFILE_ALIASES = {
   install: ['install', 'deps', 'dependencies', 'setup', 'bootstrap'],
 }
 
-/** 兼容 2 空格 / 4 空格 / 混合缩进 YAML 的 `run:` / `script:` / `commands:` / `command:` 提取器（支持 CircleCI mapping 步）。 */
+/** 兼容 2 空格 / 4 空格 / 混合缩进 YAML 的 `run:` / `script:` / `commands:` / `command:` 提取器（支持 CircleCI mapping 步与 working-directory）。 */
 export function extractYamlRunBlocks(relFile, text) {
   const steps = []
   const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
   const stepMappingKeyRe = /^(?:name|command|shell|working[-_]directory|environment|env|when|no_output_timeout|background|if|id|continue-on-error)\s*:/i
+  let inJobs = false
+  let inJobDefaultsRun = false
+  let jobWorkingDir = null
+  let stepWorkingDir = null
+  let stepBaseIndent = -1
+  const pushStep = (lineNo, cmdText) => {
+    const wd = stepWorkingDir ?? jobWorkingDir ?? null
+    steps.push({ file: relFile, line: lineNo, cmd: cmdText, ...(wd ? { workingDirectory: wd } : {}) })
+  }
   for (let i = 0; i < lines.length; i += 1) {
-    const m = /^(\s*)(?:-\s+)?(?:run|script|commands|command)\s*:\s*(.*)$/.exec(lines[i])
+    const rawLine = lines[i]
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const lineIndent = rawLine.length - rawLine.trimStart().length
+    if (lineIndent === 0 && /^jobs\s*:/.test(trimmed)) { inJobs = true; continue }
+    if (lineIndent === 0 && /^[A-Za-z0-9_-]+\s*:/.test(trimmed)) { inJobs = false; inJobDefaultsRun = false; jobWorkingDir = null }
+    if (inJobs && lineIndent === 2 && /^[A-Za-z0-9_-]+\s*:/.test(trimmed)) {
+      jobWorkingDir = null; inJobDefaultsRun = false; stepWorkingDir = null; stepBaseIndent = -1
+    }
+    if (inJobs && lineIndent >= 4 && /^defaults\s*:/.test(trimmed)) { inJobDefaultsRun = false; continue }
+    if (inJobs && lineIndent >= 6 && /^run\s*:\s*$/.test(trimmed)) { inJobDefaultsRun = true; continue }
+    if (inJobDefaultsRun) {
+      const wdM = /^working[-_]directory\s*:\s*["']?([^"'\n]+)["']?/.exec(trimmed)
+      if (wdM) { jobWorkingDir = wdM[1].trim(); continue }
+      if (lineIndent <= 4) inJobDefaultsRun = false
+    }
+    if (/^\s*-\s+/.test(rawLine) && (stepBaseIndent === -1 || lineIndent <= stepBaseIndent)) {
+      stepBaseIndent = lineIndent; stepWorkingDir = null
+    } else if (stepBaseIndent >= 0 && lineIndent < stepBaseIndent) {
+      stepWorkingDir = null; stepBaseIndent = -1
+    }
+    const stepWdM = /^\s*(?:-\s+)?working[-_]directory\s*:\s*["']?([^"'\n]+)["']?/.exec(rawLine)
+    if (stepWdM) { stepWorkingDir = stepWdM[1].trim(); continue }
+
+    const m = /^(\s*)(?:-\s+)?(?:run|script|commands|command)\s*:\s*(.*)$/.exec(rawLine)
     if (!m) continue
-    const listPrefix = /^(\s*-\s+)(?:run|script|commands|command)\s*:/.exec(lines[i])
+    const listPrefix = /^(\s*-\s+)(?:run|script|commands|command)\s*:/.exec(rawLine)
     const baseIndent = listPrefix ? listPrefix[1].length : m[1].length
     const tail = m[2].trim()
     const startLine = i + 1
@@ -98,7 +131,7 @@ export function extractYamlRunBlocks(relFile, text) {
         if (!tail && /^\s*-\s+/.test(raw)) {
           const itemCmd = raw.replace(/^\s*-\s+/, '').replace(/\s+#.*$/, '').trim()
           if (itemCmd && !/^(?:true|false|null)$/i.test(itemCmd)) {
-            steps.push({ file: relFile, line: j + 1, cmd: stripWrapQuotes(itemCmd) })
+            pushStep(j + 1, stripWrapQuotes(itemCmd))
           }
           i = j
           continue
@@ -125,7 +158,7 @@ export function extractYamlRunBlocks(relFile, text) {
               idx += 1
               if (sub === endTag) break
             }
-            steps.push({ file: relFile, line: stepStart, cmd: chunk })
+            pushStep(stepStart, chunk)
             continue
           }
           if (/^(?:if|for|while|until|case)\b/.test(clean) && !/\b(?:fi|done|esac)\s*$/.test(clean)) {
@@ -138,20 +171,20 @@ export function extractYamlRunBlocks(relFile, text) {
               else if (/^(?:fi|done|esac)\b/.test(sub)) depth -= 1
               idx += 1
             }
-            steps.push({ file: relFile, line: stepStart, cmd: chunk })
+            pushStep(stepStart, chunk)
             continue
           }
           while (/(?:^|[^\\])\\\s*$/.test(chunk) && idx + 1 < blockLines.length) {
             idx += 1
             chunk += `\n${blockLines[idx].trim()}`
           }
-          steps.push({ file: relFile, line: stepStart, cmd: chunk })
+          pushStep(stepStart, chunk)
           idx += 1
         }
       }
     } else {
       const clean = stripWrapQuotes(tail.replace(/\s+#.*$/, '').trim())
-      if (clean && !/^(?:true|false|null)$/i.test(clean)) steps.push({ file: relFile, line: startLine, cmd: clean })
+      if (clean && !/^(?:true|false|null)$/i.test(clean)) pushStep(startLine, clean)
     }
   }
   return steps
@@ -409,7 +442,7 @@ export function extractStructuredCiSteps(repoRoot, { neutralCi = null, maxCmdByt
     }
     const kind = classifyCiCommand(normCmd)
     if (!kind) continue
-    steps.push({ file: step.file, line: step.line, cmd: normCmd, kind })
+    steps.push({ file: step.file, line: step.line, cmd: normCmd, kind, ...(step.workingDirectory ? { workingDirectory: step.workingDirectory } : {}) })
     if (!commandsByKind[kind].includes(normCmd)) {
       commandsByKind[kind].push(normCmd)
       evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: normCmd })
@@ -425,6 +458,7 @@ export function extractStructuredCiSteps(repoRoot, { neutralCi = null, maxCmdByt
   }
   return {
     steps,
+    rawSteps: ci.steps ?? [],
     omittedSteps,
     commands,
     commandsByKind,

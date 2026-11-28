@@ -16,7 +16,8 @@ import {
 } from '../../lib/profile-sniffer.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
-  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, hasBehavioralAssertion, isMetaTestHarness, isTestOrFixtureFile, stripCodeCommentsLines,
+  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, hasBehavioralAssertion, isCallbackSpyTest,
+  isMetaTestHarness, isTestOrFixtureFile, isTimeoutGuardSleep, stripCodeCommentsLines,
 } from '../../lib/static-gates.mjs'
 import {
   cmdCoversTestFile, collectConfiguredTestEntries, collectTestInventory, expandVerificationCommands,
@@ -291,6 +292,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
     if (isUnitTier) {
       for (let i = 0; i < codeLines.length; i += 1) {
         if (HARD_SLEEP_RULES.some((re) => re.test(codeLines[i]))) {
+          if (isTimeoutGuardSleep(codeLines, i)) continue
           addFinding(findings, {
             id: `tests.hard-sleep.${f.rel}`,
             category: 'tests',
@@ -333,7 +335,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
       const hasSpyAssert = MOCK_SPY_ASSERT_RE.test(codeOnlyText)
       const nonSpyCode = codeOnlyText.replace(new RegExp(MOCK_SPY_ASSERT_RE.source, 'g'), '')
       const hasRealAssertion = hasBehavioralAssertion(nonSpyCode, { ext })
-      if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion) {
+      if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion && !isCallbackSpyTest(codeOnlyText)) {
         addFinding(findings, {
           id: `tests.mock-tautology.${f.rel}`,
           category: 'tests',

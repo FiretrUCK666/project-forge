@@ -94,8 +94,9 @@ export function validateDocOwnerValue(rawOwner, { allowMissing = false } = {}) {
 /**
  * 槽位边界硬门禁：
  *   - Case 1 允许主仓原地微调；
- *   - Case >= 2 在 commits > 0 仓内禁止主仓原地实施（BLOCKED_MAIN_SLOT_VIOLATION），
- *     且主仓存在脏改动时禁止新开 Case >= 2 实施槽位（BLOCKED_DIRTY_MAIN）。
+ *   - Case >= 2 在 commits > 0 仓内禁止主仓原地实施（BLOCKED_MAIN_SLOT_VIOLATION）；
+ *   - 从干净 HEAD 新开隔离 worktree（creatingIsolatedWorktree=true && !isSameMain）不碰主仓工作区文件，
+ *     主仓脏改动降级为非阻断预警；原地主仓改码或合入主干严格保持 BLOCKED_DIRTY_MAIN 硬阻断。
  */
 export function enforceSlotBoundary({
   mainRoot,
@@ -104,26 +105,28 @@ export function enforceSlotBoundary({
   isDirtyMain = false,
   commits = 1,
   sandbox = false,
+  creatingIsolatedWorktree = false,
 } = {}) {
   const caseNum = Number(caseType ?? 3)
   const hasCommits = Number(commits ?? 1) > 0
   const isSameMain = Boolean(mainRoot && implRoot && canonicalPath(mainRoot) === canonicalPath(implRoot))
   const isSandboxSlot = Boolean(sandbox || (implRoot && /(?:^|[/\\])\.worktrees[/\\]sandbox-[^/\\]+$/i.test(String(implRoot))))
+  const isolatedWorktreeFromCleanHead = Boolean(creatingIsolatedWorktree && !isSameMain)
 
-  if (caseNum >= 2 && hasCommits && isDirtyMain) {
+  if (caseNum >= 2 && hasCommits && isDirtyMain && !isolatedWorktreeFromCleanHead) {
     return {
       ok: false,
       code: 'BLOCKED_DIRTY_MAIN',
       exitCode: EXIT.FACT,
-      reason: '主仓工作区存在未提交脏改动，Case >= 2 禁止在脏主仓上开启或合并隔离槽位；请先清理或提交主仓改动。',
+      reason: '主仓工作区存在未提交脏改动，Case >= 2 禁止在脏主仓原地改码或合入主干；请先清理或提交主仓改动。',
     }
   }
-  if (isSandboxSlot && hasCommits && isDirtyMain) {
+  if (isSandboxSlot && hasCommits && isDirtyMain && !isolatedWorktreeFromCleanHead) {
     return {
       ok: false,
       code: 'BLOCKED_DIRTY_MAIN',
       exitCode: EXIT.FACT,
-      reason: '主仓工作区存在未提交脏改动，隔离沙箱禁止在脏主仓上开启或合并隔离槽位；请先清理或提交主仓改动。',
+      reason: '主仓工作区存在未提交脏改动，隔离沙箱禁止在脏主仓原地操作或合入主干；请先清理或提交主仓改动。',
     }
   }
   if (caseNum === 1 && !isSandboxSlot) {
@@ -137,7 +140,18 @@ export function enforceSlotBoundary({
       reason: `Case ${caseNum}（commits > 0）禁止直接在主仓原地实施（implRoot === mainRoot），必须使用隔离 .worktrees/impl-<taskId>/ 或 .worktrees/sandbox-<taskId>/。`,
     }
   }
-  return { ok: true, inPlace: false, ...(isSandboxSlot ? { sandboxSlot: true } : {}) }
+  const dirtyMainWarning = (hasCommits && isDirtyMain && isolatedWorktreeFromCleanHead)
+    ? {
+        code: 'WARN_DIRTY_MAIN_ISOLATED_WORKTREE',
+        message: '主仓工作区存在未提交改动；新开隔离 worktree 基于干净 HEAD 创建不受影响，但合入主干（merge）前须清理主仓。',
+      }
+    : null
+  return {
+    ok: true,
+    inPlace: false,
+    ...(isSandboxSlot ? { sandboxSlot: true } : {}),
+    ...(dirtyMainWarning ? { dirtyMainWarning } : {}),
+  }
 }
 
 export const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i

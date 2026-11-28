@@ -243,9 +243,8 @@ function removeSectionByHeading(md, headingTitle) {
   return cur
 }
 
-const DOC_SYNC_FILE_RE = /^(?:README(?:\.[A-Za-z-]+)?\.md|AGENTS\.md|CONTRIBUTING\.md|RELEASING\.md|SKILL\.md|docs\/TDD\.md|references\/.*\.md)$/i
+const DOC_SYNC_FILE_RE = /^(?:README(?:\.[A-Za-z-]+)?\.md|AGENTS\.md|CONTRIBUTING\.md|RELEASING\.md|CHANGELOG\.md|ARCHITECTURE\.md|SKILL\.md|docs\/.*\.md|references\/.*\.md)$/i
 const FIXTURE_OR_TEST_FILE_RE = /(?:^|\/)(?:fixtures(?:-[^/]+)?\.[^/]+|injections-data(?:-[^/]+)?\.[^/]+|[^/]*coverage[^/]*\.[^/]+|[^/]+\.(?:test|spec)\.[^/]+|[^/]+_test\.[^/]+|test_[^/]+\.[^/]+)$/i
-const SURVEY_OR_GATE_FILE_RE = /(?:^|\/)(?:survey(?:-[^/]+)?|review|static-gates(?:-[^/]+)?|[^/]+-gate(?:-[^/]+)?)\.[^/]+$/i
 
 function formatFileSample(list, limit = 3, unit = '项') {
   const shown = list.slice(0, limit).map((f) => `\`${f}\``).join('、')
@@ -282,7 +281,6 @@ function updateChecklistByEvidence(md, {
   )
   const touchedDocs = normFiles.filter((f) => DOC_SYNC_FILE_RE.test(f))
   const touchedFixtures = normFiles.filter((f) => FIXTURE_OR_TEST_FILE_RE.test(f))
-  const touchesSurveyOrGate = normFiles.some((f) => SURVEY_OR_GATE_FILE_RE.test(f))
   const archivedDocs = [...new Set([
     ledger?.archivedPrdFile,
     ledger?.archivedSpecFile,
@@ -298,12 +296,11 @@ function updateChecklistByEvidence(md, {
       if (verifyPassed) return `- [x] ${t}（静态扫描未检出弱化门禁或跳过测试）`
       return full
     }
-    if (/(?:双向夹具|正反双向|fixtures|coverage)/i.test(t)) {
+    if (/(?:双向夹具|正反双向|fixtures|coverage|单测|回归测试|test\s+cases?)/i.test(t)) {
       if (touchedFixtures.length > 0) return `- [x] ${t}（已补/更新：${formatFileSample(touchedFixtures, 3, '项')}）`
-      if (touchesSurveyOrGate) return `- [ ] ${t}（触及勘察/门禁判定但未检测到夹具变更，请补齐正反双向用例）`
-      return `- [x] ${t}（未改动勘察/门禁判定，不适用）`
+      return full
     }
-    if (/(?:敏感|凭据|密钥|本机路径|emoji|\b(?:secrets?|credentials?|tokens?|keys?)\b)/i.test(t)) {
+    if (/(?:敏感|凭据|密钥|本机路径|\b(?:secrets?|credentials?|tokens?|keys?)\b)/i.test(t)) {
       if (!hasNoSecrets) return full
       const archNote = archivedDocs.length > 0
         ? `已归档：${formatFileSample(archivedDocs, 3, '份')}`
@@ -318,10 +315,7 @@ function updateChecklistByEvidence(md, {
     if (/(?:文档|Todo|SPEC|README|TDD|AGENTS|归档|\b(?:docs?|documentation|spec|todo|readme|tdd|archived?|changelog)\b)/i.test(t)) {
       if (touchedDocs.length > 0) return `- [x] ${t}（已同步：${formatFileSample(touchedDocs, 4, '份')}）`
       if (finalized && archivedDocs.length > 0) return `- [x] ${t}（已归档：${formatFileSample(archivedDocs, 3, '份')}）`
-      if (/(?:README|用户可见|命令变更)/i.test(t) && (finalized || verifyPassed)) {
-        return `- [x] ${t}（本次仅内部重构/缺陷修复，未触及用户可见命令，不适用）`
-      }
-      if (finalized) return `- [x] ${t}（已核对无需额外同步或已完成归档）`
+      if (finalized) return `- [x] ${t}（已完成核对与归档）`
       return full
     }
     return full

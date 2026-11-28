@@ -156,13 +156,13 @@ export function registerSandboxDualLoopCases(cases) {
     try {
       const roots = await resolveRepoRoots(dir)
 
-      // 1. 脏主仓禁止 start --sandbox -> BLOCKED_DIRTY_MAIN
+      // 1. 脏主仓从干净 HEAD 新开隔离沙箱降级为非阻断预警（原地主仓/合主干仍由 enforceSlotBoundary 硬阻断 BLOCKED_DIRTY_MAIN）
       writeFileSync(join(dir, 'src/ui/theme.css'), '.btn { color: #222; }\n', 'utf8')
       const dirtyStart = await captureOutput(() => handleStart({
         sandbox: true, task: 'sb-dirty', slug: 'sb-dirty', agent: 'impl-a', json: true,
       }, roots))
-      if (dirtyStart.result.exitCode !== EXIT.FACT || !dirtyStart.stderr.includes('BLOCKED_DIRTY_MAIN')) {
-        return `脏主仓启动沙箱应报 BLOCKED_DIRTY_MAIN：exit=${dirtyStart.result.exitCode} err=${dirtyStart.stderr}`
+      if (dirtyStart.result.exitCode !== EXIT.OK || !dirtyStart.stdout.includes('WARN_DIRTY_MAIN_ISOLATED_WORKTREE')) {
+        return `脏主仓新开隔离沙箱应降级预警 WARN_DIRTY_MAIN_ISOLATED_WORKTREE：exit=${dirtyStart.result.exitCode} out=${dirtyStart.stdout} err=${dirtyStart.stderr}`
       }
       gitSync(dir, ['checkout', '--', 'src/ui/theme.css'])
 

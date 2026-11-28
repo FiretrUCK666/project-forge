@@ -142,13 +142,13 @@ export function registerW4HarnessCases(cases) {
       const c1Out = JSON.parse(c1.stdout)
       if (c1Out.tier !== 1) return `Case 1 应原地执行（tier=1），收到：${JSON.stringify(c1Out)}`
 
-      // 2) 脏 main 对 Case 2 阻断
+      // 2) 脏 main 下从干净 HEAD 新开 Case 2 隔离 worktree 降级为非阻断预警（原地主仓/合主干仍硬阻断 BLOCKED_DIRTY_MAIN）
       writeFileSync(join(dir, 'src/core.mjs'), 'export const ok = 2\n', 'utf8')
       const dirtyStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
-        'start', '--task', 'dirty-case2', '--case', '2', '--agent', 'impl-1', '--dir', dir, '--json',
+        'start', '--task', 'dirty-case2', '--case', '2', '--agent', 'impl-1', '--no-issue', '--reason', '测试脏主仓新开隔离槽位降级预警', '--dir', dir, '--json',
       ], { cwd: dir })
-      if (dirtyStart.status !== EXIT.FACT || !`${dirtyStart.stdout}${dirtyStart.stderr}`.includes('BLOCKED_DIRTY_MAIN')) {
-        return `脏 main 对 Case 2 应阻断 BLOCKED_DIRTY_MAIN，收到 status=${dirtyStart.status} out=${dirtyStart.stdout} err=${dirtyStart.stderr}`
+      if (dirtyStart.status !== 0 || !`${dirtyStart.stdout}${dirtyStart.stderr}`.includes('WARN_DIRTY_MAIN_ISOLATED_WORKTREE')) {
+        return `脏 main 新开 Case 2 隔离 worktree 应降级为 WARN_DIRTY_MAIN_ISOLATED_WORKTREE，收到 status=${dirtyStart.status} out=${dirtyStart.stdout} err=${dirtyStart.stderr}`
       }
       gitSync(dir, ['checkout', '--', 'src/core.mjs'])
 

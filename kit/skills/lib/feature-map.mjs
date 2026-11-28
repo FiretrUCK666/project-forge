@@ -28,7 +28,7 @@ import {
 } from './feature-map-graph.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { splitCommandSegments, validateExecutableCommandShape } from './command-lex.mjs'
-import { isTestOrFixtureFile } from './static-gates.mjs'
+import { TEST_FILE_RE, isTestOrFixtureFile } from './static-gates.mjs'
 import {
   VALID_RISK_LEVELS,
   computeFeatureFingerprint,
@@ -397,10 +397,12 @@ function testBaseStemOf(relPath) {
     .toLowerCase()
 }
 
+const NON_SOURCE_ARTIFACT_RE = /^(?:dist|build|coverage|\.github|\.agents|\.worktrees|node_modules)\/|(?:^|\/)\.[^/]+\/|(?:^|\/)__snapshots__\/|\.(?:stories|story)\.[^/]+$|\.(?:mdx|snap|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|mp4|webm|pdf|map|lock)$/i
+
 export function isNonFeatureArtifactPath(relPath) {
   const p = normRelPath(relPath)
   if (!p) return true
-  if (/^(?:dist|build|coverage|\.github|\.agents|\.worktrees|node_modules)\//i.test(p)) return true
+  if (NON_SOURCE_ARTIFACT_RE.test(p)) return true
   return isTestOrFixtureFile(p)
 }
 
@@ -430,11 +432,64 @@ function isRunnableVerifyCommand(cmd) {
   return validateExecutableCommandShape(cmd, { allowNone: false }).ok
 }
 
+/**
+ * 校验候选验证命令的作用域是否真实覆盖目标模块：
+ * 仅在显式目录/工作区包匹配、命中关联测试文件或属于全仓验证命令时放行，禁止无作用域窄测试盲回退。
+ */
+export function isCommandScopedToFeature(cmd, { modules = [], testRefs = [], packages = [] } = {}) {
+  if (!isRunnableVerifyCommand(cmd)) return false
+  const text = String(cmd).trim()
+  const normMods = uniqPaths(modules)
+  const normRefs = new Set(uniqPaths(testRefs))
+  if (normMods.length === 0) return true
+
+  // 1. 显式子目录/包前缀参数（--prefix / --dir / --cwd / -C）必须覆盖目标模块
+  const dirFlagM = /(?:--prefix|--dir|--cwd|-C)\s+['"]?([^\s'"]+)['"]?/.exec(text)
+  if (dirFlagM) {
+    const scopeDir = normRelPath(dirFlagM[1])
+    if (scopeDir && scopeDir !== '.') {
+      return normMods.some((m) => m === scopeDir || m.startsWith(`${scopeDir}/`))
+    }
+  }
+
+  // 2. 显式指向特定测试文件或窄测试目录时，必须与目标模块或 testRefs 匹配
+  const pkgDirs = (Array.isArray(packages) ? packages : []).map((p) => normRelPath(p?.dirRel)).filter(Boolean)
+  const tokens = text.split(/[\s"'`;|&()]+/).map((t) => normRelPath(t)).filter((t) => t && !t.startsWith('-'))
+  const explicitTestTargets = []
+  const explicitPkgTargets = []
+  for (const tok of tokens) {
+    if (TEST_FILE_RE.test(tok)) {
+      explicitTestTargets.push(tok)
+      continue
+    }
+    const hitPkg = pkgDirs.find((d) => tok === d || tok.startsWith(`${d}/`))
+    if (hitPkg) explicitPkgTargets.push(hitPkg)
+  }
+  if (explicitPkgTargets.length > 0) {
+    if (!explicitPkgTargets.some((d) => normMods.some((m) => m === d || m.startsWith(`${d}/`)))) return false
+  }
+  if (explicitTestTargets.length > 0) {
+    return explicitTestTargets.some((t) => (
+      normRefs.has(t)
+      || normMods.some((m) => {
+        const mDir = posix.dirname(m)
+        const tDir = posix.dirname(t)
+        return (mDir !== '.' && (tDir === mDir || tDir.startsWith(`${mDir}/`) || mDir.startsWith(`${tDir}/`)))
+          || matchTestsForSourceFile(m, [t]).length > 0
+      })
+    ))
+  }
+  return true
+}
+
 /** 从 repo-map 产出增量预填 `docs/feature-map.json`（默认只读，传 `{ write: true }` 才落盘）。 */
 export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false, topology = null } = {}) {
   const discovered = []
   const seen = new Set()
-  const testFiles = Array.isArray(repoMap?.testFiles) ? repoMap.testFiles : []
+  const testFiles = Array.isArray(repoMap?.allTestFiles)
+    ? repoMap.allTestFiles
+    : (Array.isArray(repoMap?.testFiles) ? repoMap.testFiles : [])
+  const packages = Array.isArray(repoMap?.packages) ? repoMap.packages : []
   const highRiskGlobs = repoMap?.devProfile?.highRisk ?? []
   const smokeCmd = repoMap?.devProfile?.smokeVerify ?? null
   const flowsList = Array.isArray(repoMap?.businessFlows?.flows) ? repoMap.businessFlows.flows : []
@@ -449,8 +504,10 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false,
     seen.add(cleanId)
     const epList = uniqPaths(entrypoints, { strictFeaturePath: true })
     const modList = uniqPaths([...epList, ...(modules ?? [])], { strictFeaturePath: true })
+    const cleanTests = uniqPaths(testRefs)
     const isHigh = modList.some((m) => highRiskGlobs.some((g) => m.startsWith(g.replace(/\/\*+$/, ''))))
-    const verificationTools = isRunnableVerifyCommand(command)
+    const scopedOk = isCommandScopedToFeature(command, { modules: modList, testRefs: cleanTests, packages })
+    const verificationTools = scopedOk
       ? [sanitizeVerificationTool({
           id: `verify-${cleanId}`, kind: command === smokeCmd ? 'smoke' : 'command', command,
           scriptPath: null, riskLevel: isHigh ? 'high' : 'medium', triggerHints: [cleanId, name].filter(Boolean),
@@ -460,7 +517,7 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false,
     const deps = Array.isArray(dependsOnByFeature[cleanId]) ? dependsOnByFeature[cleanId] : null
     discovered.push(sanitizeFeatureEntry({
       id: cleanId, name: name || cleanId, entrypoints: epList, modules: modList,
-      businessFlows: uniqStrings(businessFlows), verificationTools, testRefs: uniqPaths(testRefs),
+      businessFlows: uniqStrings(businessFlows), verificationTools, testRefs: cleanTests,
       ...(domId ? { domain: domId } : {}),
       ...(deps ? { dependsOn: deps } : {}),
     }))
@@ -482,15 +539,17 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false,
       ? fm.symbols
       : (inlineSym ? [inlineSym] : [])
     const stem = basename(src).replace(/\.[^.]+$/, '')
-    const matchedTests = matchTestsForSourceFile(src, testFiles).slice(0, 6)
+    const preAggregatedTests = Array.isArray(fm.testRefs) ? fm.testRefs : []
+    const matchedTests = uniqPaths([...preAggregatedTests, ...matchTestsForSourceFile(src, testFiles)]).slice(0, 12)
     const relatedFlows = flowsList
-      .filter((fl) => normRelPath(fl.entry) === src || normRelPath(fl.source) === src)
+      .filter((fl) => allSources.includes(normRelPath(fl.entry)) || allSources.includes(normRelPath(fl.source)))
       .map((fl) => `[${fl.surface}] ${fl.name} (${fl.entry})`)
     const defaultFlow = symbols.length > 0
       ? `${fm.feature || stem} 主入口 (${src}: ${symbols.join(', ')})`
       : `${fm.feature || stem} 主入口 (${src})`
     addCandidate({
-      id: stem, name: fm.feature || stem, entrypoints: allSources, modules: allSources,
+      id: (fm.origin === 'detected-domain' && allSources.length > 1) ? (fm.feature || stem) : stem,
+      name: fm.feature || stem, entrypoints: allSources.slice(0, 6), modules: allSources,
       businessFlows: relatedFlows.length > 0 ? relatedFlows : [defaultFlow],
       command: fm.verifyCmd, testRefs: matchedTests,
     })
@@ -499,12 +558,14 @@ export function prefillFeatureMapFromRepoMap(repoRoot, repoMap, { write = false,
     const ep = normRelPath(fl.entry)
     if (isNonFeatureArtifactPath(ep)) continue
     const stem = basename(ep).replace(/\.[^.]+$/, '')
-    if (seen.has(slugifyFeatureId(stem))) continue
+    if (seen.has(slugifyFeatureId(stem)) || discovered.some((d) => d.modules.includes(ep))) continue
     const matchedTests = matchTestsForSourceFile(ep, testFiles).slice(0, 6)
+    const fallbackCmd = smokeCmd ?? (repoMap?.preferredVerifyCommands ?? [])
+      .find((c) => isCommandScopedToFeature(c?.command, { modules: [ep], testRefs: matchedTests, packages }))?.command ?? null
     addCandidate({
       id: stem, name: fl.name || stem, entrypoints: [ep], modules: [ep],
       businessFlows: [`[${fl.surface}] ${fl.name} (${ep})`],
-      command: smokeCmd ?? repoMap?.preferredVerifyCommands?.[0]?.command ?? null, testRefs: matchedTests,
+      command: fallbackCmd, testRefs: matchedTests,
     })
   }
 

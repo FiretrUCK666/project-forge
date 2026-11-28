@@ -84,7 +84,6 @@ export function registerEditPyramidCases(cases) {
         '',
       ].join('\n'),
       'src/shared/tight.mjs': tightCode,
-      'src/core/huge.mjs': bigCode,
       'src/ui/bad.mjs': [
         '// 以前是旧接口，后来改成直接查库',
         '// 2026-01-12 fixed old timeout',
@@ -116,6 +115,8 @@ export function registerEditPyramidCases(cases) {
       'docs/specs/261119-issue91-spec.md': '# spec\n',
     })
     gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
+    mkdirSync(join(dir, 'src', 'core'), { recursive: true })
+    writeFileSync(join(dir, 'src', 'core', 'huge.mjs'), bigCode, 'utf8')
 
     try {
       // 1. pre-edit: blocks do-not-edit, warns tight file & high-risk, returns reuseHints

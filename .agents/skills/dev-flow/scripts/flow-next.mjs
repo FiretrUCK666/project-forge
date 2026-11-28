@@ -9,13 +9,14 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from '../../lib/concurrency-radar.mjs'
 import { collectExcludedReviewers } from '../../lib/critique-rounds.mjs'
 import { gitRun, readJsonSafe } from '../../lib/git.mjs'
 import { readGitConfigFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildPlanHandoff, evaluatePlanNextState } from '../../lib/plan-next.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
-import { readSessionState } from '../../lib/session-state.mjs'
+import { matchTopicForContext, readSessionState } from '../../lib/session-state.mjs'
 import { getVisualBriefSummary } from '../../lib/visual-brief.mjs'
 import { collectTaskLivenessBuckets, ensureReviewToken, nextReviewRound, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, detectGitModeMarkers, isVerifiedTier, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
@@ -414,16 +415,32 @@ export async function handleNext(opts, roots) {
 
   const orient = out.phase === 'idle' ? buildSessionOrientation(roots.mainRoot) : null
   const sessionState = readSessionState(roots.mainRoot)
+  const topicMatch = matchTopicForContext(sessionState?.topics, {
+    taskId: selectedTask?.taskId,
+    slug: selectedTask?.slug,
+    branch: selectedTask?.branch,
+    worktreePath: selectedTask?.worktreePath,
+  })
+  const matchedTopic = topicMatch.matched
+  const concurrencyRadar = orient?.concurrencyRadar ?? projectConcurrencyRadar(roots.mainRoot, {
+    currentTaskId: selectedTask?.taskId ?? null,
+    currentWorkRoot: selectedTask?.worktreePath ? resolve(roots.mainRoot, selectedTask.worktreePath) : roots.workTreeRoot,
+    currentFiles: taskRuntime?.changedFiles ?? [],
+    baseBranch: selectedTask?.baseBranch ?? null,
+    baseSha: selectedTask?.baseSha ?? null,
+  })
   const visualBrief = out.planState?.visualBrief ?? getVisualBriefSummary(roots.mainRoot, {
-    briefKey: selectedTask?.briefKey ?? (sessionState?.activeTopic ? sessionState.topics?.[sessionState.activeTopic]?.briefKey : null) ?? null,
+    briefKey: selectedTask?.briefKey ?? matchedTopic?.briefKey ?? null,
     taskId: selectedTask?.taskId ?? null,
-    topicId: sessionState?.activeTopic ?? null,
+    topicId: matchedTopic?.topicId ?? null,
     masterPrdRel: selectedTask?.prdFile ?? null,
   })
   const payload = {
     ...out,
     hydration,
     visualBrief,
+    concurrencyRadar,
+    ...(topicMatch.ambiguous ? { availableTopics: topicMatch.availableTopics } : {}),
     ...(retroHint ? { retroHint } : {}),
     ...(sessionState ? { sessionState } : {}),
     ...(orient ? { orientation: { docs: orient.docs, stuck: orient.stuck, nextSteps: orient.nextSteps } } : {}),
@@ -448,6 +465,11 @@ export async function handleNext(opts, roots) {
     if (payload.blockingReasons.length > 0) process.stdout.write(`- 阻塞原因: ${payload.blockingReasons.join(', ')}\n`)
     for (const w of payload.warnings ?? []) {
       process.stdout.write(`- 提醒 ${w.code}: ${w.message}\n`)
+    }
+    if (!orient) {
+      for (const rl of formatConcurrencyRadarLines(payload.concurrencyRadar)) {
+        process.stdout.write(`${rl}\n`)
+      }
     }
     if (payload.waves?.length > 0) {
       process.stdout.write('- 波次计划:\n')

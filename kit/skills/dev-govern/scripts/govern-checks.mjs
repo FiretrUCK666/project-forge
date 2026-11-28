@@ -16,11 +16,10 @@ import { readBlobBatch } from '../../lib/git-fast-objects.mjs'
 import { collectGateReceiptKey, hasReusableGateCheck } from '../../lib/gate-receipt.mjs'
 import { loadForgeHooksConfig } from '../../lib/overlay.mjs'
 import {
-  CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, ISSUE_REF_RE, JUSTIFICATION_ANCHOR_RE,
-  RUST_ALLOW_RE, TEST_FILE_RE, TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, countTextLines, evaluateArchRules,
-  extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode, scanStructuralHygiene,
+  CODE_EXT_RE, TEST_FILE_RE, checkProcessArtifactFilename, countTextLines, evaluateArchRules,
+  evaluateFileHygiene, extractLineCommentInfo, isTestOrFixtureFile, looksLikeCommentedCode,
 } from '../../lib/static-gates.mjs'
-import { resolveOversizedExemption, scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
+import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 import {
   ENV_FILE_RE, NPMRC_FILE_RE, SAFE_ENV_RE, SECRET_FILE_RE, TEST_FIXTURE_PATH_RE,
   isSensitiveSecretFile, matchSecretContentLine,
@@ -468,20 +467,19 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
         })
       }
       codeRelList.push(f.rel)
-      const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
       const lines = getLinesCached(f.full, info) ?? []
-      const parsedComments = getCommentLinesCached(f.full, lines, ext)
+      const lineCount = countTextLines(info.text)
+      const skipFixtureHygiene = isTestOrFixtureFile(f.rel)
+      const structCheck = evaluateFileHygiene({
+        fileRel: f.rel, lines, fullText: info.text, fullLineCount: lineCount,
+        warnLines: GOD_FILE_WARN_LINES, highLines: GOD_FILE_HIGH_LINES,
+        skipFixtureCheck: true, gitAttributesText, agentsText, forgeHooksConfig,
+      })
       if (!isTestOrFixtureFile(f.rel) && !f.name.endsWith('.min.js') && lines.length > GOD_FILE_WARN_LINES) {
-        const lineCount = countTextLines(info.text)
-        const structCheck = scanStructuralHygiene({
-          fileRel: f.rel, lines, fullText: info.text, fullLineCount: lineCount,
-          warnLines: GOD_FILE_WARN_LINES, highLines: GOD_FILE_HIGH_LINES, skipFixtureCheck: true, gitAttributesText,
-        })
-        if (structCheck.godFile) {
-          const exempt = resolveOversizedExemption({ fileRel: f.rel, agentsText, forgeHooksConfig })
-          if (!exempt.exempt && changedSet && changedSet.has(f.rel) && isGit) {
+        if (structCheck.godFile && !structCheck.oversizedExempt?.exempt) {
+          if (changedSet && changedSet.has(f.rel) && isGit) {
             pendingRatchetFiles.push({ rel: f.rel, lineCount })
-          } else if (!exempt.exempt) {
+          } else {
             const isHigh = lineCount > GOD_FILE_HIGH_LINES
             oversizedNonExemptFiles.push({ rel: f.rel, lines: lineCount })
             addFinding(findings, {
@@ -496,43 +494,31 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
         }
       }
 
-      let tombCount = 0
-      let excuseCount = 0
-      const skipFixtureHygiene = isTestOrFixtureFile(f.rel)
-      for (let i = 0; i < lines.length; i += 1) {
-        const { commentText } = parsedComments[i]
-        if (!skipFixtureHygiene && commentText && TOMBSTONE_COMMENT_RE.test(commentText)) {
-          tombCount += 1
-          if (tombCount <= 5) {
-            addFinding(findings, {
-              id: `hygiene.tombstone-comment.${f.rel}:${i + 1}`,
-              category: 'hygiene',
-              severity: 'low',
-              file: f.rel,
-              line: i + 1,
-              title: `Tombstone/chronicle history comment at ${f.rel}:${i + 1}`,
-              detail: lines[i].trim().slice(0, 100),
-              action: 'Describe current invariants only; remove historical change-log commentary.',
-            })
-          }
+      if (!skipFixtureHygiene) {
+        for (const tc of structCheck.tombstoneComments.slice(0, 5)) {
+          addFinding(findings, {
+            id: `hygiene.tombstone-comment.${f.rel}:${tc.line}`,
+            category: 'hygiene',
+            severity: 'low',
+            file: f.rel,
+            line: tc.line,
+            title: `Tombstone/chronicle history comment at ${f.rel}:${tc.line}`,
+            detail: tc.excerpt.slice(0, 100),
+            action: 'Describe current invariants only; remove historical change-log commentary.',
+          })
         }
-        const hasJustify = JUSTIFICATION_ANCHOR_RE.test(commentText || lines[i])
-        const hasIssueRef = Boolean(commentText && EXCUSE_HACK_RE.test(commentText) && ISSUE_REF_RE.test(commentText))
-        if (!hasJustify && !hasIssueRef && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(lines[i]))) {
-          excuseCount += 1
-          if (excuseCount <= 5) {
-            addFinding(findings, {
-              id: `hygiene.excuse-suppression.${f.rel}:${i + 1}`,
-              category: 'hygiene',
-              severity: 'medium',
-              file: f.rel,
-              line: i + 1,
-              title: `Excuse/suppression pragma or workaround marker at ${f.rel}:${i + 1}`,
-              detail: lines[i].trim().slice(0, 100),
-              action: 'Fix root cause, or link an active #<issue> (via flow.mjs issue create / escalation.mjs) for temporary workarounds.',
-            })
-          }
-        }
+      }
+      for (const ex of structCheck.excuseSuppressions.slice(0, 5)) {
+        addFinding(findings, {
+          id: `hygiene.excuse-suppression.${f.rel}:${ex.line}`,
+          category: 'hygiene',
+          severity: 'medium',
+          file: f.rel,
+          line: ex.line,
+          title: `Excuse/suppression pragma or workaround marker at ${f.rel}:${ex.line}`,
+          detail: ex.excerpt.slice(0, 100),
+          action: 'Fix root cause, or link an active #<issue> (via flow.mjs issue create / escalation.mjs) for temporary workarounds.',
+        })
       }
       if (changedSet && changedSet.has(f.rel) && !isTestOrFixtureFile(f.rel)) {
         const headText = isGit ? (headBlobMap.get(f.rel) ?? null) : null
@@ -628,7 +614,7 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
 
   await auditUnignoredOutputDirs(workRoot, mainRoot, isGit, findings, addFinding, opts.trackedSet ?? null)
 
-  const wtReport = await inspectWorktrees(mainRoot, isGit, defaultBranch)
+  const wtReport = await inspectWorktrees(mainRoot, isGit, defaultBranch, { currentWorkRoot: workRoot })
   for (const s of wtReport.stale) {
     const isNoOwn = s.state === 'no_own_commits'
     const isOrphan = s.state === 'orphan_dir'

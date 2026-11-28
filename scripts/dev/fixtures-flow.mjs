@@ -644,7 +644,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
       const noteDirtyAfterPush = gitSync(implNote, ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim()
       if (subRes.exitCode !== 0 || noteLedger?.prNumber !== 99 || noteDirtyAfterPush !== ''
         || postedComments.some((c) => c.number === 99)
-        || !postedComments.some((c) => c.number === 42 && c.body.includes('@url-dev') && c.body.includes('已提 PR #99'))) {
+        || !postedComments.some((c) => c.number === 42 && c.body.includes('@url-dev') && c.body.includes('https://github.com/acme/demo/pull/99'))) {
         return `handleSubmit 零脏文件/新建 PR 去冗余首评或 Issue 评论失败：code=${subRes.exitCode}, pr=${noteLedger?.prNumber}, dirty="${noteDirtyAfterPush}", comments=${JSON.stringify(postedComments)}`
       }
     } finally { rmTree(bareRem) }

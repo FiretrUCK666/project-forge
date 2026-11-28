@@ -11,7 +11,7 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 ```
 
 - 默认纯只读扫描文件系统与本地 Git 状态（忽略 `.DS_Store`、`._*`、`__MACOSX`、`.Spotlight-V100`、`.Trashes`、`.fseventsd` 等 macOS Finder 元数据）；加 `--probe-auth` 后注入 `GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`SSH_ASKPASS_REQUIRE=never`、`GH_PROMPT_DISABLED=1`，并发探测 Track A（SSH 密钥就绪度 + `StrictHostKeyChecking=yes` 22/443、`git credential fill` 5s 硬超时、`gh auth setup-git`、`~/.ssh/config` 别名映射）与 Track B（`gh-cli` -> `node-https-token` -> 仅确认宿主能力时 `mcp-delegate` -> `half-duplex`/`offline`/`none`）。**即使尚未配置远端或处于空目录，传 `--probe-auth` 同样探测本机建仓凭据**；附加 `--verify-token` 可对本地令牌发一次轻量验活请求。
-- **外部调研边界与 `NEEDS_HUMAN` 停步铁律**：S1/S2 仓内事实以本地源码与脚本输出为准，离线或勘察仓内现状时禁用网页搜索代替本地核验；仅当需求澄清、技术选型或用户明确要求时允许调用外部调研（`webfetch`/`websearch` 并注明外部来源），且任何写入文档/规划的仓内路径、符号与命令必须经 `doc-locate`、`repo-map` 或 `verifyDocClaims` 在本仓验真（Repo-Path Grounding）；当 `NEEDS_HUMAN > 0`（`needsHuman.count > 0`，如缺许可、`role=undetermined`、缺 Git 署名或待选发版策略）时**严禁任何 S3 写入**，必须先全部问清并等用户拍板后再进入 S3。
+- **外部调研边界与 `NEEDS_HUMAN` 停步铁律**：S1/S2 仓内事实以本地源码与脚本输出为准，离线或勘察仓内现状时禁用网页搜索代替本地核验；仅当需求澄清、技术选型或用户明确要求时允许调用外部网络检索与网页读取工具调研（注明外部来源），且任何写入文档/规划的仓内路径、符号与命令必须经 `doc-locate`、`repo-map` 或 `verifyDocClaims` 在本仓验真（Repo-Path Grounding）；当 `NEEDS_HUMAN > 0`（`needsHuman.count > 0`，如缺许可、`role=undetermined`、缺 Git 署名或待选发版策略）时**严禁任何 S3 写入**，必须先全部问清并等用户拍板后再进入 S3。
 - 扫描结果末尾自带基于唯一判据生成的「下一步必读参考」，不靠人工记忆决定要读哪几份。
 
 ## 二、必须立即拦截的三类现场
@@ -42,7 +42,7 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 
 ### 并行只读分片探索规范（大型与重入仓写前前置）
 
-- 当 `explorationStrategy.tier === 'parallel-subagents'` 时，**进入写入或生成阶段前必须先完成并行只读勘察**：按 `explorationStrategy.shards` 并发派发 2–4 个纯只读子代理，每人只负责互不重叠的分片（如顶层模块与架构入口、既有 `.agents/skills/` 与 `AGENTS.md` 规则、文档/测试/CI 现状）。
+- 当 `explorationStrategy.tier === 'parallel-subagents'` 时，**进入写入或生成阶段前必须先完成并行只读勘察**：按 `explorationStrategy.shards` 并发派发 2–4 个纯只读子代理，每人只负责互不重叠的分片（如顶层模块与架构入口、既有 `.agents/skills/` 与 `AGENTS.md` 规则、文档/测试/CI 现状）；若当前宿主不支持派生子代理，则显式标明 `hostCapability: serial-fallback` 并按同一 `shards` 清单分片串行执行，不跳过任何分片。
 - **分片汇总规范**：子代理严禁修改任何文件、严禁越界重复扫描他人分片，只回传**真实存在路径 + 关键事实摘要 + 发现的漂移/风险**（其中 `business-flows` 分片对照 `repo-map.mjs` 的 `businessFlows` 汇总服务对象、路由/CLI/UI/作业面与文档源码差异）；主代理收齐后与 `reentry` 四个漂移列表交叉核对，再敲定校准与落盘范围。
 - **改前只读实跑基线（`S1 -> S3` 前置）**：对非空存量代码仓进入 `S3` 写入前，先以**只读非破坏方式实跑对方既有测试与主入口**，采集 **`preForgeBaseline`**（执行命令、退出码/通过情况、主入口实测状态）直接写入 `docs/TDD.md`（`AGENTS.md` 仅留薄指针以守住体积预算），确保后续治理全过程可对照改前真基线核验无退化。
 

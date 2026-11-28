@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块与 `kit/skills/lib/`）。
  */
 
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join, posix } from 'node:path'
 
@@ -326,19 +327,47 @@ export async function buildIterationPlan(repoRoot, {
   }
 
   candidates.sort((a, b) => b.priority - a.priority)
-  const selected = candidates.slice(0, Math.max(1, Number(limit) || 5)).map((c) => {
-    const effTier = c.tier || cleanTier
-    const stem = slugTestToken(c.flowId || c.featureId || c.topic || (c.targetModule ? basename(c.targetModule).replace(/\.[^.]+$/, '') : 'flow'))
-    const fileName = nativeTarget.stack === 'python'
+  const usedPlannedPaths = new Set()
+  const styleTok = nativeTarget.namingStyle === 'spec' ? 'spec' : 'test'
+  const buildFileName = (stem, effTier) => (
+    nativeTarget.stack === 'python'
       ? `test_${stem.replace(/-/g, '_')}_${effTier}.py`
       : nativeTarget.stack === 'go'
         ? `${stem.replace(/-/g, '_')}_${effTier}_test.go`
         : nativeTarget.stack === 'rust'
           ? `${stem.replace(/-/g, '_')}_${effTier}.rs`
           : (nativeTarget.isTypeScript || nativeTarget.ext === '.ts'
-              ? `${stem}.${effTier}.test.ts`
-              : `${stem}.${effTier}.test.mjs`)
-    const plannedTestFile = posixPath(`${nativeTarget.dirRel}/${fileName}`)
+              ? `${stem}.${effTier}.${styleTok}.ts`
+              : `${stem}.${effTier}.${styleTok}.mjs`)
+  )
+  const selected = candidates.slice(0, Math.max(1, Number(limit) || 5)).map((c, idx) => {
+    const effTier = c.tier || cleanTier
+    const baseToken = slugTestToken(c.flowId || c.featureId || c.topic || (c.targetModule ? basename(c.targetModule).replace(/\.[^.]+$/, '') : 'flow'))
+    let stem = baseToken
+    if (c.source === 'focus' && c.targetModule) {
+      const modNoExt = posixPath(c.targetModule).replace(/\.[^.]+$/, '')
+      const modSlug = slugTestToken(modNoExt.replace(/\//g, '-'))
+      const combined = modSlug && !baseToken.includes(modSlug) ? `${baseToken}-${modSlug}` : (modSlug || baseToken)
+      stem = slugTestToken(combined)
+    }
+    let targetDir = nativeTarget.dirRel
+    if (nativeTarget.layout === 'colocated' && c.targetModule) {
+      const modDir = posix.dirname(posixPath(c.targetModule))
+      if (modDir && modDir !== '.' && !modDir.startsWith('.agents')) {
+        const colocatedProbe = posixPath(`${modDir}/${buildFileName(stem, effTier)}`)
+        if (!isPathInQuickTestScope(devProfile, colocatedProbe) || !nativeTarget.avoidsQuickTest) {
+          targetDir = modDir
+        }
+      }
+    }
+    let plannedTestFile = posixPath(`${targetDir}/${buildFileName(stem, effTier)}`)
+    if (usedPlannedPaths.has(plannedTestFile)) {
+      const hashSeed = `${c.targetModule ?? ''}|${c.featureId ?? ''}|${c.topic ?? ''}|${idx}`
+      const digest = createHash('sha256').update(hashSeed).digest('hex').slice(0, 6)
+      const uniqueStem = `${stem.slice(0, 33)}-${digest}`
+      plannedTestFile = posixPath(`${targetDir}/${buildFileName(uniqueStem, effTier)}`)
+    }
+    usedPlannedPaths.add(plannedTestFile)
     return {
       ...c,
       plannedTestFile,

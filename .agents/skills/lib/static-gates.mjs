@@ -12,12 +12,17 @@ import { verifyArchitectureMapHeader } from './feature-map-graph.mjs'
 import { CODE_EXT_RE, matchGlob } from './git-core.mjs'
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
 import { extractImportsForArch, resolveGoModules } from './import-graph.mjs'
-import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
 import {
-  classifyDeclarativeDataFile, classifyOversizedFile, isGeneratedSourceHeader, isGitAttributesGenerated,
+  EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, FIXTURE_FILE_RE, ISSUE_REF_RE,
+  JUSTIFICATION_ANCHOR_RE, NEAR_LIMIT_LINES, RUST_ALLOW_RE, TEST_FILE_RE,
+  TOMBSTONE_COMMENT_RE, TOMBSTONE_DATE_RE, evaluateFileHygiene, isTestOrFixtureFile, scanStructuralHygiene,
 } from './static-gates-comment-hygiene.mjs'
 
-export { CODE_EXT_RE, matchGlob }
+export {
+  CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, FIXTURE_FILE_RE, ISSUE_REF_RE,
+  JUSTIFICATION_ANCHOR_RE, NEAR_LIMIT_LINES, RUST_ALLOW_RE, TEST_FILE_RE,
+  TOMBSTONE_COMMENT_RE, TOMBSTONE_DATE_RE, evaluateFileHygiene, isTestOrFixtureFile, matchGlob, scanStructuralHygiene,
+}
 import {
   computePatchRawDigest, getCachedCommitDiff, getCachedEntriesDiffText, parseRawAndUnifiedDiff,
   readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedCommitDiff,
@@ -26,17 +31,17 @@ import { DEFAULT_HIGH_RISK_PATHS, hasHumanMergeAuthority, parseArchRuleItem } fr
 import {
   ASSERTION_FAMILIES, NON_ASSERTION_RECEIVER_METHODS, buildLexedViews, checkProcessArtifactFilename,
   detectCommentedDeadCodeBlocks, extractLineCommentInfo, findProcessArtifactFilenameViolations,
-  HARD_SLEEP_RULES, hasBehavioralAssertion, isRustLifetimeAt, looksLikeCommentedCode,
-  maskLiteralsInCodeLine, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE, PROCESS_ARTIFACT_EXCLUDED_DIR_RE,
-  PROCESS_ARTIFACT_FILENAME_RE, scanTestAntiCheat, stripCodeCommentsLines,
+  HARD_SLEEP_RULES, hasBehavioralAssertion, isCallbackSpyTest, isRustLifetimeAt, isTimeoutGuardSleep,
+  looksLikeCommentedCode, maskLiteralsInCodeLine, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
+  PROCESS_ARTIFACT_EXCLUDED_DIR_RE, PROCESS_ARTIFACT_FILENAME_RE, scanTestAntiCheat, stripCodeCommentsLines,
 } from './static-gates-lexer.mjs'
 
 export {
   ASSERTION_FAMILIES, NON_ASSERTION_RECEIVER_METHODS, buildLexedViews, checkProcessArtifactFilename,
   detectCommentedDeadCodeBlocks, extractLineCommentInfo, findProcessArtifactFilenameViolations,
-  HARD_SLEEP_RULES, hasBehavioralAssertion, isRustLifetimeAt, looksLikeCommentedCode,
-  maskLiteralsInCodeLine, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE, PROCESS_ARTIFACT_EXCLUDED_DIR_RE,
-  PROCESS_ARTIFACT_FILENAME_RE, scanTestAntiCheat, stripCodeCommentsLines,
+  HARD_SLEEP_RULES, hasBehavioralAssertion, isCallbackSpyTest, isRustLifetimeAt, isTimeoutGuardSleep,
+  looksLikeCommentedCode, maskLiteralsInCodeLine, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
+  PROCESS_ARTIFACT_EXCLUDED_DIR_RE, PROCESS_ARTIFACT_FILENAME_RE, scanTestAntiCheat, stripCodeCommentsLines,
 }
 
 export const PACKAGE_LOCKFILES = Object.freeze([
@@ -47,17 +52,10 @@ export const PACKAGE_LOCKFILES = Object.freeze([
 
 export const LOCKFILE_NAMES = new Set(PACKAGE_LOCKFILES.map((n) => n.toLowerCase()))
 
-export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs|e2e|src\/test|src\/it)\/|(?:\.(?:test|spec)\.[^/]+$)|_test\.[^/]+$|(?:^|\/)test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$|\.Tests\//i
-export const FIXTURE_FILE_RE = /(?:^|\/)(?:fixtures?|__fixtures__|testdata|__mocks__)\/|(?:\.(?:fixtures?|mocks?|testdata)\.[^/]+$)|(?:^|\/)fixtures(?:-[^/]+)?\.[^/]+$|(?:^|\/)injections-data(?:-[^/]+)?\.[^/]+$/i
 export const UI_VISUAL_EXT_RE = new RegExp(
   `^(?!.*(?:${TEST_FILE_RE.source}|${FIXTURE_FILE_RE.source})).*\\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$`,
   'i',
 )
-
-export function isTestOrFixtureFile(rel) {
-  const p = posixPath(rel)
-  return TEST_FILE_RE.test(p) || FIXTURE_FILE_RE.test(p)
-}
 
 const RELEASE_NOTES_DIR_PREFIX = `${['docs', 'release-notes'].join('/')}/`
 
@@ -155,16 +153,6 @@ export const TEST_SKIP_RE = GATE_SKIP_RE
 export const GATE_CI_PERM_WRITE_RE = /\b(?:contents|id-token|packages|security-events|actions|pull-requests|checks|deployments|issues)\s*:\s*write\b/i
 export const GATE_SHELL_BYPASS_RE = /(?:^|[\s;|&"'])\|\|\s*true(?:\s|$|["';&|])/
 
-export const TOMBSTONE_COMMENT_RE = CHANGELOG_VOICE_TOMBSTONE_RE
-export const TOMBSTONE_DATE_RE = /\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\s*(?:fixed|changed|updated|migrated|removed|replaced|修复|改为|改成|迁移|删除|替换)/i
-export const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
-export const EXCUSE_TEMP_RE = /\bTEMP\b/
-export const EXCUSE_HACK_RE = /\b(?:hack|workaround)\b|\bTEMP\b/i
-export const ISSUE_REF_RE = /(?:issue\s*#\d+|#\d+\b|https?:\/\/[^\s)]+\/issues\/\d+)/i
-export const RUST_ALLOW_RE = /^\s*#\[\s*allow\(/
-export const JUSTIFICATION_ANCHOR_RE = /\b(?:pf-allow|justification|justified-by|issue\s*#\d+)\s*[:：]/i
-export const NEAR_LIMIT_LINES = 730
-
 /**
  * 统计文本行数：统一将 CRLF 转为 LF 并剥离末尾换行产生的空行，保证 799/800 行边界口径在全仓一致。
  */
@@ -259,7 +247,10 @@ export function classifyDoorType({
   const infraHits = files.filter((f) => /(?:^|\/)(?:migrations?|migrate)\/|\.sql$|^(?:SKILL\.md|LICENSE|package-lock\.json)$/i.test(f))
   if (infraHits.length > 0) signals.push(`触碰不可逆迁移或分发根契约：${infraHits.slice(0, 5).join(', ')}`)
   const summaryText = String(summary ?? '')
-  if (/(?:breaking\s+change|外部契约|跨模块|数据迁移|schema\s*变更|数据库迁移|不可逆|权限模型|协议变更|弱化门禁|publish|release|改可见性)/i.test(summaryText)) {
+  const explicitIrreversible = /(?:breaking\s+change|数据迁移|schema\s*变更|数据库迁移|不可逆|弱化门禁|改可见性)/i.test(summaryText)
+  const softSummaryHits = [...new Set((summaryText.match(/外部契约|跨模块|权限模型|协议变更|\bpublish\b|\brelease\b/gi) ?? []).map((s) => s.toLowerCase()))]
+  const hasStructuralContext = highRiskHits.length > 0 || infraHits.length > 0 || touchesContract || protectedHits.length > 0
+  if (explicitIrreversible || (softSummaryHits.length > 0 && (hasStructuralContext || softSummaryHits.length >= 2))) {
     signals.push('任务语义涉及外部契约、权限、发布或不可逆数据迁移')
   }
 
@@ -317,27 +308,36 @@ export function splitDiffByFile(diffText) {
   return chunks
 }
 
-/** 提取单文件 diff 的增删行列表（支持可选 hunk 粒度拆分）。 */
+/** 提取单文件 diff 的增删行列表（保留各 hunk 原始新文件行号，杜绝跨 hunk 误拼接）。 */
 export function summarizeHunkChanges(fileDiff) {
   const added = []
   const removed = []
   const hunks = []
   let curHunk = null
+  let newLineNo = 1
   for (const line of String(fileDiff ?? '').split('\n')) {
     if (line.startsWith('@@')) {
       if (curHunk) hunks.push(curHunk)
-      curHunk = { header: line, added: [], removed: [] }
+      const hm = /\+(\d+)/.exec(line)
+      newLineNo = hm ? Number.parseInt(hm[1], 10) : 1
+      curHunk = { header: line, startLine: newLineNo, added: [], addedLines: [], removed: [] }
       continue
     }
     if (line.startsWith('+++') || line.startsWith('---')) continue
     if (line.startsWith('+')) {
       const body = line.slice(1)
       added.push(body)
-      if (curHunk) curHunk.added.push(body)
+      if (curHunk) {
+        curHunk.added.push(body)
+        curHunk.addedLines.push({ line: newLineNo, text: body })
+      }
+      newLineNo += 1
     } else if (line.startsWith('-')) {
       const body = line.slice(1)
       removed.push(body)
       if (curHunk) curHunk.removed.push(body)
+    } else if (!line.startsWith('\\')) {
+      newLineNo += 1
     }
   }
   if (curHunk) hunks.push(curHunk)
@@ -479,7 +479,7 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
       }
     }
 
-    if (commentText && /(?:eslint-disable(?:-next-line)?|@ts-nocheck)\b/.test(commentText)) {
+    if (commentText && /(?:eslint-disable(?:-next-line)?|@ts-nocheck)\b/.test(commentText) && !JUSTIFICATION_ANCHOR_RE.test(commentText || line)) {
       hits.push({ type: 'error-suppression', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '新增静态检查屏蔽注释', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
     }
 
@@ -508,7 +508,8 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
   }
 
   if (isTest) {
-    const hunkList = Array.isArray(hunks) && hunks.length > 0 ? hunks : [{ added, removed }]
+    const allRemoved = Array.isArray(hunks) && hunks.length > 0 ? hunks.flatMap((hk) => hk.removed ?? []) : removed
+    const allAdded = Array.isArray(hunks) && hunks.length > 0 ? hunks.flatMap((hk) => hk.added ?? []) : added
     const hasAssertOrTest = (l) => {
       const info = extractLineCommentInfo(l, false, ext)
       return info.codeText.trim() && (hasBehavioralAssertion(info.codeText, { ext }) || TEST_CASE_RE.test(info.codeText))
@@ -519,15 +520,13 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
       if (!code || TAUTOLOGY_ASSERT_RE.test(code)) return false
       return hasBehavioralAssertion(code, { ext }) || TEST_CASE_RE.test(code)
     }
-    for (const hk of hunkList) {
-      const remAsserts = hk.removed.filter(hasAssertOrTest)
-      const addAsserts = hk.added.filter(isEffectiveAddedAssert)
-      if (remAsserts.length > addAsserts.length) {
-        const netRemoved = remAsserts.length - addAsserts.length
-        const removeRatio = remAsserts.length > 0 ? netRemoved / remAsserts.length : 0
-        const severity = netRemoved >= 3 && removeRatio >= 0.5 ? 'deterministic' : 'advisory'
-        hits.push({ type: 'deleted-assertion', category: 'gate-weakening', severity, file: rel, reason: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, detail: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, excerpt: remAsserts.slice(0, 4).map((l) => `- ${l}`) })
-      }
+    const remAsserts = allRemoved.filter(hasAssertOrTest)
+    const addAsserts = allAdded.filter(isEffectiveAddedAssert)
+    if (remAsserts.length > addAsserts.length) {
+      const netRemoved = remAsserts.length - addAsserts.length
+      const removeRatio = remAsserts.length > 0 ? netRemoved / remAsserts.length : 0
+      const severity = netRemoved >= 3 && removeRatio >= 0.5 ? 'deterministic' : 'advisory'
+      hits.push({ type: 'deleted-assertion', category: 'gate-weakening', severity, file: rel, reason: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, detail: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, excerpt: remAsserts.slice(0, 4).map((l) => `- ${l}`) })
     }
   }
   return hits
@@ -620,63 +619,4 @@ export async function detectGateWeakening(implRoot, baseRef, baseBranch, opts = 
     findings.push(...detectGateWeakeningInEntry({ file, status, added, removed, hunks }))
   }
   return findings
-}
-
-/** 扫描源码增行中的履历注释、借口压制、注释死代码、自动生成头标豁免、纯声明式/类型契约降级与大文件/紧文件指标。 */
-export function scanStructuralHygiene({ fileRel, lines = [], fullText = null, fullLineCount = 0, warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES, skipFixtureCheck = false, gitAttributesText = '' }) {
-  const rel = posixPath(fileRel)
-  const ext = rel.split('.').pop()?.toLowerCase() ?? ''
-  const isFixture = FIXTURE_FILE_RE.test(rel)
-  const rawJoined = Array.isArray(lines) ? lines.join('\n') : String(lines ?? '')
-  const effectiveFullText = typeof fullText === 'string' && fullText.length > 0
-    ? fullText
-    : (Array.isArray(lines) && lines.length >= fullLineCount && lines.length > 0 ? rawJoined : '')
-  const generatedExempt = Boolean(
-    !rel.startsWith('kit/skills/') && (
-      (gitAttributesText && isGitAttributesGenerated(gitAttributesText, rel))
-      || (effectiveFullText && isGeneratedSourceHeader(effectiveFullText, ext))
-    ),
-  )
-  const views = buildLexedViews(rawJoined, ext)
-  const tombstoneComments = []
-  const excuseSuppressions = []
-  if (!isFixture) {
-    for (let i = 0; i < views.lines.length; i += 1) {
-      const line = views.lines[i]
-      const commentText = views.commentLines[i]
-      if (!generatedExempt && commentText && (TOMBSTONE_COMMENT_RE.test(commentText) || TOMBSTONE_DATE_RE.test(commentText))) {
-        tombstoneComments.push({ file: rel, line: i + 1, excerpt: line.trim().slice(0, 120) })
-      }
-      const hasJustify = JUSTIFICATION_ANCHOR_RE.test(commentText || line)
-      const isHackLike = Boolean(commentText && EXCUSE_HACK_RE.test(commentText))
-      const hasIssueRef = Boolean(commentText && ISSUE_REF_RE.test(commentText))
-      if (!hasJustify && !(isHackLike && hasIssueRef) && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {
-        excuseSuppressions.push({
-          file: rel,
-          line: i + 1,
-          kind: isHackLike ? 'missing-issue-link' : 'suppression-bypass',
-          excerpt: line.trim().slice(0, 120),
-        })
-      }
-    }
-  }
-  const deadCodeBlocks = (isFixture || generatedExempt) ? [] : detectCommentedDeadCodeBlocks(views).map((b) => ({ file: rel, line: b.startLine, endLine: b.endLine, length: b.length, excerpt: b.excerpt }))
-  const isCheckableSrc = (skipFixtureCheck || !isTestOrFixtureFile(rel)) && !rel.endsWith('.min.js') && !generatedExempt
-  const oversizedClass = (isCheckableSrc && fullLineCount > warnLines)
-    ? classifyOversizedFile({ fileRel: rel, fullText: effectiveFullText, ext, fullLineCount, warnLines, gitAttributesText })
-    : null
-  const declMeta = oversizedClass?.category === 'declarative-data'
-    ? oversizedClass
-    : (isCheckableSrc && fullLineCount > warnLines && effectiveFullText
-      ? classifyDeclarativeDataFile({ fullText: effectiveFullText, ext, fullLineCount, warnLines })
-      : null)
-  const declarativeDataFile = declMeta ? { file: rel, ...declMeta } : null
-  const downgraded = Boolean(oversizedClass?.downgrade) || Boolean(declarativeDataFile)
-  const godFile = (isCheckableSrc && !downgraded && fullLineCount > warnLines)
-    ? { file: rel, lines: fullLineCount, severity: fullLineCount > highLines ? 'high' : 'warn' }
-    : null
-  const nearLimitFile = (isCheckableSrc && !downgraded && fullLineCount >= nearLimitLines && fullLineCount <= warnLines)
-    ? { file: rel, lines: fullLineCount, limit: warnLines }
-    : null
-  return { generatedExempt, oversizedClass, declarativeDataFile, tombstoneComments, excuseSuppressions, deadCodeBlocks, godFile, nearLimitFile }
 }

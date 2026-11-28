@@ -3,12 +3,14 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { buildContextBrief, extractDocPaths } from './context-brief.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from './concurrency-radar.mjs'
 import { extractCriteria } from './criteria-lock.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { parseDocFrontmatter } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
 import { resolvePlanBootstrapDirOrder, resolvePrimaryPlanDocOrder } from './master-criteria-sync.mjs'
 import { parseAgentsProfile } from './profile.mjs'
+import { readPreInitState, trimHandoffProjectionBlocks } from './session-state.mjs'
 import { getVisualBriefSummary } from './visual-brief.mjs'
 
 /**
@@ -77,9 +79,12 @@ const RECEIPT_LINES = Object.freeze([
  * 这里只写**不随流程改动而失效**的东西：谁负责哪一段、谁不许做什么、交回来要给什么。
  * 具体步骤、命令、门禁一律不抄——那些由状态机与 Dev Profile 现算。
  */
+const DAY1_PREMISE_INSTRUCTION = '高维原则：动手前先质疑前提并做 Deletion Test（能删/合并单源绝不叠加平行抽象，直指业务根因）。'
+
 const ROLE_BOUNDARY = Object.freeze({
   explore: Object.freeze({
     label: '只读探索者',
+    skillPath: '.agents/skills/dev-explore/SKILL.md',
     scope: '只负责按需测绘仓库架构、模块边界、符号入口与相关文档切片。',
     mustNot: Object.freeze([
       '在探索阶段修改源码、配置或规划文档',
@@ -90,6 +95,7 @@ const ROLE_BOUNDARY = Object.freeze({
   }),
   plan: Object.freeze({
     label: '规划设计者',
+    skillPath: '.agents/skills/dev-plan/SKILL.md',
     scope: '只负责收敛需求、冻结 C1..Cn 可验证验收标准与编写 PRD/SPEC/Todo，不参与实现。',
     mustNot: Object.freeze([
       '在多代理模式下自己兼任同一任务的实施者',
@@ -100,6 +106,7 @@ const ROLE_BOUNDARY = Object.freeze({
   }),
   critique: Object.freeze({
     label: '规划内审者',
+    skillPath: '.agents/skills/dev-plan/SKILL.md',
     scope: '只负责站在独立只读视角挑规划缺陷（`critique-scope` + 事实核对），不替规划者改文档。',
     mustNot: Object.freeze([
       '与规划作者为同一主体，或 Round 2+ 复用历史复核人上下文',
@@ -110,6 +117,7 @@ const ROLE_BOUNDARY = Object.freeze({
   }),
   implementer: Object.freeze({
     label: '实现者',
+    skillPath: '.agents/skills/dev-edit/SKILL.md',
     scope: '只负责把认领的验收标准落进代码，并在隔离实施位里跑绿门禁。',
     mustNot: Object.freeze([
       '自己宣布通过——完成的标准是实证记录，不是你的判断',
@@ -121,6 +129,7 @@ const ROLE_BOUNDARY = Object.freeze({
   }),
   reviewer: Object.freeze({
     label: '审查者',
+    skillPath: '.agents/skills/dev-review/SKILL.md',
     scope: '只负责对着冻结的验收标准独立判断，不替实现者修代码。',
     mustNot: Object.freeze([
       '复用上一轮的上下文（Round 2 起必须新建独立子代理）',
@@ -132,6 +141,7 @@ const ROLE_BOUNDARY = Object.freeze({
   }),
   coordinator: Object.freeze({
     label: '协调者',
+    skillPath: '.agents/skills/dev-flow/SKILL.md',
     scope: '只负责调度与验收，不代实现者提交、不代审查者下结论。',
     mustNot: Object.freeze([
       '自己改业务代码（协调者改代码，就没人能独立判断了）',
@@ -142,6 +152,7 @@ const ROLE_BOUNDARY = Object.freeze({
   }),
   human: Object.freeze({
     label: '需要人拍板',
+    skillPath: '.agents/skills/dev-flow/SKILL.md',
     scope: '这一步不是 AI 能自己决定的——要么弱化了门禁，要么触发了停损，要么需要外部凭据。',
     mustNot: Object.freeze([
       '自己替人做这个决定',
@@ -152,6 +163,7 @@ const ROLE_BOUNDARY = Object.freeze({
   }),
   default: Object.freeze({
     label: '执行者',
+    skillPath: '.agents/skills/dev-flow/SKILL.md',
     scope: '只做这一轮被交代的那一段，其余交给状态机驱动。',
     mustNot: Object.freeze([
       '越过当前阶段去做后面的步骤',
@@ -544,10 +556,19 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   const taskId = ledger?.taskId ?? null
   // `ownerRole` 由状态机算出，`ledger.role` 是平台身份——不是一回事。
   const boundary = ROLE_BOUNDARY[role] ?? ROLE_BOUNDARY.default
+  const activeTopic = mainRoot ? readPreInitState(mainRoot, { taskId, slug: ledger?.slug, branch: ledger?.branch, worktreePath: ledger?.worktreePath }) : null
+  const concurrencyRadar = mainRoot ? projectConcurrencyRadar(mainRoot, { currentTaskId: taskId, currentWorkRoot: locateRoot, currentFiles: paths, baseBranch: ledger?.baseBranch, baseSha: ledger?.baseSha }) : null
+  const trimmedProjection = trimHandoffProjectionBlocks({
+    skillLines: [`- 必读技能：\`${boundary.skillPath}\``, `- ${DAY1_PREMISE_INSTRUCTION}`],
+    decisions: activeTopic?.decisions ?? [],
+    deadEnds: activeTopic?.deadEnds ?? [],
+    radarLines: formatConcurrencyRadarLines(concurrencyRadar),
+  })
 
   lines.push('## 你的角色与边界')
   lines.push('')
   lines.push(`**${boundary.label}**。${boundary.scope}`)
+  lines.push(...trimmedProjection.lines)
   lines.push('')
   for (const n of boundary.mustNot) lines.push(`- 不要${n}`)
   lines.push('')
@@ -730,6 +751,7 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
   }
   const fields = {
     taskId: ledger?.taskId ?? null,
+    skillPath: boundary.skillPath,
     sourceDoc,
     criteriaCount: criteria.length,
     criteria,
@@ -739,6 +761,9 @@ export function buildHandoff({ mainRoot = null, ledger = null, role: explicitRol
     design: visibleDesign,
     ...(designPointer ? { designPointer } : {}),
     contextBrief,
+    concurrencyRadar,
+    activeTopic: activeTopic ? { topicId: activeTopic.topicId, decisions: activeTopic.decisions, deadEnds: activeTopic.deadEnds } : null,
+    projectionBytes: trimmedProjection.bytes,
     visualBrief,
     explored: ledger?.explored ?? null,
     reworkFeedback,

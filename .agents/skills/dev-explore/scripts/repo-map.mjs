@@ -31,6 +31,8 @@ import {
 
 const CODE_RE = /\.(?:js|mjs|cjs|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|scala|groovy|rb|php|cs|fs|vb|c|cc|cpp|cxx|h|hpp|m|mm|swift|dart|ex|exs|erl|sh|bash|zsh|ps1|sql|lua|r|zig|nim|hs)$/i
 const DOC_OR_DATA_EXT_RE = /\.(?:md|mdx|txt|rst|json|ya?ml|toml|xml|csv|tsv|ini|cfg|lock|lockb|svg|png|jpg|jpeg|gif|webp|ico|pdf|woff2?)$/i
+const HIDDEN_NON_GITHUB_DIR_RE = /(?:^|\/)\.(?!github(?:\/|$))[^/]+\//
+const STORYBOOK_OR_SNAPSHOT_RE = /\.(?:stories|story)\.[^/]+$|\.mdx$|\.snap$|(?:^|\/)__snapshots__\//i
 const ENTRY_NAMES = new Set([
   'index.js', 'index.mjs', 'index.ts', 'index.tsx', 'main.js', 'main.mjs', 'main.ts', 'main.tsx',
   'app.js', 'app.ts', 'app.tsx', 'app.vue', 'server.js', 'server.ts', 'cli.js', 'cli.mjs', 'cli.ts',
@@ -38,8 +40,14 @@ const ENTRY_NAMES = new Set([
   'Main.java', 'Main.kt', 'Package.swift', 'SKILL.md',
 ])
 
+function isHiddenAgentOrArtifactFile(rel) {
+  const norm = posixPath(rel).replace(/^\.\//, '')
+  return isToolOwnedPath(norm) || HIDDEN_NON_GITHUB_DIR_RE.test(norm) || STORYBOOK_OR_SNAPSHOT_RE.test(norm)
+}
+
 function isSourceCodeFile(f) {
   if (!f.isText) return false
+  if (STORYBOOK_OR_SNAPSHOT_RE.test(f.rel)) return false
   if (CODE_RE.test(f.name)) return true
   if (DOC_OR_DATA_EXT_RE.test(f.name)) return false
   return /(?:^|\/)(?:src|lib|app|cmd|internal|pkg|server|client|backend|frontend)\//i.test(f.rel)
@@ -189,14 +197,14 @@ function detectEntrypoints(root, files, packages) {
     }
   }
   for (const f of files) {
-    if (isToolOwnedPath(f.rel) || isNonFeatureArtifactPath(f.rel)) continue
+    if (isHiddenAgentOrArtifactFile(f.rel) || isNonFeatureArtifactPath(f.rel)) continue
     if (ENTRY_NAMES.has(f.name)
       || /(?:Application|Main|Server|App)\.(?:java|kt|cs|swift|ts|tsx)$/i.test(f.name)
       || /^(?:bin|cmd|scripts)\/[^/]+\.(?:js|mjs|ts|py|go|sh)$/i.test(f.rel)) {
       addEntry(f.rel)
     }
   }
-  return { entrypoints: [...entries].slice(0, 35), cliEntrypoints }
+  return { entrypoints: [...entries], cliEntrypoints }
 }
 
 function detectDocsPresence(root, contextDocs) {
@@ -221,7 +229,7 @@ function detectDocsPresence(root, contextDocs) {
 /** 扫描潜在可复用共享模块与公开导出符号，排除工具托管的 `.agents/` 产物。 */
 function extractReusableModules(files) {
   const candidates = files.filter((f) => {
-    if (isToolOwnedPath(f.rel) || !isSourceCodeFile(f) || isTestOrFixtureFile(f.rel)) return false
+    if (!isSourceCodeFile(f) || isTestOrFixtureFile(f.rel)) return false
     if (/^(?:dist|build|coverage|\.github)\//i.test(f.rel)) return false
     return /(?:^|\/)(?:lib|shared|utils?|helpers?|common|core|domain)\//i.test(f.rel)
       || /(?:shared|utils?|helpers?|common|protocol|template|render)\.[^/]+$/i.test(f.name)
@@ -271,16 +279,16 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus, writeF
   ])
 
   const profile = parseAgentsProfile(root)
-  const discovery = discoverWorkspacePackages(root, scan.files.map((f) => f.rel))
-  const codeFiles = scan.files.filter(isSourceCodeFile)
-  const testFiles = scan.files.filter((f) => f.isText && TEST_FILE_RE.test(f.rel)).map((f) => f.rel)
-  const { entrypoints, cliEntrypoints } = detectEntrypoints(root, scan.files, discovery.packages)
+  const visibleFiles = scan.files.filter((f) => !isHiddenAgentOrArtifactFile(f.rel))
+  const discovery = discoverWorkspacePackages(root, visibleFiles.map((f) => f.rel))
+  const projectCodeFiles = visibleFiles.filter(isSourceCodeFile)
+  const testFiles = visibleFiles.filter((f) => f.isText && TEST_FILE_RE.test(f.rel)).map((f) => f.rel)
+  const { entrypoints, cliEntrypoints } = detectEntrypoints(root, visibleFiles, discovery.packages)
   const contextDocs = discoverContextDocs(root)
   const docs = detectDocsPresence(root, contextDocs)
   const ciRunSteps = extractCiRunSteps(root, readdirSync)
   const taskRunners = extractTaskRunners(root, discovery.packages)
-  const reusableModules = extractReusableModules(scan.files)
-  const projectCodeFiles = scan.files.filter((f) => !isToolOwnedPath(f.rel) && isSourceCodeFile(f))
+  const reusableModules = extractReusableModules(visibleFiles)
   const symbolCoverage = summarizeSymbolCoverage(projectCodeFiles.map((f) => f.name))
   let symbolCount = 0
   for (const item of projectCodeFiles.slice(0, 200)) {
@@ -289,12 +297,12 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus, writeF
     const ext = item.name.includes('.') ? item.name.split('.').pop() : ''
     symbolCount += extractSymbols(text, ext).symbols.length
   }
-  const featureMap = buildFeatureMap(root, entrypoints, testFiles, profile, taskRunners, discovery.packages)
-  const businessFlows = buildBusinessFlows(root, scan.files, entrypoints, cliEntrypoints)
+  const featureMap = buildFeatureMap(root, entrypoints, testFiles, profile, taskRunners, discovery.packages, projectCodeFiles)
+  const businessFlows = buildBusinessFlows(root, visibleFiles, entrypoints, cliEntrypoints)
   const preferredVerifyCommands = buildPreferredVerifyCommands(profile, ciRunSteps, taskRunners, discovery.packages)
   const focusAgents = focusRel && existsSync(join(root, focusRel, 'AGENTS.md')) ? `${focusRel}/AGENTS.md` : null
   const focusFiles = focusRel
-    ? scan.files.filter((f) => f.rel === focusRel || f.rel.startsWith(`${focusRel}/`)).map((f) => f.rel).slice(0, 80)
+    ? visibleFiles.filter((f) => f.rel === focusRel || f.rel.startsWith(`${focusRel}/`)).map((f) => f.rel).slice(0, 80)
     : []
 
   const map = {
@@ -309,7 +317,7 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus, writeF
     truncated: scan.truncated,
     totalFiles: scan.files.length,
     textFileCount: scan.files.filter((f) => f.isText).length,
-    codeFileCount: codeFiles.length,
+    codeFileCount: projectCodeFiles.length,
     testFileCount: testFiles.length,
     topDirectories: [...scan.dirSummary.entries()].map(([dir, count]) => ({ dir, count })),
     packages: discovery.packages,
@@ -342,11 +350,10 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus, writeF
     docLocateHints: contextDocs.docLocateHints,
     hotspots,
   }
-  const featureTopology = inferLayer1Topology(root, scan.files, featureMap, businessFlows.flows, discovery.packages)
-  Object.defineProperty(map, 'featureTopology', {
-    value: featureTopology,
-    enumerable: false,
-    configurable: true,
+  const featureTopology = inferLayer1Topology(root, visibleFiles, featureMap, businessFlows.flows, discovery.packages)
+  Object.defineProperties(map, {
+    featureTopology: { value: featureTopology, enumerable: false, configurable: true },
+    allTestFiles: { value: testFiles, enumerable: false, configurable: true },
   })
   const fmSync = prefillFeatureMapFromRepoMap(root, map, { write: Boolean(writeFeatureMap), topology: featureTopology })
   const archSync = writeFeatureMap ? renderArchitectureMapFromRepo(root) : null

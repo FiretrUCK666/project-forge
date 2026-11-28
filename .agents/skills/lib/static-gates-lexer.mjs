@@ -372,6 +372,31 @@ export const HARD_SLEEP_RULES = Object.freeze([
 export const MOCK_SETUP_RE = /\b(?:vi\.fn|vi\.spyOn|jest\.fn|jest\.spyOn|mock\.fn|sinon\.(?:stub|spy|mock)|unittest\.mock|MagicMock|patch\.object|mock\.patch|mockReturnValue|mockResolvedValue|when\([^\n]+\)\.thenReturn)\b|\bpatch\s*\(/g
 export const MOCK_SPY_ASSERT_RE = /\bexpect\s*\((?:[^()\n]|\([^()\n]*\))+\)\s*(?:\.\s*not)?\s*\.\s*toHaveBeenCalled\w*\s*\((?:[^()\n]|\([^()\n]*\))*\)|[A-Za-z0-9_$.]+\s*\.\s*assert_(?:not_)?called(?:_once|_with|_once_with)?\s*\((?:[^()\n]|\([^()\n]*\))*\)|\bassert\s+[A-Za-z0-9_$.]+\s*\.\s*(?:called|calledOnce|calledTwice|calledThrice|call_count)\b[^\n]*|[A-Za-z0-9_$.]+\s*\.\s*(?:calledOnce|calledTwice|calledThrice|verify)\b(?:\s*\([^)\n]*\))?/
 
+const TIMEOUT_GUARD_CONTEXT_RE = /\b(?:Promise\.race|AbortController|AbortSignal|clearTimeout|abort\s*\(|signal\s*[:.]|timed?\s*out|timeout)\b/i
+const STUBBING_MOCK_RE = /\b(?:vi\.mock|jest\.mock|vi\.spyOn|jest\.spyOn|sinon\.stub|unittest\.mock|MagicMock|patch\.object|mock\.patch|mockReturnValue|mockResolvedValue|mockImplementation|when\([^\n]+\)\.thenReturn)\b|\bpatch\s*\(/
+
+/** 判断命中 `HARD_SLEEP_RULES` 的行是否属于 `Promise.race` / `AbortController` / `abort` 超时保护模式。 */
+export function isTimeoutGuardSleep(codeLines = [], lineIdx = 0) {
+  const start = Math.max(0, lineIdx - 2)
+  const end = Math.min(codeLines.length, lineIdx + 3)
+  const windowText = codeLines.slice(start, end).join('\n')
+  return TIMEOUT_GUARD_CONTEXT_RE.test(windowText)
+}
+
+/** 判断测试中的 `vi.fn()` / `jest.fn()` 是否仅作为回调 spy 传入真实生产函数验证，而非纯 Mock 桩自证。 */
+export function isCallbackSpyTest(codeOnlyText = '') {
+  const code = String(codeOnlyText ?? '')
+  if (!code || STUBBING_MOCK_RE.test(code)) return false
+  const spyVars = [...code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:vi|jest|mock)\.fn\s*\(/g)].map((m) => m[1])
+  if (spyVars.length === 0) return false
+  for (const v of spyVars) {
+    const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const passedToRealFn = new RegExp(`\\b(?!expect|vi|jest|mock|assert|it|test|describe|context|suite|beforeEach|afterEach|beforeAll|afterAll)[A-Za-z_$][A-Za-z0-9_$.]*\\s*\\([^\\n;{}]*\\b${escaped}\\b`).test(code)
+    if (passedToRealFn) return true
+  }
+  return false
+}
+
 /**
  * 词法去噪后的单测反作弊检查（零断言、纯 Mock 自证、单测 >=1s 硬编码 sleep、非无头 UI 测试）。
  */
@@ -408,7 +433,7 @@ export function scanTestAntiCheat({
     const hasSpyAssert = MOCK_SPY_ASSERT_RE.test(codeOnlyText)
     const nonSpyCode = codeOnlyText.replace(new RegExp(MOCK_SPY_ASSERT_RE.source, 'g'), '')
     const hasRealAssertion = checkAssert(nonSpyCode)
-    if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion) {
+    if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion && !isCallbackSpyTest(codeOnlyText)) {
       findings.push({
         ruleId: 'edit.test-mock-tautology',
         defectClass: 'mock-only-test',
@@ -424,6 +449,7 @@ export function scanTestAntiCheat({
   if (!isNonUnit) {
     for (let i = 0; i < views.codeNoLiteralLines.length; i += 1) {
       if (HARD_SLEEP_RULES.some((re) => re.test(views.codeNoLiteralLines[i]))) {
+        if (isTimeoutGuardSleep(views.codeNoLiteralLines, i)) continue
         findings.push({
           ruleId: 'edit.test-hard-sleep',
           defectClass: 'race-condition',
@@ -463,7 +489,7 @@ export function scanTestAntiCheat({
 }
 
 export const PROCESS_ARTIFACT_EXCLUDED_DIR_RE = /^(?:docs\/(?:prd|specs|todo|archive|release-notes|adr)\/|\.git\/|\.worktrees\/|node_modules\/)/i
-export const PROCESS_ARTIFACT_FILENAME_RE = /(?:^|[-_.])(?:issue\d+|pr\d+|mr\d+|ticket\d+|wave\d+|phase\d+|sprint\d+|slice\d+|batch\d+|stage[-_][a-z0-9]+|stage[0-9]+[a-z]?|stage[a-z][0-9]+|stage(?!d(?:$|[-_.])|s(?:$|[-_.]))[a-z])(?:$|[-_.])|[-_][bc]\d+[a-z]?(?:$|[-_.])/i
+export const PROCESS_ARTIFACT_FILENAME_RE = /(?:^|[-_.])(?:issue\d+|pr\d+|mr\d+|ticket\d+|wave\d+|phase\d+|sprint\d+|slice\d+|batch\d+|stage[-_][a-z0-9]+|stage[0-9]+[a-z]?|stage[a-z][0-9]+|stage(?!d(?:$|[-_.])|s(?:$|[-_.]))[a-z])(?:$|[-_.])|[-_](?!(?:b2b|b2c|b2g|b2e|c2c|c2b)(?:$|[-_.]))[bc]\d+[a-z]?(?:$|[-_.])/i
 
 /** 通用 Tier 2 静态规则：拦截源码/脚本/测试中的过程编号或阶段命名文件名（排除规划/归档文档目录）。 */
 export function checkProcessArtifactFilename(fileRel) {

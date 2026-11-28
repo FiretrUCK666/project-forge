@@ -559,7 +559,11 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
   if (requiredGates.length > 0) {
     const requiredTier = requiredGates[0]
     const minRank = GATE_TIER_RANK[requiredTier] ?? 1
-    if (!validGates.some((v) => v.rank >= minRank)) {
+    const fullSatisfiesSameCmdGate = requiredTier === 'gate'
+      && validGates.some((v) => v.name === 'full')
+      && Boolean(profile?.fullTest && profile?.mergeGate)
+      && normalizeConcurrentVerifyCommand(profile.fullTest) === normalizeConcurrentVerifyCommand(profile.mergeGate)
+    if (!validGates.some((v) => v.rank >= minRank) && !fullSatisfiesSameCmdGate) {
       const onlyPartial = Boolean(evidence.gates?.quick?.partial && (!headSha || evidence.gates.quick.headSha === headSha))
       const rejTier = rejectedCustomGates.find((r) => r.name === requiredTier || (GATE_TIER_RANK[r.name] ?? 0) >= minRank) ?? rejectedCustomGates[0]
       return {

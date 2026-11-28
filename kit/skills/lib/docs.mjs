@@ -66,7 +66,8 @@ export function buildDocFilename({ date, issue, slug, kind }) {
     throw new Error(`无效文档 kind：${kind}（仅支持 prd | spec | todo）`)
   }
   const dateTag = date && /^\d{6}$/.test(String(date)) ? String(date) : docDateTag()
-  const safeSlug = slugify(slug)
+  const rawSlug = slugify(slug)
+  const safeSlug = rawSlug.replace(new RegExp(`-${kind}$`, 'i'), '') || rawSlug
   const issueNum = issue !== undefined && issue !== null && String(issue).trim() !== ''
     ? Number(String(issue).replace(/^#/, '').trim())
     : null

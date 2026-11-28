@@ -46,38 +46,12 @@ import {
   writeManifestRegions,
 } from './lib/compose-agents-helpers.mjs'
 
-const { AGENTS_MANAGED_MAX_BYTES, AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, markerRegions, parseMarkers, stripMarkers } = protocol
+const { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, measureAgentsBytes, parseMarkers, stripMarkers } = protocol
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const TEMPLATE_PATH = join(SKILL_ROOT, 'templates', 'agents-project.md')
-
-function checkAgentsBytes(text, fileName = 'AGENTS.md') {
-  const raw = String(text ?? '').replace(/\r\n/g, '\n')
-  const bytes = Buffer.byteLength(raw, 'utf8')
-  const { regions } = markerRegions(raw, fileName)
-  const lines = raw.split('\n')
-  let managedBytes = 0
-  for (const r of regions) {
-    if (r.customized) continue
-    managedBytes += Buffer.byteLength(lines.slice(r.start, r.end + 1).join('\n'), 'utf8')
-  }
-  const customBytes = Math.max(0, bytes - managedBytes)
-  const totalOversize = bytes > AGENTS_MAX_BYTES
-  const managedOversize = managedBytes > AGENTS_MANAGED_MAX_BYTES
-  const customOversize = !managedOversize && totalOversize
-  return {
-    bytes,
-    managedBytes,
-    customBytes,
-    totalOversize,
-    managedOversize,
-    customOversize,
-    oversize: managedOversize,
-    warn: !managedOversize && !customOversize && bytes >= AGENTS_WARN_BYTES && bytes <= AGENTS_MAX_BYTES,
-  }
-}
 
 export { buildVars }
 
@@ -292,7 +266,7 @@ async function main(argv) {
       process.stderr.write(`${agentsName} 读不出来（不是 UTF-8 文本？）\n`)
       return 1
     }
-    const sizeInfo = checkAgentsBytes(info.text, agentsName)
+    const sizeInfo = measureAgentsBytes(info.text, agentsName)
     if (sizeInfo.warn) {
       process.stderr.write(`[警告] ${agentsName} 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B），接近上限 ${AGENTS_MAX_BYTES} 字节（预警线 ${AGENTS_WARN_BYTES} 字节）。\n`)
     }
@@ -396,7 +370,7 @@ async function main(argv) {
       return 0
     }
     const nextText = `${existing.trimEnd()}\n\n${additions.join('\n\n')}\n`
-    const sizeInfo = checkAgentsBytes(nextText, agentsName)
+    const sizeInfo = measureAgentsBytes(nextText, agentsName)
     if (sizeInfo.managedOversize) {
       process.stderr.write(`追加后 ${agentsName} 受管区体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
@@ -431,7 +405,7 @@ async function main(argv) {
 
     const refreshed = refreshRegions(existing, rendered, volatileValues(facts), baselineRegions, removedSet)
     const nextText = refreshed.changed ? refreshed.text : existing
-    const sizeInfo = checkAgentsBytes(nextText, agentsName)
+    const sizeInfo = measureAgentsBytes(nextText, agentsName)
     if (sizeInfo.managedOversize) {
       process.stderr.write(`刷新后 ${agentsName} 受管区体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
@@ -466,7 +440,7 @@ async function main(argv) {
       const convergedBaseline = convergedManifest && !convergedManifest.invalid ? (convergedManifest.data.agentsRegions ?? {}) : null
       const convergedRefresh = refreshRegions(nextText, convergedRendered, volatileValues(convergedFacts), convergedBaseline, removedSet)
       if (convergedRefresh.changed) {
-        const convergedSize = checkAgentsBytes(convergedRefresh.text, agentsName)
+        const convergedSize = measureAgentsBytes(convergedRefresh.text, agentsName)
         if (!convergedSize.managedOversize) {
           writeAtomic(agentsPath, convergedRefresh.text)
           writeManifestRegions(
@@ -503,7 +477,7 @@ async function generate(root, agentsPath, template, { manifest, fileName = 'AGEN
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
   }
-  const sizeInfo = checkAgentsBytes(content, fileName)
+  const sizeInfo = measureAgentsBytes(content, fileName)
   if (sizeInfo.managedOversize) {
     process.stderr.write(`生成的 ${fileName} 受管区体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
     return 1
@@ -520,7 +494,7 @@ async function generate(root, agentsPath, template, { manifest, fileName = 'AGEN
   const convergedManifest = readManifestSafe(root)
   const convergedContent = renderAgentsTemplate(convergedFacts, template, root, { manifest: convergedManifest })
   if (convergedContent !== content) {
-    const convergedSize = checkAgentsBytes(convergedContent, fileName)
+    const convergedSize = measureAgentsBytes(convergedContent, fileName)
     if (!convergedSize.managedOversize) {
       content = convergedContent
       writeAtomic(agentsPath, content)
@@ -567,7 +541,7 @@ export async function contractHealth(root, { facts: precomputedFacts } = {}) {
     ? manifest.data.removedAgentsRegions : [])
   const info = inspectAgentsFile(agentsPath, rendered, removedSet, agentsName)
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
-  const { bytes, managedBytes, customBytes, totalOversize, managedOversize, customOversize } = checkAgentsBytes(existing, agentsName)
+  const { bytes, managedBytes, customBytes, totalOversize, managedOversize, customOversize } = measureAgentsBytes(existing, agentsName)
   return {
     broken: info.broken ?? [],
     missing: info.regions.length === 0 ? [] : info.missingRegions ?? [],

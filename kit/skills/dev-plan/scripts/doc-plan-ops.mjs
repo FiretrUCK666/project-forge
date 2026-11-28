@@ -285,11 +285,14 @@ export async function initDoc({
   if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
     throw new Error(`--kind / --type 必须是 prd、spec、todo、tdd、pair 或 all，收到：${effectiveKind}`)
   }
-  const safeSlug = slugify(specSlug || slug)
+  const rawSafeSlug = slugify(specSlug || slug)
+  const safeSlug = ['prd', 'spec', 'todo'].includes(effectiveKind)
+    ? (rawSafeSlug.replace(new RegExp(`-${effectiveKind}$`, 'i'), '') || rawSafeSlug)
+    : rawSafeSlug
   const issueNum = parseInitIssueArg(issue)
   const dateTag = docDateTag()
   const today = docIsoDate()
-  const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
+  let kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
 
   const pendingPreInit = effectiveKind !== 'tdd' ? readPreInitState(mainRoot, { topic: topic ?? null }) : null
   const unresolvedOpen = pendingPreInit?.unresolvedOpen
@@ -301,6 +304,7 @@ export async function initDoc({
     )
   }
 
+  let reusedTodoDoc = null
   if (effectiveKind !== 'tdd' && !force) {
     const duplicates = findDuplicatePlanDocs(repoRoot, {
       mainRoot,
@@ -310,7 +314,14 @@ export async function initDoc({
       includeWorktrees: true,
     })
     if (duplicates.length > 0) {
-      throw buildDuplicatePlanDocError(duplicates, { slug: safeSlug, issue: issueNum })
+      const onlyExistingTodo = effectiveKind === 'pair'
+        && duplicates.every((d) => d.kind === 'todo')
+      if (onlyExistingTodo) {
+        reusedTodoDoc = duplicates[0]
+        kindsToCreate = ['spec']
+      } else {
+        throw buildDuplicatePlanDocError(duplicates, { slug: safeSlug, issue: issueNum })
+      }
     }
   }
 
@@ -395,7 +406,8 @@ export async function initDoc({
 
   const planned = []
   for (const k of kindsToCreate) {
-    const fileName = k === 'tdd' ? 'TDD.md' : `${dateTag}-${issueNum ? `issue${issueNum}-` : ''}${safeSlug}-${k}.md`
+    const fileSlug = k === 'tdd' ? safeSlug : (safeSlug.replace(new RegExp(`-${k}$`, 'i'), '') || safeSlug)
+    const fileName = k === 'tdd' ? 'TDD.md' : `${dateTag}-${issueNum ? `issue${issueNum}-` : ''}${fileSlug}-${k}.md`
     const relFile = `${dirMap[k]}/${fileName}`
     const absFile = join(writeRoot, relFile)
     if (existsSync(absFile) && !force) throw new Error(`目标文件已存在：${relFile}（如确需重建请加 --force）`)
@@ -449,7 +461,18 @@ export async function initDoc({
     ? consumePreInitNotes(mainRoot, { taskId: effTaskId ?? safeSlug, slug: safeSlug, topic: topic ?? pendingPreInit?.topicId ?? null })
     : null
 
-  if (planned.length > 1 || relatedSpec || relatedPrd) {
+  if (reusedTodoDoc) {
+    const newSpec = planned.find((p) => p.kind === 'spec')
+    const todoAbs = reusedTodoDoc.abs && existsSync(reusedTodoDoc.abs) ? reusedTodoDoc.abs : resolve(writeRoot, reusedTodoDoc.rel)
+    if (newSpec && existsSync(todoAbs)) {
+      const relSpecToTodo = posixPath(relative(dirname(newSpec.absFile), todoAbs))
+      const relTodoToSpec = posixPath(relative(dirname(todoAbs), newSpec.absFile))
+      updateDocFrontmatter(newSpec.absFile, { related_todo: relSpecToTodo, updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.spec })
+      updateDocFrontmatter(todoAbs, { related_spec: relTodoToSpec, updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.todo })
+    }
+  }
+
+  if (planned.length > 1 || relatedSpec || relatedPrd || reusedTodoDoc) {
     const syncRes = await syncDocsLifecycle(writeRoot, {
       slugOrPath: planned[0].file,
       issue: issueNum ?? undefined,
@@ -564,6 +587,7 @@ export async function initDoc({
     taskId: effTaskId, worktreePath: planningWorktreeRel, branch: planningBranch,
     issue: issueNum, milestone: milestone ?? null, plannedAt: headSha, ledgerUpdated, customTemplates,
     planMode: planMode ?? null,
+    ...(reusedTodoDoc ? { reusedTodo: reusedTodoDoc.rel } : {}),
     absorbedPreInit,
     ...(briefMigration ? { briefMigration, visualBrief: briefMigration.summary } : {}),
     ...(!briefMigration && tddVisualBrief ? { visualBrief: tddVisualBrief } : {}),

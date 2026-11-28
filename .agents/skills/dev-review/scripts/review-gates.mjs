@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
+import { formatConcurrencyRadarLines } from '../../lib/concurrency-radar.mjs'
 import { formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { checkMermaidLabelWidth, isSharedMasterPrd } from '../../lib/docs.mjs'
 import { hasReusableGateCheck, resolveCleanReceiptKeySync, writeGateReceipt } from '../../lib/gate-receipt.mjs'
@@ -19,10 +20,9 @@ import { appendFallbackCriteriaFromTask, extractCriteriaFromBodyText } from '../
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
   CODE_EXT_RE, GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, TEST_FILE_RE,
-  classifyDoorType, countTextLines, detectGateWeakeningInEntry, evaluateArchRules, isLegalArchiveMove, isTestOrFixtureFile, isUiVisualFile, matchGlob,
-  scanStructuralHygiene, splitDiffByFile, summarizeHunkChanges,
+  classifyDoorType, countTextLines, detectGateWeakeningInEntry, evaluateArchRules, evaluateFileHygiene,
+  isLegalArchiveMove, isTestOrFixtureFile, isUiVisualFile, matchGlob, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
-import { resolveOversizedExemption } from '../../lib/static-gates-comment-hygiene.mjs'
 import { EXTRA_CI_FILE_RE, hasValidE2eObservationOnHead } from '../../lib/workflow-policy.mjs'
 import { formatReviewContextLines } from './review-context.mjs'
 
@@ -411,48 +411,26 @@ export function assessStructuralGate({ reviewRoot, mainRoot = reviewRoot, diff, 
     const mv = parity?.mermaidViolations ?? []
     return { status: mv.length > 0 ? 'warn' : 'clean', tombstoneComments, excuseSuppressions, archViolations: [], godFiles, mermaidViolations: mv, reusedGateReceipt: true }
   }
+  const lineCap = typeof devProfile?.['max-file-lines'] === 'number' && devProfile['max-file-lines'] > 0 ? devProfile['max-file-lines'] : 800
   for (const entry of allEntries) {
     const f = entry.file
-    if (entry.status === 'D') continue
-    if (!CODE_EXT_RE.test(f)) continue
+    if (entry.status === 'D' || !CODE_EXT_RE.test(f)) continue
     codeFilesOnDisk.push(f)
 
-    let added = []
-    if (entry.status === '?') {
-      const raw = readTextSafe(join(reviewRoot, f))
-      if (raw) added = raw.split('\n')
-    } else {
-      added = summarizeHunkChanges(chunks.get(f) ?? '').added
-    }
-
+    const parsedChunk = entry.status === '?' ? null : summarizeHunkChanges(chunks.get(f) ?? '')
+    const added = entry.status === '?' ? (readTextSafe(join(reviewRoot, f))?.split('\n') ?? []) : parsedChunk.added
+    const hunks = parsedChunk ? parsedChunk.hunks : null
     const fullText = !isTestOrFixtureFile(f) ? readTextSafe(join(reviewRoot, f), 2 * 1024 * 1024) : undefined
     const fullLineCount = fullText ? countTextLines(fullText) : 0
-    const hy = scanStructuralHygiene({ fileRel: f, lines: added, fullText, fullLineCount, warnLines: 800, highLines: 1500, gitAttributesText })
+    const hy = evaluateFileHygiene({
+      fileRel: f, lines: added, hunks, fullText, fullLineCount,
+      warnLines: lineCap, highLines: 1500, gitAttributesText, agentsText, forgeHooksConfig,
+    })
 
-    for (const tc of hy.tombstoneComments) {
-      tombstoneComments.push({
-        file: f,
-        excerpt: tc.excerpt,
-        hint: 'Remove historical evolution commentary; comments should describe current invariants only.',
-      })
-    }
-    for (const ex of hy.excuseSuppressions) {
-      excuseSuppressions.push({
-        file: f,
-        excerpt: ex.excerpt,
-        hint: 'Fix the underlying type/lint/architecture issue rather than silencing checks with suppression pragmas or workaround markers.',
-      })
-    }
-    if (hy.godFile) {
-      const exempt = resolveOversizedExemption({ fileRel: f, agentsText, forgeHooksConfig })
-      if (!exempt.exempt) {
-        godFiles.push({
-          file: f,
-          lines: hy.godFile.lines,
-          severity: hy.godFile.severity,
-          hint: `File exceeds 800 lines (${hy.godFile.lines}); extract cohesive modules instead of expanding a god file.`,
-        })
-      }
+    for (const tc of hy.tombstoneComments) tombstoneComments.push({ file: f, line: tc.line, excerpt: tc.excerpt, hint: 'Remove historical evolution commentary; comments should describe current invariants only.' })
+    for (const ex of hy.excuseSuppressions) excuseSuppressions.push({ file: f, line: ex.line, excerpt: ex.excerpt, hint: 'Fix the underlying type/lint/architecture issue rather than silencing checks with suppression pragmas or workaround markers.' })
+    if (hy.godFile && !hy.oversizedExempt?.exempt) {
+      godFiles.push({ file: f, lines: hy.godFile.lines, severity: hy.godFile.severity, hint: `File exceeds ${lineCap} lines (${hy.godFile.lines}); extract cohesive modules instead of expanding a god file.` })
     }
   }
 
@@ -768,6 +746,11 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
     lines.push('', '--- Diff Patch (Suppressed Until Empirical Gate Passes) ---')
     lines.push('  Raw patch suppressed (hunkIndex/summary only). Complete empirical & fault-injection steps, then pass --include-diff.')
   }
+
+  const radarLines = formatConcurrencyRadarLines(pack.concurrencyRadar)
+  if (radarLines.length > 0) lines.push('', '--- Concurrency Radar ---', ...radarLines)
+  const briefLines = formatContextBriefLines(pack.contextBrief)
+  if (briefLines.length > 0) lines.push('', ...briefLines)
 
   lines.push('', '[NEXT STEP]')
   for (const step of pack.nextSteps) lines.push(`  ${step}`)

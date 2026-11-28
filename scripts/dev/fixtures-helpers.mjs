@@ -1,0 +1,425 @@
+/**
+ * fixtures-helpers.mjs —— 行为断言共享沙盒夹具与执行辅助原语。
+ */
+
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { spawnSync } from 'node:child_process'
+
+import { buildNonInteractiveEnv, prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
+import { textsOf, survey as runSurvey } from '../survey.mjs'
+import { tryFastNodeCommit, tryFastNodeInitialCommit } from './fixtures-git-fast.mjs'
+
+export const HERE = dirname(fileURLToPath(import.meta.url))
+export const SCRIPTS = resolve(HERE, '..')
+export const SKILL_ROOT = resolve(HERE, '..', '..')
+
+export { textsOf }
+
+/**
+ * 夹具断言退出码时引用单点档位，不写字面量。
+ *
+ * 断言里写死 `2` 看着更直接，但档位一改，全仓的断言就要跟着逐条改；
+ * 改漏一条的表现是「实现对了、断言红了」，而人会先去怀疑实现。
+ * 所以断言也走 `EXIT`：改档位只改一处，断言自动跟上。
+ */
+export { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
+
+const trackedTempDirs = new Set()
+let tempExitHookRegistered = false
+
+function ensureTempExitCleanup() {
+  if (tempExitHookRegistered) return
+  tempExitHookRegistered = true
+  process.on('exit', () => {
+    for (const dir of trackedTempDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
+      } catch { /* 留给系统清理 */ }
+    }
+  })
+}
+
+export function trackTempDir(dir) {
+  if (!dir) return dir
+  ensureTempExitCleanup()
+  trackedTempDirs.add(dir)
+  return dir
+}
+
+export function initTestBackupDir() {
+  if (!String(process.env.PF_NO_REAL_AUTH_PROBE ?? '').trim()) {
+    process.env.PF_NO_REAL_AUTH_PROBE = '1'
+  }
+  if (!String(process.env.PF_BACKUP_DIR ?? '').trim()) {
+    const testBackupRoot = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-test-bk-')))
+    process.env.PF_BACKUP_DIR = testBackupRoot
+  }
+}
+
+export function tmpProject(files) {
+  const dir = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-fix-')))
+  for (const [rel, content] of Object.entries(files)) {
+    const full = join(dir, rel)
+    mkdirSync(dirname(full), { recursive: true })
+    writeFileSync(full, content)
+  }
+  return dir
+}
+
+export function rmTree(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    trackedTempDirs.delete(dir)
+  } catch { /* 留给退出清理 */ }
+}
+
+export function existingKept(result, pid) {
+  return (result.kept ?? []).some((p) => p.endsWith(`.tmp-${pid}`))
+}
+
+let lastFixtureTraceAt = 0
+
+export function traceFixtureStage(stage, force = false) {
+  const tf = process.env.PF_TRACE_FILE
+  if (!tf) return
+  const now = Date.now()
+  if (force) lastFixtureTraceAt = 0
+  else if (now - lastFixtureTraceAt < 250) return
+  else lastFixtureTraceAt = now
+  try { writeFileSync(tf, `${now} ${stage}\n`) } catch { /* ignore */ }
+}
+
+export function gitSync(cwd, args, opts = {}) {
+  traceFixtureStage(`git:${args[0] ?? ''}`)
+  const baseEnv = buildNonInteractiveEnv(opts.env ?? process.env)
+  const targetCwd = opts.cwd ?? cwd
+  const inv = prepareExecInvocation('git', args, { cwd: targetCwd, env: baseEnv })
+  return spawnSync(inv.cmd, inv.args, {
+    cwd: targetCwd,
+    encoding: 'utf8',
+    stdio: opts.stdio ?? (opts.encoding ? 'pipe' : 'ignore'),
+    timeout: opts.timeout ?? 30000,
+    killSignal: opts.killSignal ?? 'SIGKILL',
+    windowsHide: true,
+    ...opts,
+    env: inv.env,
+    ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+  })
+}
+
+let emptyGitTplDir
+let seedGitRepoDir
+let seedBareGitDir
+function getEmptyGitTemplateDir() {
+  if (!emptyGitTplDir) {
+    emptyGitTplDir = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-gtpl-')))
+  }
+  return emptyGitTplDir
+}
+
+function getSeedGitDir() {
+  if (!seedGitRepoDir) {
+    const repo = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-gseed-')))
+    gitSync(repo, ['init', '-q', `--template=${getEmptyGitTemplateDir()}`])
+    appendFileSync(join(repo, '.git', 'config'), '[core]\n\tfsync = none\n[gc]\n\tauto = 0\n', 'utf8')
+    seedGitRepoDir = join(repo, '.git')
+  }
+  return seedGitRepoDir
+}
+
+export function gitInitBare(dir) {
+  if (!seedBareGitDir) {
+    const bare = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-gbare-')))
+    gitSync(undefined, ['init', '--bare', '-q', `--template=${getEmptyGitTemplateDir()}`, bare])
+    appendFileSync(join(bare, 'config'), '[core]\n\tfsync = none\n[gc]\n\tauto = 0\n', 'utf8')
+    seedBareGitDir = bare
+  }
+  cpSync(seedBareGitDir, dir, { recursive: true })
+}
+
+export function gitCommitFast(dir, message, opts = {}) {
+  traceFixtureStage('git:commit-fast')
+  if (tryFastNodeCommit(dir, message, opts)) return
+  const args = ['-c', 'core.fsync=none']
+  if (opts.name) args.push('-c', `user.name=${opts.name}`)
+  if (opts.email) args.push('-c', `user.email=${opts.email}`)
+  if (Array.isArray(opts.files) && opts.files.length > 0) {
+    gitSync(dir, [...args, 'add', ...opts.files])
+    gitSync(dir, [...args, 'commit', '-qm', message])
+  } else if (opts.updateOnly) {
+    gitSync(dir, [...args, 'commit', '-qam', message])
+  } else {
+    gitSync(dir, [...args, 'add', '-A'])
+    gitSync(dir, [...args, 'commit', '-qm', message])
+  }
+}
+
+export function gitInit(dir, opts = {}) {
+  cpSync(getSeedGitDir(), join(dir, '.git'), { recursive: true })
+  if (opts.branch) {
+    writeFileSync(join(dir, '.git', 'HEAD'), `ref: refs/heads/${opts.branch}\n`, 'utf8')
+  }
+  const cfgBlocks = []
+  if (opts.name || opts.email) {
+    cfgBlocks.push('[user]')
+    if (opts.name) cfgBlocks.push(`\tname = ${opts.name}`)
+    if (opts.email) cfgBlocks.push(`\temail = ${opts.email}`)
+  }
+  if (opts.origin) {
+    cfgBlocks.push('[remote "origin"]', `\turl = ${opts.origin}`, '\tfetch = +refs/heads/*:refs/remotes/origin/*')
+  }
+  if (opts.upstream) {
+    cfgBlocks.push('[remote "upstream"]', `\turl = ${opts.upstream}`, '\tfetch = +refs/heads/*:refs/remotes/upstream/*')
+  }
+  if (cfgBlocks.length > 0) {
+    appendFileSync(join(dir, '.git', 'config'), `${cfgBlocks.join('\n')}\n`, 'utf8')
+  }
+  if (opts.commit !== false) {
+    const cName = opts.name || 't'
+    const cEmail = opts.email || 't@t.t'
+    const msg = opts.message || 'init'
+    if (tryFastNodeInitialCommit(dir, opts.branch, cName, cEmail, msg)) return
+    gitSync(dir, ['-c', 'core.fsync=none', '-c', `user.name=${cName}`, '-c', `user.email=${cEmail}`, 'add', '-A'])
+    gitSync(dir, ['-c', 'core.fsync=none', '-c', `user.name=${cName}`, '-c', `user.email=${cEmail}`, 'commit', '-qm', msg])
+  }
+}
+
+export async function survey(dir, opts) {
+  return runSurvey(dir, opts)
+}
+
+export function readDirRefs(dir) {
+  const prefix = dir.slice(SKILL_ROOT.length + 1).replace(/\\/g, '/')
+  try {
+    return readdirSync(dir).filter((n) => n.endsWith('.md')).map((n) => `${prefix}/${n}`)
+  } catch { return [] }
+}
+
+export const IN_PROCESS_CLI_SCRIPTS = new Set([
+  'backup.mjs', 'compose-agents.mjs', 'equip.mjs', 'equip-ci.mjs', 'handoff.mjs', 'review.mjs', 'survey.mjs',
+  'kit/skills/dev-explore/scripts/repo-map.mjs',
+  'kit/skills/dev-explore/scripts/doc-locate.mjs',
+  'kit/skills/dev-edit/scripts/edit-gate.mjs',
+  'kit/skills/dev-flow/scripts/flow.mjs',
+  'kit/skills/dev-flow/scripts/worktree-deps.mjs',
+  'kit/skills/dev-plan/scripts/doc-plan.mjs',
+  'kit/skills/dev-review/scripts/review-pack.mjs',
+  'kit/skills/dev-govern/scripts/govern-audit.mjs',
+  'kit/skills/dev-verify-tools/scripts/verify-tools.mjs',
+  'kit/skills/dev-iterate/scripts/iterate.mjs',
+])
+const cliModCache = new Map()
+let inProcessQueue = Promise.resolve()
+
+function execCliInProcess(absPath, args, opts = {}) {
+  traceFixtureStage(`cli:${basename(absPath)}:${args[0] ?? ''}`)
+  const task = inProcessQueue.then(() => runCliInProcessUnlocked(absPath, args, opts))
+  inProcessQueue = task.catch(() => {})
+  return task
+}
+
+async function runCliInProcessUnlocked(absPath, args, opts = {}) {
+  let mod = cliModCache.get(absPath)
+  if (!mod) {
+    mod = await import(pathToFileURL(absPath).href)
+    cliModCache.set(absPath, mod)
+  }
+  const entry = typeof mod?.runCli === 'function'
+    ? mod.runCli
+    : (typeof mod?.main === 'function' ? mod.main : null)
+  if (!entry) return null
+
+  const outChunks = []
+  const errChunks = []
+  const origOut = process.stdout.write.bind(process.stdout)
+  const origErr = process.stderr.write.bind(process.stderr)
+  const capture = (bucket) => (chunk, enc, cb) => {
+    if (typeof enc === 'function') { cb = enc; enc = undefined }
+    bucket.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), typeof enc === 'string' ? enc : 'utf8'))
+    if (typeof cb === 'function') cb()
+    return true
+  }
+  const prevCwd = process.cwd()
+  const prevExitCode = process.exitCode
+  const changedCwd = Boolean(opts.cwd && resolve(opts.cwd) !== prevCwd)
+  const savedEnv = new Map()
+  if (opts.env) {
+    for (const [k, v] of Object.entries(opts.env)) {
+      savedEnv.set(k, Object.prototype.hasOwnProperty.call(process.env, k) ? process.env[k] : undefined)
+      if (v === undefined || v === null) delete process.env[k]
+      else process.env[k] = String(v)
+    }
+  }
+  process.exitCode = undefined
+  process.stdout.write = capture(outChunks)
+  process.stderr.write = capture(errChunks)
+  let status = 0
+  try {
+    if (changedCwd) process.chdir(opts.cwd)
+    const rawCode = await Promise.resolve(entry([...args]))
+    status = typeof rawCode === 'number'
+      ? rawCode
+      : (typeof process.exitCode === 'number' ? process.exitCode : 0)
+  } catch (err) {
+    errChunks.push(Buffer.from(err instanceof Error ? `${err.stack || err.message}\n` : `${String(err)}\n`, 'utf8'))
+    status = 1
+  } finally {
+    if (changedCwd) process.chdir(prevCwd)
+    for (const [k, prev] of savedEnv.entries()) {
+      if (prev === undefined) delete process.env[k]
+      else process.env[k] = prev
+    }
+    process.exitCode = prevExitCode
+    process.stdout.write = origOut
+    process.stderr.write = origErr
+  }
+  return {
+    status: typeof status === 'number' ? status : 0,
+    stdout: Buffer.concat(outChunks).toString('utf8'),
+    stderr: Buffer.concat(errChunks).toString('utf8'),
+    inProcess: true,
+  }
+}
+
+export async function runNode(script, args, opts = {}) {
+  if (!opts.input && !opts.forceSubprocess && !opts.killSignal && IN_PROCESS_CLI_SCRIPTS.has(script)) {
+    const inProc = await execCliInProcess(join(SCRIPTS, script), args, opts)
+    if (inProc) return inProc
+  }
+  return spawnSync(process.execPath, [join(SCRIPTS, script), ...args], {
+    encoding: 'utf8',
+    timeout: 60000,
+    ...opts,
+  })
+}
+
+export async function runAbsAsync(scriptRel, args, opts = {}) {
+  const norm = scriptRel.replace(/\\/g, '/')
+  if (!opts.input && !opts.forceSubprocess && !opts.killSignal && (IN_PROCESS_CLI_SCRIPTS.has(norm) || IN_PROCESS_CLI_SCRIPTS.has(norm.replace(/^scripts\//, '')))) {
+    const inProc = await execCliInProcess(join(SKILL_ROOT, scriptRel), args, opts)
+    if (inProc) return inProc
+  }
+  return spawnSync(process.execPath, [join(SKILL_ROOT, scriptRel), ...args], {
+    encoding: 'utf8',
+    timeout: 60000,
+    ...opts,
+  })
+}
+
+export function runAbs(scriptRel, args, opts = {}) {
+  return spawnSync(process.execPath, [join(SKILL_ROOT, scriptRel), ...args], {
+    encoding: 'utf8',
+    timeout: 60000,
+    ...opts,
+  })
+}
+
+let preflightLib
+export async function loadPreflight() {
+  if (preflightLib === undefined) preflightLib = await import('./preflight.mjs')
+  return preflightLib
+}
+
+export function createTempHookEnv(extra = {}) {
+  return { ...process.env, ...extra }
+}
+
+export function hasFile(root, rel) {
+  return existsSync(join(root, rel))
+}
+
+/**
+ * 给某个任务发一枚审查令牌，供夹具调用 `review-pack record --review-token`。
+ *
+ * 夹具不该自己造令牌字面量：令牌是「由 flow next 现场签发」的东西，夹具绕过签发点
+ * 直接编一个，测出来的就不是真实链路。这里走与 `flow next` 同一个签发函数。
+ *
+ * `round` 不传时取「下一个轮次」，与 `flow next` 的算法一致。
+ */
+export async function issueTokenFor(mainRoot, taskId, round) {
+  const { readTaskLedger, ensureReviewToken, nextReviewRound } = await import('../../kit/skills/lib/ledger.mjs')
+  const ledger = readTaskLedger(mainRoot, taskId)
+  if (!ledger) throw new Error(`找不到任务账本：${taskId}`)
+  const effectiveRound = round ?? nextReviewRound(ledger)
+  const { token } = ensureReviewToken(mainRoot, ledger, effectiveRound)
+  return token
+}
+
+/** 为非探索类下游夹具补记一条合规探索证据，避免被前置门禁阻断。 */
+export async function seedExploredFor(mainRoot, ...taskIds) {
+  const { createExploredEvidence, readTaskLedger, writeTaskLedger } = await import('../../kit/skills/lib/ledger.mjs')
+  for (const id of taskIds) {
+    const ledger = readTaskLedger(mainRoot, id)
+    if (!ledger) throw new Error(`找不到任务账本：${id}`)
+    ledger.explored = createExploredEvidence({ at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1, by: 'fixture-seed' })
+    writeTaskLedger(mainRoot, ledger)
+  }
+}
+
+/** 构造仅本地运行的 fake `gh` CLI 垫片环境（绕开真网探测，用于测真实 API 通道与 PR SHA 解析）。 */
+export function createFakeGhEnv({ prs = {}, issues = {}, login = 'fake-dev', failAuth = false } = {}) {
+  const sb = trackTempDir(mkdtempSync(join(tmpdir(), 'pf-fake-gh-')))
+  const binDir = join(sb, 'bin')
+  mkdirSync(binDir, { recursive: true })
+  const dataFile = join(sb, 'gh-data.json')
+  writeFileSync(dataFile, JSON.stringify({ prs, issues, login, failAuth }, null, 2), 'utf8')
+
+  const fakeGhJs = join(sb, 'fake-gh.mjs')
+  writeFileSync(fakeGhJs, [
+    "import { readFileSync } from 'node:fs'",
+    'const data = JSON.parse(readFileSync(process.env.FAKE_GH_DATA, "utf8"))',
+    'const args = process.argv.slice(2)',
+    'if (args[0] === "auth" && args[1] === "status") {',
+    '  if (data.failAuth) { process.stderr.write("not logged into github.com\\n"); process.exit(1) }',
+    '  process.stdout.write(`Logged in to github.com account ${data.login || "fake-dev"}\\n`); process.exit(0)',
+    '}',
+    'if (args[0] === "api" && args[1] === "user") {',
+    '  process.stdout.write(`${data.login || "fake-dev"}\\n`); process.exit(0)',
+    '}',
+    'const lookup = (map, num) => map?.[String(num)] ?? map?.[Number(num)] ?? null',
+    'const handleView = (map, notFoundMsg) => {',
+    '  const item = lookup(map, args[2])',
+    '  if (!item) { process.stderr.write(`${notFoundMsg}\\n`); process.exit(1) }',
+    '  if (item.error || (item.statusCode && item.statusCode >= 400)) {',
+    '    process.stderr.write(`${item.error || ("HTTP " + item.statusCode)}\\n`); process.exit(1)',
+    '  }',
+    '  process.stdout.write(JSON.stringify(item)); process.exit(0)',
+    '}',
+    'if (args[0] === "pr" && args[1] === "view") handleView(data.prs, "Could not resolve to a PullRequest (404 Not Found)")',
+    'if (args[0] === "issue" && args[1] === "view") handleView(data.issues, "Could not resolve to an Issue (404 Not Found)")',
+    'process.stderr.write(`unsupported fake-gh cmd: ${args.join(" ")}\\n`)',
+    'process.exit(1)',
+  ].join('\n'), 'utf8')
+
+  if (process.platform === 'win32') {
+    writeFileSync(join(binDir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${fakeGhJs}" %*\r\n`, 'utf8')
+  } else {
+    const shPath = join(binDir, 'gh')
+    writeFileSync(shPath, `#!/bin/sh\nexec "${process.execPath}" "${fakeGhJs}" "$@"\n`, 'utf8')
+    chmodSync(shPath, 0o755)
+  }
+
+  const sepPath = process.platform === 'win32' ? ';' : ':'
+  const origPath = process.env.PATH ?? process.env.Path ?? ''
+  const nextPath = `${binDir}${sepPath}${origPath}`
+  const env = {
+    ...process.env,
+    PATH: nextPath,
+    ...(process.platform === 'win32' ? { Path: nextPath } : {}),
+    PF_NO_REAL_AUTH_PROBE: '0',
+    FAKE_GH_DATA: dataFile,
+    GH_TOKEN: undefined,
+    GITHUB_TOKEN: undefined,
+    PF_MCP_GITHUB: undefined,
+    MCP_GITHUB_AVAILABLE: undefined,
+  }
+  return {
+    env,
+    dataFile,
+    update(next) { writeFileSync(dataFile, JSON.stringify(next, null, 2), 'utf8') },
+    cleanup() { rmTree(sb) },
+  }
+}

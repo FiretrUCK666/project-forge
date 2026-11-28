@@ -1,0 +1,797 @@
+/**
+ * review-ledger.mjs -- Review verdict recording, explicit rebutted/resolved tracking,
+ * visual verification recording, stop-loss human override, and text/next-step rendering.
+ *
+ * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
+ */
+
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import { printNextStep, resolveAvailableSkills, withNextSteps } from '../../lib/cli.mjs'
+import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
+import { artifactPathsOf, mergeArtifactRecords, normalizeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
+import { autoEscalateBlockingFindings, buildEscalationIssuePayload, evaluateNoEscalateExemption } from '../../lib/escalation.mjs'
+import { posixPath } from '../../lib/git.mjs'
+import {
+  collectImplementerHistory, consumeReviewToken, createDefaultLedger, nextReviewRound,
+  readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger,
+} from '../../lib/ledger.mjs'
+import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
+import {
+  appendGovernSignal, computeSignalFingerprint, inferDefectClass, inferPyramidTier, inferSignalModule,
+} from '../../lib/signals.mjs'
+import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
+import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
+import { readReceipt, resolveEmpiricalReceiptPath, resolveReviewObservationInputs } from './review-empirical-state.mjs'
+import {
+  buildReviewStopLossPacket, checkDistinctRoundReviewer, checkHistoricalStopLoss,
+  checkIncrementalScopeLock, checkSameHeadRereview, collectExcludedReviewers,
+  computeDispositionStats, computeReviewArtifactBaseline, evaluatePassBlockers,
+  evaluateThreeRoundStopLoss, extractFileAndLines, isOptionalLowRiskReview, normActorId,
+  normalizeAdvisoryList, normalizeMustFixObj, parseDispositions, parseMustFixItem, sameBlockerItem,
+} from './review-locks.mjs'
+import { collectNormalReviewEscalations, syncReviewToGitHub } from './review-sync.mjs'
+
+function matchesItemIdSet(pm, idSet) {
+  if (!pm || idSet.size === 0) return false
+  return idSet.has(String(pm.id ?? '').toLowerCase())
+    || idSet.has(String(pm.fingerprint ?? '').toLowerCase())
+    || (pm.criterion && idSet.has(String(pm.criterion).toLowerCase()))
+}
+
+function isMatchingHeadEmpiricalReceipt(receipt, { headSha, round }) {
+  const rec = receipt?.empiricalVerified
+  if (!rec || typeof rec !== 'object') return false
+  if (rec.executed === false || rec.errorOnly === true || rec.succeeded === false) return false
+  if (headSha && rec.headSha !== headSha) return false
+  if (receipt.mode === 'task' && rec.round !== undefined && Number(rec.round) !== Number(round)) return false
+  return true
+}
+
+function formatEmpiricalReceiptEvidence(recEmp, headSha = '') {
+  if (!recEmp || typeof recEmp !== 'object') return { cmdSummary: '', obsSummary: '', text: '' }
+  const cmds = Array.isArray(recEmp.commands) ? recEmp.commands : []
+  const cmdSummary = cmds
+    .map((c) => `${c.cmd || 'cmd'}(exit=${c.exitCode ?? 0}${c.durationMs !== undefined ? `,${c.durationMs}ms` : ''})`)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('；')
+  const obsSummary = String(recEmp.e2eObservation?.summary ?? '').trim()
+  if (cmdSummary) return { cmdSummary, obsSummary, text: `回执实跑：${cmdSummary}` }
+  if (obsSummary) return { cmdSummary: '', obsSummary, text: `回执观察：${obsSummary}` }
+  if (recEmp.lowRiskNoRuntimeChecks) {
+    const st = recEmp.status || 'low-risk-no-runtime-checks'
+    return { cmdSummary: '', obsSummary: '', text: `回执静态核验：${st} (${String(headSha ?? '').slice(0, 7) || 'HEAD'})` }
+  }
+  return { cmdSummary: '', obsSummary: '', text: '' }
+}
+
+function resolveRecordNextSteps({ taskId, verdict, round, role, providerId = null, mainRoot, excludedReviewers = [] }) {
+  const skills = resolveAvailableSkills(mainRoot)
+  if (verdict === 'pass') {
+    if (role === 'contributor-fork') {
+      return ['Review PASSED (contributor-fork): wait for upstream maintainer merge; do NOT delete your fork branch before PR is merged.']
+    }
+    if (role === 'generic-git' || providerId === 'generic-git') {
+      return [`Review PASSED (generic-git / awaiting-remote-mr): push branch and create/merge remote MR manually, then confirm with flow.mjs merge --task ${taskId}.`]
+    }
+    if (skills.has('dev-flow')) {
+      return [`node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}`]
+    }
+    return ['Review PASSED: merge via GitHub PR or `git merge --no-ff` after verifying merge authority rules.']
+  }
+  const excl = excludedReviewers.length > 0 ? ` (Round ${round + 1} must spawn fresh reviewer excluding: ${excludedReviewers.join(', ')})` : ''
+  if (skills.has('dev-flow')) {
+    return [
+      `Implementer: fix Must-Fix on SAME branch (rework -> verify -> submit), then run Round ${round + 1}${excl}.`,
+    ]
+  }
+  return [`Implementer: fix Must-Fix on SAME branch, verify & commit, then run Round ${round + 1}${excl}.`]
+}
+
+export async function handleRecord(opts, roots) {
+  const { mainRoot, workTreeRoot } = roots
+  const noEscalateExemption = evaluateNoEscalateExemption({
+    noEscalate: Boolean(opts['no-escalate']),
+    reason: opts.reason ?? '',
+  })
+  if (!noEscalateExemption.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: noEscalateExemption.code, error: noEscalateExemption.error }, null, 2)}\n`)
+    process.stderr.write(`${noEscalateExemption.error}\n`)
+    return noEscalateExemption.exitCode
+  }
+  let taskId
+  let existing = null
+
+  if (opts.task && String(opts.task).trim() !== '' && opts.task !== 'auto') {
+    taskId = sanitizeTaskId(opts.task)
+    existing = readTaskLedger(mainRoot, taskId)
+  } else {
+    const ctx = await resolveTaskContext(roots, { ...opts, task: undefined }, { requireExisting: true })
+    taskId = ctx.taskId
+    existing = ctx.ledger
+  }
+
+  const baseLedger = existing ? createDefaultLedger(existing) : createDefaultLedger({
+    taskId,
+    implementerId: opts['implementer-id'] ?? null,
+    rounds: [],
+  })
+
+  const prevRounds = Array.isArray(baseLedger.rounds) ? structuredClone(baseLedger.rounds) : []
+  let round
+  if (opts.round !== undefined && String(opts.round).trim() !== '') {
+    round = Number(opts.round)
+    if (!Number.isInteger(round) || round < 1) {
+      process.stderr.write('Error: record requires integer --round <1|2|3...>\n')
+      return EXIT.USAGE
+    }
+  } else {
+    // 与签发侧用同一个派生式——两处各算一次，轮次有空档时必然对不上。
+    round = nextReviewRound(baseLedger)
+  }
+
+  const verdict = String(opts.verdict ?? '').toLowerCase()
+  if (verdict !== 'pass' && verdict !== 'changes') {
+    process.stderr.write('Error: record requires --verdict pass|changes\n')
+    return EXIT.USAGE
+  }
+  const reviewerId = String(opts['reviewer-id'] ?? '').trim()
+  if (!reviewerId) {
+    process.stderr.write('Error: record requires non-empty --reviewer-id <id>\n')
+    return EXIT.USAGE
+  }
+
+  const targetRoot = (baseLedger.reviewWorktreePath && existsSync(resolve(mainRoot, baseLedger.reviewWorktreePath)))
+    ? resolve(mainRoot, baseLedger.reviewWorktreePath)
+    : ((baseLedger.worktreePath && existsSync(resolve(mainRoot, baseLedger.worktreePath)))
+        ? resolve(mainRoot, baseLedger.worktreePath)
+        : workTreeRoot)
+
+  const headSha = opts.head
+    ? await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, opts.head, { preferReviewSlot: true })
+    : await resolveReviewTargetSha(mainRoot, workTreeRoot, baseLedger, 'HEAD', { preferReviewSlot: true })
+
+  const receipt = readReceipt(resolveEmpiricalReceiptPath({
+    gitDir: roots.gitDir, mode: 'task', task: baseLedger, prNo: baseLedger.prNumber,
+    reviewRoot: targetRoot, baseRef: baseLedger.baseSha || baseLedger.baseBranch,
+  }))
+  const matchingReceiptEmp = isMatchingHeadEmpiricalReceipt(receipt, { headSha, round }) ? receipt.empiricalVerified : null
+  const receiptFmt = formatEmpiricalReceiptEvidence(matchingReceiptEmp, headSha)
+
+  // 实证佐证：没有它，'我跑过' 与 '我觉得' 在账本里分不出来；缺省时自动复用同 HEAD 有效 check-empirical 回执。
+  const explicitEvidence = String(opts.evidence ?? '').trim()
+  const evidenceRaw = explicitEvidence || receiptFmt.text
+  if (!evidenceRaw) {
+    const msg = 'BLOCKED_MISSING_REVIEW_EVIDENCE: 记审查结论必须传 --evidence "<你实际跑过的命令与输出摘要>"（或先在同 HEAD 跑通 check-empirical 以自动复用回执）。'
+      + '判据是「跑过什么」，不是「觉得怎样」——没有佐证的通过和没有通过是一回事。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_REVIEW_EVIDENCE', error: msg, taskId, round }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE
+  }
+
+  const ledgerImplementer = String(baseLedger.implementerId ?? '').trim()
+  const optImplementer = String(opts['implementer-id'] ?? '').trim()
+  const implementerId = ledgerImplementer || optImplementer
+  if (!implementerId) {
+    const msg = 'BLOCKED_MISSING_IMPLEMENTER: 账本里没有 implementerId，无法判断这是不是自审——'
+      + '缺少实施者标识不等于不需要独立审查。请用 flow.mjs start 建立任务（会记下实施者），或显式传 --implementer-id。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_IMPLEMENTER', error: msg, taskId, round }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE
+  }
+
+  const criteriaDrift = checkFrozenCriteria(baseLedger, targetRoot)
+  if (criteriaDrift.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_CRITERIA_DRIFT', exitCode: EXIT.ACTION, taskId, round, headSha, error: criteriaDrift.message }, null, 2)}\n`)
+    else process.stdout.write(criteriaDrift.message)
+    process.stderr.write(criteriaDrift.message)
+    return EXIT.ACTION
+  }
+
+  const optionalLowRiskRecord = opts['review-token'] === undefined
+    ? await isOptionalLowRiskReview({ mainRoot, targetRoot, baseLedger })
+    : false
+
+  // 按「历史 ∪ 当前」比对，不只看当前字段：一次接管就能让原实施者换个身份回来审自己的活（低风险单会话免审除外）。
+  const implementerHistory = [...new Set([...collectImplementerHistory(baseLedger), implementerId, optImplementer]
+    .filter((a) => String(a ?? '').trim()))]
+  const selfMatch = implementerHistory.find((a) => normActorId(a) === normActorId(reviewerId))
+  if (!optionalLowRiskRecord && selfMatch) {
+    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) 与这个任务的历史实施者 (${selfMatch}) 相同。独立审查要求复核人不参与实施。`
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId: selfMatch, implementerHistory }, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${msg}\n`)
+    }
+    process.stderr.write(`${msg}\n`)
+    return EXIT.FACT
+  }
+
+  const distinctLock = optionalLowRiskRecord
+    ? { blocked: false }
+    : checkDistinctRoundReviewer(prevRounds, reviewerId, {
+        minRound: 2, currentRound: round, code: 'BLOCKED_SAME_REVIEWER_REREVIEW', subject: '代码审查',
+      })
+  if (distinctLock.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: distinctLock.code, exitCode: distinctLock.exitCode, taskId, round, reviewerId, matchedRound: distinctLock.matchedRound, excludedReviewers: distinctLock.excludedReviewers, error: distinctLock.message }, null, 2)}\n`)
+    else process.stdout.write(`${distinctLock.message}\n`)
+    process.stderr.write(`${distinctLock.message}\n`)
+    return distinctLock.exitCode
+  }
+
+  if (!optionalLowRiskRecord) {
+    const tokenCheck = consumeReviewToken(baseLedger, opts['review-token'], round, { reviewerId, headSha })
+    if (!tokenCheck.ok) {
+      const errCode = tokenCheck.code ?? 'BLOCKED_REVIEW_TOKEN'
+      const msg = `${errCode}: ${tokenCheck.reason}。`
+        + '独立审查要凭 flow.mjs next 在待审查阶段签发的一次性令牌，--reviewer-id 一个字符串不再是凭据。'
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify({ status: errCode, code: errCode, error: msg, taskId, round, reviewerId, headSha }, null, 2)}\n`)
+      } else {
+        process.stdout.write(`${msg}\n`)
+      }
+      process.stderr.write(`${msg}\n`)
+      return EXIT.FACT
+    }
+  }
+
+  const histLock = checkHistoricalStopLoss(prevRounds, baseLedger, opts)
+  if (histLock.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: histLock.code, exitCode: histLock.exitCode, taskId, round, error: histLock.message }, null, 2)}\n`)
+    else process.stdout.write(`${histLock.message}\n`)
+    process.stderr.write(`${histLock.message}\n`)
+    return histLock.exitCode
+  }
+  if (histLock.unlockedNow) {
+    baseLedger.humanApprovedStopLoss = true
+    baseLedger.humanApprovedReason = histLock.reason
+  }
+
+  const mustFixList = []
+  for (let i = 0; i < (opts['must-fix'] ?? []).length; i += 1) {
+    const raw = opts['must-fix'][i]
+    if (typeof raw === 'string' && raw.trim().startsWith('[')) {
+      try {
+        const arr = JSON.parse(raw)
+        if (Array.isArray(arr)) {
+          arr.forEach((item, j) => mustFixList.push(normalizeMustFixObj(item, mustFixList.length + j)))
+          continue
+        }
+      } catch { /* fallback */ }
+    }
+    mustFixList.push(parseMustFixItem(raw, i))
+  }
+
+  if (verdict === 'pass' && mustFixList.length > 0) {
+    process.stderr.write('Error: cannot record --verdict pass when --must-fix items are present.\n')
+    return EXIT.USAGE
+  }
+
+  const dispParsed = parseDispositions(opts.disposition ?? [])
+  if (!dispParsed.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'INVALID_DISPOSITION', error: dispParsed.error, taskId, round }, null, 2)}\n`)
+    process.stderr.write(`${dispParsed.error}\n`)
+    return EXIT.USAGE
+  }
+  const roundDispositionsMap = new Map()
+  for (const d of dispParsed.items) roundDispositionsMap.set(d.idOrFp.toLowerCase(), d)
+  const roundDispositions = [...roundDispositionsMap.values()]
+
+  const shouldFixList = normalizeAdvisoryList(opts['should-fix'] ?? [])
+  const preExistingList = normalizeAdvisoryList(opts['pre-existing'] ?? [])
+  const outOfScopeList = normalizeAdvisoryList(opts['out-of-scope'] ?? [])
+  const rebutAccepted = new Set((opts['rebut-accepted'] ?? []).map((s) => String(s).trim().toLowerCase()).filter(Boolean))
+  const resolvedAccepted = new Set((opts.resolved ?? []).map((s) => String(s).trim().toLowerCase()).filter(Boolean))
+
+  const prevRound = prevRounds.filter((r) => Number(r.round) < round).sort((a, b) => a.round - b.round).at(-1) ?? null
+  const prevOpen = prevRound
+    ? (prevRound.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved')
+    : []
+
+  const sameHeadLock = checkSameHeadRereview({ round, prevRound, headSha })
+  if (sameHeadLock.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: sameHeadLock.code, exitCode: sameHeadLock.exitCode, taskId, round, headSha, error: sameHeadLock.message }, null, 2)}\n`)
+    else process.stdout.write(`${sameHeadLock.message}\n`)
+    process.stderr.write(`${sameHeadLock.message}\n`)
+    return sameHeadLock.exitCode
+  }
+
+  const curArtifactBaseline = await computeReviewArtifactBaseline({ targetRoot, baseSha: baseLedger.baseSha, headSha })
+  if (round >= 2 && prevRound?.verdict === 'changes' && prevRound?.artifact_baseline?.diffSha && curArtifactBaseline.diffSha && curArtifactBaseline.diffSha === prevRound.artifact_baseline.diffSha) {
+    const msg = `BLOCKED_NO_REWORK_CHANGES: Round ${round} 相对 baseSha 的代码差异指纹未变 (${curArtifactBaseline.diffSha})，禁止提交空返工直接复审。`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_NO_REWORK_CHANGES', exitCode: EXIT.FACT, taskId, round, headSha, artifact_baseline: curArtifactBaseline, error: msg }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.FACT
+  }
+
+  const rebutsAll = [...(Array.isArray(baseLedger.rebuts) ? baseLedger.rebuts : []), ...(Array.isArray(prevRound?.rebuts) ? prevRound.rebuts : [])]
+  const evidence = readVerificationEvidence(roots.gitDir, taskId)
+  const scopeLock = await checkIncrementalScopeLock({
+    round,
+    verdict,
+    mustFixList,
+    prevOpen,
+    rebuts: rebutsAll,
+    targetRoot,
+    prevHead: prevRound?.headSha,
+    headSha,
+    baseSha: baseLedger.baseSha,
+    baseBranch: baseLedger.baseBranch,
+    prevRoundBaseSha: prevRound?.baseSha ?? baseLedger.roundBaseSha?.prevBaseSha,
+    currentBaseSha: baseLedger.baseSha ?? baseLedger.roundBaseSha?.newBaseSha,
+    roundBaseSha: baseLedger.roundBaseSha,
+    evidence,
+    lastVerifyExitCode: baseLedger.lastVerifyExitCode,
+  })
+  if (scopeLock.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: scopeLock.code, exitCode: scopeLock.exitCode, taskId, round, headSha, range: scopeLock.range, outOfScope: scopeLock.outOfScope, error: scopeLock.message }, null, 2)}\n`)
+    else process.stdout.write(`${scopeLock.message}\n`)
+    process.stderr.write(`${scopeLock.message}\n`)
+    return scopeLock.exitCode
+  }
+
+  if (verdict === 'pass') {
+    const passCheck = await evaluatePassBlockers({
+      mainRoot,
+      targetRoot,
+      gitDir: roots.gitDir,
+      taskId,
+      ledger: baseLedger,
+      headSha,
+      enforceGates: opts['no-enforce-gates'] ? false : (opts['enforce-gates'] !== false),
+      humanApproved: Boolean(opts['human-approved']),
+      receipt,
+      opts,
+    })
+    if (passCheck.blocked) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ status: passCheck.code, exitCode: passCheck.exitCode, taskId, round, headSha, blockers: passCheck.blockers, error: passCheck.message }, null, 2)}\n`)
+      else process.stdout.write(`${passCheck.message}\n`)
+      process.stderr.write(`${passCheck.message}\n`)
+      return passCheck.exitCode
+    }
+  }
+
+  const rebuttedItems = []
+  const resolvedItems = []
+  const remainingFromPrev = []
+  const unmentionedFromPrev = []
+
+  // 轮次收口三态：`已证实解决` / `仍在` / `本轮未提及`。
+  //
+  // 「本轮没再提到它」不等于「它没了」——换一次措辞就足以让旧写法认不出来，
+  // 而认不出来正是这一片要治的东西。所以未提及保持原状态、单列清单，
+  // 只有明写 `--resolved` 且被接受，或者本轮仍按定位点命中，才算有下文。
+  for (const pm of prevOpen) {
+    if (matchesItemIdSet(pm, rebutAccepted)) {
+      pm.status = 'rebutted'
+      pm.rebuttedInRound = round
+      rebuttedItems.push(pm.id)
+    } else if (matchesItemIdSet(pm, resolvedAccepted)) {
+      pm.status = 'resolved'
+      pm.resolvedInRound = round
+      resolvedItems.push(pm.id)
+    } else if (mustFixList.some((nm) => sameBlockerItem(pm, nm))) {
+      // 本轮再次出现且按实质判定命中：仍在，保持原状态等下一轮。
+      remainingFromPrev.push(pm)
+    } else {
+      unmentionedFromPrev.push(pm.id)
+    }
+  }
+
+  if (round >= 2 && verdict === 'pass' && unmentionedFromPrev.length > 0) {
+    const msg = `BLOCKED_PASS_WITH_OPEN_BLOCKERS: Round ${round} 试图给出 pass，但上一轮尚有未逐条闭环的阻塞项（${unmentionedFromPrev.join(', ')}）；请使用 --resolved 或 --rebut-accepted 逐条确认，或判 changes。`
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_PASS_WITH_OPEN_BLOCKERS', code: 'BLOCKED_PASS_WITH_OPEN_BLOCKERS', exitCode: EXIT.FACT, taskId, round, headSha, unmentionedFromPrev, error: msg }, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${msg}\n`)
+    }
+    process.stderr.write(`${msg}\n`)
+    return EXIT.FACT
+  }
+
+  // 整轮通过不等于所有历史阻塞项都被解决。
+  //
+  // 过去这里把「本轮 verdict=pass」当成「上一轮每一条都修好了」的证据，但那只是
+  // 「本轮没再提」，两件事之间没有因果关系：审查者这轮换了说法、换了视角，
+  // 或者根本没收进本轮视野，都会产出 pass。批量置 resolved 等于替审查者宣布结论。
+  //
+  // 现在的口径：pass 只说明本轮没有新的阻塞项。历史未终结项的去向由上一段的三态决定，
+  // 没被证实解决的继续挂着，未提及的单列进 `unmentionedFromPrev`。
+
+  const slPre = evaluateThreeRoundStopLoss({
+    round,
+    verdict,
+    items: mustFixList,
+    prevItems: remainingFromPrev,
+    humanApproved: Boolean(baseLedger.humanApprovedStopLoss),
+    matchesSame: sameBlockerItem,
+    maxRounds: 3,
+  })
+  const humanApprovedNow = Boolean(opts['human-approved'])
+  const stopLossReason = String(opts.reason ?? '').trim()
+  if (slPre.stopLoss && humanApprovedNow && !baseLedger.humanApprovedStopLoss && !stopLossReason) {
+    const msg = 'BLOCKED_STOP_LOSS_REASON_REQUIRED: 第 3 轮触发停损时，--human-approved 必须提供非空 --reason 说明为何批准继续。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_STOP_LOSS_REASON_REQUIRED', code: 'BLOCKED_STOP_LOSS_REASON_REQUIRED', exitCode: EXIT.HUMAN, taskId, round, error: msg }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.HUMAN
+  }
+  const sl = evaluateThreeRoundStopLoss({
+    round,
+    verdict,
+    items: mustFixList,
+    prevItems: remainingFromPrev,
+    humanApproved: Boolean((humanApprovedNow && stopLossReason) || baseLedger.humanApprovedStopLoss),
+    matchesSame: sameBlockerItem,
+    maxRounds: 3,
+  })
+  const stopLoss = sl.stopLoss
+  const stopReasons = sl.reasons
+
+  const fr = baseLedger.faultRecord
+  const autoFaultText = fr?.restoredAt
+    ? `已通过两阶段故障注入与干净还原（round=${fr.round ?? '-'}, failed=${fr.failedCmd ?? 'injected'}, restoredAt=${fr.restoredAt}）`
+    : ''
+  const effectiveFaultInjection = String(opts['fault-injection'] ?? '').trim() || autoFaultText
+
+  const obsInput = resolveReviewObservationInputs(opts)
+  if (!obsInput.ok) {
+    const msg = `${obsInput.code}: ${obsInput.reason}`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: obsInput.code, exitCode: EXIT.FACT, taskId, round, headSha, field: obsInput.field, error: msg }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.FACT
+  }
+  const { e2eText, blockedReasonText } = obsInput
+  const artifactInput = normalizeArtifactRecords({ repoRoot: targetRoot, artifacts: artifactPathsOf(opts) })
+  if (!artifactInput.ok) {
+    const msg = `BLOCKED_ARTIFACT_INVALID: ${artifactInput.error}`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_ARTIFACT_INVALID', exitCode: EXIT.FACT, taskId, round, headSha, artifactErrors: artifactInput.errors, error: msg }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.FACT
+  }
+  const artifactRecords = artifactInput.records
+  const artifactText = artifactRecords.map((r) => `${r.relPath}(${r.bytes}B,${r.sha256Prefix})`).join('、')
+  const empParts = []
+  const seenEmpBodies = new Set()
+  const pushEmpPart = (prefix, body) => {
+    const clean = String(body ?? '').trim()
+    if (!clean) return
+    const norm = clean.toLowerCase()
+    for (const prev of seenEmpBodies) {
+      if (prev === norm || prev.includes(norm) || norm.includes(prev)) return
+    }
+    seenEmpBodies.add(norm)
+    empParts.push(prefix ? `${prefix}：${clean}` : clean)
+  }
+  if (explicitEvidence) pushEmpPart('审查命令与实证', explicitEvidence)
+  else if (evidenceRaw) pushEmpPart(null, evidenceRaw)
+  pushEmpPart('E2E/交互观察', e2eText)
+  pushEmpPart('产物核验', artifactText)
+  pushEmpPart('环境阻塞待人工核验', blockedReasonText)
+  if (matchingReceiptEmp) {
+    if (receiptFmt.cmdSummary) pushEmpPart('回执实跑', receiptFmt.cmdSummary)
+    if (receiptFmt.obsSummary) pushEmpPart('回执观察', receiptFmt.obsSummary)
+  }
+  const reviewEmpirical = empParts.join(' | ') || null
+  const visualChecked = Boolean(e2eText || artifactRecords.length > 0 || blockedReasonText)
+  const roundEntry = {
+    round,
+    baseSha: baseLedger.baseSha ?? null,
+    headSha,
+    artifact_baseline: curArtifactBaseline,
+    reviewerId,
+    verdict,
+    optionalLowRisk: optionalLowRiskRecord,
+    // 跑过什么。没有它，'我跑过' 和 '我觉得' 在账本里分不出来。
+    reviewEvidence: evidenceRaw,
+    ...(reviewEmpirical ? { reviewEmpirical } : {}),
+    blockers: mustFixList.map((m) => m.summary),
+    mustFix: mustFixList,
+    shouldFix: shouldFixList,
+    preExisting: preExistingList,
+    dispositions: roundDispositions,
+    rebuts: (() => {
+      const seenRebuts = new Set()
+      return [...(Array.isArray(baseLedger?.rebuts) ? baseLedger.rebuts : []), ...(Array.isArray(prevRound?.rebuts) ? prevRound.rebuts : [])]
+        .filter((r) => { const k = `${r?.id ?? ''}:${r?.reason ?? ''}`; if (seenRebuts.has(k)) return false; seenRebuts.add(k); return true })
+    })(),
+    rebutAccepted: [...rebutAccepted],
+    rebuttedItems,
+    resolvedItems,
+    unmentionedFromPrev,
+    faultInjection: effectiveFaultInjection,
+    visualChecked,
+    ...(artifactRecords.length > 0 ? { artifacts: mergeArtifactRecords(prevRound?.artifacts ?? [], artifactRecords) } : {}),
+    stopLossTriggered: stopLoss,
+    stopLossReasons: stopReasons,
+    recordedAt: new Date().toISOString(),
+  }
+
+  const filteredRounds = prevRounds.filter((r) => r.round !== round)
+  filteredRounds.push(roundEntry)
+  filteredRounds.sort((a, b) => a.round - b.round)
+  const dispositionStats = computeDispositionStats(filteredRounds)
+  const excludedReviewers = collectExcludedReviewers(filteredRounds, implementerId)
+  const stopLossPacket = stopLoss
+    ? buildReviewStopLossPacket({ taskId, round, headSha, reasons: stopReasons, repeatedItems: sl.repeatedItems, mustFixList, excludedReviewers })
+    : null
+
+  const prOptNum = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : null
+  const issueOptNums = opts.issue !== undefined ? parseIssueNumbers(opts.issue, { strict: true }) : []
+  const updated = {
+    ...baseLedger,
+    taskId,
+    ...(prOptNum ? { prNumber: prOptNum } : {}),
+    ...(issueOptNums.length > 0 ? {
+      linkedIssues: [...new Set([...(baseLedger.linkedIssues ?? []), ...issueOptNums])],
+    } : {}),
+    implementerId: implementerId || baseLedger.implementerId,
+    reviewerId,
+    ...(reviewEmpirical ? { reviewEmpirical } : {}),
+    rounds: filteredRounds,
+    dispositionStats,
+    ...(stopLossPacket ? { stopLossPacket } : {}),
+    lastReview: {
+      round,
+      verdict,
+      headSha,
+      reviewerId,
+      stopLossTriggered: stopLoss,
+      stopLossReasons: stopReasons,
+      ...(stopLossPacket ? { stopLossPacket } : {}),
+    },
+  }
+
+  if (verdict === 'pass' && !stopLoss) {
+    updated.reviewPassed = true
+    updated.reviewPassedHead = headSha
+  } else {
+    updated.reviewPassed = false
+    updated.reviewPassedHead = null
+  }
+
+  if (visualChecked) {
+    updated.visualVerifiedHead = headSha
+    // 这个字段只接受入参原文、真实附件记录或既有真实记录；三者都没有就不写。
+    //
+    // 它不得由任何开关或阻塞说明派生。阻塞说明是「我这儿渲染不出来」的诚实报阻，
+    // 不是「我看到了什么」；把它拼成证据字段，等于把一次报阻洗成一次核验。
+    // 阻塞原因落到 `visualBlockedReason`，与证据字段并列而不是顶替它。
+    const inlineEvidence = e2eText || artifactText
+    const priorEvidence = typeof updated.visualCheckEvidence === 'string' ? updated.visualCheckEvidence.trim() : ''
+    updated.visualCheckEvidence = inlineEvidence || priorEvidence || null
+    updated.visualBlockedReason = blockedReasonText || (updated.visualBlockedReason ?? null)
+  }
+
+  const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)
+  if (stopLossPacket) stopLossPacket.ledgerPath = posixPath(tPath)
+  await appendGovernSignal({
+    mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, workRoot: targetRoot, category: 'review',
+    module: mustFixList[0]?.file ? undefined : 'review',
+    pattern: stopLoss ? 'review.stop-loss' : (verdict === 'pass' ? 'review.pass' : 'review.changes'),
+    severity: stopLoss ? 'high' : (verdict === 'pass' ? 'info' : 'medium'),
+    source: 'review-record', file: mustFixList[0]?.file ?? '',
+    message: `review round ${round} verdict=${verdict}${stopLoss ? ' [STOP_LOSS]' : ''} (mustFix=${mustFixList.length}, rebutted=${rebuttedItems.length})`,
+    taskId, round, verdict,
+    meta: { dispositions: roundDispositions, dispositionStats, mustFixCount: mustFixList.length, ...(stopLossPacket ? { stopLossPacket } : {}) },
+  })
+  for (const mf of mustFixList) {
+    const modRoot = inferSignalModule(mf.file)
+    const ruleId = mf.criterion ? `review.must-fix.${mf.criterion}` : `review.must-fix.${mf.id}`
+    const defectClass = inferDefectClass({ ruleId, pattern: 'review.must-fix', category: 'review', message: mf.summary })
+    const pyramidTier = inferPyramidTier(defectClass, { stopLoss })
+    const fingerprint = computeSignalFingerprint({ ruleId, pattern: 'review.must-fix', defectClass, moduleRoot: modRoot })
+    await appendGovernSignal({
+      mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, workRoot: targetRoot, category: 'review', module: modRoot,
+      pattern: 'review.must-fix', ruleId, defectClass, pyramidTier, fingerprint,
+      targetArtifact: mf.file || modRoot, severity: mf.gateFailure ? 'high' : 'medium',
+      source: 'review-finding', file: mf.file || '', line: mf.line ?? undefined,
+      message: `[${mf.id}] ${mf.summary}`, taskId, round, verdict,
+      meta: { findingId: mf.id, blockerFingerprint: mf.fingerprint, criterion: mf.criterion ?? null },
+    })
+  }
+  for (let i = 0; i < shouldFixList.length; i += 1) {
+    const sfText = shouldFixList[i]
+    const sfParsed = extractFileAndLines(sfText)
+    const modRoot = inferSignalModule(sfParsed.file)
+    const ruleId = 'review.should-fix'
+    const defectClass = inferDefectClass({ ruleId, pattern: 'review.should-fix', category: 'review.should-fix', message: sfText })
+    const pyramidTier = inferPyramidTier(defectClass, { stopLoss: false })
+    const fingerprint = computeSignalFingerprint({ ruleId, pattern: 'review.should-fix', defectClass, moduleRoot: modRoot })
+    await appendGovernSignal({
+      mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, workRoot: targetRoot,
+      category: 'review.should-fix', module: modRoot,
+      pattern: 'review.should-fix', ruleId, defectClass, pyramidTier, fingerprint,
+      targetArtifact: sfParsed.file || modRoot, severity: 'should-fix',
+      source: 'review-finding', file: sfParsed.file || '', line: sfParsed.line ?? undefined,
+      message: sfText, taskId, round, verdict,
+      meta: { index: i + 1, kind: 'should-fix' },
+    })
+  }
+  const nextSteps = resolveRecordNextSteps({ taskId, verdict, round, role: updated.role, providerId: updated.providerId, mainRoot, excludedReviewers })
+  const githubSync = await syncReviewToGitHub({
+    mainRoot, workTreeRoot: targetRoot, ledger: updated, round, verdict, headSha, reviewerId, implementerId,
+    empiricalSummary: reviewEmpirical, summary: opts.summary ?? '', stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems, nextSteps, opts,
+  })
+  if (Array.isArray(githubSync.syncFailures) && githubSync.syncFailures.length > 0) {
+    await updateTaskLedger(mainRoot, taskId, (cur) => ({
+      ...cur,
+      syncFailures: [...(Array.isArray(cur.syncFailures) ? cur.syncFailures : []), ...githubSync.syncFailures],
+    }))
+  }
+  const hasRepeatedSevereBlockers = mustFixList.length > 0 && prevRounds.length >= 1
+    && mustFixList.some((m) => (prevRounds.at(-1)?.mustFix ?? []).some((pm) => sameBlockerItem(m, pm)))
+  const shouldWriteEscalation = !noEscalateExemption.skip && Boolean(
+    opts.escalate || stopLoss || outOfScopeList.length > 0 || hasRepeatedSevereBlockers
+    || updated.role === 'local-only' || opts._ghProbe || opts._ghClient,
+  )
+
+  if (stopLoss) {
+    const escalationItem = {
+      source: 'review', stopLoss: true, severity: 'high', caseType: 4, taskId,
+      title: `stop-loss escalation for ${taskId} (Round ${round})`,
+      summary: stopReasons.join('; '),
+      rootCause: stopLossPacket.rootCauseHypothesis,
+      criteria: mustFixList.length > 0 ? mustFixList.map((m, idx) => `C${idx + 1}: 根治 [${m.id}] ${m.summary}`) : ['C1: 拆解架构前提冲突并补全双向实证'],
+      stopLossPacket, milestone: updated.milestone ?? undefined, labels: ['stop-loss', 'escalation'],
+    }
+    const escalationPayload = buildEscalationIssuePayload(escalationItem)
+    const escalatedIssue = shouldWriteEscalation
+      ? await autoEscalateBlockingFindings({
+          repoRoot: mainRoot, item: escalationItem, noEscalate: noEscalateExemption.skip,
+          noEscalateReason: noEscalateExemption.reason ?? '', _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
+        }).catch((e) => ({ ok: false, error: e?.message }))
+      : null
+    const payload = withNextSteps({
+      status: 'STOP_LOSS_ESCALATE', exitCode: EXIT.HUMAN, taskId, round, headSha, reasons: stopReasons,
+      unresolvedMustFix: mustFixList, rebuttedItems, resolvedItems, excludedReviewers, stopLossPacket, escalationPayload,
+      ...(escalatedIssue ? { escalatedIssue } : {}),
+      ...(noEscalateExemption.skip ? { escalationSkipped: { reason: noEscalateExemption.reason } } : {}),
+      ledgerPath: posixPath(tPath), githubSync,
+      nextStep: stopLossPacket.recoveryCommand,
+    }, [stopLossPacket.recoveryCommand], { repoRoot: mainRoot })
+    if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+    else {
+      process.stdout.write([
+        'STOP_LOSS_ESCALATE',
+        `Task     : ${taskId} | Round ${round} | HEAD ${headSha}`,
+        `Exit Code: ${EXIT.HUMAN} (escalate to human maintainer)`,
+        `Reasons  : ${stopReasons.join('; ')}`,
+        ...(stopLossPacket.hotspotFiles.length > 0 ? [`Hotspots : ${stopLossPacket.hotspotFiles.join(', ')}`] : []),
+        ...(githubSync.synced ? [`GitHub   : synced to ${githubSync.targetRepo} (${githubSync.results.map((r) => `${r.kind}#${r.number}`).join(', ')})`] : []),
+        ...(githubSync.labelWarnings?.length > 0 ? [`LabelWarn: ${githubSync.labelWarnings.join('; ')}`] : []),
+        ...(escalatedIssue?.ok ? [`Escalated: Issue #${escalatedIssue.number} (${escalatedIssue.title})`] : []),
+        ...(escalatedIssue?.warning ? [`EscWarn  : ${escalatedIssue.warning}`] : []),
+        'Remaining Must-Fix:',
+        ...(mustFixList.length > 0 ? mustFixList.map((m) => `  - [${m.id}] (fp:${m.fingerprint}) ${m.summary}`) : ['  - (verdict=changes at round >= 3)']),
+      ].join('\n') + '\n')
+      printNextStep([stopLossPacket.recoveryCommand], { repoRoot: mainRoot })
+    }
+    process.stderr.write(`STOP_LOSS_ESCALATE: ${stopReasons.join('; ')} (exit ${EXIT.HUMAN})\n`)
+    return EXIT.HUMAN
+  }
+
+  const normalEscalations = collectNormalReviewEscalations({
+    preExistingList, outOfScopeList, mustFixList, taskId, round, milestone: updated.milestone ?? undefined,
+  })
+  const escalationPayloads = normalEscalations.payloads
+  const escalatedIssues = []
+  if (shouldWriteEscalation && normalEscalations.items.length > 0) {
+    for (const item of normalEscalations.items) {
+      const res = await autoEscalateBlockingFindings({
+        repoRoot: mainRoot, item, deduplicate: true, noEscalate: noEscalateExemption.skip,
+        noEscalateReason: noEscalateExemption.reason ?? '', _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
+      }).catch((e) => ({ ok: false, error: e?.message }))
+      escalatedIssues.push({ ...res, fingerprint: item.fingerprint })
+    }
+  } else if (shouldWriteEscalation && hasRepeatedSevereBlockers && mustFixList.length > 0) {
+    const first = mustFixList[0]
+    const repItem = {
+      source: 'review', severity: 'high', caseType: 4, taskId,
+      title: `repeated review blocker for ${taskId}: ${first.id}`,
+      summary: first.summary, fingerprint: first.fingerprint,
+      criteria: [`C1: 解决连续两轮未闭环严重阻塞 [${first.id}] ${first.summary}`],
+      labels: ['escalation'],
+    }
+    const res = await autoEscalateBlockingFindings({
+      repoRoot: mainRoot, item: repItem, deduplicate: true, noEscalate: noEscalateExemption.skip,
+      noEscalateReason: noEscalateExemption.reason ?? '', _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
+    }).catch((e) => ({ ok: false, error: e?.message }))
+    escalatedIssues.push({ ...res, fingerprint: repItem.fingerprint })
+  }
+
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify({
+      status: verdict === 'pass' ? 'REVIEW_PASSED' : 'CHANGES_REQUESTED',
+      taskId, round, headSha, reviewerId, excludedReviewers, optionalLowRisk: optionalLowRiskRecord,
+      reviewPassed: updated.reviewPassed, reviewPassedHead: updated.reviewPassedHead, visualVerifiedHead: updated.visualVerifiedHead,
+      mustFixCount: mustFixList.length, shouldFixCount: shouldFixList.length, preExistingCount: preExistingList.length,
+      outOfScopeCount: outOfScopeList.length, dispositionStats, rebuttedItems, resolvedItems,
+      ...(escalationPayloads.length > 0 ? { escalationPayloads } : {}),
+      ...(escalatedIssues.length > 0 ? { escalatedIssues } : {}),
+      ...(noEscalateExemption.skip ? { escalationSkipped: { reason: noEscalateExemption.reason } } : {}),
+      ledgerPath: posixPath(tPath), githubSync, nextSteps,
+    }, null, 2)}\n`)
+  } else {
+    const lines = [
+      verdict === 'pass' ? 'REVIEW_PASSED' : 'CHANGES_REQUESTED',
+      `Task     : ${taskId} | Round ${round} | HEAD ${headSha}`,
+      `Reviewer : ${reviewerId}`,
+      `Ledger   : ${posixPath(tPath)}`,
+      ...(githubSync.synced ? [`GitHub   : synced to ${githubSync.targetRepo} (${githubSync.results.map((r) => `${r.kind}#${r.number}`).join(', ')})`] : []),
+      ...(githubSync.labelWarnings?.length > 0 ? [`LabelWarn: ${githubSync.labelWarnings.join('; ')}`] : []),
+      ...(githubSync.hint ? [`Hint     : ${githubSync.hint}`] : []),
+      ...(escalatedIssues.filter((e) => e.ok).map((e) => `Escalated: Issue #${e.number} [fp:${e.fingerprint}] (${e.title})`)),
+      ...(rebuttedItems.length > 0 ? [`Rebutted : ${rebuttedItems.join(', ')}`] : []),
+      ...(resolvedItems.length > 0 ? [`Resolved : ${resolvedItems.join(', ')}`] : []),
+      ...(mustFixList.length > 0 ? ['Open Must-Fix:', ...mustFixList.map((m) => `  - [${m.id}] (fp:${m.fingerprint}) ${m.summary}`)] : []),
+    ]
+    process.stdout.write(`${lines.join('\n')}\n`)
+    printNextStep(nextSteps, { repoRoot: mainRoot })
+  }
+  return EXIT.OK
+}
+
+export async function handleOverride(opts, roots) {
+  const { mainRoot, workTreeRoot } = roots
+  const ctx = await resolveTaskContext(roots, opts, { requireExisting: true })
+  const { taskId, ledger } = ctx
+
+  if (!opts['human-approved']) {
+    process.stderr.write('Error: `override` requires explicit `--human-approved --reason "<text>"`.\n')
+    return EXIT.USAGE
+  }
+  const reason = String(opts.reason ?? '').trim()
+  if (!reason) {
+    process.stderr.write('Error: `override` requires non-empty `--reason "<text>"` documenting human rationale.\n')
+    return EXIT.USAGE
+  }
+
+  const headSha = await resolveReviewTargetSha(mainRoot, workTreeRoot, ledger, opts.head ?? 'HEAD')
+  const updated = {
+    ...createDefaultLedger(ledger),
+    humanApprovedStopLoss: true,
+    humanApprovedReason: reason,
+    humanApprovedAt: new Date().toISOString(),
+    humanApprovedHead: headSha,
+    humanApprovedBy: String(opts['reviewer-id'] ?? opts.agent ?? 'human-maintainer').trim(),
+    lastReview: ledger.lastReview
+      ? { ...ledger.lastReview, stopLossOverridden: true }
+      : ledger.lastReview,
+  }
+  const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)
+  const skills = resolveAvailableSkills(mainRoot)
+  const nextSteps = updated.role === 'contributor-fork'
+    ? ['Stop-loss human override recorded (contributor-fork): wait for upstream maintainer merge.']
+    : skills.has('dev-flow')
+      ? [`node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} --human-approved --reason "${reason.replace(/"/g, '\\"')}"`]
+      : [`Proceed to merge approved branch at HEAD ${headSha.slice(0, 7)} per human decision.`]
+
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify({
+      status: 'STOP_LOSS_OVERRIDDEN',
+      taskId,
+      headSha,
+      humanApprovedStopLoss: true,
+      humanApprovedReason: reason,
+      ledgerPath: posixPath(tPath),
+      nextSteps,
+    }, null, 2)}\n`)
+  } else {
+    process.stdout.write([
+      'STOP_LOSS_OVERRIDDEN',
+      `Task     : ${taskId} | HEAD ${headSha}`,
+      `Reason   : ${reason}`,
+      `Ledger   : ${posixPath(tPath)}`,
+    ].join('\n') + '\n')
+    printNextStep(nextSteps, { repoRoot: mainRoot })
+  }
+  return EXIT.OK
+}

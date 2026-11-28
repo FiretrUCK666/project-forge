@@ -1,0 +1,216 @@
+# project-forge 发布自动化骨架
+#
+# 复制到 .github/workflows/release.yml，按 TODO 替换。顶部这一整块注释删掉即可，
+# 删不删都不影响它作为工作流运行。机制不要改，只换取值。落地前先看那个路径上有没有
+# 已存在的工作流：有就合并，不要覆盖。
+#
+# ---
+#
+# 它只做两件事：**校验标签与清单版本号同号**，并**把版本库里那份说明文件原样搬到发布页**。
+# 它不生成说明、不改写说明——「这一版更新了什么」在打标签之前就已经由人写好。
+#
+# 原理（配之前先读）
+#
+#   **顺序是这套机制的命门**：说明必须先提交并推送到默认分支，再打标签。反过来的话，
+#   工作流读不到说明文件，会直接失败——这是设计如此，好过发一份空说明出去。
+#
+#   **为什么检出默认分支而不是触发时的 ref**：workflow_dispatch 补漏时，界面上选的那个
+#   ref 可能还是旧的；说明文件在默认分支上才有意义。而版本号门禁读取 `git show "$TAG:..."`
+#   那棵树里的清单，避免补跑旧标签或错打旧提交时出现假对比。
+#
+#   **为什么每个变量都经 env 传入**：直接展开进脚本正文的话，输入框里的内容会被当成
+#   shell 语法执行。
+#
+#   **跨文件不能写 needs。** 想表达「检查跑完才发版」这种依赖关系，写成同一文件里的
+#   两个 job 更可靠；拆成两个文件时只能靠事件触发，先后顺序没有保证。
+#
+# TODO(1) 标签形状：按发布链路决定，只留一个。
+#
+#   - 多数生态惯例是带 v 前缀（v*），下面的 on.push.tags 与 job 级 if 都按 v 写；
+#   - 插件市场一类要求**不带前缀的裸版本号**（如 1.2.3）。此时 on.push.tags 与 job 级
+#     if 必须**一起**改成 [0-9]* 形态——只改一处的话，工作流**永远不触发**，而它不报错。
+#
+# TODO(2) 说明文件目录与权威清单文件：
+#
+#   - NOTES_DIR 默认 'docs/release-notes'；若项目用单文件 CHANGELOG.md（兼容 `## [v1.2.3]`
+#     与 Keep a Changelog `## [1.2.3]`），下面的兜底逻辑会自动识别。
+#   - VERSION_MANIFEST 换成项目唯一权威版本号所在清单（如 package.json / pyproject.toml /
+#     Cargo.toml / manifest.json），并在下方版本校验步骤按对应生态启用解析命令。
+#
+# 前置（默认零额外 Secret）：这套流程默认使用平台内置 `GITHUB_TOKEN`，只要下方 job 声明
+# `permissions: contents: write` 就能建 Release，普通项目零配置即可发版。仅当需要联动触发
+# 下游工作流、回写受保护分支或发布到制品库时，才在仓库 Settings -> Secrets and variables
+# -> Actions 配置最小权限 Fine-grained PAT（命名为 `RELEASE_TOKEN`）或各生态 OIDC 可信发布。
+
+name: release
+
+on:
+  push:
+    tags: ['v*']  # TODO(1)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的标签名（例如 v1.2.3；手动触发必填）'
+        required: true
+        default: ''
+
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # 建 Release 要写权限。默认直接使用内置 GITHUB_TOKEN；若配置了 secrets.RELEASE_TOKEN 则优先使用。
+    permissions:
+      contents: write
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      INPUT_TAG: ${{ inputs.tag }}
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      NOTES_DIR: 'docs/release-notes'  # TODO(2)
+      VERSION_MANIFEST: '<版本来源文件>'  # TODO(2)
+    steps:
+      - name: 校验触发标签非空（防 workflow_dispatch 落回默认分支名）
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -z "$INPUT_TAG" ]; then
+            echo "::error::手动触发（workflow_dispatch）必须填写 tag 参数（例如 v1.2.3），不可留空。"
+            exit 1
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::未能解析目标标签名。"
+            exit 1
+          fi
+
+      - name: 检出默认分支（读说明文件；工具永远用最新那一版）
+        uses: actions/checkout@v4  # 落盘前核对最新大版本
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: 发版门禁（标签与目标树内清单版本号必须同号）
+        run: |
+          # 使用 POSIX/macOS BSD 兼容 shell，不依赖 GNU 专有参数。
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::仓库中找不到标签 $TAG。请先推送标签后再运行。"
+            exit 1
+          fi
+          EXPECTED="${TAG#v}"
+          if [ ! -f "$VERSION_MANIFEST" ] && ! git cat-file -e "$TAG:$VERSION_MANIFEST" 2>/dev/null; then
+            echo "::error::标签 $TAG 中找不到清单文件 $VERSION_MANIFEST（请调整 TODO(2) VERSION_MANIFEST）。"
+            exit 1
+          fi
+          # 示例 1（Node / 插件 manifest.json）：
+          # ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" | sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+          # 示例 2（Python pyproject.toml / Rust Cargo.toml）：
+          # ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+          # 示例 3（SKILL.md metadata.version）：
+          # ACTUAL=$(git show "$TAG:SKILL.md" | sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' | head -1)
+          # 示例 4（Java pom.xml）：
+          # ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" | sed -n 's/^[[:space:]]*<version>\([^<]*\)<\/version>.*/\1/p' | head -1)
+          ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" \
+            | sed -n \
+              -e 's/^[[:space:]]*"\{0,1\}version"\{0,1\}[[:space:]]*[:=][[:space:]]*["'\'']\{0,1\}\([^"'\'',]*\)["'\'']\{0,1\}.*/\1/p' \
+              -e 's/^[[:space:]]*<version>\([^<]*\)<\/version>.*/\1/p' \
+            | head -1)
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::在标签 $TAG 的 $VERSION_MANIFEST 中读不到版本号。"
+            exit 1
+          fi
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::标签是 $TAG（期望版本 $EXPECTED），而标签树内 $VERSION_MANIFEST 版本是「$ACTUAL」。两者必须同号。"
+            exit 1
+          fi
+          echo "版本对齐：$TAG 与 $VERSION_MANIFEST 同号（$ACTUAL）"
+
+      - name: 说明文件必须已经在默认分支上，而且不是空壳
+        run: |
+          # 两种模式：默认一版一文件（docs/release-notes/<标签>.md）；
+          # 存量项目使用单文件 CHANGELOG.md 时，同时兼容 `## [v1.2.3]` 与 Keep a Changelog `## [1.2.3]`。
+          TAG_FILE="$NOTES_DIR/$TAG.md"
+          if [ -f "$TAG_FILE" ]; then
+            NOTES="$TAG_FILE"
+            echo "说明文件模式：$NOTES"
+          elif [ -f CHANGELOG.md ]; then
+            NOTES="$RUNNER_TEMP/$TAG.md"
+            BARE_TAG="${TAG#v}"
+            awk -v tag="$TAG" -v bare="$BARE_TAG" '
+              index($0, "## [" tag "]") == 1 || index($0, "## [" bare "]") == 1 { inside = 1; print "# " tag; next }
+              inside && /^## / { exit }
+              inside { print }
+            ' CHANGELOG.md > "$NOTES"
+            if [ ! -s "$NOTES" ]; then
+              echo "::error::CHANGELOG.md 里找不到「## [$TAG]」或「## [$BARE_TAG]」这一节。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+              exit 1
+            fi
+            echo "变更记录模式：从 CHANGELOG.md 截取了 $TAG 对应小节，转成本次发布说明"
+          else
+            echo "::error::找不到 $TAG_FILE，仓库根也没有 CHANGELOG.md。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+            exit 1
+          fi
+
+          if [ ! -s "$NOTES" ]; then
+            echo "::error::$NOTES 是空文件。"
+            exit 1
+          fi
+          if ! grep -qE '^# +[^ ]' "$NOTES"; then
+            echo "::error::$NOTES 缺一级标题：第一行应当是这一版的标签名。"
+            exit 1
+          fi
+          BODY_LINES=$(awk '!/^[[:space:]]*$/ && !/^#/ { n += 1 } END { print n + 0 }' "$NOTES")
+          if [ "$BODY_LINES" -eq 0 ]; then
+            echo "::error::$NOTES 除了标题之外没有正文。"
+            exit 1
+          fi
+          # **判据是「独立成行的注释标记」，不是全文含这几个字。**
+          if grep -qE '^[[:space:]]*<!--[[:space:]]*project-forge:[[:space:]]*fill\b' "$NOTES"; then
+            echo "::error::$NOTES 里还留着未填的占位标记——说明没写完。补完再发。"
+            exit 1
+          fi
+          echo "NOTES=$NOTES" >> "$GITHUB_ENV"
+
+      - name: 写发布说明（建或更新，写完回读比对）
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          run_gh() {
+            OUT=$("$@" 2>&1) || {
+              CODE=$?
+              printf '%s\n' "$OUT" >&2
+              if printf '%s' "$OUT" | grep -qiE '\b(401|403)\b|Bad credentials|Resource not accessible'; then
+                echo "::error::GitHub Release API 返回 401/403 权限或令牌失效错误：若配置了 secrets.RELEASE_TOKEN，请到仓库 Settings -> Secrets and variables -> Actions 刷新令牌并确认具备 Contents 读写权限；若使用内置 GITHUB_TOKEN，请检查工作流 permissions: contents: write 与仓库 Actions 权限设置。"
+              fi
+              return "$CODE"
+            }
+            printf '%s\n' "$OUT"
+          }
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            run_gh gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTES"
+          else
+            run_gh gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" --notes-file "$NOTES"
+          fi
+
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > readback.md
+          norm() {
+            awk '{ sub(/[ \t]+$/, "") } { line[NR] = $0 }
+                 END { n = NR; while (n > 0 && line[n] == "") n -= 1
+                       for (i = 1; i <= n; i += 1) print line[i] }' "$1"
+          }
+          norm "$NOTES" > want.txt
+          norm readback.md > got.txt
+          if ! diff -u want.txt got.txt; then
+            echo "::error::回读的正文与说明文件不一致——正文在传输中被改写了。请打开页面确认实际内容，不要假定它是对的。"
+            exit 1
+          fi
+          echo "回读一致：$TAG 的正文与 $NOTES 逐字相同。"
+
+      # TODO(3)：若分发通道要求在发布页挂产物附件（如独立构建包或插件三件套），在回读一致后追加上传与回读校验步骤，
+      # 并将对应产物加入 .gitignore（禁止与库内分发混用）：
+      # - name: 上传并回读校验发布附件
+      #   env:
+      #     GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+      #   run: |
+      #     gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+      #     gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name)\t\(.size)"'
+      #     gh release download "$TAG" -p "$ASSET" --repo "$GITHUB_REPOSITORY" -O "$RUNNER_TEMP/readback-$ASSET"
+      #     # 按格式做完整性校验与字节/SHA256 比对（示例：zip 用 unzip -tq / tar 用 tar -tzf），校验后删除临时文件：
+      #     # unzip -tq "$RUNNER_TEMP/readback-$ASSET" && cmp -s "$ASSET" "$RUNNER_TEMP/readback-$ASSET" && rm -f "$RUNNER_TEMP/readback-$ASSET"

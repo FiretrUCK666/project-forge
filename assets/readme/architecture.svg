@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">project-forge Worktree 双轨隔离与八技能闭环</title>
+  <desc id="svg-desc">main 主线不落脏改动：向左分入 .worktrees/impl 执行探索规划改码验证，向右经 .worktrees/review 独立门禁审查合入，外环由 verify-tools / iterate / govern 支撑。</desc>
+
+  <defs>
+    <!-- Organic warm cotton paper speckles -->
+    <pattern id="paper-speck" width="160" height="160" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="24" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="64" cy="12" r="0.8" fill="#B5482A" fill-opacity="0.16"/>
+      <circle cx="118" cy="38" r="1.3" fill="#6F6758" fill-opacity="0.18"/>
+      <circle cx="42" cy="76" r="0.9" fill="#1B1E38" fill-opacity="0.14"/>
+      <circle cx="95" cy="92" r="1.2" fill="#8C8270" fill-opacity="0.24"/>
+      <circle cx="144" cy="74" r="0.8" fill="#B5482A" fill-opacity="0.15"/>
+      <circle cx="24" cy="132" r="1.4" fill="#7D7464" fill-opacity="0.2"/>
+      <circle cx="78" cy="146" r="0.9" fill="#1B1E38" fill-opacity="0.12"/>
+      <circle cx="132" cy="128" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="152" cy="150" r="0.7" fill="#6F6758" fill-opacity="0.16"/>
+    </pattern>
+
+    <!-- 45-degree Risograph halftone screens -->
+    <pattern id="ht-indigo" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#1B1E38" fill-opacity="0.52"/>
+    </pattern>
+    <pattern id="ht-indigo-dense" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="2.0" fill="#1B1E38" fill-opacity="0.76"/>
+    </pattern>
+    <pattern id="ht-red" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#D93829" fill-opacity="0.58"/>
+    </pattern>
+    <pattern id="ht-cobalt" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.75" fill="#1E4DD8" fill-opacity="0.48"/>
+    </pattern>
+    <pattern id="ht-ochre" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#DDA027" fill-opacity="0.62"/>
+    </pattern>
+    <pattern id="ht-cream" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="1.75" fill="#F5F1E8" fill-opacity="0.65"/>
+    </pattern>
+    <pattern id="blueprint-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#F5F1E8" stroke-opacity="0.18" stroke-width="0.8"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="590" fill="#F5F1E8"/>
+  <rect width="1200" height="590" fill="url(#paper-speck)"/>
+
+  <g id="top-main-rail">
+    <text x="56" y="54" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="800" fill="#1B1E38">main</text>
+    <text x="1144" y="54" text-anchor="end" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="800" fill="#D93829">merged</text>
+    <rect x="0" y="78" width="1200" height="16" fill="#1B1E38"/>
+    <line x1="0" y1="86" x2="1200" y2="86" stroke="#F5F1E8" stroke-width="1.5" stroke-opacity="0.72"/>
+  </g>
+
+  <!-- Left Branch Turnout Curve into .worktrees/impl -->
+  <g id="left-turnout">
+    <path d="M 332 86 L 236 86 Q 114 86 114 218 L 114 410" fill="none" stroke="#1B1E38" stroke-width="16"/>
+    <path d="M 332 86 L 236 86 Q 114 86 114 218 L 114 410" fill="none" stroke="#F5F1E8" stroke-width="1.6" stroke-opacity="0.8"/>
+  </g>
+
+  <!-- Left Bay Artwork: Drafting Compass + Protractor Halftone + Cobalt Blueprint + 3D Bevel Cube -->
+  <g id="impl-bay">
+    <!-- Halftone Protractor Semicircle behind Compass -->
+    <path d="M 164 406 A 92 92 0 0 1 348 406 Z" fill="url(#ht-indigo-dense)"/>
+    <path d="M 192 406 A 64 64 0 0 1 302 356 L 302 406 Z" fill="#DDA027" fill-opacity="0.82"/>
+
+    <!-- Cobalt Architectural Blueprint Sheet -->
+    <rect x="304" y="148" width="222" height="178" fill="#1E4DD8"/>
+    <rect x="304" y="148" width="222" height="178" fill="url(#blueprint-grid)"/>
+    <!-- Dog-ear fold top right -->
+    <polygon points="484,148 526,148 526,190" fill="#F5F1E8"/>
+    <polygon points="484,148 526,190 484,190" fill="#1B1E38"/>
+    <!-- Crisp Cream Technical Elevation inside Blueprint -->
+    <rect x="322" y="168" width="152" height="136" fill="none" stroke="#F5F1E8" stroke-width="1.6"/>
+    <polygon points="348,258 408,200 456,228 396,284" fill="none" stroke="#F5F1E8" stroke-width="1.8"/>
+    <line x1="348" y1="258" x2="456" y2="228" stroke="#F5F1E8" stroke-width="1.3" stroke-dasharray="5 3"/>
+    <line x1="408" y1="200" x2="396" y2="284" stroke="#F5F1E8" stroke-width="1.3"/>
+    <rect x="412" y="280" width="96" height="24" fill="none" stroke="#F5F1E8" stroke-width="1.4"/>
+
+    <!-- Left Ochre/Cobalt Drafting Compass -->
+    <rect x="220" y="168" width="12" height="26" rx="2" fill="#1B1E38"/>
+    <circle cx="226" cy="208" r="19" fill="#1E4DD8"/>
+    <circle cx="226" cy="208" r="8" fill="#DDA027"/>
+    <polygon points="212,222 225,226 176,396 164,392" fill="#DDA027"/>
+    <polygon points="227,226 240,222 288,392 276,396" fill="#DDA027"/>
+    <polygon points="164,392 174,396 162,414" fill="#B57B14"/>
+    <polygon points="278,396 288,392 290,414" fill="#B57B14"/>
+    <rect x="174" y="274" width="104" height="4.5" fill="#1E4DD8"/>
+    <circle cx="174" cy="276" r="4" fill="#1E4DD8"/>
+    <circle cx="278" cy="276" r="4" fill="#1E4DD8"/>
+    <rect x="223" y="260" width="6" height="32" rx="2" fill="#1B1E38"/>
+
+    <!-- Sculptural 3D Risograph Isometric Bevel Blocks -->
+    <polygon points="348,408 386,368 438,368 416,408" fill="#DDA027"/>
+    <polygon points="416,408 438,368 438,408" fill="#B57B14"/>
+    <g transform="translate(422, 286)">
+      <rect x="0" y="0" width="118" height="122" fill="#1E4DD8"/>
+      <polygon points="0,0 118,0 84,34 34,34" fill="#DDA027"/>
+      <polygon points="0,0 34,34 34,88 0,122" fill="#B57B14"/>
+      <polygon points="118,0 118,122 84,88 84,34" fill="#153499"/>
+      <polygon points="34,88 84,88 118,122 0,122" fill="#1B1E38"/>
+      <rect x="34" y="34" width="50" height="54" fill="#F5F1E8"/>
+      <polygon points="34,34 62,34 62,62 34,88" fill="#DDA027" fill-opacity="0.35"/>
+    </g>
+  </g>
+
+  <!-- Right Gatehouse Artwork: Vermilion Twin Arches + Vernier Caliper + Interlocking Seal + Return Rail -->
+  <g id="review-bay">
+    <!-- Twin Monumental Vermilion Arches -->
+    <path d="M 672 412 L 672 146 L 1002 146 L 1002 412 L 944 412 L 944 268 A 42 42 0 0 0 860 268 L 860 412 L 814 412 L 814 268 A 42 42 0 0 0 730 268 L 730 412 Z" fill="#D93829"/>
+    <!-- Halftone arch pillar bases -->
+    <rect x="672" y="296" width="58" height="116" fill="url(#ht-indigo-dense)"/>
+    <rect x="944" y="296" width="58" height="116" fill="url(#ht-indigo-dense)"/>
+    <rect x="814" y="296" width="46" height="116" fill="url(#ht-indigo)"/>
+
+    <!-- Geometric Interlocking Labyrinth Seal inside Right Arch -->
+    <g id="labyrinth-seal" transform="translate(836, 294)">
+      <rect x="0" y="0" width="96" height="118" fill="#1B1E38"/>
+      <path d="M 14 14 L 82 14 L 82 104 L 14 104 Z" fill="none" stroke="#D93829" stroke-width="8"/>
+      <path d="M 30 30 L 66 30 L 66 88 L 30 88 Z" fill="none" stroke="#D93829" stroke-width="8"/>
+      <line x1="14" y1="59" x2="30" y2="59" stroke="#1B1E38" stroke-width="10"/>
+      <line x1="66" y1="59" x2="82" y2="59" stroke="#1B1E38" stroke-width="10"/>
+      <rect x="44" y="44" width="8" height="30" fill="#D93829"/>
+    </g>
+
+    <!-- S-Curve Return Track lifting from Caliper back into top main rail -->
+    <path d="M 992 252 C 1094 252, 1084 86, 1188 86 L 1200 86" fill="none" stroke="#1B1E38" stroke-width="16"/>
+    <path d="M 992 252 C 1094 252, 1084 86, 1188 86 L 1200 86" fill="none" stroke="#F5F1E8" stroke-width="1.6" stroke-opacity="0.8"/>
+
+    <!-- Precision Vernier Caliper across Twin Arches -->
+    <g id="caliper">
+      <!-- Fixed Left Jaw + Ruler Bar -->
+      <path d="M 782 178 L 796 178 L 796 228 L 1012 228 L 1012 276 L 814 276 L 814 342 L 782 316 Z" fill="#1B1E38"/>
+      <rect x="782" y="230" width="82" height="30" fill="#D93829"/>
+      <line x1="794" y1="262" x2="794" y2="273" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="800" y1="262" x2="800" y2="268" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="806" y1="262" x2="806" y2="273" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="812" y1="262" x2="812" y2="268" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="818" y1="262" x2="818" y2="273" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="824" y1="262" x2="824" y2="268" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="830" y1="262" x2="830" y2="273" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="836" y1="262" x2="836" y2="268" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="842" y1="262" x2="842" y2="273" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="848" y1="262" x2="848" y2="268" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="854" y1="262" x2="854" y2="273" stroke="#F5F1E8" stroke-width="1.5"/>
+      <!-- Moving Sliding Jaw + Twin Calibration Dials -->
+      <path d="M 852 174 L 870 174 L 878 214 L 990 214 Q 1004 214 1004 230 L 1004 276 Q 1004 294 984 294 L 880 294 L 866 346 L 844 334 L 844 214 Z" fill="#1B1E38"/>
+      <!-- Vermilion and Cobalt Dual Lenses -->
+      <circle cx="910" cy="252" r="22" fill="#D93829"/>
+      <circle cx="910" cy="252" r="10" fill="#1B1E38" fill-opacity="0.28"/>
+      <circle cx="964" cy="252" r="22" fill="#1E4DD8"/>
+      <circle cx="964" cy="252" r="10" fill="#1B1E38" fill-opacity="0.28"/>
+      <!-- Precision Jaw Highlight -->
+      <rect x="782" y="308" width="32" height="10" fill="#D93829"/>
+    </g>
+  </g>
+
+  <g id="bay-labels">
+    <text x="336" y="464" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="800" fill="#1E4DD8">.worktrees/impl</text>
+    <text x="336" y="494" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">explore · plan · edit · flow</text>
+
+    <text x="840" y="464" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="800" fill="#D93829">.worktrees/review</text>
+    <text x="840" y="494" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">dev-review · 独立审查合入</text>
+
+    <line x1="160" y1="522" x2="1040" y2="522" stroke="#1B1E38" stroke-opacity="0.16" stroke-width="1"/>
+    <text x="600" y="556" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#575B78">外环支撑技能：dev-verify-tools · dev-iterate · dev-govern</text>
+  </g>
+</svg>

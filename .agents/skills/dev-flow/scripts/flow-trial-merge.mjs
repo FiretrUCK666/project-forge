@@ -1,0 +1,291 @@
+/**
+ * flow-trial-merge.mjs —— 在隔离的临时 `--detach` worktree 执行试合、挂载依赖与复测，
+ * 成功后再推进干净 `mainRoot` 的基线分支，严禁直接在 `mainRoot` 运行 `git switch` / `git merge --no-ff`。
+ */
+
+import { EXIT } from '../../lib/exit-codes.mjs'
+import { existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { execShellCommand, gitRun, gitStatusPorcelainZ, readTextSafe, resolveDefaultBranch } from '../../lib/git.mjs'
+import { isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { sanitizeTaskId } from '../../lib/ledger.mjs'
+import { isProfileExplicitNone, resolveTierCommand } from '../../lib/profile.mjs'
+import { runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
+import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
+
+function pickTrialVerifyCommand({ policy, profile, evidence, ledger }) {
+  if (policy?.riskTier === 'low') return null
+  const tier = policy?.requiredGates?.[0] ?? null
+  // 层级到 Dev Profile 键的对应只在 profile.mjs 一处；这里不再自己拼一份。
+  let cmd = tier ? (resolveTierCommand(profile, tier) ?? null) : null
+
+  if (!cmd && evidence?.gates && evidence.mode) {
+    const g = evidence.gates[evidence.mode]
+    if (g && g.exitCode === 0 && g.cmd && g.cmd !== 'none (explicitly disabled)') cmd = g.cmd
+  }
+  if (!cmd) return null
+  if (cmd.includes('{target}')) {
+    if (ledger?.verifiedTarget) {
+      const safe = /\s/.test(ledger.verifiedTarget) ? `"${ledger.verifiedTarget}"` : ledger.verifiedTarget
+      cmd = cmd.replace(/\{target\}/g, safe)
+    } else if (tier === 'quick') {
+      cmd = cmd.replace(/\s*(?:--[A-Za-z0-9_-]+(?:=|\s+)|-[A-Za-z]\s+)?\{target\}\s*/g, ' ').replace(/\s+/g, ' ').trim()
+    } else {
+      return null
+    }
+  }
+  return cmd
+}
+
+async function cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel, { prune = false } = {}) {
+  if (!existsSync(tmpAbs)) return
+  const um = unmountSharedDeps(mainRoot, tmpAbs, { mode: 'deps' })
+  if (!um?.ok) {
+    throw new Error(`BLOCKED_TRIAL_MERGE_UNMOUNT: 临时试合 worktree (${tmpRel}) 解绑失败，拒绝执行 worktree remove`)
+  }
+  const trackedLeft = (um.skipped ?? []).filter((s) => s.reason === 'tracked-in-git').map((s) => s.path)
+  const internalGuard = unmountSharedDeps(mainRoot, tmpAbs, { mode: 'cleanup', allowOutbound: trackedLeft })
+  if (!internalGuard?.ok) {
+    throw new Error(`BLOCKED_TRIAL_MERGE_UNMOUNT: 临时试合 worktree (${tmpRel}) 存在未获准外链，拒绝强制删除`)
+  }
+  const rmRes = await gitRun(mainRoot, ['worktree', 'remove', '--force', tmpAbs])
+  if (!rmRes.ok && !prune) {
+    throw new Error(`移除临时试合 worktree (${tmpRel}) 失败：${rmRes.stderr}`)
+  }
+  if (prune) {
+    await gitRun(mainRoot, ['worktree', 'prune'])
+    if (existsSync(tmpAbs)) {
+      const residualGuard = unmountSharedDeps(mainRoot, tmpAbs, { mode: 'cleanup', allowOutbound: trackedLeft })
+      if (!residualGuard?.ok) {
+        throw new Error(`BLOCKED_TRIAL_MERGE_UNMOUNT: 残留目录 (${tmpRel}) 存在未解绑外链，拒绝清理`)
+      }
+      try { rmSync(tmpAbs, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  }
+}
+
+/**
+ * 执行临时 `--detach` worktree 试合复测并推进干净主干。
+ */
+export async function runTrialMerge({
+  mainRoot,
+  ledger,
+  baseBranch = null,
+  profile = null,
+  evidence = null,
+  policy = null,
+  changedFiles = [],
+  runVerify = true,
+} = {}) {
+  const targetBase = baseBranch ?? ledger?.baseBranch ?? await resolveDefaultBranch(mainRoot, { strict: true })
+  if (!targetBase) {
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_MISSING_DEFAULT_BRANCH',
+      exitCode: EXIT.FACT,
+      message: 'BLOCKED_MISSING_DEFAULT_BRANCH: 仓库缺少可用的默认基线分支（禁止擅自创建 main），请先确认基线分支。',
+    }
+  }
+  const mainSt = await gitStatusPorcelainZ(mainRoot)
+  if (!mainSt.ok || mainSt.entries.length > 0) {
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_DIRTY_MAIN',
+      exitCode: EXIT.FACT,
+      message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。',
+    }
+  }
+
+  const branch = ledger?.branch
+  if (!branch) return { ok: true, localBranchMissing: true, into: targetBase }
+  const fastGitDir = resolveGitDirFast(mainRoot)
+  const fastBranchSha = resolveRefShaFast(fastGitDir, `refs/heads/${branch}`)
+  const brRes = fastBranchSha
+    ? { ok: true, stdout: fastBranchSha }
+    : await gitRun(mainRoot, ['rev-parse', '--verify', `refs/heads/${branch}`])
+  if (!brRes.ok || !brRes.stdout.trim()) {
+    throw new Error(`找不到本地待合并分支：${branch}`)
+  }
+  const branchSha = brRes.stdout.trim()
+
+  const baseRefName = `refs/heads/${targetBase}`
+  const fastBaseSha = resolveRefShaFast(fastGitDir, baseRefName)
+  const fastHead = readHeadFast(fastGitDir)
+  const [baseRes, curMainRes] = await Promise.all([
+    fastBaseSha ? Promise.resolve({ ok: true, stdout: fastBaseSha }) : gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', baseRefName]),
+    fastHead?.branch ? Promise.resolve({ ok: true, stdout: fastHead.branch }) : gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD']),
+  ])
+  const curMainBranch = curMainRes.ok ? curMainRes.stdout.trim() : ''
+
+  if (!baseRes.ok) {
+    if (curMainBranch === branch && targetBase === branch) {
+      return { ok: true, localBranchCurrent: true, branch, into: targetBase, mergedSha: branchSha }
+    }
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_MISSING_DEFAULT_BRANCH',
+      exitCode: EXIT.FACT,
+      message: `BLOCKED_MISSING_DEFAULT_BRANCH: 基线分支 ${targetBase} 不存在（禁止擅自 update-ref 造旁支），请先检查默认分支。`,
+    }
+  }
+
+  const oldBaseSha = baseRes.stdout.trim()
+  if (branchSha === oldBaseSha) {
+    return { ok: true, alreadyMerged: true, branch, into: targetBase, mergedSha: oldBaseSha }
+  }
+  const fastAnc = isAncestorLinearFast(fastGitDir, branchSha, oldBaseSha)
+  const isAncOk = fastAnc !== null ? fastAnc : (await gitRun(mainRoot, ['merge-base', '--is-ancestor', branchSha, oldBaseSha])).ok
+  if (isAncOk) {
+    return { ok: true, alreadyMerged: true, branch, into: targetBase, mergedSha: oldBaseSha }
+  }
+
+  const safeId = sanitizeTaskId(ledger.taskId)
+  const tmpRel = `.worktrees/.tmp-merge-${safeId}`
+  const tmpAbs = join(mainRoot, tmpRel)
+  if (existsSync(tmpAbs)) {
+    await cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel, { prune: true })
+  }
+
+  const addRes = await gitRun(mainRoot, ['worktree', 'add', '-q', '--detach', tmpAbs, oldBaseSha])
+  if (!addRes.ok) throw new Error(`创建临时试合 worktree 失败：${addRes.stderr}`)
+
+  const UNMERGED_XY_RE = /^(?:UU|AA|DD|AU|UA|DU|UD|U.|.U)$/
+  const extractBoundedConflictHunks = (rootAbs, entries, maxPerFile = 4, maxTotal = 8) => {
+    const conflictEntries = (entries ?? []).filter((e) => e?.file && UNMERGED_XY_RE.test(String(e.xy ?? '')))
+    const conflictFiles = conflictEntries.map((e) => e.file)
+    const hunks = []
+    let truncated = false
+    for (const entry of conflictEntries) {
+      if (hunks.length >= maxTotal) { truncated = true; break }
+      const raw = readTextSafe(join(rootAbs, entry.file))
+      if (!raw) continue
+      const lines = raw.split(/\r?\n/)
+      let perFileCount = 0
+      let i = 0
+      while (i < lines.length) {
+        if (/^<{7}(?:\s|$)/.test(lines[i])) {
+          const startLine = i + 1
+          let midIdx = -1
+          let endIdx = -1
+          for (let j = i + 1; j < lines.length; j += 1) {
+            if (midIdx < 0 && /^={7}(?:\s|$)/.test(lines[j])) midIdx = j
+            else if (/^>{7}(?:\s|$)/.test(lines[j])) { endIdx = j; break }
+          }
+          if (endIdx >= 0) {
+            if (perFileCount >= maxPerFile || hunks.length >= maxTotal) {
+              truncated = true
+              break
+            }
+            const oursLines = midIdx > i ? lines.slice(i + 1, midIdx) : []
+            const theirsLines = midIdx >= 0 ? lines.slice(midIdx + 1, endIdx) : lines.slice(i + 1, endIdx)
+            hunks.push({
+              file: entry.file,
+              xy: entry.xy,
+              startLine,
+              endLine: endIdx + 1,
+              oursSnippet: oursLines.slice(0, 6).join('\n'),
+              theirsSnippet: theirsLines.slice(0, 6).join('\n'),
+            })
+            perFileCount += 1
+            i = endIdx + 1
+            continue
+          }
+        }
+        i += 1
+      }
+    }
+    return { conflictFiles, conflictHunks: hunks, truncated }
+  }
+
+  let mergedSha = null
+  try {
+    const mRes = await gitRun(tmpAbs, ['merge', '--no-ff', '-q', '--no-edit', branchSha, '-m', `Merge branch '${branch}' (${ledger.taskId})`])
+    if (!mRes.ok) {
+      const stConf = await gitStatusPorcelainZ(tmpAbs)
+      const extracted = extractBoundedConflictHunks(tmpAbs, stConf.entries, 4, 8)
+      await gitRun(tmpAbs, ['merge', '--abort'])
+      const errDetail = (mRes.stderr || mRes.stdout).trim()
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_TRIAL_MERGE_CONFLICT',
+        exitCode: EXIT.FACT,
+        conflictFiles: extracted.conflictFiles,
+        conflictHunks: extracted.conflictHunks,
+        conflictSummary: {
+          totalFiles: extracted.conflictFiles.length,
+          totalHunks: extracted.conflictHunks.length,
+          truncated: extracted.truncated,
+        },
+        recoveryPacket: {
+          code: 'BLOCKED_TRIAL_MERGE_CONFLICT',
+          branch,
+          baseBranch: targetBase,
+          conflictFiles: extracted.conflictFiles,
+          conflictHunks: extracted.conflictHunks,
+          commands: [
+            `node ".agents/skills/dev-flow/scripts/flow.mjs" sync --task ${ledger.taskId}`,
+            'GIT_EDITOR=true git rebase --continue',
+          ],
+        },
+        message: `BLOCKED_TRIAL_MERGE_CONFLICT: 临时试合 ${branch} 到 ${targetBase} 存在冲突：${errDetail}`,
+      }
+    }
+    const fastMergedHead = readHeadFast(resolveGitDirFast(tmpAbs))?.oid ?? null
+    const revRes = fastMergedHead ? { ok: true, stdout: fastMergedHead } : await gitRun(tmpAbs, ['rev-parse', 'HEAD'])
+    mergedSha = revRes.stdout.trim()
+
+    if (runVerify) {
+      mountSharedDeps(mainRoot, tmpAbs)
+      if (policy?.riskTier === 'low' && policy?.staticDocCheckRequired) {
+        const docCheck = runLowRiskDocStaticCheck(tmpAbs, changedFiles)
+        if (!docCheck.ok) {
+          return {
+            ok: false,
+            blocked: true,
+            code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
+            exitCode: EXIT.FACT,
+            message: `BLOCKED_STATIC_DOC_CHECK_FAILED: 试合后文档静态校验失败：${docCheck.errors.map((e) => e.message).slice(0, 3).join('；')}`,
+          }
+        }
+      }
+      const trialCmd = pickTrialVerifyCommand({ policy, profile, evidence, ledger })
+      if (trialCmd) {
+        const execRes = await execShellCommand(trialCmd, tmpAbs, { timeout: 300000 })
+        if (!execRes.ok) {
+          return {
+            ok: false,
+            blocked: true,
+            code: 'BLOCKED_TRIAL_MERGE_VERIFY_FAILED',
+            exitCode: EXIT.FACT,
+            message: `BLOCKED_TRIAL_MERGE_VERIFY_FAILED: 临时试合后复测失败（cmd="${trialCmd}", exit=${execRes.code}）：${(execRes.stderr || execRes.stdout).trim().slice(0, 300)}`,
+          }
+        }
+      }
+    }
+  } finally {
+    await cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel)
+  }
+
+  if (curMainBranch === targetBase) {
+    const ffRes = await gitRun(mainRoot, ['merge', '--ff-only', '-q', mergedSha])
+    if (!ffRes.ok) throw new Error(`试合通过但推进主干 ${targetBase} (merge --ff-only) 失败：${ffRes.stderr}`)
+  } else {
+    const casRes = await gitRun(mainRoot, ['update-ref', baseRefName, mergedSha, oldBaseSha])
+    if (!casRes.ok) throw new Error(`试合通过但 CAS 更新 ${baseRefName} 失败：${casRes.stderr}`)
+  }
+
+  return {
+    ok: true,
+    localMerge: true,
+    trialMerged: true,
+    branch,
+    into: targetBase,
+    oldBaseSha,
+    mergedSha,
+  }
+}

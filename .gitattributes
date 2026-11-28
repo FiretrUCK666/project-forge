@@ -1,0 +1,56 @@
+# 文本属性：先声明行尾，再提交。
+#
+# 行尾不一致会让「同一份源码在不同机器上产出不同字节」，尤其是内嵌了源码原文的产物。
+# 这份声明必须在首次提交之前就位，晚了就得重新规范化一次工作区。
+
+* text=auto eol=lf
+
+# 必须在 Windows 上保留 CRLF 的脚本类型
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 自动生成的可视化架构图：GitHub Diff 默认折叠并标识为生成产物
+docs/architecture-map.html linguist-generated=true
+
+# 二进制：不做行尾转换，也不参与文本差异与合并
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.7z binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.mp3 binary
+*.mp4 binary
+*.mov binary
+*.so binary
+*.dll binary
+*.dylib binary
+*.exe binary
+*.wasm binary
+
+# 用户包内容：打标签时用 git archive 产出用户包，只收用户需要的文件。
+#
+# 下面这些只服务本仓库（协作设施、项目契约、自用脚本），拿到包的人不需要它们。
+# 结构规则的另一半在 scripts/lib/protocol.mjs 的 REPO_ONLY_DIRS / REPO_ONLY_FILES 里，
+# 两处由 preflight 核对一致。**新增自用文件放进 scripts/dev/、docs/ 或 .agents/**——
+# 那几处整目录排除，不必逐个登记；`kit/` 属于用户安装包，绝不排进这里。
+/AGENTS.md        export-ignore
+/CONTRIBUTING.md  export-ignore
+/RELEASING.md     export-ignore
+/.github/         export-ignore
+/.gitattributes   export-ignore
+/.gitignore       export-ignore
+/scripts/dev/     export-ignore
+/docs/            export-ignore
+/.agents/         export-ignore

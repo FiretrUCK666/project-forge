@@ -503,7 +503,7 @@ cases.push(['内置研发技能全场景联通：dev-govern 联动 explore/plan/
   })
   gitInit(govDir, { branch: 'main', name: 't', email: 't@t.t' })
   try {
-    const govRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['plan', '--write-todo', '--json'], { cwd: govDir })
+    const govRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['plan', '--write-todo', '--allow-main', '--json'], { cwd: govDir })
     if (govRes.status !== 0) return `govern-audit plan --write-todo 失败：${govRes.stderr}`
     const gj = JSON.parse(govRes.stdout)
     const todoRel = gj.plan?.todoRel

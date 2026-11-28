@@ -65,7 +65,7 @@ node ".agents/skills/dev-plan/scripts/doc-plan.mjs" brief [--topic "<主题>"] [
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--plan-mode interactive | autonomous]
 
 # 2. 按统一模板生成文档（commits > 0 默认分支自动入隔离规划 worktree；--in-place 原地落盘）
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|tdd|pair|all> --slug "<slug>" --title "<标题>" [--agent <id>] [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune]
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|tdd|pair|all> --slug "<slug>" --title "<标题>" --agent <id> [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune]
 
 # 3. 多轮互动澄清落盘与规划内审自净化（实质性校验零字数门槛、跨轮防退化比对、Mermaid 16/12、Frontmatter 互链）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" clarify --file "docs/specs/<file>" --question "<问题>" --decision "<结论>" [--by user] [--criterion "<追加 C 项>"]

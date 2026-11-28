@@ -627,7 +627,7 @@ async function main(argv) {
         '用法：node scripts/equip.mjs [目标目录] [选项]',
         '',
         `  （默认）                   统一完整装配全部已落盘研发技能（当前 ${skillCount} 套）并写入 .pf-manifest.json`,
-        '  --check                    只读校验，不一致退出码 1（已豁免定制文件退出 0）',
+        '  --check                    只读校验，不一致退出码 3（已豁免定制文件退出 0）',
         '  --adopt-custom [path]      将手工修改或二次编辑的托管技能登记为定制豁免',
         '  --restore [pathOrSkill]    显式恢复此前删除记入墓碑的技能或文件',
         '  --dry-run                  仅打印将执行的操作，不写文件',

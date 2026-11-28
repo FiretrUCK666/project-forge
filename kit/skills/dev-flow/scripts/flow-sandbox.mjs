@@ -475,7 +475,7 @@ export async function handlePromote(opts, roots) {
     ledger.linkedIssues = preservedIssues
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     const specSlug = ledger.slug ?? taskId
-    const nextCmd = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug ${specSlug} --title "${specSlug}"`
+    const nextCmd = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug ${specSlug} --title "${specSlug}" --agent <id>`
     const nextSteps = [{ skill: 'dev-plan', text: nextCmd }]
     const payload = {
       ok: true,

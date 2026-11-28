@@ -13,14 +13,15 @@
  *   sync | create | run | audit | clean | render
  */
 
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
+import { renderArchitectureMapFromRepo } from '../../lib/architecture-map.mjs'
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import {
   computeFeatureFingerprint, ensureTaskScratchDir, evaluateToolStaleness,
-  FEATURE_MAP_REL, findAffectedFeatures, isSafeTaskScratchPath,
+  FEATURE_MAP_REL, findAffectedFeatures, isSafeTaskScratchPath, prefillFeatureMapFromRepoMap,
   readFeatureMap, resolveTaskScratchDir, resolveVerifySlotKey, sanitizeFeatureEntry, sanitizeVerificationTool,
   slugifyFeatureId, VALID_RISK_LEVELS, VALID_TOOL_KINDS, writeFeatureMap, writeVerifyCacheEntry,
 } from '../../lib/feature-map.mjs'
@@ -32,6 +33,7 @@ import { sanitizeTaskId } from '../../lib/ledger.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { runEditGate } from '../../dev-edit/scripts/edit-gate.mjs'
+import { generateRepoMap } from '../../dev-explore/scripts/repo-map.mjs'
 import { guardExistingFeatureMapForWrite, handleAudit, handleClean } from './verify-tools-audit.mjs'
 import { handleRender, handleSync, normRelFile, resolveCurrentHead, splitCsv } from './verify-tools-render.mjs'
 
@@ -74,12 +76,13 @@ function printHelp() {
     '  --files <a,b>                Changed files filter for run',
     '  --base <ref>                 Base git ref for changed files diff',
     '  --live-e2e-cmd <cmd>         Live override command when medium-risk tool is stale',
-    '  --dry-run                    Preview without writing feature-map.json',
+    '  --dry-run                    Preview sync without writing feature-map.json (sync writes by default)',
     '  --draft-only                 Create scratch probe without promoting',
     '  --promote                    Promote scratch probe immediately',
-    '  --apply                      Write sync updates to docs/feature-map.json',
+    '  --apply                      Write updates explicitly (sync writes by default; use --dry-run to preview)',
     '  --skip-run                   Skip execution during create --promote',
-    '  --changed                    Detect changed files automatically on run',
+    '  --changed                    Detect changed files automatically on run (default when no selector is given)',
+    '  --all                        Run all registered tools in feature-map',
     '  --stale                      Filter and rerun stale/unbaselined tools, refreshing baselines',
     '  --refresh-baseline           Force refresh verification cache baseline',
     '  --allow-medium-fallback      Allow stale medium-risk fallback (requires --live-e2e-cmd)',
@@ -385,6 +388,12 @@ export async function handleRun(opts, roots) {
   const staleOnly = Boolean(opts.stale)
   const allowMediumFallback = Boolean(opts['allow-medium-fallback'])
   const liveE2eCmd = opts['live-e2e-cmd'] ? String(opts['live-e2e-cmd']).trim() : ''
+  if (allowMediumFallback && !liveE2eCmd) {
+    const msg = 'Error: --allow-medium-fallback 必须同时传入非空 --live-e2e-cmd "<实时端到端验证命令>"。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'MISSING_LIVE_E2E_CMD', error: msg }, null, 2)}\n`)
+    process.stderr.write(`${msg}\n`)
+    return { exitCode: EXIT.USAGE, ok: false, code: 'MISSING_LIVE_E2E_CMD', error: msg }
+  }
 
   let map = readFeatureMap(workRoot)
   let mapSource = FEATURE_MAP_REL
@@ -394,10 +403,25 @@ export async function handleRun(opts, roots) {
     mapSource = 'prefill-in-memory'
   }
 
+  const runAll = Boolean(opts.all)
   const explicitFiles = splitCsv(opts.files).map((p) => normRelFile(workRoot, p))
+  const extraToolPos = (Array.isArray(opts._) ? opts._ : [])
+    .map((s) => String(s).trim())
+    .filter((s) => {
+      if (!s) return false
+      const abs = resolve(s)
+      if (abs === resolve(workRoot) || abs === resolve(roots.mainRoot)) return false
+      try { if (existsSync(abs) && statSync(abs).isDirectory()) return false } catch { /* ignore */ }
+      return true
+    })
+  const explicitToolIds = [...splitCsv(opts.tool), ...extraToolPos]
+  const hasExplicitSelector = Boolean(
+    explicitToolIds.length > 0 || opts.feature || explicitFiles.length > 0 || opts.changed || staleOnly || runAll,
+  )
+  const useChanged = Boolean(opts.changed || !hasExplicitSelector)
   const targetFiles = explicitFiles.length > 0
     ? explicitFiles
-    : (opts.changed ? await collectChangedFilesForRun(workRoot, baseRef) : [])
+    : (useChanged ? await collectChangedFilesForRun(workRoot, baseRef) : [])
 
   const matched = []
   const seenTool = new Set()
@@ -407,8 +431,8 @@ export async function handleRun(opts, roots) {
     matched.push({ feature, tool })
   }
 
-  if (opts.tool) {
-    const wanted = new Set(splitCsv(opts.tool))
+  if (explicitToolIds.length > 0) {
+    const wanted = new Set(explicitToolIds)
     for (const f of map.features) {
       for (const t of f.verificationTools ?? []) if (wanted.has(t.id)) addPair(f, t)
     }
@@ -417,13 +441,13 @@ export async function handleRun(opts, roots) {
     for (const f of map.features) {
       if (wanted.has(f.id)) for (const t of f.verificationTools ?? []) addPair(f, t)
     }
+  } else if (runAll || staleOnly) {
+    for (const f of map.features) {
+      for (const t of f.verificationTools ?? []) addPair(f, t)
+    }
   } else if (targetFiles.length > 0) {
     const aff = findAffectedFeatures(map, targetFiles)
     for (const f of aff.matchedFeatures) {
-      for (const t of f.verificationTools ?? []) addPair(f, t)
-    }
-  } else if (staleOnly) {
-    for (const f of map.features) {
       for (const t of f.verificationTools ?? []) addPair(f, t)
     }
   }
@@ -661,7 +685,7 @@ async function main(argv = process.argv.slice(2)) {
       positionalDir: 'auto',
       booleanFlags: [
         'dry-run', 'draft-only', 'promote', 'apply', 'skip-run', 'check',
-        'changed', 'stale', 'refresh-baseline', 'allow-medium-fallback', 'confirm', 'prune-zombies', 'prune-scratch',
+        'changed', 'all', 'stale', 'refresh-baseline', 'allow-medium-fallback', 'confirm', 'prune-zombies', 'prune-scratch',
       ],
       valueFlags: [
         'feature', 'name', 'tool', 'tool-id', 'kind', 'command', 'script', 'out', 'telemetry-spans',

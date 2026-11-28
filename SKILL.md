@@ -56,7 +56,7 @@ metadata:
 | **1. 需求侦察与判身份** | `dev-explore` 只读跑 `doc-locate.mjs` / `repo-map.mjs`（弹性探索：目标收敛且不污染主上下文时直跑，广度高或不确定性强时派并行只读 `explore` 并用简洁结构化回执收口）；`flow.mjs inspect` / `intake` 判五态与全局业务分诊 | `references/collaboration.md`「一、先判角色」 |
 | **2–3. 澄清、设计与 Critique** | `dev-plan` 联查多链接与自有模板，**多轮互动澄清直至无待拍板问题**（Case 3/4 自动刷新仓外 Living Visual Brief，支持宿主中立 `--prototype` 挂载与确认快照；允许外部调研但仓内路径/符号/命令必经本地验真），Case 3 Todo 自检直通，Case 4 经独立 Critique 与 `approve` | `references/collaboration.md`「二、五档开工分流」 |
 | **4. 隔离实现、编辑门禁与提审** | 主会话无论有无远端一律**只调度与验收、不亲自改业务源码、不代提 PR**；`dev-flow`（`flow.mjs next`、`parallelDispatch`）派隔离 `impl` 位（`Case 1` 可原地微调，非 `Case 1` 写改一律建 Worktree），改前/后过 `dev-edit`（`edit-gate.mjs`），实施者完成 `claim`/`finalize`/`verify`/`submit`（`single-session + --human-approved` 仅限无子代理能力单会话宿主且经人授权） | `references/collaboration.md`「三、三档隔离」「四、认领、PR 前文档同步」 |
-| **5–7. 评审、工具与迭代** | `dev-review` 先过 `intake` 与 `--untrusted-scan`，先跑 `dev-verify-tools` 与 `check-empirical`/`check-fault` 再解锁 `--include-diff`（Round 2+ 全历史换人与六锁收敛）；正向扩展盲区测试与并发压测走 `dev-iterate`（默认 `--escalate` 建单转正流） | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」「七、审查循环：怎么才会停」 |
+| **5–7. 评审、工具与迭代** | `dev-review` 先过 `intake` 与 `--untrusted-scan`，先跑 `dev-verify-tools` 与 `check-empirical`/`check-fault` 再解锁 `--include-diff`（Round 2+ 全历史换人与六锁收敛）；正向扩展盲区测试与并发压测走 `dev-iterate`（`run` 默认不自动建单、`cycle` 默认 `--escalate` 建单转正流） | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」「七、审查循环：怎么才会停」 |
 | **8. 合入、清理与复盘** | 独立审查 PASS 后由**独立审查者或调度者**执行 `flow.mjs merge`（严禁实施者自合，弱化门禁必问人），问人确认后清理；`dev-govern` 经 `audit`/`reconcile`/`retro` 读取 `signals.jsonl` 下沉门禁 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」 |
 
 ## 能力矩阵与默认范围

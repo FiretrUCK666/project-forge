@@ -34,7 +34,7 @@ import { handleFinalize } from './flow-lifecycle-finalize.mjs'
 import { guardSandboxPreSubmitOrFinalize, resolveSandboxVerifyMode } from './flow-sandbox.mjs'
 import {
   assertSubmitOwnership, checkCase2StructuralDriftOnVerify, checkLifecyclePreconditions,
-  checkTaskSlotBoundaryOrEmit, runLifecycleGovernHook, runPreVerifyEditGateHook, runVerifyPrecheck,
+  checkTaskSlotBoundaryOrEmit, runFlowVerifyPrecheck, runLifecycleGovernHook, runPreVerifyEditGateHook,
 } from './flow-lifecycle-hooks.mjs'
 import {
   applySubmitPostActions,
@@ -190,6 +190,16 @@ export async function handleVerify(opts, roots) {
 
   if (!cmd && isExplicitNone) {
     const { currentHead, dirty, stStdout, changedFiles, policy, diffText } = await computeVerifyPolicy()
+    const preRunPrecheck = runFlowVerifyPrecheck({
+      implRoot, roots, taskId, headSha: currentHead, dirty, policy, mode, isInner: sbVerify.inner,
+      artifacts: artifactsInput, visualCheckedRaw: visualCheckedRawInput,
+      visualBlockedReason: visualBlockedReasonInput, observationSummary: e2eEvidenceInput,
+    })
+    if (preRunPrecheck?.blocked) {
+      const preMsg = `${preRunPrecheck.code ?? 'BLOCKED_VERIFY_PRECHECK'}: ${preRunPrecheck.reason ?? preRunPrecheck.message ?? '实证前置校验未通过'}`
+      process.stderr.write(`${preMsg}\n`)
+      return handleVerifyPrecheckBlock({ opts, roots, taskId, mode, ledger, evRec: { precheck: preRunPrecheck }, finalExit: preRunPrecheck.exitCode ?? EXIT.FACT })
+    }
     const docStaticRes = policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles, { diffText }) : null
     const docOk = !docStaticRes || docStaticRes.ok
     const evRec = recordVerifyEvidenceForFlow({
@@ -200,11 +210,20 @@ export async function handleVerify(opts, roots) {
       artifacts: artifactsInput,
       visualCheckedRaw: visualCheckedRawInput,
       visualBlockedReason: visualBlockedReasonInput,
+      precheckResult: preRunPrecheck,
     })
     if (evRec.precheck?.blocked) {
       return handleVerifyPrecheckBlock({ opts, roots, taskId, mode, ledger, evRec, finalExit: evRec.overallExit || EXIT.FACT })
     }
     const allOk = docOk && evRec.overallExit === 0
+    if (allOk && roots.gitDir && artifactsInput.length > 0) {
+      await stageAndSyncTaskArtifacts({
+        repoRoot: implRoot, gitCommonDir: roots.gitDir, mainRoot: roots.mainRoot, taskId,
+        evidencePath: verificationEvidencePath(roots.gitDir, taskId),
+        records: readVerificationEvidence(roots.gitDir, taskId)?.artifacts ?? [],
+        artifacts: artifactsInput, backend: null, observationSummary: e2eEvidenceInput,
+      }).catch(() => null)
+    }
     ledger.verifiedHead = allOk ? currentHead : null
     ledger.verifiedCmd = 'none (explicitly disabled)'
     ledger.verifiedMode = mode
@@ -320,10 +339,11 @@ export async function handleVerify(opts, roots) {
     ? { ...wtEnv, PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false' }
     : wtEnv)
   const prePolicySnap = preRunSnap ?? await computeVerifyPolicy()
-  const preRunPrecheck = runVerifyPrecheck({
-    repoRoot: implRoot, gitCommonDir: roots.gitDir, headSha: prePolicySnap.currentHead, policy: prePolicySnap.policy,
-    taskId, dirty: prePolicySnap.dirty, mode, exitCode: 0,
-    artifacts: artifactsInput, visualCheckedRaw: visualCheckedRawInput, visualBlockedReason: visualBlockedReasonInput, observationSummary: e2eEvidenceInput,
+  const preRunPrecheck = runFlowVerifyPrecheck({
+    implRoot, roots, taskId, headSha: prePolicySnap.currentHead, dirty: prePolicySnap.dirty,
+    policy: prePolicySnap.policy, mode, isInner: sbVerify.inner,
+    artifacts: artifactsInput, visualCheckedRaw: visualCheckedRawInput,
+    visualBlockedReason: visualBlockedReasonInput, observationSummary: e2eEvidenceInput,
   })
   if (preRunPrecheck?.blocked) {
     const preMsg = `${preRunPrecheck.code ?? 'BLOCKED_VERIFY_PRECHECK'}: ${preRunPrecheck.reason ?? preRunPrecheck.message ?? '实证前置校验未通过'}`

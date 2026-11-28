@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
+import { evaluateStoredVisualEvidence } from '../../lib/empirical-artifacts.mjs'
 import { ARCHITECTURE_MAP_REL, isArchitectureMapOptedOut, verifyArchitectureMapSync } from '../../lib/architecture-map.mjs'
 import { canReuseArchitectureMapReceipt } from '../../lib/gate-receipt.mjs'
 import { execSafe, execShellCommand, gitDiffNameStatusZ, gitStatusPorcelainZ, posixPath, readTextSafe } from '../../lib/git.mjs'
@@ -119,6 +120,8 @@ export function assertSubmitOwnership(ledger, opts = {}, { mainRoot = null, docR
         message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 提交者 (${rawExplicitAgent}) 与已认领实施者 (${ledger.claimedBy}) 不一致；请由原实施者提交或带 --takeover --reason "..." 接管。`,
       }
     }
+    const provErr = checkProvenanceForSubmit(rawExplicitAgent)
+    if (provErr) return provErr
     return { ok: true }
   }
   if (ledger.implementerId && String(ledger.implementerId).trim() && ledger.implementerId !== 'local-agent') {
@@ -580,4 +583,31 @@ export function runVerifyPrecheck(payload) {
     process.stderr.write(`前置换算异常，按 Fail-Soft 放行：${err instanceof Error ? err.message : String(err)}\n`)
     return null
   }
+}
+
+/** `flow verify` 预检包装：放行 quick / --inner 缺附件迭代，并在同 HEAD 已有合法存量视觉实证时复用不死锁。 */
+export function runFlowVerifyPrecheck({
+  implRoot, roots, taskId, headSha, dirty, policy, mode, isInner,
+  artifacts, visualCheckedRaw, visualBlockedReason, observationSummary,
+}) {
+  const precheck = runVerifyPrecheck({
+    repoRoot: implRoot, gitCommonDir: roots.gitDir, headSha, policy,
+    taskId, dirty, mode, exitCode: 0,
+    artifacts, visualCheckedRaw, visualBlockedReason, observationSummary,
+  })
+  if (!precheck?.blocked || precheck.code !== 'BLOCKED_UI_ARTIFACT_REQUIRED') return precheck
+  if (mode === 'quick' || isInner) {
+    return { ...precheck, ok: true, blocked: false, skippedReason: isInner ? 'inner-sandbox' : 'quick-mode', visual: null }
+  }
+  const existingEv = workflowPolicy.readVerificationEvidence(roots.gitDir, taskId)
+  const sameHeadClean = Boolean(
+    existingEv && !dirty && !existingEv.dirty
+    && (!headSha || existingEv.headSha === headSha)
+    && Boolean(existingEv.inner) === Boolean(isInner),
+  )
+  const storedVis = sameHeadClean ? evaluateStoredVisualEvidence({ evidence: existingEv, policy, headSha }) : null
+  if (storedVis && storedVis.ok && !storedVis.unclaimed) {
+    return { ...precheck, ok: true, blocked: false, reusedStoredVisual: true, visual: existingEv.visual ?? null }
+  }
+  return precheck
 }

@@ -112,7 +112,7 @@ export function registerDocDepthCases(cases) {
       })
       try {
         gitInit(govDir, { branch: 'main', name: 't', email: 't@t.t' })
-        const govRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['plan', '--write-todo', '--json'], { cwd: govDir })
+        const govRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['plan', '--write-todo', '--allow-main', '--json'], { cwd: govDir })
         if (govRes.status !== 0) return `govern --write-todo 失败：${govRes.stderr}`
         const gTodoRel = JSON.parse(govRes.stdout).plan?.todoRel
         const gTodoText = readFileSync(join(govDir, gTodoRel), 'utf8')

@@ -69,7 +69,8 @@ function printHelp() {
     '  --execute                    Guided closed-loop execution plan + verification checklist',
     '  --loop                       Include/track multi-round governance state in <mainRoot>/.worktrees/.state/',
     '  --apply-issues               Create issues via TaskBackend (GitHub: gh / local-only & generic-git: local-issues)',
-    '  --write-todo                 Write standard Frontmatter `-todo.md` to docs/todo/ (with `plan` / `--plan-only`)',
+    '  --write-todo                 Write standard Frontmatter `-todo.md` to docs/todo/ (with `plan` / `--plan-only`; blocked on default branch unless `--allow-main`)',
+    '  --allow-main                 Explicitly allow `plan --write-todo` on the default branch when commits > 0',
     '  --commits <N>                Commit window size for `sample` (default: 30)',
     '  --from <tag|rev>             Base tag/commit for `release-prep`',
     '  --to <rev>                   Target revision for `release-prep` (default: HEAD)',
@@ -157,6 +158,7 @@ function normalizeParsedArgs(cli) {
     applyIssues: Boolean(opts['apply-issues']),
     applyPatches: Boolean(opts['apply-patches']),
     writeTodo: Boolean(opts['write-todo']),
+    allowMain: Boolean(opts['allow-main']),
     strict: Boolean(opts.strict),
     quiet: Boolean(opts.quiet),
     auto: Boolean(opts.auto),
@@ -191,7 +193,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       positionalDir: 'auto',
       booleanFlags: [
         'audit-only', 'plan-only', 'execute', 'reconcile', 'cluster',
-        'signals-only', 'loop', 'issues', 'apply-issues', 'apply-patches', 'write-todo',
+        'signals-only', 'loop', 'issues', 'apply-issues', 'apply-patches', 'write-todo', 'allow-main',
         'strict', 'quiet', 'auto', 'allow-tier3-fallback', 'skip-govern', 'escalate',
         'save-baseline', 'changed', 'all',
       ],
@@ -512,6 +514,19 @@ async function finishAudit({
   const needPlan = opts.planOnly || opts.execute || opts.writeTodo
   const plan = needPlan ? await buildPlan(findings, workTreeRoot, devProfile, isGit) : undefined
   if (opts.writeTodo && plan) {
+    if (isGit && !roots.isWorktree && !opts.allowMain && headSha) {
+      const curBranch = readHeadFast(roots.workTreeGitDir, gitDir)?.branch ?? null
+      const effDef = defaultBranch || await resolveDefaultBranch(workTreeRoot)
+      const onDefault = Boolean(curBranch && (effDef ? curBranch === effDef : ['main', 'master'].includes(curBranch)))
+      if (onDefault) {
+        const msg = `BLOCKED_MAIN_SLOT_VIOLATION: 拒绝在有提交的默认分支（${curBranch}）非隔离主工作区执行 plan --write-todo；请先切换到特性分支或运行 flow.mjs start 进入 .worktrees/ 隔离工作位（确需原地生成可显式传 --allow-main）。`
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_MAIN_SLOT_VIOLATION', exitCode: 3, branch: curBranch, error: msg }, null, 2)}\n`)
+        }
+        process.stderr.write(`${msg}\n`)
+        return 3
+      }
+    }
     mkdirSync(dirname(join(workTreeRoot, plan.todoRel)), { recursive: true })
     writeAtomic(join(workTreeRoot, plan.todoRel), plan.todoDraft)
   }

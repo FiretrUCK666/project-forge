@@ -47,6 +47,44 @@ function isAllFourDevProfileNone(profile) {
   return ['quick-test', 'full-test', 'smoke-verify', 'merge-gate'].every(hasNone)
 }
 
+/** 单源视觉实证判定：供 evaluateIncludeDiffGate 与 handleCheckEmpirical 共用，消除同 HEAD 存量实证自死锁。 */
+function evaluateCombinedVisualGate({
+  opts, reviewRoot, gitDir, task, headSha, receipt, matchesBaseline, behavioralGate,
+}) {
+  const uiFiles = behavioralGate?.visualFilesChanged ?? []
+  const artifactVisual = resolveArtifactAndVisualInput(opts, { repoRoot: reviewRoot, visualFilesChanged: uiFiles })
+  const evidence = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
+  const storedVisualCheck = (evidence && !evidence.dirty && (!headSha || evidence.headSha === headSha))
+    ? evaluateStoredVisualEvidence({ evidence, policy: { visualFilesChanged: uiFiles }, headSha })
+    : null
+  const evidenceVisualSatisfied = Boolean(storedVisualCheck && storedVisualCheck.ok && !storedVisualCheck.unclaimed)
+  const receiptVisualSatisfied = Boolean(
+    matchesBaseline && (
+      receipt?.empiricalVerified?.visualChecked
+      || receipt?.visualChecked
+      || (Array.isArray(receipt?.artifacts) && receipt.artifacts.length > 0)
+      || receipt?.empiricalVerified?.visual?.satisfiedBy
+    ),
+  )
+  const artifactBlock = artifactVisual.errors.length > 0
+    ? { code: artifactVisual.code ?? 'BLOCKED_ARTIFACT_INVALID', reason: artifactVisual.reason, uiFiles: artifactVisual.visual.uiFiles, errors: artifactVisual.errors }
+    : null
+  const visualSatisfied = Boolean(
+    artifactVisual.visual.satisfiedBy !== null
+    || evidenceVisualSatisfied
+    || receiptVisualSatisfied
+    || ((!storedVisualCheck || storedVisualCheck.ok) && behavioralGate?.visualVerifiedOnHead),
+  )
+  const ok = !artifactBlock && (!artifactVisual.visual.required || visualSatisfied)
+  const reusedStoredVisual = Boolean(
+    ok && artifactVisual.visual.required && artifactVisual.visual.satisfiedBy === null && (evidenceVisualSatisfied || receiptVisualSatisfied),
+  )
+  return {
+    artifactVisual, evidence, storedVisualCheck, evidenceVisualSatisfied, receiptVisualSatisfied,
+    artifactBlock, visualSatisfied, reusedStoredVisual, ok,
+  }
+}
+
 export function computeEmpiricalRequirements({
   diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null, explicitCmds = [], repoRoot = null,
 }) {
@@ -192,42 +230,10 @@ export function evaluateIncludeDiffGate({
   const evInput = resolveAndValidateE2eEvidenceInput(opts)
   const shallowE2eEvidence = evInput.ok ? null : { code: evInput.code, reason: evInput.reason, raw: evInput.raw }
   const e2eEvidenceInput = evInput.ok ? evInput.text : ''
-  const evidence = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
-  const artifactVisual = resolveArtifactAndVisualInput(opts, {
-    repoRoot: reviewRoot,
-    visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
+  const combinedVisual = evaluateCombinedVisualGate({
+    opts, reviewRoot, gitDir, task, headSha, receipt, matchesBaseline, behavioralGate,
   })
-  // 在拦截前先核查账本与回执里已落盘的同 HEAD 实证，避免后续 `--include-diff` 未重传 `--artifact` 时误拦。
-  const storedVisualCheck = (evidence && !evidence.dirty && (!headSha || evidence.headSha === headSha))
-    ? evaluateStoredVisualEvidence({
-        evidence,
-        policy: { visualFilesChanged: behavioralGate?.visualFilesChanged ?? [] },
-        headSha,
-      })
-    : null
-  const evidenceVisualSatisfied = Boolean(storedVisualCheck && storedVisualCheck.ok && !storedVisualCheck.unclaimed)
-  const receiptVisualSatisfied = Boolean(
-    matchesBaseline && (
-      receipt?.empiricalVerified?.visualChecked
-      || receipt?.visualChecked
-      || (Array.isArray(receipt?.artifacts) && receipt.artifacts.length > 0)
-      || receipt?.empiricalVerified?.visual?.satisfiedBy
-    ),
-  )
-  const visualSatisfied = Boolean(
-    artifactVisual.visual.satisfiedBy !== null
-    || evidenceVisualSatisfied
-    || receiptVisualSatisfied
-    || ((!storedVisualCheck || storedVisualCheck.ok) && behavioralGate?.visualVerifiedOnHead),
-  )
-  const artifactBlock = artifactVisual.errors.length > 0
-    ? {
-        code: artifactVisual.code ?? 'BLOCKED_ARTIFACT_INVALID',
-        reason: artifactVisual.reason,
-        uiFiles: artifactVisual.visual.uiFiles,
-        errors: artifactVisual.errors,
-      }
-    : null
+  const { artifactVisual, evidence, storedVisualCheck, evidenceVisualSatisfied, artifactBlock, visualSatisfied } = combinedVisual
 
   const visualDone = !requirements.visualCheckRequired || (!artifactBlock && visualSatisfied)
   const smokeOk = !requirements.smokeRequired || Boolean(
@@ -380,11 +386,12 @@ export async function handleCheckEmpirical(ctx) {
   }
   const e2eEvidenceInput = evInput.text
 
-  const artifactVisual = resolveArtifactAndVisualInput(opts, {
-    repoRoot: reviewRoot,
-    visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
+  const matchesPrevBaseline = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint)
+  const combinedVisual = evaluateCombinedVisualGate({
+    opts, reviewRoot, gitDir, task, headSha, receipt: prev, matchesBaseline: matchesPrevBaseline, behavioralGate,
   })
-  if (!artifactVisual.ok) {
+  const { artifactVisual } = combinedVisual
+  if (!combinedVisual.ok) {
     return emitGateBlock({
       opts,
       code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED',
@@ -492,8 +499,18 @@ export async function handleCheckEmpirical(ctx) {
     }).catch(() => null)
     if (staged?.records) stagedArtifactRecs = staged.records
   }
-  const artifacts = mergeArtifactRecords(prev?.artifacts ?? [], stagedArtifactRecs)
-  const visualChecked = Boolean(artifactVisual.visual.satisfiedBy || e2eEvidenceInput)
+  const reusedArtifacts = combinedVisual.reusedStoredVisual && Array.isArray(combinedVisual.evidence?.artifacts)
+    ? combinedVisual.evidence.artifacts
+    : []
+  const artifacts = mergeArtifactRecords(mergeArtifactRecords(prev?.artifacts ?? [], reusedArtifacts), stagedArtifactRecs)
+  const effectiveVisual = combinedVisual.reusedStoredVisual
+    ? (combinedVisual.evidence?.visual ?? {
+        ...artifactVisual.visual,
+        satisfiedBy: combinedVisual.storedVisualCheck?.satisfiedBy ?? 'artifacts',
+        reusedFromEvidence: true,
+      })
+    : artifactVisual.visual
+  const visualChecked = Boolean(effectiveVisual.satisfiedBy || e2eEvidenceInput)
   writeReceipt(receiptPath, {
     mode, round, prNo: prNo ?? null, headSha, diffScope, baselineFingerprint: currentFingerprint,
     untrustedScanClean: untrusted.scanClean ?? prev?.untrustedScanClean ?? null,
@@ -503,7 +520,7 @@ export async function handleCheckEmpirical(ctx) {
     empiricalVerified: {
       status: statusLabel, lowRiskNoRuntimeChecks, fingerprint: currentFingerprint, headSha, round, diffScope,
       commands: cmdResults, executed: commandsToRun.length > 0 || lowRiskNoRuntimeChecks, succeeded: true, errorOnly: false,
-      smokeExecuted, e2eObservation, visualChecked, ...(artifactVisual.visual.required ? { visual: artifactVisual.visual } : {}), verifiedAt,
+      smokeExecuted, e2eObservation, visualChecked, ...(effectiveVisual.required ? { visual: effectiveVisual } : {}), verifiedAt,
     },
     faultInjectedAndFailed: keepFault ? (prev?.faultInjectedAndFailed ?? null) : null,
     faultRestoredClean: keepFault ? Boolean(prev?.faultRestoredClean) : false,

@@ -396,7 +396,7 @@ export function evaluateNextState({
         command = 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "docs/TDD.md"'
       } else {
         nextAction = '沙箱 PoC 命中 Case 4 / 高风险边界，请先起草 SPEC（或 1:N PRD）经独立 Critique 与 approve 后进入外环实施'
-        command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug ${t.slug ?? t.taskId} --title "${t.slug ?? t.taskId}"`
+        command = `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug ${t.slug ?? t.taskId} --title "${t.slug ?? t.taskId}" --agent <id>`
       }
     } else if ((rt.dirty ?? 0) === 0 && ((rt.commitsAheadOfBase ?? 0) > 0 || t.status === 'sandbox-ready-to-promote')) {
       phase = 'sandbox-ready-to-promote'
@@ -507,9 +507,10 @@ export function evaluateNextState({
     if (evidenceVal.code) blockingReasons.push(evidenceVal.code)
     const recTier = evidenceVal.requiredTier ?? policy?.requiredGates?.[0] ?? 'full'
     const modeFlag = policy?.riskTier === 'low' ? '' : ` --mode ${recTier}`
-    const e2eHint = policy?.smokeRequired ? ' --e2e-evidence "<运行观察实证>"' : ''
+    const visualFlag = policy?.visualCheckRequired ? ' --artifact "<真实非空产物路径>"' : ''
+    const e2eHint = (policy?.smokeRequired || policy?.visualCheckRequired) ? ' --e2e-evidence "<运行观察实证>"' : ''
     nextAction = evidenceVal.reason ?? '请运行匹配的 verify 门禁锁定当前 HEAD'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${t.taskId}${modeFlag}${e2eHint}`
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${t.taskId}${modeFlag}${visualFlag}${e2eHint}`
   } else if (!['submitted', 'local-ready', 'awaiting-upstream-merge'].includes(t.status) || (t.lastSubmittedHead && currentHead && t.lastSubmittedHead !== currentHead)) {
     phase = 'needs-submit'
     ownerRole = 'implementer'

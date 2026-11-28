@@ -198,6 +198,10 @@ export function parseStandardCli(argv = [], schema = {}) {
     throw new Error(`未知参数：--${rawKey}（使用 --help 查看支持选项${hint}）`)
   }
 
+  if (!sub && subcommands && opts._.length > 0 && subcommands.includes(opts._[0])) {
+    sub = opts._.shift()
+  }
+
   let targetDir = process.cwd()
   if (opts.dir !== undefined && String(opts.dir).trim() !== '') {
     targetDir = resolve(String(opts.dir))

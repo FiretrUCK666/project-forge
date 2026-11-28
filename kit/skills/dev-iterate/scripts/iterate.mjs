@@ -19,7 +19,7 @@ import { escalateToBackend } from '../../lib/escalation.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { shouldAutoEscalateFailure } from '../../lib/gate-receipt.mjs'
 import {
-  execSafe, isMacOsJunkPath, isMainModule, posixPath, resolveRepoRoots, writeAtomic,
+  execSafe, isMacOsJunkPath, isMainModule, posixPath, resolveDefaultBranch, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
@@ -79,7 +79,7 @@ function printHelp() {
 export async function generateIterationTests(repoRoot, {
   focus = '',
   tier = 'integration',
-  limit = 3,
+  limit = 5,
   write = false,
   isGit = true,
   gitDir = null,
@@ -413,7 +413,9 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   if (sub === 'generate') {
     if (opts.write && roots.isGit && !roots.isWorktree) {
       const head = readHeadFast(resolveGitDirFast(repoRoot), roots.gitDir)
-      if (head && head.oid && ['main', 'master'].includes(head.branch ?? '')) {
+      const defBranch = await resolveDefaultBranch(repoRoot)
+      const onDefault = Boolean(head?.branch && (defBranch ? head.branch === defBranch : ['main', 'master'].includes(head.branch)))
+      if (head && head.oid && onDefault) {
         const msg = `BLOCKED_MAIN_SLOT_VIOLATION: 拒绝在有提交的默认分支（${head.branch}）非隔离主工作区执行 generate --write；请先运行 flow.mjs start 进入 .worktrees/ 隔离工作位。`
         if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, status: 'BLOCKED_MAIN_SLOT_VIOLATION', code: 'BLOCKED_MAIN_SLOT_VIOLATION', exitCode: EXIT.FACT, branch: head.branch, error: msg }, null, 2)}\n`)
         else process.stderr.write(`${msg}\n`)
@@ -423,7 +425,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
     const out = await generateIterationTests(repoRoot, {
       focus: opts.focus ?? '',
       tier: opts.tier ?? 'integration',
-      limit: opts.limit ? Number(opts.limit) : 3,
+      limit: opts.limit ? Number(opts.limit) : 5,
       write: Boolean(opts.write),
       isGit: roots.isGit,
       gitDir: roots.gitDir,

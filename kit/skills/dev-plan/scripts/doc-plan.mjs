@@ -7,7 +7,7 @@
  *   note           [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--decision <text>] [--exclude <t>...] [--anchor <p>...] [--open <q>...] [--json]
  *   brief          [--topic <id>] [--task <id>] [--title <title>] [--verdict <text>] [--affected-feature <spec>...] [--add-feature <spec>...] [--remove-feature <spec>...] [--flow-delta <text>...] [--prototype <t=p>...] [--select-prototype <id>] [--source-skill <name>] [--pr-diff-base <ref>] [--parent-brief <key>] [--confirm] [--open-browser] [--json]
  *   triage         --summary <text> [--topic <id>] [--fact <k=v>...] [--resolve <q>...] [--drop <k>...] [--reset] [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
- *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--topic <id>] [--allow-open-draft] [--spec-slug <slug>] [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
+ *   init           --kind prd|spec|todo|tdd|pair|all --slug <slug> --title <title> --agent <id> [--topic <id>] [--allow-open-draft] [--spec-slug <slug>] [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
  *   slice          --prd <prdPath> --spec-slug <slug> --title <title> [--scope <p>...] [--criteria <c>...] [--depends-on <s...>] [--issue <N>] [--task <id>] [--topic <id>] [--allow-open-draft] [--worktree | --in-place] [--json]
  *   clarify        --file <docPath> [--decision <结论> | --drop-criterion <C条目> --reason <原因>] [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]
  *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name> --owner-reason "<原因>"] [--status <s>] [--json]
@@ -122,7 +122,7 @@ function printHelp() {
     '  note               [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
     '  brief              [--topic <主题>] [--task <id>] [--title <标题>] [--verdict <结论>] [--affected-feature <模块或改前改后>...] [--add-feature "<id|domain|title|summary>"...] [--remove-feature "<id|reason>"...] [--flow-delta <变化>...] [--prototype "<标题>=<路径或URL>"...] [--select-prototype <id>] [--source-skill <名称>] [--pr-diff-base <ref>] [--parent-brief <key>] [--confirm] [--open-browser] [--json]',
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--topic <主题>] [--fact <k=v>...] [--resolve <问题>...] [--drop <键或问题>...] [--reset] [--decision <结论>] [--exclude <不做项>...] [--anchor <锚点>...] [--open <问题>...] [--json]',
-    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--topic <主题>] [--allow-open-draft] [--spec-slug <slug>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--case <1..5>] [--multi-spec] [--agent <id>] [--host-mode <m>] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
+    '  init               --kind <prd|spec|todo|tdd|pair|all> --slug <slug> --title <标题> --agent <id> [--topic <主题>] [--allow-open-draft] [--spec-slug <slug>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--case <1..5>] [--multi-spec] [--host-mode <m>] [--human-approved] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree | --in-place] [--no-prune] [--json]',
     '  slice              --prd <prdPath> --spec-slug <slug> --title <标题> [--kind <spec|pair>] [--scope <路径>...] [--criteria <条款>...] [--depends-on <切片>...] [--issue <N>] [--task <id>] [--agent <id>] [--host-mode <m>] [--topic <主题>] [--allow-open-draft] [--worktree | --in-place] [--json]',
     '  clarify            --file <docPath> [--decision <结论> | --drop-criterion <C条目> --reason <原因>] [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--agent <id> --owner-reason "<变更原因>"] [--status <S>] [--milestone <m>] [--json]',
@@ -146,7 +146,17 @@ async function main(argv) {
 
   let cli
   try {
-    const normalizedArgv = argv[0] === 'archive'
+    const firstSub = (() => {
+      for (let i = 0; i < argv.length; i += 1) {
+        const a = argv[i]
+        if (a === '--') break
+        if (a === '--dir' || a === '-C') { i += 1; continue }
+        if (a.startsWith('-')) continue
+        return a
+      }
+      return null
+    })()
+    const normalizedArgv = firstSub === 'archive'
       ? argv.map((a) => (a === '--drop' ? '--drop=true' : a))
       : argv
     cli = parseStandardCli(normalizedArgv, {
@@ -207,7 +217,7 @@ async function main(argv) {
     if (sub === 'init' || sub === 'slice') {
       const effectiveKind = sub === 'slice' ? (opts.kind || 'spec') : opts.kind
       const effectiveSlug = opts['spec-slug'] ?? opts.slug
-      if (sub === 'init' && (!effectiveKind || !effectiveSlug || !opts.title)) throw new Error('init 需要 --kind <prd|spec|todo|pair|all>、--slug <slug> 与 --title <title>')
+      if (sub === 'init' && (!effectiveKind || !effectiveSlug || !opts.title)) throw new Error('init 需要 --kind <prd|spec|todo|tdd|pair|all>、--slug <slug> 与 --title <title>')
       if (sub === 'slice' && (!opts.prd || !effectiveSlug || !opts.title)) throw new Error('slice 需要 --prd <prdPath>、--spec-slug <slug> 与 --title <title>')
       let resolvedOwner = opts.agent ?? opts.owner
       if (String(effectiveKind).toLowerCase() !== 'tdd') {
@@ -218,7 +228,12 @@ async function main(argv) {
         } else {
           const hostMode = resolveHostMode(opts)
           const actorRes = resolveNonEmptyActor([opts.agent], { role: 'doc-owner', hostMode, humanApproved: Boolean(opts['human-approved']), allowSingleSessionWaive: true })
-          if (!actorRes.ok) throw Object.assign(new Error(actorRes.reason), { code: 'INVALID_OWNER', exitCode: EXIT.USAGE })
+          if (!actorRes.ok) {
+            throw Object.assign(
+              new Error(`${actorRes.reason} 请传入 --agent <id>（或单会话宿主经人授权传 --host-mode single-session --human-approved）。`),
+              { code: 'INVALID_OWNER', exitCode: EXIT.USAGE },
+            )
+          }
           resolvedOwner = actorRes.actor
         }
       }
@@ -603,7 +618,10 @@ async function main(argv) {
         phase: 'approve', file: res.file, taskId: taskKey ?? null,
         issueNumber: issueNum, summary: `已批准 ${res.file}（C1..Cn=${res.criteriaCount}）`,
       }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
-      const startHint = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case ${fm.data?.kind === 'todo' ? 3 : 4}${issueNum ? ` --issue ${issueNum}` : ' [--issue <N> | --create-issue --title "<标题>"]'} --agent <agentId>`
+      const docKindLow = String(fm.data?.kind ?? '').toLowerCase()
+      const isSpecDoc = docKindLow === 'spec' || (!docKindLow && posixPath(res.file).includes('docs/specs/'))
+      const specFlag = isSpecDoc ? ` --spec "${res.file}"` : ''
+      const startHint = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case ${docKindLow === 'todo' ? 3 : 4}${specFlag}${issueNum ? ` --issue ${issueNum}` : ' [--issue <N> | --create-issue --title "<标题>"]'} --agent <agentId>`
       if (res.status === 'approved' || res.status === 'active') res.nextStep = startHint
       const approveNext = res.nextStep
         ? [{ skill: 'dev-flow', text: `规划已批准，移交 dev-flow 启动隔离工作区【须派发独立实施子代理/新会话认领实施，严禁规划作者在当前上下文自建自改】：${startHint}` }]

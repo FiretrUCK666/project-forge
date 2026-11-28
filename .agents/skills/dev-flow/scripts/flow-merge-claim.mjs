@@ -329,6 +329,15 @@ export async function handleRelease(opts, roots) {
   return { exitCode: EXIT.OK }
 }
 
+function buildClaimNextSteps(ledger, taskId) {
+  const slotLabel = ledger?.worktreePath ? posixPath(ledger.worktreePath) : '当前工作区'
+  return [
+    { skill: 'dev-edit', text: `1. 在隔离工作位 ${slotLabel} 内完成修改并运行编辑门禁自检：node ".agents/skills/dev-edit/scripts/edit-gate.mjs" --changed --json` },
+    { skill: 'dev-flow', text: `2. 改动完成后执行归档与提交前同步：node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}` },
+    { skill: 'dev-flow', text: `3. 提交后运行分层实证锁定当前 HEAD：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
+  ]
+}
+
 function computeClaimContextBrief(roots, claimRoot, ledger, taskId) {
   const docRels = [ledger?.specFile, ledger?.todoFile, ledger?.prdFile].filter(Boolean)
   const seeds = extractDocBriefSeeds([claimRoot, roots?.mainRoot], docRels)
@@ -442,8 +451,7 @@ export async function handleClaim(opts, roots) {
     }
     await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     const contextBrief = computeClaimContextBrief(roots, claimRoot, ledger, taskId)
-    const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-    const localClaimNext = [{ skill: 'dev-flow', text: nextCmd }]
+    const localClaimNext = buildClaimNextSteps(ledger, taskId)
     if (opts.json) process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover, contextBrief }, localClaimNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
     else {
       process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
@@ -493,14 +501,14 @@ export async function handleClaim(opts, roots) {
       const activeClaim = analyzeIssueClaimState(listRes.comments)
       if (activeClaim && !isSameClaimant(activeClaim, actorKey, ghProbe.env.trackB.login)) {
         if (!isTakeover) {
-          const takeoverCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --takeover --reason "<接管原因>"`
+          const takeoverCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --takeover --agent <id> --reason "<接管原因>"`
           if (opts.json) {
             process.stdout.write(`${JSON.stringify(withNextSteps({
               blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', taskId, issue: num, activeClaim,
               nextStep: takeoverCmd,
             }, [{ skill: 'dev-flow', text: takeoverCmd }], { repoRoot: roots.mainRoot }), null, 2)}\n`)
           }
-          process.stderr.write(`BLOCKED_ISSUE_ALREADY_CLAIMED: Issue #${num} 已被 ${activeClaim.actor ?? activeClaim.login ?? '他人'} 认领（分支=${activeClaim.branch ?? '未知'}），且尚无 release/takeover；如需接管请传 --takeover --reason "<接管原因>"。\n`)
+          process.stderr.write(`BLOCKED_ISSUE_ALREADY_CLAIMED: Issue #${num} 已被 ${activeClaim.actor ?? activeClaim.login ?? '他人'} 认领（分支=${activeClaim.branch ?? '未知'}），且尚无 release/takeover；如需接管请传 --takeover --agent <id> --reason "<接管原因>"。\n`)
           return { exitCode: EXIT.FACT }
         }
         activeClaimsByIssue.set(num, activeClaim)
@@ -550,8 +558,7 @@ export async function handleClaim(opts, roots) {
   }
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   const contextBrief = computeClaimContextBrief(roots, claimRoot, ledger, taskId)
-  const nextCmd = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-  const claimNext = [{ skill: 'dev-flow', text: nextCmd }]
+  const claimNext = buildClaimNextSteps(ledger, taskId)
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(withNextSteps({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}), contextBrief }, claimNext, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {

@@ -50,8 +50,8 @@ function buildReadableNextNote({ isFull, stopLoss, verdict, round, role, prNum, 
 
 /**
  * 单源渲染结构化审查评论：
- * - `isFull === true`（PR 或无 PR 工单 `!prNum`）：输出固定三字段 + 条件 `止损记录` + `#### 验收标准逐条核对` + 完整 `Must Fix`/`Should Fix`/`Pre-existing`；
- * - `isFull === false`（已关联 `PR #N` 的 Issue）：仅输出紧凑结论、阻塞定位与指向 `PR #N` 的指针摘要。
+ * - 默认（`isFull === true`，`buildReviewComments` 对 PR 与 Issue 双方统一启用）：输出完整三固定字段（`逐条标准状态`/`故障注入记录`/`实证核验`）+ 条件 `止损记录` + `#### 验收标准逐条核对` + 完整 `Must Fix`/`Should Fix`/`Pre-existing`；
+ * - 显式传入 `isFull === false` 时仅用于调用方主动请求紧凑摘要视图。
  */
 export function renderReviewSection({
   isFull = true,

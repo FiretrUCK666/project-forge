@@ -371,10 +371,19 @@ export function registerTraceSyncCases(cases) {
     }
     const firstSubmit = buildSubmitComments({
       isRework: false, isHeadUpdate: false, round: 1, shortHead: '1111111', actorDisplay: '`impl-w4c`',
-      branch: 'feat/demo', verifiedCmd: 'exit 0', prNumber: 77, linkedIssues: [10],
+      branch: 'feat/demo', verifiedCmd: 'exit 0', prNumber: 77, prUrl: 'https://example.com/acme/demo/pull/77', linkedIssues: [10],
     })
+    const firstIssueBody = firstSubmit.issueCommentBodyFor(10)
     if (!firstSubmit.prCommentBody.includes('### 提交待审（Round 1')) {
       return `首次提交应渲染提交待审：\n${firstSubmit.prCommentBody}`
+    }
+    if (!firstIssueBody.includes('[#77](https://example.com/acme/demo/pull/77)')
+      || firstIssueBody.includes('#77 (https://example.com/acme/demo/pull/77)')) {
+      return `有 prUrl 时应渲染单链接 [#N](url) 避免 GitHub/移动端双重展开：\n${firstIssueBody}`
+    }
+    const noUrlIssueBody = headUpdate.issueCommentBodyFor(10)
+    if (!noUrlIssueBody.includes('· #77') || noUrlIssueBody.includes('[#77](')) {
+      return `无 prUrl 时应渲染纯 #N：\n${noUrlIssueBody}`
     }
 
     // 2) 同轮非返工二次 submit 端到端验证

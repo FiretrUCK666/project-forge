@@ -149,6 +149,10 @@ export function buildSubmitComments({
 } = {}) {
   const cleanActor = String(actorDisplay ?? '').trim()
   const issuesText = linkedIssues.map((n) => `#${n}`).join(', ')
+  const cleanPrUrl = String(prUrl ?? '').trim()
+  const prRef = prNumber
+    ? (cleanPrUrl ? `[#${prNumber}](${cleanPrUrl})` : `#${prNumber}`)
+    : (cleanPrUrl ? `[PR](${cleanPrUrl})` : '')
   if (isRework && prNumber) {
     const prCommentBody = [
       `### 返工已提交（Round ${round} @ \`${shortHead}\`）`,
@@ -164,7 +168,7 @@ export function buildSubmitComments({
       `### 返工已提交（Round ${round} @ \`${shortHead}\`）`,
       '',
       ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-      `- **分支 / PR**：\`${branch}\` · PR #${prNumber}`,
+      `- **分支 / PR**：\`${branch}\` · ${cleanPrUrl ? prRef : `PR #${prNumber}`}`,
       `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
       ...(recentRebuts ? [`- **反驳与说明**：${recentRebuts}`] : []),
       `- **下一步**：等待 Round ${round} 独立审查复核。`,
@@ -186,7 +190,7 @@ export function buildSubmitComments({
       heading,
       '',
       ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-      `- **分支 / PR**：\`${branch}\`${prNumber ? ` · #${prNumber}` : ''}${prUrl ? ` (${prUrl})` : ''}`,
+      `- **分支 / PR**：\`${branch}\`${prRef ? ` · ${prRef}` : ''}`,
       `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
       ...(iss ? [`- **关联**：Fixes #${iss}`] : []),
       `- **下一步**：等待 Round ${round} 独立审查复核（同轮 HEAD 已更新）。`,
@@ -206,7 +210,7 @@ export function buildSubmitComments({
     `### 提交待审 · 已提 PR #${prNumber}（@ \`${shortHead}\`）`,
     '',
     ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-    `- **分支 / PR**：\`${branch}\` · #${prNumber}${prUrl ? ` (${prUrl})` : ''}`,
+    `- **分支 / PR**：\`${branch}\`${prRef ? ` · ${prRef}` : ''}`,
     `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
     `- **关联**：Fixes #${iss}`,
     '- **下一步**：等待 Round 1 独立审查复核。',

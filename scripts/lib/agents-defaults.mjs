@@ -251,9 +251,10 @@ export function customSkillsBlock(facts) {
   return custom
     .map((s) => {
       const detail = s.description || s.summary
+      const skillMdPath = s.path.endsWith('/SKILL.md') ? s.path : `${s.path}/SKILL.md`
       return detail
-        ? `- \`${s.path}/SKILL.md\`（\`${s.name}\`）：${detail}`
-        : `- \`${s.path}/SKILL.md\`（\`${s.name}\`）`
+        ? `- \`${skillMdPath}\`（\`${s.name}\`）：${detail}`
+        : `- \`${skillMdPath}\`（\`${s.name}\`）`
     })
     .join('\n')
 }
@@ -265,10 +266,9 @@ function formatScriptCell(script, skillPath) {
 }
 
 /**
- * 动态渲染 `AGENTS.md` `意图路由` 表格行，合并按 `order` 排序的已落盘内置技能与项目自有技能。
+ * 动态渲染 `AGENTS.md` `意图路由` 内置技能表格行（按 `order` 排序；项目自有技能统一由 `CUSTOM_SKILLS_BLOCK` 单源渲染）。
  */
 export function renderKitRoutingRows({
-  customSkills = [],
   discoveredSkills,
   hasRemote = true,
 } = {}) {
@@ -301,20 +301,7 @@ export function renderKitRoutingRows({
   }
 
   entries.sort((a, b) => (a.order - b.order) || (a.seq - b.seq))
-  const rows = entries.map((e) => `| ${e.intent} | ${e.target} | ${e.script} |`)
-
-  for (const cs of customSkills ?? []) {
-    if (!cs || cs.valid === false) continue
-    const csPath = String(cs.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
-    if (!csPath) continue
-    const csName = String(cs.name ?? csPath.split('/').pop()).trim()
-    const csDesc = String(cs.description || cs.summary || csName).replace(/\s+/g, ' ').trim()
-    const skillMdPath = csPath.endsWith('/SKILL.md') ? csPath : `${csPath}/SKILL.md`
-    const safeIntent = `${csName}：${csDesc}`.replace(/\|/g, '\\|')
-    rows.push(`| ${safeIntent} | \`${skillMdPath}\` | 静默读取 \`${skillMdPath}\` 并按指引执行 |`)
-  }
-
-  return rows.join('\n')
+  return entries.map((e) => `| ${e.intent} | ${e.target} | ${e.script} |`).join('\n')
 }
 
 export function excludedSkillsFor(facts, manifest, root, { kitDir } = {}) {
@@ -472,7 +459,6 @@ export function buildVars(facts, root, { kitDir } = {}) {
 
   const commandPlan = commandPlanOf(facts)
   const hasRemote = Boolean(facts?.git?.remote) && facts?.git?.isRepoRoot !== false && !facts?.git?.localMode
-  const customSkills = customSkillsOf(facts)
   const discoveredSkills = protocol.discoverKitSkills(kitDir)
 
   return {
@@ -491,7 +477,7 @@ export function buildVars(facts, root, { kitDir } = {}) {
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
     SUBDIR_AGENTS_POINTER: subdirAgents.length > 0 ? subdirAgents.map((f) => `\`${f}\``).join('、') : '`<subdir>/AGENTS.md`',
     WORKSPACE_PACKAGES: formatWorkspacePackages(packages),
-    KIT_ROUTING_ROWS: renderKitRoutingRows({ customSkills, discoveredSkills, hasRemote }),
+    KIT_ROUTING_ROWS: renderKitRoutingRows({ discoveredSkills, hasRemote }),
     CUSTOM_SKILLS_BLOCK: customSkillsBlock(facts),
     ...buildDevProfileVars(facts, targetRoot),
   }

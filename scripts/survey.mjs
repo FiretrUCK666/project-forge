@@ -164,15 +164,30 @@ export function computeArtifactPlan(facts) {
   } else if (!docs.agents) {
     items.push({ id: 'agents-contract', artifact: 'AGENTS.md', status: '缺失', action: 'create', detail: `运行 compose-agents.mjs 生成紧凑受管契约并按真实事实填实空白位${otherNote}` })
   } else {
+    const hasManagedRegions = (docs.agentsMarkers?.regions?.length ?? 0) > 0
+      || (docs.agentsMarkers?.marks ?? 0) > (docs.agentsMarkers?.fills?.length ?? 0)
+    const hasCoreSections = Boolean(docs.agentsMarkers?.hasDevProfile && docs.agentsMarkers?.hasIntentRouting)
+    const isForeignUnmanaged = !hasManagedRegions && !hasCoreSections
     const driftReasons = []
     if ((reentry.staleAgentPaths?.length ?? 0) > 0) driftReasons.push('失效路径')
     if ((reentry.staleAgentScripts?.length ?? 0) > 0) driftReasons.push('失效脚本')
     if ((docs.agentsBytes ?? 0) > AGENTS_MAX_BYTES) driftReasons.push('超过 30KB 上限')
     if ((docs.agentsMarkers?.fills?.length ?? 0) > 0) driftReasons.push('未填占位')
     if (otherAi.length > 0) driftReasons.push('待合流其他 AI 规则')
-    items.push(driftReasons.length > 0
-      ? { id: 'agents-contract', artifact: 'AGENTS.md', status: `待校准（${driftReasons.join('、')}）`, action: 'calibrate', detail: `保留手写规则与「取舍」区，定向修复失效条目或外置超长设计到 docs/TDD.md${otherNote}` }
-      : { id: 'agents-contract', artifact: 'AGENTS.md', status: '已就绪', action: 'preserve', detail: '受管区间完整、无失效引用且处于体积预算内' })
+    if (isForeignUnmanaged) {
+      const extraNote = driftReasons.length > 0 ? `（另含：${driftReasons.join('、')}）` : ''
+      items.push({
+        id: 'agents-contract',
+        artifact: 'AGENTS.md',
+        status: `已有手写契约（未纳入受管区间）${extraNote}`,
+        action: 'upgrade',
+        detail: `保留全部既有手写正文与规则，运行 \`node scripts/compose-agents.mjs . --upgrade\` 无损追加缺失受管区间（Dev Profile / 意图路由等）${otherNote}`,
+      })
+    } else {
+      items.push(driftReasons.length > 0
+        ? { id: 'agents-contract', artifact: 'AGENTS.md', status: `待校准（${driftReasons.join('、')}）`, action: 'calibrate', detail: `保留手写规则与「取舍」区，定向修复失效条目或外置超长设计到 docs/TDD.md${otherNote}` }
+        : { id: 'agents-contract', artifact: 'AGENTS.md', status: '已就绪', action: 'preserve', detail: '受管区间完整、无失效引用且处于体积预算内' })
+    }
   }
 
   // 6. README.md（保留此精确条文以供故障注入检测）

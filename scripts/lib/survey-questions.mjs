@@ -4,8 +4,23 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 scripts/survey.mjs 调用。
  */
 
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { GAP_RULES } from './survey-gap-rules.mjs'
 import { readDecisionMap } from '../../kit/skills/lib/profile.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SCRIPTS_DIR = resolve(HERE, '..').replace(/\\/g, '/')
+
+function quoteCliArg(value) {
+  const s = String(value ?? '')
+  return /\s/.test(s) ? `"${s}"` : s
+}
+
+function resolveEngineScript(fileName) {
+  return quoteCliArg(`${SCRIPTS_DIR}/${fileName}`)
+}
 
 function getDecisionsMap(facts) {
   const raw = facts?.decisions
@@ -200,10 +215,11 @@ export function summarizeNeedsHuman(facts) {
 }
 
 /**
- * 计算 S3 推荐下一步命令行与是否自动附带 `--with-hooks`。
+ * 计算 S2/S3 推荐下一步命令行与是否自动附带 `--with-hooks`。
  *
- * 规则：仅当本地没有外部 Hook 冲突、尚未接管、且 `AGENTS.md`「## 取舍」未写 `no-git-hooks` 时，
- * 自动在推荐 `equip.mjs` 命令中附带 `--with-hooks`，防止弱模型遗漏本地护栏。
+ * 规则：
+ * 1. 当 `needsHuman.count > 0` 时严格遵守 S2 停步门禁，只输出询问用户拍板的 `[NEXT STEP]`，绝不提前放出 `equip.mjs`；
+ * 2. 当 `needsHuman.count === 0` 时基于本 skill 绝对 `scripts/` 路径输出：非空仓先 `backup.mjs create --label pre-forge` 再 `equip.mjs`（无冲突且未写 `no-git-hooks` 时自动附带 `--with-hooks`）。
  */
 export function computeS3NextStep(facts) {
   const git = facts?.git ?? {}
@@ -218,10 +234,40 @@ export function computeS3NextStep(facts) {
   const gitUsable = git.available !== false && git.isBare !== true && git.isRepoRoot !== false
   const withHooks = Boolean(gitUsable && !hooksDisabled && !hooksConflict && !hooksInstalled)
 
-  const quotedTarget = /\s/.test(targetPath) ? `"${targetPath}"` : targetPath
+  let hookReason = '无本地 Hook 冲突且未配置 `no-git-hooks`，已自动附带 `--with-hooks`'
+  if (!gitUsable) hookReason = '当前目录非可用普通仓库根目录，跳过 `--with-hooks`'
+  else if (hooksDisabled) hookReason = 'AGENTS.md「## 取舍」已写 `no-git-hooks`，已跳过 `--with-hooks`'
+  else if (hooksConflict) {
+    const paths = (hooks.conflicts ?? []).map((c) => c.path).filter(Boolean).join('、')
+    hookReason = `检测到既有 Hook（${paths || '外部钩子配置'}），按 preserve 原则保留现有配置，不附带 \`--with-hooks\``
+  } else if (hooksInstalled) {
+    hookReason = '本地 `.githooks/pre-push` 已由 project-forge 配置就位'
+  }
+
+  const needsHuman = facts?.needsHuman ?? summarizeNeedsHuman(facts)
+  if ((needsHuman?.count ?? 0) > 0) {
+    const pendingKinds = (needsHuman.kinds ?? []).join('、') || 'NEEDS_HUMAN'
+    return {
+      stage: 'S2',
+      blockedByNeedsHuman: true,
+      needsHumanCount: needsHuman.count,
+      needsHumanKinds: needsHuman.kinds ?? [],
+      withHooks,
+      hooksConflict,
+      hooksDisabled,
+      hooksInstalled,
+      reason: `当前存在 ${needsHuman.count} 项需人工拍板事项（NEEDS_HUMAN > 0），按 S2 停步门禁暂停 S3 写入；待用户确认后继续（Hook 预判：${hookReason}）`,
+      text: `[NEXT STEP] 先向用户询问并确认上方 ${needsHuman.count} 项待拍板问题（${pendingKinds}），获得明确决定前严禁执行任何 S3 写入或装配命令。`,
+    }
+  }
+
+  const quotedTarget = quoteCliArg(targetPath)
+  const backupCommand = isEmpty
+    ? undefined
+    : `node ${resolveEngineScript('backup.mjs')} create ${quotedTarget} --label pre-forge`
   const equipCommand = isEmpty
-    ? `node scripts/equip.mjs ${quotedTarget} --bootstrap-empty${withHooks ? ' --with-hooks' : ''}`
-    : `node scripts/equip.mjs ${quotedTarget}${withHooks ? ' --with-hooks' : ''}`
+    ? `node ${resolveEngineScript('equip.mjs')} ${quotedTarget} --bootstrap-empty${withHooks ? ' --with-hooks' : ''}`
+    : `node ${resolveEngineScript('equip.mjs')} ${quotedTarget}${withHooks ? ' --with-hooks' : ''}`
 
   const canProtectApi = Boolean(
     git.present === true
@@ -234,28 +280,22 @@ export function computeS3NextStep(facts) {
   )
   const defaultBranch = facts?.conventions?.defaultBranch || git.originHeadBranch || git.initDefaultBranch || 'main'
   const protectBranchCommand = canProtectApi
-    ? `node scripts/equip-ci.mjs ${quotedTarget} --protect-branch --branch ${defaultBranch}`
+    ? `node ${resolveEngineScript('equip-ci.mjs')} ${quotedTarget} --protect-branch --branch ${defaultBranch}`
     : undefined
 
-  let reason = '无本地 Hook 冲突且未配置 `no-git-hooks`，已自动附带 `--with-hooks`'
-  if (!gitUsable) reason = '当前目录非可用普通仓库根目录，跳过 `--with-hooks`'
-  else if (hooksDisabled) reason = 'AGENTS.md「## 取舍」已写 `no-git-hooks`，已跳过 `--with-hooks`'
-  else if (hooksConflict) {
-    const paths = (hooks.conflicts ?? []).map((c) => c.path).filter(Boolean).join('、')
-    reason = `检测到既有 Hook（${paths || '外部钩子配置'}），按 preserve 原则保留现有配置，不附带 \`--with-hooks\``
-  } else if (hooksInstalled) {
-    reason = '本地 `.githooks/pre-push` 已由 project-forge 配置就位'
-  }
+  const commandChain = [backupCommand, equipCommand, protectBranchCommand].filter(Boolean).join(' && ')
 
   return {
     stage: 'S3',
+    blockedByNeedsHuman: false,
     withHooks,
     hooksConflict,
     hooksDisabled,
     hooksInstalled,
+    ...(backupCommand ? { backupCommand } : {}),
     equipCommand,
     ...(protectBranchCommand ? { protectBranchCommand } : {}),
-    reason,
-    text: `[NEXT STEP] ${equipCommand}${protectBranchCommand ? ` && ${protectBranchCommand}` : ''}`,
+    reason: hookReason,
+    text: `[NEXT STEP] ${commandChain}`,
   }
 }

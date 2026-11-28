@@ -10,12 +10,14 @@
  *   plan | generate | run | cycle
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
+import { execShellCommand } from '../../lib/exec.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { shouldAutoEscalateFailure } from '../../lib/gate-receipt.mjs'
 import {
@@ -28,7 +30,7 @@ import { scanNeutralCiSteps } from '../../lib/profile-sniffer.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import {
-  collectConfiguredTestEntries, expandVerificationCommands, renderNativeTestContent,
+  collectConfiguredVerificationCommands, renderNativeTestContent,
   resolveNativeTestDir, resolveTestRunner, updateFeatureMapTestRefs, validateGeneratedTestQuality,
 } from '../../lib/suite-inventory.mjs'
 import {
@@ -193,6 +195,7 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
     : (!res.ok ? 'test-failure' : (perfExceeded ? 'perf-regression' : null))
   return {
     file: posixPath(relPath),
+    kind: 'native-test',
     ok,
     exitCode: res.code ?? (ok ? 0 : 1),
     durationMs,
@@ -205,12 +208,43 @@ async function runSingleTestTarget(repoRoot, relPath, { timeoutMs = 30000, perfB
   }
 }
 
+async function runConfiguredCommandTarget(repoRoot, entry, { timeoutMs = null, perfBudgetMs = 0 } = {}) {
+  const t0 = performance.now()
+  const effectiveTimeout = timeoutMs !== null && timeoutMs !== undefined
+    ? Number(timeoutMs)
+    : (entry.heavy ? 300000 : 120000)
+  const res = await execShellCommand(entry.cmd, repoRoot, { timeout: effectiveTimeout })
+  const durationMs = Math.round(performance.now() - t0)
+  const perfExceeded = perfBudgetMs > 0 && durationMs > perfBudgetMs
+  const timedOut = Boolean(res.timedOut)
+  const ok = Boolean(res.ok && !timedOut && !perfExceeded)
+  const failureKind = timedOut
+    ? 'timeout'
+    : (!res.ok ? 'test-failure' : (perfExceeded ? 'perf-regression' : null))
+  return {
+    file: entry.scriptPath ? posixPath(entry.scriptPath) : entry.cmd,
+    command: entry.cmd,
+    source: entry.source,
+    kind: 'configured-command',
+    executionMode: entry.serial ? 'serial' : 'parallel',
+    ok,
+    exitCode: res.code ?? (ok ? 0 : 1),
+    durationMs,
+    timedOut,
+    perfExceeded,
+    failureKind,
+    runner: 'shell',
+    stdout: String(res.stdout ?? '').slice(0, 600),
+    stderr: String(res.stderr ?? '').slice(0, 600),
+  }
+}
+
 /** 分片并发执行目标测试集；遇失败/超时/性能越阈不改业务源码，写 signals.jsonl 并仅在显式开启 escalate 时经 escalation.mjs 建单。 */
 export async function runIterationSuites(repoRoot, {
   targets = [],
   tier = 'integration',
   concurrency = null,
-  timeoutMs = 30000,
+  timeoutMs = null,
   perfBudgetMs = 0,
   escalate = false,
   writeSignals = true,
@@ -222,37 +256,77 @@ export async function runIterationSuites(repoRoot, {
 } = {}) {
   applyLowPriority(process.pid)
   const devProfile = parseDevProfile(repoRoot)
-  let resolvedTargets = [...new Set((targets ?? []).map((t) => posixPath(String(t ?? '').trim()).replace(/^\.\//, '')).filter(Boolean))]
-  if (resolvedTargets.length === 0) {
+  let nativeTargets = [...new Set((targets ?? []).map((t) => posixPath(String(t ?? '').trim()).replace(/^\.\//, '')).filter(Boolean))]
+  let configuredCommands = []
+  let runTempDir = null
+
+  if (nativeTargets.length === 0) {
     const allCode = walkSourceFiles(repoRoot)
     const nativeInfo = resolveNativeTestDir(repoRoot, { tier, devProfile, files: allCode })
-    for (const rel of walkTestDirRecursive(repoRoot, nativeInfo.dirRel)) resolvedTargets.push(rel)
-    if (resolvedTargets.length === 0) {
-      for (const f of allCode) { if (TEST_FILE_RE.test(f.rel)) resolvedTargets.push(f.rel) }
+    for (const rel of walkTestDirRecursive(repoRoot, nativeInfo.dirRel)) nativeTargets.push(rel)
+    if (nativeTargets.length === 0) {
+      for (const f of allCode) { if (TEST_FILE_RE.test(f.rel)) nativeTargets.push(f.rel) }
     }
-    const { steps: ciSteps } = scanNeutralCiSteps(repoRoot)
-    const expanded = expandVerificationCommands(repoRoot, ciSteps, devProfile, null)
-    const { configuredTestEntries } = collectConfiguredTestEntries(repoRoot, allCode, expanded)
-    for (const entry of configuredTestEntries) {
-      if (existsSync(join(repoRoot, entry))) resolvedTargets.push(posixPath(entry))
+    nativeTargets = [...new Set(nativeTargets)].filter((rel) => existsSync(join(repoRoot, rel))).sort()
+    if (nativeTargets.length === 0) {
+      runTempDir = mkdtempSync(join(tmpdir(), 'pf-iter-run-'))
+      const { steps: ciSteps } = scanNeutralCiSteps(repoRoot)
+      configuredCommands = collectConfiguredVerificationCommands(repoRoot, {
+        ciSteps, devProfile, files: allCode, tempDir: runTempDir,
+      })
     }
-    resolvedTargets = [...new Set(resolvedTargets)]
+  } else {
+    nativeTargets = nativeTargets.filter((rel) => existsSync(join(repoRoot, rel))).sort()
   }
-  resolvedTargets = resolvedTargets.filter((rel) => existsSync(join(repoRoot, rel))).sort()
 
   const requestedJobs = concurrency !== null && concurrency !== undefined ? concurrency : null
   const budgeted = resolveWorkerConcurrency({ requestedJobs, cap: requestedJobs !== null ? Infinity : 4 })
-  const lanes = Math.max(1, Math.min(budgeted, Math.max(1, resolvedTargets.length)))
-  const results = new Array(resolvedTargets.length)
-  let cursor = 0
-  const worker = async () => {
-    while (cursor < resolvedTargets.length) {
-      const idx = cursor
-      cursor += 1
-      results[idx] = await runSingleTestTarget(repoRoot, resolvedTargets[idx], { timeoutMs, perfBudgetMs, devProfile })
+  let results = []
+  let lanes = 1
+
+  try {
+    if (nativeTargets.length > 0) {
+      const nativeTimeout = timeoutMs !== null && timeoutMs !== undefined ? Number(timeoutMs) : 30000
+      lanes = Math.max(1, Math.min(budgeted, nativeTargets.length))
+      results = new Array(nativeTargets.length)
+      let cursor = 0
+      const worker = async () => {
+        while (cursor < nativeTargets.length) {
+          const idx = cursor
+          cursor += 1
+          results[idx] = await runSingleTestTarget(repoRoot, nativeTargets[idx], { timeoutMs: nativeTimeout, perfBudgetMs, devProfile })
+        }
+      }
+      await Promise.all(Array.from({ length: lanes }, () => worker()))
+    } else if (configuredCommands.length > 0) {
+      const parallelIndexed = []
+      const serialIndexed = []
+      configuredCommands.forEach((entry, idx) => {
+        if (entry.serial) serialIndexed.push({ idx, entry })
+        else parallelIndexed.push({ idx, entry })
+      })
+      results = new Array(configuredCommands.length)
+      lanes = parallelIndexed.length > 0 ? Math.max(1, Math.min(budgeted, parallelIndexed.length)) : 1
+      if (parallelIndexed.length > 0) {
+        let cursor = 0
+        const worker = async () => {
+          while (cursor < parallelIndexed.length) {
+            const item = parallelIndexed[cursor]
+            cursor += 1
+            results[item.idx] = await runConfiguredCommandTarget(repoRoot, item.entry, { timeoutMs, perfBudgetMs })
+          }
+        }
+        await Promise.all(Array.from({ length: lanes }, () => worker()))
+      }
+      for (const item of serialIndexed) {
+        results[item.idx] = await runConfiguredCommandTarget(repoRoot, item.entry, { timeoutMs, perfBudgetMs })
+      }
+    }
+  } finally {
+    if (runTempDir) {
+      try { rmSync(runTempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
     }
   }
-  await Promise.all(Array.from({ length: lanes }, () => worker()))
 
   const failed = results.filter((r) => r && !r.ok)
   const signalResults = []
@@ -444,7 +518,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       targets,
       tier: opts.tier ?? 'integration',
       concurrency: opts.concurrency ? Number(opts.concurrency) : undefined,
-      timeoutMs: opts['timeout-ms'] ? Number(opts['timeout-ms']) : 30000,
+      timeoutMs: opts['timeout-ms'] ? Number(opts['timeout-ms']) : null,
       perfBudgetMs: opts['perf-budget-ms'] ? Number(opts['perf-budget-ms']) : 0,
       escalate: shouldAutoEscalateFailure({ stage: 'iterate', mode: 'run', ledger: runtimeOpts._ledger ?? null, opts }).escalate,
       writeSignals: !opts['no-signals'],
@@ -458,7 +532,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
     else {
       process.stdout.write(`dev-iterate run: ${out.passed}/${out.total} passed (failed=${out.failed}, concurrency=${out.concurrency})\n`)
       for (const r of out.results) {
-        process.stdout.write(`  - [${r.ok ? 'PASS' : 'FAIL'}] ${r.file} (${r.durationMs}ms${r.failureKind ? `, ${r.failureKind}` : ''})\n`)
+        process.stdout.write(`  - [${r.ok ? 'PASS' : 'FAIL'}] ${r.command || r.file} (${r.durationMs}ms${r.failureKind ? `, ${r.failureKind}` : ''})\n`)
       }
       printNextStep([
         out.ok

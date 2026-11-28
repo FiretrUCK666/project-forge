@@ -9,6 +9,7 @@ import { basename, extname, join, posix } from 'node:path'
 
 import { resolveExecutable } from './exec.mjs'
 import { FEATURE_MAP_REL, readFeatureMapSafe, updateFeatureMapTestRefs } from './feature-map.mjs'
+import { deriveMergeGate } from './gate-truth.mjs'
 import { posixPath, readJsonSafe, readTextSafe } from './git.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
@@ -723,5 +724,73 @@ export function resolveTestRunner(repoRoot, targetRel, opts = {}) {
   if (ext === '.go') { const b = resolveExecutable('go', { cwd: repoRoot, env }); const d = posix.dirname(cleanRel); return b ? ok('go', b, ['test', d === '.' ? '.' : `./${d}`]) : miss('go', 'missing go binary') }
   if (ext === '.rs') { const b = resolveExecutable('cargo', { cwd: repoRoot, env }); return b ? ok('cargo', b, ['test']) : miss('cargo', 'missing cargo binary') }
   return miss(ext || 'unknown', `unsupported test file extension for ${cleanRel}`)
+}
+
+const CMD_SKIP_RE = /^(?:echo|printf|mkdir|cd|export|set|if|then|else|elif|fi|for|do|done|exit|return|true|false|rm|cp|mv|cat|\{|\}|#|$)(?:\s|$)|^(?:npm|pnpm|yarn|bun)\s+(?:ci|install|i|add|setup|update)\b|^(?:pip3?|uv|poetry)\s+(?:install|sync|add)\b|^(?:cargo\s+fetch|go\s+mod\s+(?:download|tidy)|bundle\s+install|composer\s+install|dotnet\s+restore)\b|\b(?:git\s+(?:push|commit|tag|checkout|reset|clean|rebase|merge)|npm\s+publish|gh\s+(?:release|pr\s+(?:create|merge|edit))|prettier\b[^\n]*--write|eslint\b[^\n]*--fix|ruff\b[^\n]*--fix|biome\b[^\n]*(?:--write|--apply)|gofmt\s+-w)\b|\|\s*(?:sh|bash|zsh)\b/i
+const CMD_MUTATOR_SCRIPT_RE = /(?:^|[/_-])(?:compose|equip|sync|generate|gen|format|fmt|fix|migrate|update|install|setup|bootstrap|scaffold|build|release|publish|deploy)(?:[-_][a-z0-9_.-]*)?\.(?:m?js|cjs|ts|py|sh|ps1)\b/i
+const CMD_READONLY_FLAG_RE = /(?:^|\s)(?:--check|--dry-run|--verify|--list|--status|--diff|check|audit|validate|test|lint|review|survey)(?:\s|$)/i
+const CMD_META_AGGREGATE_RE = /(?:^|[\s/"'=])(?:merge[-_]?gate|ci[-_]?all|run[-_]?all[-_]?gates)(?:\.[a-z0-9]+)?(?:\s|$)/i
+const CMD_SERIAL_HEAVY_RE = /\b(?:bench|benchmark|perf|profile|fixtures|e2e|harness|injections?|fuzz|stress|playwright|cypress|selenium|testcontainers|git\s+archive)\b|(?:^|\s)--(?:jobs|concurrency)\b/i
+const CMD_REMOTE_OR_PLATFORM_RE = /\b(?:gh\s+(?:api|pr|release|workflow|run|secret)|git\s+(?:push|fetch|remote)|curl\s+https?:|wget\s+https?:|actions\/)\b|\$\{\{\s*(?:needs\.|matrix\.|secrets\.|github\.|strategy\.|env\.)/i
+
+function normalizeVerificationCommand(rawCmd, tempDir = '') {
+  let s = String(rawCmd ?? '').replace(/\r\n/g, '\n').trim()
+  if (!s || /^(?:none|null|false)$/i.test(s) || /no test specified/i.test(s) || s.includes('{target}')) return null
+  if (tempDir) s = s.replace(/\$\{\{\s*runner\.temp\s*\}\}/gi, posixPath(tempDir))
+  if (/\$\{\{[^}]+?\}\}/.test(s) || CMD_REMOTE_OR_PLATFORM_RE.test(s)) return null
+  s = s.replace(/\s*\|\|\s*\{\s*[\s\S]*?\}\s*$/, '').trim()
+  const lines = s.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !/^set\s+-[euox]+/i.test(l))
+  if (lines.length === 0 || lines.some((l) => /^(?:if|then|else|elif|fi|for|while|do|done|case|esac)\b/.test(l))) return null
+  const joined = lines.join(' && ').replace(/\s+/g, ' ').trim()
+  if (!joined || CMD_SKIP_RE.test(joined)) return null
+  if (CMD_MUTATOR_SCRIPT_RE.test(joined) && !CMD_READONLY_FLAG_RE.test(joined)) return null
+  return joined
+}
+
+function extractPrimaryScriptPath(repoRoot, cmd, codeRelSet) {
+  let last = null
+  for (const tok of String(cmd ?? '').split(/[\s"'`;|&()]+/)) {
+    const clean = posixPath(tok).replace(/^\.\//, '')
+    if (clean && !clean.startsWith('-') && CODE_EXT_RE.test(clean) && (codeRelSet.has(clean) || existsSync(join(repoRoot, clean)))) last = clean
+  }
+  return last
+}
+
+/** 收集仓库已配置的只读验证命令（完整保留参数、排除写盘/发布/元聚合门禁并标注串行与重型特性）。 */
+export function collectConfiguredVerificationCommands(repoRoot, { ciSteps = [], devProfile = null, files = [], tempDir = '' } = {}) {
+  const codeRelSet = new Set((files ?? []).filter((f) => CODE_EXT_RE.test(f.name ?? f.rel ?? '')).map((f) => posixPath(f.rel ?? f)))
+  const derived = deriveMergeGate(repoRoot)
+  const rejectedCi = new Set((derived.skippedFiles ?? []).filter((s) => /写作用域|触发形态不是/.test(String(s.reason ?? ''))).map((s) => posixPath(s.file)))
+  const rawEntries = (derived.steps ?? []).length > 0
+    ? derived.steps.map((s) => ({ cmd: s.cmd, source: 'ci', heavy: false }))
+    : (ciSteps ?? []).filter((s) => !s?.file || !rejectedCi.has(posixPath(s.file))).map((s) => ({ cmd: s?.cmd, source: 'ci', heavy: false }))
+  for (const key of ['quick-test', 'full-test', 'smoke-verify']) {
+    for (const c of devProfile?.[key] ?? []) rawEntries.push({ cmd: c, source: `profile:${key}`, heavy: key === 'full-test' })
+  }
+  const byCmd = new Map()
+  const aggregateFallback = []
+  const pushEntry = (norm, source, heavy) => {
+    const isHeavy = Boolean(heavy || CMD_SERIAL_HEAVY_RE.test(norm))
+    if (byCmd.has(norm)) { if (isHeavy) { byCmd.get(norm).heavy = true; byCmd.get(norm).serial = true }; return }
+    byCmd.set(norm, { cmd: norm, scriptPath: extractPrimaryScriptPath(repoRoot, norm, codeRelSet), source, heavy: isHeavy, serial: isHeavy })
+  }
+  for (const item of rawEntries) {
+    const norm = normalizeVerificationCommand(item.cmd, tempDir)
+    if (!norm) continue
+    if (CMD_META_AGGREGATE_RE.test(norm)) { aggregateFallback.push({ norm, source: item.source }); continue }
+    pushEntry(norm, item.source, item.heavy)
+  }
+  if (byCmd.size === 0) {
+    for (const c of devProfile?.['merge-gate'] ?? []) {
+      const norm = normalizeVerificationCommand(c, tempDir)
+      if (norm) aggregateFallback.push({ norm, source: 'profile:merge-gate' })
+    }
+    for (const item of aggregateFallback) pushEntry(item.norm, item.source, true)
+  }
+  if (byCmd.size === 0) {
+    const norm = normalizeVerificationCommand(readJsonSafe(join(repoRoot, 'package.json'))?.scripts?.test, tempDir)
+    if (norm) pushEntry(norm, 'package.json:test', false)
+  }
+  return [...byCmd.values()]
 }
 

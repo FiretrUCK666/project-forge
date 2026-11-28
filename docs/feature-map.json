@@ -153,7 +153,8 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#3-外部项目治理与跨代升级s1-s4",
@@ -223,7 +224,9 @@
         "scripts/dev/fixtures-onboarding.mjs",
         "scripts/dev/fixtures-iterate-evolution.mjs",
         "scripts/dev/fixtures-skills-hooks.mjs",
-        "scripts/dev/fixtures-core.mjs"
+        "scripts/dev/fixtures-core.mjs",
+        "scripts/dev/e2e-zip-harness.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#v3-账本三方融合abi-回滚与跨代自更新"
@@ -275,7 +278,8 @@
       "testRefs": [
         "scripts/dev/fixtures-contracts.mjs",
         "scripts/dev/fixtures-engine-hardening.mjs",
-        "scripts/dev/fixtures-doc-fill.mjs"
+        "scripts/dev/fixtures-doc-fill.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全"
@@ -355,7 +359,8 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#模块与目录职责",
@@ -603,7 +608,8 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#八个技能分工与确定性阻断点"
@@ -753,7 +759,8 @@
         "scripts/dev/injections-data-triage-parity.mjs",
         "scripts/dev/fixtures-multi-platform.mjs",
         "scripts/dev/injections-data-multi-platform.mjs",
-        "scripts/dev/live-forge-e2e.mjs"
+        "scripts/dev/live-forge-e2e.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -843,7 +850,8 @@
         "scripts/dev/fixtures-visual-layout-v2.mjs",
         "scripts/dev/injections-data-visual-layout-v2.mjs",
         "scripts/dev/fixtures-studio-ux.mjs",
-        "scripts/dev/injections-data-studio-ux.mjs"
+        "scripts/dev/injections-data-studio-ux.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#7-三层常青文档与工作区安全",
@@ -1014,7 +1022,8 @@
         "scripts/dev/fixtures-w5-blind-fixes.mjs",
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
-        "scripts/dev/injections-data-issue-quality.mjs"
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱三先最小运行复现poc-first与整类根治tier-1--tier-2",
@@ -1086,7 +1095,9 @@
         "scripts/dev/fixtures-visual-layout-v2.mjs",
         "scripts/dev/injections-data-visual-layout-v2.mjs",
         "scripts/dev/fixtures-studio-ux.mjs",
-        "scripts/dev/injections-data-studio-ux.mjs"
+        "scripts/dev/injections-data-studio-ux.mjs",
+        "scripts/dev/fixtures-iterate-hardening.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"
@@ -1412,7 +1423,8 @@
         }
       ],
       "testRefs": [
-        "scripts/dev/fixtures-equip.mjs"
+        "scripts/dev/fixtures-equip.mjs",
+        "scripts/dev/fixtures-iterate-hotspots.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"

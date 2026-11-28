@@ -268,7 +268,7 @@ export async function handleRelease(opts, roots) {
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, null, { cwd: roots.mainRoot, providerHint: ledger.providerId })
   const { targetRepo } = targetCtx
 
   const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || targetCtx.capabilities?.api !== true || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
@@ -380,7 +380,7 @@ export async function handleClaim(opts, roots) {
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, null, { cwd: roots.mainRoot, providerHint: ledger.providerId })
   const { targetRepo } = targetCtx
 
   const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || targetCtx.capabilities?.api !== true || (ledger.linkedIssues ?? []).length === 0 || !targetRepo

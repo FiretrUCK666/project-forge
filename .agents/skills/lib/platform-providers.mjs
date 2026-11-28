@@ -471,7 +471,7 @@ export function createProviderClient({
     const finalState = hasState ? { ...statePayload, writeBackFingerprint: statePayload.writeBackFingerprint ?? fp } : {}
     const fullBody = hasState ? `${normBody}\n\n<!-- pf-state:${JSON.stringify(finalState)} -->` : normBody
     if (deduplicate && fp) {
-      const cacheKey = `${pid}:${slug}#${num}#${fp}`
+      const cacheKey = `${pid}:${slug}:${isPr ? 'pr' : 'issue'}#${num}#${fp}`
       if (seenFingerprints.has(cacheKey)) return { ok: true, deduplicated: true, skipped: true, writeBackFingerprint: fp }
       const candidate = Array.isArray(existingComments) ? { ok: true, comments: existingComments } : await listCommentsImpl({ repo: slug, number: num, isPr })
       const hit = candidate?.ok ? candidate.comments.find((c) => commentMatchesFp(c, fp)) : null
@@ -483,7 +483,7 @@ export function createProviderClient({
     const path = isGitLabLike ? `${basePathOf(slug)}/${isPr ? 'merge_requests' : 'issues'}/${num}/notes` : `${basePathOf(slug)}/issues/${num}/comments`
     const res = await apiCall('POST', path, { body: { body: fullBody } })
     if (!res.ok) return { ok: false, status: res.status, error: errOf(res, 'post-comment-failed') }
-    if (fp) seenFingerprints.add(`${pid}:${slug}#${num}#${fp}`)
+    if (fp) seenFingerprints.add(`${pid}:${slug}:${isPr ? 'pr' : 'issue'}#${num}#${fp}`)
     return {
       ok: true,
       id: res.data?.id ?? null,

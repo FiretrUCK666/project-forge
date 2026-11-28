@@ -109,7 +109,7 @@ async function closeIssuesStructured({
 }) {
   const role = state.identity.role
   const providerId = state.identity.providerId ?? 'none'
-  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: roots.mainRoot, providerHint: providerId })
   const { targetRepo } = targetCtx
   const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && targetCtx.capabilities?.issues === true && Boolean(targetRepo)
   const ghProbe = useRemoteGh
@@ -289,7 +289,7 @@ export async function createIssueForStart({
     process.stderr.write(`BLOCKED_CREATE_ISSUE_ROLE: --create-issue 仅支持 maintainer、local-only 或 generic-git 创建新工单（当前 role=${role}）。\n`)
     return { exitCode: EXIT.FACT, blocked: true }
   }
-  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: roots.mainRoot, providerHint: providerId })
   const { targetRepo } = targetCtx
   const useRemoteGh = role === 'maintainer' && targetCtx.capabilities?.issues === true
   if (useRemoteGh && !targetRepo) {
@@ -365,7 +365,7 @@ export async function handleIssue(opts, roots) {
   })
   const role = state.identity.role
   const providerId = state.identity.providerId ?? 'none'
-  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: roots.mainRoot, providerHint: providerId })
   const { targetRepo } = targetCtx
   const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && targetCtx.capabilities?.issues === true && Boolean(targetRepo)
 
@@ -609,7 +609,7 @@ export async function handleMilestone(opts, roots) {
   })
   const role = state.identity.role
   const providerId = state.identity.providerId ?? 'none'
-  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: roots.mainRoot, providerHint: providerId })
   const { targetRepo } = targetCtx
   const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && targetCtx.capabilities?.milestones === true && Boolean(targetRepo)
 
@@ -663,26 +663,30 @@ export async function handleMilestone(opts, roots) {
     if (!msRaw) throw new Error('milestone assign 需要传入 --milestone <编号|标题|URL>')
     const msId = await resolveMilestoneId(backend, targetRepo, msRaw)
     const issueNums = parseIssueNumbers([opts.issue, opts.issues])
-    const targetNums = [...issueNums]
-    if (opts.pr !== undefined && Number(opts.pr) > 0) targetNums.push(Number(opts.pr))
+    const targets = issueNums.map((n) => ({ number: n, isPr: false }))
+    if (opts.pr !== undefined && Number(opts.pr) > 0) targets.push({ number: Number(opts.pr), isPr: true })
     let taskCtx = null
-    if (opts.task || targetNums.length === 0) {
+    if (opts.task || targets.length === 0) {
       try { taskCtx = await resolveTaskContext(roots, opts) } catch { taskCtx = null }
-      if (taskCtx && targetNums.length === 0) {
-        for (const n of taskCtx.ledger.linkedIssues ?? []) if (!targetNums.includes(n)) targetNums.push(n)
-        if (taskCtx.ledger.prNumber && !targetNums.includes(taskCtx.ledger.prNumber)) targetNums.push(taskCtx.ledger.prNumber)
+      if (taskCtx && targets.length === 0) {
+        for (const n of taskCtx.ledger.linkedIssues ?? []) {
+          if (!targets.some((t) => !t.isPr && t.number === n)) targets.push({ number: n, isPr: false })
+        }
+        if (taskCtx.ledger.prNumber && !targets.some((t) => t.isPr && t.number === taskCtx.ledger.prNumber)) {
+          targets.push({ number: taskCtx.ledger.prNumber, isPr: true })
+        }
       }
     }
-    if (targetNums.length === 0) throw new Error('milestone assign 需要传入 --issue <N>、--pr <N> 或关联 --task <taskId>')
+    if (targets.length === 0) throw new Error('milestone assign 需要传入 --issue <N>、--pr <N> 或关联 --task <taskId>')
     const results = []
-    for (const num of targetNums) {
-      const r = await backend.assignMilestone({ repo: targetRepo, number: num, milestone: msId })
+    for (const target of targets) {
+      const r = await backend.assignMilestone({ repo: targetRepo, number: target.number, milestone: msId, ...(target.isPr ? { isPr: true } : {}) })
       if (r.delegated) {
         if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MILESTONE_DELEGATED', ...r }, null, 2)}\n`)
         else process.stdout.write(`已生成指派里程碑代理载荷：${JSON.stringify(r.jsonPayload)}\n`)
         return { exitCode: EXIT.HUMAN }
       }
-      if (!r.ok) throw new Error(`指派里程碑至 #${num} 失败：${r.error ?? 'unknown'}`)
+      if (!r.ok) throw new Error(`指派里程碑至 ${target.isPr ? 'PR/MR ' : ''}#${target.number} 失败：${r.error ?? 'unknown'}`)
       results.push(r)
     }
     if (taskCtx) {
@@ -690,7 +694,7 @@ export async function handleMilestone(opts, roots) {
     }
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, milestone: msId, results }, null, 2)}\n`)
     else {
-      process.stdout.write(`已将 ${targetNums.map((n) => `#${n}`).join(', ')} 归入里程碑 ${msId}。\n`)
+      process.stdout.write(`已将 ${targets.map((t) => `${t.isPr ? 'PR #' : '#'}${t.number}`).join(', ')} 归入里程碑 ${msId}。\n`)
       for (const step of results[0]?.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
     }
     return { exitCode: EXIT.OK }

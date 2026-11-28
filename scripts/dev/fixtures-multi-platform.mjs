@@ -22,8 +22,10 @@ import { hydratePrTemplateBody, resolveReadablePrTitle } from '../../kit/skills/
 import { createTaskBackend } from '../../kit/skills/lib/task-backend.mjs'
 import { destroyTaskArtifactsDir, isSafeTaskArtifactPath, resolveFlowArtifactsRoot, resolveTaskArtifactsDir, stageTaskArtifact } from '../../kit/skills/lib/verify-state.mjs'
 import { handleAbort, handleCleanup } from '../../kit/skills/dev-flow/scripts/flow-cleanup.mjs'
-import { findMatchingDocStrict } from '../../kit/skills/dev-flow/scripts/flow-context.mjs'
+import { buildTargetRepoContext, findMatchingDocStrict } from '../../kit/skills/dev-flow/scripts/flow-context.mjs'
 import { inspectWorkspace } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
+import { handleMilestone } from '../../kit/skills/dev-flow/scripts/flow-issues.mjs'
+import { handleNext } from '../../kit/skills/dev-flow/scripts/flow-next.mjs'
 import { parseAcceptanceCriteria } from '../../kit/skills/dev-review/scripts/review-gates.mjs'
 import { gitInit, rmTree, tmpProject } from './fixtures-helpers.mjs'
 import { alignCloneUrlScheme, buildHttpsAuthGitArgs, cloneAndPrepareRepo, runLiveForgeE2e } from './live-forge-e2e.mjs'
@@ -714,15 +716,16 @@ export function registerMultiPlatformCases(cases) {
       const idRes = resolveWorkspaceIdentity({ cwd: dirWithAgents, remoteUrls: { origin: sshRemote }, gitIdentity: { name: 'alice', email: 'alice@example.com' } })
       const topo = parseRemotesTopology(`origin\t${sshRemote} (fetch)\n`, { providerHint: 'gitlab', sshHostMap: false })
       const insp = await inspectWorkspace(dirWithAgents, { env: {} })
-      if (probed.env.providerId !== 'gitlab' || idRes.providerId !== 'gitlab' || topo.providerId !== 'gitlab' || insp.remotesTopology?.[0]?.providerId !== 'gitlab' || insp.identity?.providerId !== 'gitlab') {
-        return `C2 拓扑/探测透传失败：${JSON.stringify({ p: probed.env.providerId, id: idRes.providerId, topo: topo.providerId, inspTopo: insp.remotesTopology?.[0]?.providerId, inspId: insp.identity?.providerId })}`
+      const ctxStale = buildTargetRepoContext('maintainer', { origin: sshRemote }, null, null, { cwd: dirWithAgents, providerHint: 'generic-git' })
+      if (probed.env.providerId !== 'gitlab' || idRes.providerId !== 'gitlab' || topo.providerId !== 'gitlab' || insp.remotesTopology?.[0]?.providerId !== 'gitlab' || insp.identity?.providerId !== 'gitlab' || ctxStale.providerId !== 'gitlab' || !ctxStale.capabilities?.milestones) {
+        return `C2 拓扑/探测透传失败：${JSON.stringify({ p: probed.env.providerId, id: idRes.providerId, topo: topo.providerId, inspTopo: insp.remotesTopology?.[0]?.providerId, inspId: insp.identity?.providerId, ctxStale: ctxStale.providerId })}`
       }
       return true
     } finally { rmTree(dirWithAgents); rmTree(dirPlain) }
   }])
 
   cases.push(['Issue #235 C3/C4：GitLab 10.x 标签 400 回退、里程碑全局 id 与 isPr=true 零泄漏至 /issues', async () => {
-    const state = { issueLabels: ['old'], mrLabels: ['in-review'], hits: [], closedMsId: null, assignedMsId: null }
+    const state = { issueLabels: ['old'], mrLabels: ['in-review'], hits: [], closedMsId: null, assignedMsId: null, msTargets: [] }
     const mock = await startMockForgeServer(({ req, res, json }) => {
       const p = new URL(req.url, 'http://127.0.0.1').pathname
       state.hits.push(`${req.method} ${p}`)
@@ -731,7 +734,7 @@ export function registerMultiPlatformCases(cases) {
       if (req.method === 'PUT' && p.endsWith('/milestones/42')) { state.closedMsId = 42; return res.end(JSON.stringify({ id: 42, iid: 1, state: 'closed' })) }
       if (req.method === 'GET' && p.endsWith('/labels')) return res.end(JSON.stringify([]))
       if (req.method === 'GET' && /\/(issues|merge_requests)\/\d+$/.test(p)) {
-        return res.end(JSON.stringify({ iid: 5, labels: p.includes('/merge_requests/') ? state.mrLabels : state.issueLabels }))
+        return res.end(JSON.stringify({ iid: 5, state: 'opened', labels: p.includes('/merge_requests/') ? state.mrLabels : state.issueLabels }))
       }
       if (req.method === 'PUT' && /\/(issues|merge_requests)\/\d+$/.test(p)) {
         const isMr = p.includes('/merge_requests/')
@@ -740,16 +743,19 @@ export function registerMultiPlatformCases(cases) {
           const next = String(json.labels).split(',').map((s) => s.trim()).filter(Boolean)
           if (isMr) state.mrLabels = next; else state.issueLabels = next
         }
-        if ('milestone_id' in (json ?? {})) state.assignedMsId = json.milestone_id
+        if ('milestone_id' in (json ?? {})) { state.assignedMsId = json.milestone_id; state.msTargets.push(`${isMr ? 'mr' : 'issue'}:${p.split('/').pop()}=${json.milestone_id}`) }
         return res.end(JSON.stringify({ iid: 5, labels: isMr ? state.mrLabels : state.issueLabels }))
       }
       if (p.endsWith('/notes')) return res.end(JSON.stringify(req.method === 'POST' ? { id: 9, body: json?.body } : []))
       res.statusCode = 404
       res.end(JSON.stringify({ message: 'not found' }))
     })
+    const glDir = tmpProject({ 'README.md': '# gl\n', 'AGENTS.md': '# Contract\n- `platform-provider`: `gitlab`\n' })
     try {
+      gitInit(glDir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'ssh://git@git.custom.example:10022/grp/app.git' })
+      const glRoots = { isGit: true, mainRoot: glDir, workTreeRoot: glDir, gitDir: join(glDir, '.git'), isWorktree: false }
       const client = createProviderClient({ providerId: 'gitlab', apiBaseUrl: `${mock.baseUrl}/api/v4`, repoSlug: 'grp/app', token: 'gl-tok' })
-      const backend = createTaskBackend({ role: 'maintainer', providerId: 'gitlab', targetRepo: 'grp/app', client, mainRoot: tmpdir() })
+      const backend = createTaskBackend({ role: 'maintainer', providerId: 'gitlab', targetRepo: 'grp/app', client, mainRoot: glDir })
       const ms = await backend.createMilestone({ title: 'v1.0' })
       const msA = await backend.assignMilestone({ number: 5, milestone: ms.number })
       const msC = await backend.closeMilestone({ number: ms.number })
@@ -771,7 +777,23 @@ export function registerMultiPlatformCases(cases) {
       if (!prCmt.ok || !prSync.ok || !prNotes.ok || leakedIssue.length > 0 || mrHits.length < 3 || !state.mrLabels.includes('reviewed') || state.mrLabels.includes('in-review')) {
         return `C4 isPr=true 路由泄漏至 /issues：${JSON.stringify({ prCmt, prSync, prNotes, leakedIssue, hits: state.hits, mrLabels: state.mrLabels })}`
       }
+      state.hits = []; state.msTargets = []
+      const cIss1 = await backend.postComment({ number: 1, isPr: false, body: 'same', statePayload: { phase: 'init' } })
+      const cMr1 = await backend.postComment({ number: 1, isPr: true, body: 'same', statePayload: { phase: 'init' } })
+      if (cIss1.deduplicated || cMr1.deduplicated || !state.hits.includes('POST /api/v4/projects/grp%2Fapp/issues/1/notes') || !state.hits.includes('POST /api/v4/projects/grp%2Fapp/merge_requests/1/notes')) {
+        return `MF-1 同 iid=1 Issue/MR 去重冲突：${JSON.stringify({ cIss1, cMr1, hits: state.hits })}`
+      }
+      await withQuietIo(() => handleMilestone({ action: 'assign', milestone: '42', issue: '1', pr: '1', _ghClient: client, json: true }, glRoots))
+      if (!state.msTargets.includes('issue:1=42') || !state.msTargets.includes('mr:1=42')) {
+        return `MF-2a milestone assign 未分开路由 Issue/MR #1：${JSON.stringify(state.msTargets)}`
+      }
+      writeTaskLedger(glDir, createDefaultLedger({ taskId: 'gl-shared-iid', slug: 'gl-shared-iid', caseType: 2, tier: 1, isolation: 'branch', role: 'maintainer', providerId: 'gitlab', branch: 'main', baseBranch: 'main', linkedIssues: [1], prNumber: 1, status: 'submitted' }))
+      state.hits = []
+      await withQuietIo(() => handleNext({ task: 'gl-shared-iid', 'probe-auth': true, _ghClient: client, json: true }, glRoots))
+      if (!state.hits.includes('GET /api/v4/projects/grp%2Fapp/merge_requests/1/notes') || !state.hits.includes('GET /api/v4/projects/grp%2Fapp/issues/1/notes')) {
+        return `MF-2b flow-next 未同时拉取 Issue/MR #1 评论：${JSON.stringify(state.hits)}`
+      }
       return true
-    } finally { await mock.close() }
+    } finally { await mock.close(); rmTree(glDir) }
   }])
 }

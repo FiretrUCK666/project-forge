@@ -167,7 +167,7 @@ async function createDisposableRepo({ providerId, apiBaseUrl, token, repoName, n
       id: res.data?.full_name,
     }
   }
-  if (providerId === 'gitlab') {
+  if (providerId === 'gitlab' || providerId === 'gitcode') {
     const res = await authReq(providerId, apiBaseUrl, '/projects', 'POST', token, {
       name: repoName,
       path: repoName,
@@ -175,7 +175,7 @@ async function createDisposableRepo({ providerId, apiBaseUrl, token, repoName, n
       initialize_with_readme: true,
       ...(namespace && /^\d+$/.test(namespace) ? { namespace_id: Number(namespace) } : {}),
     })
-    if (!res.ok) throw new Error(`创建 GitLab 临时私仓失败 (HTTP ${res.status}): ${res.text}`)
+    if (!res.ok) throw new Error(`创建 ${providerId} 临时私仓失败 (HTTP ${res.status}): ${res.text}`)
     return {
       slug: res.data?.path_with_namespace,
       cloneUrl: res.data?.http_url_to_repo,

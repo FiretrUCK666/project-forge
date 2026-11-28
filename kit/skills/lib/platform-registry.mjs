@@ -520,7 +520,9 @@ export function resolveRemoteTarget(remoteUrls = {}, {
   const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
   const effectiveAgentsRoot = cwd || repoRoot || null
   const effectiveAgentsText = agentsText ?? (effectiveAgentsRoot ? (readTextSafe(join(effectiveAgentsRoot, 'AGENTS.md')) ?? null) : null)
-  const effectiveProviderHint = (providerHint || null)
+  const rawProviderHint = typeof providerHint === 'string' ? providerHint.trim().toLowerCase() : ''
+  const normalizedProviderHint = rawProviderHint && rawProviderHint !== 'none' && rawProviderHint !== 'generic-git' ? rawProviderHint : null
+  const effectiveProviderHint = normalizedProviderHint
     ?? env?.PF_PLATFORM_PROVIDER
     ?? extractAgentsHint(effectiveAgentsText, 'platform-provider')
     ?? null

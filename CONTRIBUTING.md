@@ -1,0 +1,182 @@
+# 贡献指南
+
+欢迎提问题、报缺陷、提改动。大部分访客只是想问个问题，先看「提问与反馈」；想改代码再看后面。
+
+这个仓库是它所教那套规范的**第一个用户**：`templates/` 里写什么结构，它自己就必须有什么结构。
+所以这里的规矩比一般项目硬一些——凡是要求贡献者做到的，维护者自己先做到。
+
+## 提问与反馈
+
+遇到问题、想要新能力、发现文档不清楚，都请到本仓库的
+[Issue 区](https://github.com/FiretrUCK666/project-forge/issues)提出。请先搜索已有的 Issue，
+避免重复。
+
+**报缺陷用仓库里的[缺陷报告模板](.github/ISSUE_TEMPLATE/bug_report.md)**：一个能被定位的报告
+该有的东西，那个模板会逐项问出来。
+
+**想要新能力、或者觉得某处行为该改，用[需求模板](.github/ISSUE_TEMPLATE/feature_request.md)**：
+它先问你要解决什么问题，再问改成什么样。只写「加一个 X 功能」的需求，维护者仍然不知道做成
+什么样算完成，来回一轮是必然的。
+
+**要求只写在模板里，本文不另抄一份**——两份清单各自维护，改一边就会漂移，而漂移的那一边总是
+没人读的那一边。
+
+如果问题只在特定条件下出现，把那个条件写出来——它往往就是根因所在。
+
+## 提出改动
+
+1. **较大改动建议先开一个 Issue** 说明你想改什么、为什么。
+
+   **小修与文档修正直接提拉取请求就行。没有关联 Issue 不是退回的理由**——只要提案说清了
+   解决什么问题、改了什么、怎么验证，它就是有效贡献。要求先开 Issue 只在维护者确实需要
+   复现信息时才成立，那是提问，不是门槛。
+2. 按工作区真实身份走对应协作轨道（由 `survey.mjs` 双轴五态判定区分 `local-only` / `maintainer` / `contributor-fork` / `clone-readonly` / `undetermined`），在分支上开发并开拉取请求：
+   - **没有本仓库写权限**（大多数外部贡献者，`contributor-fork` / `clone-readonly`）：先 **fork** 到你自己的账号，克隆或切换 `origin` 到 fork，在分支上开发，推回你自己的 fork，再从那个分支开拉取请求（不得调用合并，PR 仍开放时不要删除远端 fork 分支）；
+   - **有写权限（同源所有者与团队/组织多位写权限协作者，`maintainer`）**：公开与私有仓均直接从同源 `main` 拉出个人独立分支并向正本开拉取请求（无需 Fork），分支名沿用既有习惯（`fix/xxx`、`feat/xxx`、`docs/xxx`）；尚无本地历史提交的新成员先跑 `survey.mjs --probe-auth`（或 `flow.mjs inspect --probe-auth`）确认写权限；开工经 `flow.mjs claim` 写清人+分支，接手同事未合分支须在 Issue 与 PR 双写「接管」评论；PR 前同步默认分支最新提交，遵守 `CODEOWNERS` 与 Merge Queue（若启用），严禁直推受保护主干；团队内坚持另一位协作者或独立上下文执行 `reviewerId !== implementerId` 互审（保守仓库可在 `AGENTS.md`「## 取舍」设 `merge-authority: human`）；
+   - **只改文字**（错别字、文档表述）：在网页上点开文件、点铅笔图标改完提交即可，GitHub 会
+     替你建好分支与拉取请求——**这条路跑不了下面的提交前门禁，别用它改代码**。
+   - **涉及规格或跨模块改动时先定文档**：遵循五档分流与 `docs/` 四层体系（常青架构 `docs/TDD.md`、产品基线 `docs/prd/`、冻结规范 `docs/specs/`、任务单 `docs/todo/`，Mermaid 节点单行 `<= 16` / 菱形与边 `<= 12`）；任务完成合流前需在同一个分支上完成 `[x]` 勾选并经 `flow.mjs finalize` 将关联 `PRD`/`SPEC`/`Todo` 成对归档进 `docs/archive/{prd,specs,todo}/`。
+3. 跑完提交前门禁（见下），全绿再提交；发 PR、写评论或建 Issue 若含非 ASCII 内容，先写入系统临时目录 UTF-8 文件再通过 `--body-file` 传入，防止命令行编码损坏。
+4. 提交拉取请求，按仓库里的[提案模板](.github/pull_request_template.md)填写。
+   最重要的一栏是**怎么验证的**：贴实际跑过的命令与结果，不要只写「门禁通过」。
+   审查的人不会替你重跑一遍，他们看的就是这一栏。
+
+第一次提拉取请求、或不确定 fork 怎么用，看 GitHub 官方的
+[参与项目](https://docs.github.com/zh/get-started/exploring-projects-on-github/contributing-to-a-project)。
+fork 落后于正本时，在自己 fork 的页面上点 **Sync fork** 更新即可。
+
+**不要往本仓库推主干，也不要打版本标签或发布制品**——那些由维护者执行。主干开了保护（开关 A：`equip-ci.mjs --protect-branch`）时，**有写权限也要走拉取请求**；本地可运行 `node scripts/equip.mjs . --with-hooks` 装配 `.githooks/pre-push` 防误推主干护栏（遇 `.husky/` 或 `lefthook` 会自动 `preserve`）。另外请注意别把改动留在自己的 fork 主干上就算了事：那样维护者看不到，**必须开拉取请求**才会被处理。
+
+**维护者也不会随手发版。** 一次改动合进主干就是终点；打标签、建发布页要单独决定。
+所以你的改动合了之后，不必追问「什么时候发版」——它会在某一次真正发版时出现在说明里。
+
+**合并由独立审查收尾，不由你我自己拍。** 审查通过之后，由那个审查者直接合并——它拿到了冻结的
+验收标准、你的 diff、门禁原始输出，并且亲手做过一次故障注入。人的手不参与代码判断：把合并递给人，
+实际发生的是「点一下同意」，只增加等待，不增加判断。
+
+**唯一会转给人点头的，是弱化门禁的改动**：删测试、放宽断言、加跳过标记、把检查改成警告、改松 CI。
+别的改动做错了，下一次门禁会红；这一类做错了，以后每一次都不会红，而它看起来只是「构建绿了」。
+
+**维护者自己也走同一条路。** 有写权限不等于直接推主干：同样是拉分支 → 门禁全绿 → 推分支 →
+开拉取请求 → 独立审查 → 合并。判据是**能不能撤回**：推分支、开提案都能撤回，属于日常；
+发版撤不回来，要单独决定。
+
+三条硬规矩：
+
+- **一次实质变更一个提交**，提交信息说清「改了什么、为什么」；
+- **不弱化门禁一票否决**：删测试、放宽断言、加跳过标记、把检查改成警告——这类改动不管是谁提的，
+  都要维护者明确点头；
+- **高风险改动要有一轮独立审查**：判定逻辑（`scripts/lib/`）、门禁本身
+  （`scripts/dev/preflight.mjs`、`.github/workflows/`）、包边界（`.gitattributes`、
+  `REPO_ONLY_*`）、`templates/`、`SKILL.md`。改动落在这几处时，在提案里写清审查来自哪个独立
+  上下文，以及故障注入的实际输出。
+- **审查结论按「冻结的验收标准逐条过没过」给**，不给「整体不错」这类评价。有效意见指向具体标准，
+  感受型意见是讨论不是审查；拿它当阻塞理由，循环永远收敛不了。判据与止损见
+  [`references/collaboration.md`](references/collaboration.md) 的「七、审查循环」。
+
+## 开发环境
+
+不装任何东西，只要 **Node 18 以上**。没有构建步骤，没有依赖要安装，也不引第三方包。
+
+```sh
+git clone https://github.com/FiretrUCK666/project-forge.git
+cd project-forge
+node scripts/dev/preflight.mjs
+```
+
+`git` 可选：没有它，涉及版本控制的检查会如实报告并跳过，不会假装成功。
+
+顺手可以跑的几条（只读，只出报告或只校验一致性）：
+
+```sh
+node scripts/survey.mjs . --markdown    # 看这个仓库自己长什么样
+node scripts/review.mjs .               # 自己过一遍交付体检
+node scripts/equip.mjs . --check        # 核对 kit/skills 与本仓 .agents/skills 一致
+```
+
+## 提交前门禁
+
+改完必须**全绿才算完成**。核心五条与 `AGENTS.md` 的「环境与构建验证」一节一致，再加上缺口覆盖与内置 Skill 同步检查：
+
+```sh
+node scripts/dev/preflight.mjs                              # 结构 + 引用 + 模板 + 自举 + 端到端冒烟
+node scripts/dev/gap-coverage.mjs                           # survey 缺口与 review 检查项 100% 配对
+node scripts/dev/fixtures.mjs                               # 行为断言：造临时项目实跑，正反双向
+node scripts/dev/bench.mjs                                  # 核心命令与快照性能基准
+node scripts/dev/e2e-zip-harness.mjs                        # 真包解压 E2E 沙盒全链路实证
+node scripts/dev/verify-injections.mjs --jobs 4             # 故障注入门禁防空转复验（并发分片）
+node scripts/compose-agents.mjs . --check                   # 本仓库契约：标记成对、无未填占位、体积 <= 30KB
+node scripts/equip.mjs . --check                            # kit/skills 与本仓 .agents/skills 字节级一致
+node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的目录同步
+node scripts/review.mjs .                                   # 交付体检，预期 0 个「缺」
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
+```
+
+用户包内容要真跑一次导出再核对（用完删掉 `package-list.txt`）：
+
+```sh
+git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt
+```
+
+**动了判定逻辑时，还要再跑一次故障注入复验**：
+
+```sh
+node scripts/dev/verify-injections.mjs   # 逐条拆掉判据，确认对应断言真的变红，再还原确认变绿
+```
+
+它和前面几条不是一回事。前面几条回答「现在是不是绿的」，这一条回答**「绿是不是真的」**——
+测试全绿有两种可能：代码对了，或者测试什么都没测。只有亲眼看到它红过，才排除后一种。
+
+**它绿了才算改完。** 只改文档也要跑——引用断了它才会说话。拿不出实际运行通过的输出，
+不得声称「已验证」。
+
+## 硬性规范
+
+从 `AGENTS.md` 摘几条对贡献者同样成立的。**完整规范以 `AGENTS.md` 为准**，这里只列最关键的
+几条，不重复维护一份：
+
+- **零第三方依赖**：`scripts/` 只用 `node:` 内置模块，只用 JavaScript，不加第二个运行时。
+  这条由 `preflight` 扫磁盘检查。
+- **入口不复述细节**：`SKILL.md` 只写「什么时候读哪一份」，判据全在 `references/`。
+  两处都写机制，一定会有一处先过期。
+- **不写死取值**：账号、路径、版本号、仓库地址、默认分支一律写「从哪里取」。
+- **单一真相源**：标记语法只在 `scripts/lib/protocol.mjs`、条件与变量只在
+  `scripts/lib/template.mjs`、报告排版只在 `scripts/lib/render.mjs`。同一件事两个实现，
+  迟早给出两个答案。
+- **幂等**：所有脚本重复执行结果相同。判据是第二遍的字节与第一遍相同。
+- **只读先行**：勘察完成之前不写任何文件。这条是这个 skill 的第一硬不变量，它自己必须先做到。
+- **双向证伪**：新增或修改任何勘察 / 门禁判定逻辑时，同一次提交在 `scripts/dev/fixtures.mjs`
+  里补齐「该命中的正面用例」与「易误判的反面用例」。只测正面等于没测。
+- **内置 Skill 100% 目录自包含与双层同构**：`kit/skills/**` 复制到目标项目的 `.agents/skills/**` 后独立运行，
+  **严禁**在 `kit/skills/` 中 `import` `kit/skills/` 之外的仓库模块；修改 `kit/skills/**` 后必须通过
+  `node scripts/equip.mjs .` 同步更新本仓库 `.agents/skills/` 并在同一次提交入库。
+- **`AGENTS.md` 硬上限与 v3 无损保护**：根 `AGENTS.md` 建议 `< 24KB`、硬上限 `30KB`（30720 字节）；刷新受管区间与装配套件时借助
+  `.agents/skills/.pf-manifest.json`（v3 账本，兼容 v1/v2/v3，含三方合并与扩展槽）保护未标 `customized` 的用户手改与删除墓碑不被静默覆盖。
+- **禁 emoji**：代码、注释、文档、提交信息一律禁止 emoji，条目符号用 `-`。
+
+### 两层结构，互不越界
+
+改动前先认清自己在动哪一层：
+
+| 层 | 位置 | 约束 |
+| --- | --- | --- |
+| 产品 | `SKILL.md`、`references/`、`templates/`、`kit/skills/`、`scripts/`（顶层与 `lib/`） | 必须对任何项目成立，**不许混进本仓库自己的方法论**，且只提 GitHub |
+| 自用 | `AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`docs/`、`.github/`、`.agents/`、`.gitattributes`、`.gitignore`、`scripts/dev/` | 只服务这个仓库，由 `.gitattributes` 排除出用户包 |
+
+把自用的东西写进 `templates/` 是最容易犯的错：那会让每个用户的每个项目都背上一套他并不
+需要的流程。这条分界也是 `preflight` 的同构核对所依赖的前提。
+
+## 提交信息
+
+一次实质变更一个提交，说清「改了什么、为什么」。用使用者能读懂的话写实际发生了什么，
+不要写只有内部人才认得出的缩写。
+
+**与项目既有历史风格保持一致，不混用多套格式**：这个仓库的提交沿用「类型: 说明」的约定式格式（如 `docs:`、`fix:`、`feat:`、`perf:`），不要混用第二套格式，也不用内部编号、任务代号或分支名充当说明。
+
+**禁用 emoji**（这是本仓库自己的规范，`preflight` 会扫）。
+
+提交信息是发版时那段「这一版改了什么、修了什么」的素材，所以它面向的读者是要不要升级的人。
+
+## 许可
+
+本项目使用 [MIT 许可证](LICENSE)。提交贡献即表示你同意以该许可证发布你的贡献。

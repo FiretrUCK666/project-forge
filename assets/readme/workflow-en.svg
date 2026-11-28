@@ -1,0 +1,222 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="490" viewBox="0 0 1200 490" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">project-forge — 4-Step Onboarding Flow</title>
+  <desc id="svg-desc">Read-only survey (survey.mjs), confirm scope &amp; keep custom files, pre-write .zip snapshot for rollback, audit &amp; handoff.</desc>
+
+  <defs>
+    <!-- Organic warm cotton paper speckles -->
+    <pattern id="paper-speck" width="160" height="160" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="24" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="64" cy="12" r="0.8" fill="#B5482A" fill-opacity="0.16"/>
+      <circle cx="118" cy="38" r="1.3" fill="#6F6758" fill-opacity="0.18"/>
+      <circle cx="42" cy="76" r="0.9" fill="#1B1E38" fill-opacity="0.14"/>
+      <circle cx="95" cy="92" r="1.2" fill="#8C8270" fill-opacity="0.24"/>
+      <circle cx="144" cy="74" r="0.8" fill="#B5482A" fill-opacity="0.15"/>
+      <circle cx="24" cy="132" r="1.4" fill="#7D7464" fill-opacity="0.2"/>
+      <circle cx="78" cy="146" r="0.9" fill="#1B1E38" fill-opacity="0.12"/>
+      <circle cx="132" cy="128" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="152" cy="150" r="0.7" fill="#6F6758" fill-opacity="0.16"/>
+    </pattern>
+
+    <!-- 45-degree Risograph halftone screens -->
+    <pattern id="ht-indigo" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#1B1E38" fill-opacity="0.52"/>
+    </pattern>
+    <pattern id="ht-indigo-dense" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="2.0" fill="#1B1E38" fill-opacity="0.76"/>
+    </pattern>
+    <pattern id="ht-red" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#D93829" fill-opacity="0.58"/>
+    </pattern>
+    <pattern id="ht-cobalt" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.75" fill="#1E4DD8" fill-opacity="0.48"/>
+    </pattern>
+    <pattern id="ht-ochre" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#DDA027" fill-opacity="0.62"/>
+    </pattern>
+    <pattern id="ht-cream" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="1.75" fill="#F5F1E8" fill-opacity="0.65"/>
+    </pattern>
+    <pattern id="blueprint-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#F5F1E8" stroke-opacity="0.18" stroke-width="0.8"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="490" fill="#F5F1E8"/>
+  <rect width="1200" height="490" fill="url(#paper-speck)"/>
+
+  <g id="connectors">
+    <line x1="292" y1="204" x2="348" y2="204" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="292" cy="204" r="5" fill="#1E4DD8"/>
+    <circle cx="348" cy="204" r="5" fill="#1E4DD8"/>
+
+    <line x1="572" y1="204" x2="628" y2="204" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="572" cy="204" r="5" fill="#1E4DD8"/>
+    <circle cx="628" cy="204" r="5" fill="#1E4DD8"/>
+
+    <line x1="852" y1="204" x2="908" y2="204" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="852" cy="204" r="5" fill="#1E4DD8"/>
+    <circle cx="908" cy="204" r="5" fill="#1E4DD8"/>
+  </g>
+
+  <!-- Stage 1 (cx=180, [98..262], y=[106..302], cy=204): Layered Dossier + Slim L-Square + Translucent Magnifying Loupe -->
+  <g id="stage-1">
+    <!-- Layered Blueprint Dossier -->
+    <rect x="126" y="138" width="114" height="164" fill="#1E4DD8"/>
+    <rect x="126" y="138" width="114" height="164" fill="url(#blueprint-grid)"/>
+    <rect x="114" y="122" width="116" height="166" fill="#F5F1E8" stroke="#1E4DD8" stroke-width="2.5"/>
+    <rect x="178" y="122" width="52" height="54" fill="url(#ht-indigo)"/>
+    <line x1="130" y1="154" x2="166" y2="154" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="130" y1="174" x2="182" y2="174" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="130" y1="194" x2="206" y2="194" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="130" y1="214" x2="196" y2="214" stroke="#1E4DD8" stroke-width="3"/>
+
+    <!-- Slim Ochre Drafting L-Square + Indigo Corner Bracket -->
+    <rect x="98" y="106" width="16" height="196" fill="#DDA027"/>
+    <rect x="98" y="106" width="136" height="16" fill="#DDA027"/>
+    <rect x="98" y="106" width="28" height="28" fill="#1B1E38"/>
+    <circle cx="112" cy="120" r="3.5" fill="#F5F1E8"/>
+
+    <!-- Translucent Magnifying Loupe within [98..262] -->
+    <g id="loupe">
+      <line x1="232" y1="254" x2="255.5" y2="277.5" stroke="#1B1E38" stroke-width="13" stroke-linecap="round"/>
+      <line x1="244" y1="266" x2="255.5" y2="277.5" stroke="#1E4DD8" stroke-width="13" stroke-linecap="round"/>
+      <circle cx="206" cy="228" r="40" fill="#1B1E38"/>
+      <circle cx="206" cy="228" r="34" fill="#1E4DD8"/>
+      <circle cx="206" cy="228" r="26" fill="#F5F1E8"/>
+      <circle cx="206" cy="228" r="26" fill="#DDA027" fill-opacity="0.72"/>
+      <path d="M 188 218 A 19 19 0 0 1 218 210" fill="none" stroke="#F5F1E8" stroke-width="3.5" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- Stage 2 (cx=460, [378..542], y=[106..302], cy=204): Calibration Grid + Checkmark -->
+  <g id="stage-2">
+    <!-- Outer bi-color ruler frame (164x196 centered at 460,204) -->
+    <rect x="378" y="106" width="164" height="196" fill="#1E4DD8"/>
+    <polygon points="460,106 542,106 542,302 460,302" fill="#DDA027"/>
+    <!-- Inner 4x4 grid backing -->
+    <rect x="400" y="128" width="120" height="152" fill="#F5F1E8"/>
+    <line x1="430" y1="128" x2="430" y2="280" stroke="#DDA027" stroke-width="3"/>
+    <line x1="460" y1="128" x2="460" y2="280" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="490" y1="128" x2="490" y2="280" stroke="#DDA027" stroke-width="3"/>
+    <line x1="400" y1="166" x2="520" y2="166" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="400" y1="204" x2="520" y2="204" stroke="#DDA027" stroke-width="3"/>
+    <line x1="400" y1="242" x2="520" y2="242" stroke="#DDA027" stroke-width="3"/>
+    <rect x="378" y="120" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="132" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="144" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="156" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="168" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="180" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="192" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="204" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="216" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="228" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="240" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="252" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="264" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="276" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="378" y="288" width="13" height="2.2" fill="#F5F1E8"/>
+    <!-- Bold Two-Tone Vermilion + Deep Indigo Checkmark -->
+    <polygon points="414,206 430,190 456,216 440,232" fill="#D93829"/>
+    <polygon points="440,232 522,148 538,164 456,248" fill="#1B1E38"/>
+    <polygon points="440,232 458,214 472,228 456,248" fill="#B8421B"/>
+  </g>
+
+  <!-- Stage 3 (cx=740, [658..822], y=[106..302], cy=204): Split Vermilion/Ochre Zipper Archive Capsule + Dashed Safety Rollback Arc -->
+  <g id="stage-3">
+    <!-- Overhead Dashed Safety Return Arc -->
+    <path d="M 832 106 C 804 52, 676 52, 648 112" fill="none" stroke="#D93829" stroke-width="3" stroke-dasharray="10 7"/>
+    <polygon points="642,122 656,112 643,106" fill="#D93829"/>
+
+    <!-- Split Capsule Body (rx=44) -->
+    <clipPath id="capsule-clip">
+      <rect x="658" y="106" width="164" height="196" rx="44"/>
+    </clipPath>
+    <g clip-path="url(#capsule-clip)">
+      <rect x="658" y="106" width="82" height="196" fill="#D93829"/>
+      <rect x="740" y="106" width="82" height="196" fill="#DDA027"/>
+      <rect x="658" y="218" width="82" height="84" fill="url(#ht-indigo)"/>
+      <rect x="658" y="106" width="164" height="26" fill="#1B1E38" fill-opacity="0.12"/>
+    </g>
+    <!-- Curved open upper zipper track + central teeth -->
+    <path d="M 658 140 L 710 140 Q 735 140 740 158" fill="none" stroke="#1B1E38" stroke-width="7"/>
+    <path d="M 822 140 L 770 140 Q 745 140 740 158" fill="none" stroke="#1B1E38" stroke-width="7"/>
+    <rect x="728" y="144" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="150" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="157" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="163" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="170" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="176" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="183" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="189" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="196" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="202" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="209" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="215" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="222" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="228" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="235" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="241" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="248" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="254" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="261" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="267" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="274" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="280" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="287" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="293" width="11" height="6" fill="#1B1E38"/>
+    <!-- Sculpted Zipper Pull -->
+    <rect x="729" y="148" width="22" height="22" rx="4" fill="#1B1E38"/>
+    <rect x="731" y="162" width="18" height="32" rx="5" fill="#DDA027" stroke="#1B1E38" stroke-width="3"/>
+    <rect x="737" y="174" width="6" height="12" rx="2" fill="#1B1E38"/>
+  </g>
+
+  <!-- Stage 4 (cx=1020, [938..1102], y=[106..302], cy=204): Cobalt Tabbed Folio + Plumb-Bob + Rosette Wax Seal -->
+  <g id="stage-4">
+    <!-- Folio Tabs and Main Cover -->
+    <rect x="1084" y="126" width="18" height="44" rx="4" fill="#1E4DD8"/>
+    <rect x="1084" y="182" width="18" height="44" rx="4" fill="#153499"/>
+    <rect x="938" y="106" width="146" height="196" rx="6" fill="#1E4DD8"/>
+    <rect x="938" y="106" width="22" height="196" rx="3" fill="url(#ht-indigo-dense)"/>
+    <rect x="946" y="112" width="122" height="6" fill="#F5F1E8"/>
+    <rect x="946" y="290" width="122" height="6" fill="#F5F1E8"/>
+
+    <!-- Plumb-Bob Hanging from Top Cord -->
+    <line x1="992" y1="74" x2="992" y2="126" stroke="#1B1E38" stroke-width="4"/>
+    <circle cx="992" cy="134" r="12" fill="#DDA027"/>
+    <polygon points="992,144 964,178 992,262" fill="#DDA027"/>
+    <polygon points="992,144 1020,178 992,262" fill="#1B1E38"/>
+    <line x1="964" y1="178" x2="1020" y2="178" stroke="#1E4DD8" stroke-width="2.5"/>
+
+    <!-- Scalloped Vermilion Rosette Wax Seal -->
+    <g transform="translate(1046, 246)">
+      <circle cx="0" cy="-24" r="9" fill="#D93829"/>
+      <circle cx="17" cy="-17" r="9" fill="#D93829"/>
+      <circle cx="24" cy="0" r="9" fill="#D93829"/>
+      <circle cx="17" cy="17" r="9" fill="#D93829"/>
+      <circle cx="0" cy="24" r="9" fill="#D93829"/>
+      <circle cx="-17" cy="17" r="9" fill="#D93829"/>
+      <circle cx="-24" cy="0" r="9" fill="#D93829"/>
+      <circle cx="-17" cy="-17" r="9" fill="#D93829"/>
+      <circle cx="0" cy="0" r="22" fill="#D93829"/>
+      <circle cx="0" cy="0" r="16" fill="none" stroke="#1B1E38" stroke-width="2.5"/>
+      <circle cx="0" cy="0" r="9" fill="#A82418"/>
+    </g>
+  </g>
+
+  <g id="stage-labels">
+    
+    <text x="180" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#1B1E38">Read-Only Survey</text>
+    <text x="180" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">survey.mjs</text>
+  
+    <text x="460" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#1B1E38">Confirm Scope</text>
+    <text x="460" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">Keep custom files</text>
+  
+    <text x="740" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#D93829">Pre-Write .zip</text>
+    <text x="740" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">Full rollback</text>
+  
+    <text x="1020" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#1B1E38">Audit &amp; Handoff</text>
+    <text x="1020" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">review · handoff</text>
+  
+  </g>
+</svg>

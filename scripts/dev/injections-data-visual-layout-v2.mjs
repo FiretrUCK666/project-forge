@@ -36,8 +36,8 @@ export const INJECTIONS_VISUAL_LAYOUT_V2 = [
     what: 'C7 visual-geometry-check: 放行 NODE_OVERLAP 检测导致节点重叠违例逃逸',
     file: 'kit/skills/lib/visual-geometry-check.mjs',
     alsoDropIn: ['.agents/skills/lib/visual-geometry-check.mjs'],
-    from: '      const area = computeOverlapArea(a, b, epsilon)\n      if (area > 0) {',
-    to: '      const area = computeOverlapArea(a, b, epsilon)\n      if (false && area > 0) {',
+    from: '      const area = computeOverlapArea(a.box, b.box, epsilon)\n      if (area > 0) {',
+    to: '      const area = computeOverlapArea(a.box, b.box, epsilon)\n      if (false && area > 0) {',
     expect: '[VisualLayoutV2-C7]',
   },
   {
@@ -45,8 +45,8 @@ export const INJECTIONS_VISUAL_LAYOUT_V2 = [
     what: 'C7 visual-geometry-check: 放行 EDGE_CROSSES_BOX 检测导致连线穿盒违例逃逸',
     file: 'kit/skills/lib/visual-geometry-check.mjs',
     alsoDropIn: ['.agents/skills/lib/visual-geometry-check.mjs'],
-    from: '        if (segmentIntersectsRectInterior(p1, p2, box, epsilon)) {',
-    to: '        if (false && segmentIntersectsRectInterior(p1, p2, box, epsilon)) {',
+    from: '        if (segmentIntersectsRectInterior(p1, p2, cand.box, epsilon)) {',
+    to: '        if (false && segmentIntersectsRectInterior(p1, p2, cand.box, epsilon)) {',
     expect: '[VisualLayoutV2-C7]',
   },
 ]

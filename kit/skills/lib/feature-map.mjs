@@ -27,6 +27,7 @@ import {
   verifyArchitectureMapHeader,
 } from './feature-map-graph.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
+import { splitCommandSegments, validateExecutableCommandShape } from './command-lex.mjs'
 import { isTestOrFixtureFile } from './static-gates.mjs'
 import {
   VALID_RISK_LEVELS,
@@ -94,13 +95,24 @@ const CORE_FEATURE_KEYS = new Set([
   'docAnchors', 'domain', 'dependsOn', 'actors', ...FORBIDDEN_TRACKED_KEYS,
 ])
 
+function sanitizeToolCommand(raw) {
+  if (!raw) return null
+  const text = String(raw).trim()
+  if (!text) return null
+  if (validateExecutableCommandShape(text, { allowNone: false }).ok) return text
+  for (const seg of splitCommandSegments(text)) {
+    if (validateExecutableCommandShape(seg, { allowNone: false }).ok) return seg
+  }
+  return null
+}
+
 export function sanitizeVerificationTool(tool) {
   const id = slugifyFeatureId(tool?.id ?? tool?.scriptPath ?? tool?.command ?? 'tool')
   const kindRaw = String(tool?.kind ?? (tool?.scriptPath ? 'script' : 'command')).trim().toLowerCase()
   const kind = VALID_TOOL_KINDS.includes(kindRaw) ? kindRaw : 'command'
   const riskRaw = String(tool?.riskLevel ?? 'medium').trim().toLowerCase()
   const riskLevel = VALID_RISK_LEVELS.includes(riskRaw) ? riskRaw : 'medium'
-  const command = tool?.command ? String(tool.command).trim() : null
+  const command = sanitizeToolCommand(tool?.command)
   const scriptPath = tool?.scriptPath ? normRelPath(tool.scriptPath) : null
   const triggerHints = uniqStrings(tool?.triggerHints)
   return { id, kind, command, scriptPath, riskLevel, triggerHints }
@@ -415,8 +427,7 @@ export function matchTestsForSourceFile(srcPath, testFiles = []) {
 }
 
 function isRunnableVerifyCommand(cmd) {
-  const s = String(cmd ?? '').trim()
-  return Boolean(s) && !/^(?:待补充|未配置|none\b)/i.test(s) && !/\(或\s+/.test(s)
+  return validateExecutableCommandShape(cmd, { allowNone: false }).ok
 }
 
 /** 从 repo-map 产出增量预填 `docs/feature-map.json`（默认只读，传 `{ write: true }` 才落盘）。 */

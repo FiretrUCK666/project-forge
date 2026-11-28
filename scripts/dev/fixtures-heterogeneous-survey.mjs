@@ -416,9 +416,11 @@ export function registerStageBOnboardingB4aCases(cases) {
         return `e2eCommands 未收集隔离的 e2e/webtest 命令：${JSON.stringify(sniffE2e.e2eCommands)}`
       }
       const sniffMulti = sniffLayeredCommands(multiCiDir, { kinds: ['node'] })
-      if (sniffMulti.ciCommands.test !== 'npm test && pytest'
-        || sniffMulti.ciVerifyCommands.filter((c) => c === 'npm test').length !== 1) {
-        return `多 workflow 验证命令未正确聚合去重：${JSON.stringify({ ci: sniffMulti.ciCommands, verify: sniffMulti.ciVerifyCommands })}`
+      if (sniffMulti.ciCommands.test !== 'npm test'
+        || sniffMulti.ciCommands.test.includes('&&')
+        || sniffMulti.ciVerifyCommands.filter((c) => c === 'npm test').length !== 1
+        || !sniffMulti.ciVerifyCommands.includes('pytest')) {
+        return `多 workflow 应取单步优先且绝不跨 workflow 拼接 &&，同时在 ciVerifyCommands 去重保留：${JSON.stringify({ ci: sniffMulti.ciCommands, verify: sniffMulti.ciVerifyCommands })}`
       }
       return true
     } finally {
@@ -426,6 +428,84 @@ export function registerStageBOnboardingB4aCases(cases) {
       rmTree(polyDir)
       rmTree(e2eDir)
       rmTree(multiCiDir)
+    }
+  }])
+
+  cases.push(['Slice1 C2/C8：多 workflow + jq 续行 + ${{ 过滤、verify-tools 零僵尸与 discoverDesignDocs 去重（正反双向）', async () => {
+    const { extractStructuredCiSteps } = await import('../../kit/skills/lib/profile-sniffer.mjs')
+    const { discoverDesignDocs } = await import('../../kit/skills/lib/profile.mjs')
+    const dir = tmpProject({
+      'README.md': '# c2-c8-demo\n\nMulti-workflow and design doc dedup test.\n',
+      'package.json': JSON.stringify({ name: 'c2-c8-demo', version: '1.0.0', scripts: { test: 'node -e "process.exit(0)"' } }),
+      'src/app.mjs': 'export const ok = 1\n',
+      'ARCHITECTURE.md': '# Architecture\n',
+      'docs/DESIGN.md': '# Design\n',
+      'docs/adr/001-record.md': '# ADR 001\n',
+      'docs/TDD.md': '# TDD\n',
+      '.github/workflows/ci-a.yml': [
+        'name: CI A',
+        'on: push',
+        'jobs:',
+        '  test:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - run: |',
+        '          jq ".version" \\',
+        '            package.json',
+        '      - run: echo "${{ github.sha }}" && npm test',
+        '      - run: |',
+        '          if [ -f package.json ]; then',
+        '            npm test',
+        '          fi',
+        '      - run: npm test',
+      ].join('\n'),
+      '.github/workflows/ci-b.yml': [
+        'name: CI B',
+        'on: push',
+        'jobs:',
+        '  py:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - run: pytest',
+        `      - run: pytest ${'--ignore=x '.repeat(40)}`,
+      ].join('\n'),
+    })
+    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@c2-fixture.dev' })
+    try {
+      const ciRes = extractStructuredCiSteps(dir)
+      if (ciRes.commands.test !== 'npm test' || ciRes.commands.test.includes('&&')) {
+        return `C2 extractStructuredCiSteps 误拼 && 或未取首条合法单步：${JSON.stringify(ciRes)}`
+      }
+      if (ciRes.steps.some((s) => s.cmd.includes('${{') || s.cmd === 'package.json' || s.cmd.includes('if [') || Buffer.byteLength(s.cmd, 'utf8') > 256)) {
+        return `C2 extractStructuredCiSteps 泄露了 \${{/jq 续行/控制流/超 256B 伪命令：${JSON.stringify(ciRes.steps)}`
+      }
+      const sur = await survey(dir)
+      if ((sur.commands.test ?? '').includes('&&') || (sur.commands.test ?? '').includes('${{')) {
+        return `C2 survey.commands.test 含非法拼接或表达式：${JSON.stringify(sur.commands)}`
+      }
+      const syncRes = await runAbsAsync('kit/skills/dev-verify-tools/scripts/verify-tools.mjs', ['sync', dir, '--json'])
+      if (syncRes.status !== 0) return `C2 verify-tools sync 失败：${syncRes.stderr || syncRes.stdout}`
+      const auditRes = await runAbsAsync('kit/skills/dev-verify-tools/scripts/verify-tools.mjs', ['audit', dir, '--json'])
+      if (auditRes.status !== 0) return `C2 verify-tools audit 失败：${auditRes.stderr || auditRes.stdout}`
+      const auditJson = JSON.parse(auditRes.stdout)
+      const missingScriptZombies = (auditJson.zombies ?? []).filter((z) => z.kind === 'missing-script')
+      if (missingScriptZombies.length > 0) {
+        return `C2 verify-tools audit 出现 missing-script zombie：${JSON.stringify(missingScriptZombies)}`
+      }
+
+      // C8 discoverDesignDocs 大小写去重且排除 docs/TDD.md
+      const docs = discoverDesignDocs(dir)
+      const lowerSet = new Set(docs.map((d) => d.toLowerCase()))
+      if (lowerSet.size !== docs.length) return `C8 discoverDesignDocs 出现大小写重复项：${JSON.stringify(docs)}`
+      if (docs.includes('docs/TDD.md')) return `C8 discoverDesignDocs 不应包含 docs/TDD.md：${JSON.stringify(docs)}`
+      if (!docs.some((d) => d.toLowerCase() === 'architecture.md') || !docs.some((d) => d.toLowerCase() === 'docs/design.md') || !docs.some((d) => d.toLowerCase() === 'docs/adr/001-record.md')) {
+        return `C8 discoverDesignDocs 漏检既有设计文档：${JSON.stringify(docs)}`
+      }
+      const dupList = discoverDesignDocs(dir, ['ARCHITECTURE.md', 'architecture.md', 'docs/DESIGN.md', 'docs/design.md', 'docs/TDD.md'])
+      if (dupList.length !== 2) return `C8 discoverDesignDocs 对大小写重复文件列表未去重：${JSON.stringify(dupList)}`
+      return true
+    } finally {
+      rmTree(dir)
     }
   }])
 }

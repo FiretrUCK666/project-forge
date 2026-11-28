@@ -48,8 +48,15 @@ export {
   verdictLabel,
 } from '../../kit/skills/lib/verdict.mjs'
 
+import {
+  AGENTS_MANAGED_MAX_BYTES as _AGENTS_MANAGED_MAX_BYTES,
+  AGENTS_MAX_BYTES as _AGENTS_MAX_BYTES,
+  AGENTS_WARN_BYTES as _AGENTS_WARN_BYTES,
+} from '../../kit/skills/lib/tool-owned.mjs'
+
 export {
   AGENTS_COMPACT_RECOMMENDED_BYTES,
+  AGENTS_MANAGED_MAX_BYTES,
   AGENTS_MAX_BYTES,
   AGENTS_WARN_BYTES,
   KIT_SKILL_MAX_BYTES,
@@ -264,6 +271,33 @@ export function parseBeginMark(rest) {
   const m = /^(.*?)\s+customized$/.exec(text)
   if (m === null) return { id: text, customized: false }
   return { id: m[1].trim(), customized: true }
+}
+
+/** 统一分解 `AGENTS.md` 受管区字节与用户自定义正文字节（单源供 survey/compose/review 共享）。 */
+export function measureAgentsBytes(text, fileName = 'AGENTS.md') {
+  const raw = String(text ?? '').replace(/\r\n/g, '\n')
+  const bytes = Buffer.byteLength(raw, 'utf8')
+  const { regions } = markerRegions(raw, fileName)
+  const lines = raw.split('\n')
+  let managedBytes = 0
+  for (const r of regions) {
+    if (r.customized) continue
+    managedBytes += Buffer.byteLength(lines.slice(r.start, r.end + 1).join('\n'), 'utf8')
+  }
+  const customBytes = Math.max(0, bytes - managedBytes)
+  const totalOversize = bytes > _AGENTS_MAX_BYTES
+  const managedOversize = managedBytes > _AGENTS_MANAGED_MAX_BYTES
+  const customOversize = !managedOversize && totalOversize
+  return {
+    bytes,
+    managedBytes,
+    customBytes,
+    totalOversize,
+    managedOversize,
+    customOversize,
+    oversize: managedOversize,
+    warn: !managedOversize && !customOversize && bytes >= _AGENTS_WARN_BYTES && bytes <= _AGENTS_MAX_BYTES,
+  }
 }
 
 /**

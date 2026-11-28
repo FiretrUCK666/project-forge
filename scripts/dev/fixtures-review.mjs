@@ -111,7 +111,7 @@ cases.push(['体检拦下结构坏掉的契约', async () => {
   } finally { rmTree(dir) }
 }])
 
-cases.push(['体检把系统占位署名判成缺，正常署名判成齐', async () => {
+cases.push(['体检把系统占位与 RFC 2606 保留域署名判成缺，正常署名判成齐', async () => {
   const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
   try {
     gitInit(dir, { name: 'Administrator', email: 'admin@localhost' })
@@ -120,9 +120,24 @@ cases.push(['体检把系统占位署名判成缺，正常署名判成齐', asyn
     if (!bad) return 'Administrator / admin@localhost 被当成了合法署名'
     if (bad.level !== 'missing') return `占位署名报成了 ${bad.level}`
 
-    // 反面：正常署名不许被误伤。
+    // 反面：RFC 2606 保留无效域（example.com/.invalid/.test）与 test-* 占位名均必须拦截
+    for (const [n, e] of [
+      ['Dev Person', 'dev@example.com'],
+      ['Dev Person', 'dev@foo.invalid'],
+      ['Dev Person', 'dev@bar.test'],
+      ['test-bot', 'bot@acme-fixture.dev'],
+    ]) {
+      gitSync(dir, ['config', 'user.name', n])
+      gitSync(dir, ['config', 'user.email', e])
+      const rr = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
+      if (!rr.results.some((x) => x.id === 'git.identity.placeholder' && x.level === 'missing')) {
+        return `RFC 2606 或 test-* 占位署名未被拦截：${n} <${e}>`
+      }
+    }
+
+    // 正面：正常署名不许被误伤。
     gitSync(dir, ['config', 'user.name', 'Dev Person'])
-    gitSync(dir, ['config', 'user.email', 'dev@example.com'])
+    gitSync(dir, ['config', 'user.email', 'dev@acme-fixture.dev'])
     const r2 = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
     if (r2.results.some((x) => x.id === 'git.identity.placeholder')) return '正常署名被当成了占位'
     if (!r2.results.some((x) => x.id === 'git.identity.ok')) return '正常署名没有被判成齐'

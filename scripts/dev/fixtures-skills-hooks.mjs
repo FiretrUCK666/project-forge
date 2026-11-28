@@ -669,7 +669,7 @@ export function registerStageBOnboardingCases(cases) {
     try {
       gitInitBare(bareDir)
       gitSync(undefined, ['--git-dir', bareDir, 'symbolic-ref', 'HEAD', 'refs/heads/main'])
-      gitInit(workDir, { branch: 'main', origin: bareDir.replace(/\\/g, '/'), name: 'Dev', email: 'dev@example.com' })
+      gitInit(workDir, { branch: 'main', origin: bareDir.replace(/\\/g, '/'), name: 'Dev', email: 'dev@acme-fixture.dev' })
       gitInit(huskyDir)
       gitInit(customHookDir)
       gitInit(lefthookDir)
@@ -686,7 +686,19 @@ export function registerStageBOnboardingCases(cases) {
         return `no-git-hooks 仓库不应推荐 --with-hooks：${JSON.stringify(fNoHook.nextStep)}`
       }
 
-      // 2) .husky / custom .githooks/pre-push / lefthook.yml / 自定义 core.hooksPath 一律 preserve
+      // 2) .husky / .vite-hooks / custom .githooks/pre-push / lefthook.yml / 自定义 core.hooksPath 一律 preserve，且 render.mjs 不再附带 --with-hooks
+      const viteHookDir = tmpProject({ '.vite-hooks/pre-push': '#!/bin/sh\necho vite-hooks\n' })
+      gitInit(viteHookDir)
+      try {
+        const fVite = await survey(viteHookDir)
+        const mdVite = toMarkdown(fVite)
+        if (!fVite.git.hooks?.hasConflict || fVite.nextStep?.withHooks !== false) {
+          return `.vite-hooks 隐藏钩子目录冲突未识别：${JSON.stringify(fVite.git.hooks)}`
+        }
+        if (/equip\.mjs[^\n]*--with-hooks/.test(mdVite)) {
+          return `冲突仓库 render.mjs 报告仍违规附带 equip.mjs --with-hooks：\n${mdVite}`
+        }
+      } finally { rmTree(viteHookDir) }
       const fHusky = await survey(huskyDir)
       if (!fHusky.git.hooks?.hasConflict || fHusky.nextStep?.withHooks !== false) return `.husky 冲突未识别：${JSON.stringify(fHusky.git.hooks)}`
       const eqHusky = await runNode('equip.mjs', [huskyDir, '--with-hooks', '--no-backup'])

@@ -83,37 +83,36 @@ export function registerR8BugfixesCases(cases) {
     }
   }])
 
-  cases.push(['[R8-2] suite-inventory.mjs 改名落地与 detectOptionalNativeCheckers .prettierignore 探测（正反双向）', async () => {
+  cases.push(['[R8-2] suite-inventory.mjs 改名落地与 detectOptionalNativeCheckers 返回契约（无 .agents/ 猜测建议）', async () => {
     if (existsSync(join(process.cwd(), 'kit/skills/lib/test-inventory.mjs'))) {
       return 'kit/skills/lib/test-inventory.mjs 仍残留未重命名'
     }
     if (!existsSync(join(process.cwd(), 'kit/skills/lib/suite-inventory.mjs'))) {
       return '缺少 kit/skills/lib/suite-inventory.mjs'
     }
-    const dirNeed = tmpProject({
+    const dirWithPrettier = tmpProject({
       'package.json': '{"name":"p","scripts":{"format":"prettier --check ."}}\n',
       '.prettierrc': '{}\n',
-      '.prettierignore': 'dist/\n',
     })
-    const dirClean = tmpProject({
-      'package.json': '{"name":"p2","scripts":{"format":"prettier --check ."}}\n',
-      '.prettierignore': 'dist/\n.agents/\n.worktrees/\n',
+    const dirEmpty = tmpProject({
+      'README.md': '# empty\n',
     })
     try {
-      const c1 = detectOptionalNativeCheckers(dirNeed)
-      const adv1 = c1.agentIgnoreAdvice.find((a) => a.tool === 'prettier')
-      if (!adv1 || adv1.alreadyIgnored !== false || !adv1.suggestion.includes('.prettierignore')) {
-        return `未检出 .prettierignore 缺失忽略建议：${JSON.stringify(c1)}`
+      const c1 = detectOptionalNativeCheckers(dirWithPrettier)
+      if (!c1.hasNativeConfig || !c1.configured.some((x) => x.tool === 'prettier')) {
+        return `未检出原生 prettier 配置：${JSON.stringify(c1)}`
       }
-      const c2 = detectOptionalNativeCheckers(dirClean)
-      const adv2 = c2.agentIgnoreAdvice.find((a) => a.tool === 'prettier')
-      if (!adv2 || adv2.alreadyIgnored !== true) {
-        return `已包含 .agents/ 与 .worktrees/ 的 .prettierignore 仍误报：${JSON.stringify(c2)}`
+      if ('agentIgnoreAdvice' in c1) {
+        return `detectOptionalNativeCheckers 不应再产出静态 agentIgnoreAdvice：${JSON.stringify(c1)}`
+      }
+      const c2 = detectOptionalNativeCheckers(dirEmpty)
+      if (c2.hasNativeConfig || c2.configured.length !== 0) {
+        return `无原生检查器仓库误报 hasNativeConfig：${JSON.stringify(c2)}`
       }
       return true
     } finally {
-      rmTree(dirNeed)
-      rmTree(dirClean)
+      rmTree(dirWithPrettier)
+      rmTree(dirEmpty)
     }
   }])
 
@@ -421,5 +420,122 @@ export function registerR8BugfixesCases(cases) {
       rmTree(brDir)
     }
     return true
+  }])
+
+  cases.push(['Slice1 C8/C9：通用 SQL ALTER TABLE FK / SQLAlchemy 2.0 / @Table ERD 核、四图有界截断、扫描线与 cache v2 + Rust mod', async () => {
+    const { extractErdEvidence } = await import('../../kit/skills/lib/static-evidence-erd.mjs')
+    const { layoutTreeDiagram, layoutErdDiagram, layoutClassDiagram, MAX_TREE_NODES, MAX_ERD_NODES, MAX_CLASS_NODES } = await import('../../kit/skills/lib/visual-layout-diagrams.mjs')
+    const { layoutDataflowDiagram, MAX_DATAFLOW_NODES } = await import('../../kit/skills/lib/visual-layout-charts.mjs')
+    const { verifyDiagramGeometry } = await import('../../kit/skills/lib/visual-geometry-check.mjs')
+    const { analyzeRepoStatic, ANALYSIS_CACHE_SCHEMA_VERSION, MAX_ANALYSIS_CACHE_BYTES } = await import('../../kit/skills/lib/static-analyzer.mjs')
+
+    const dir = tmpProject({
+      'db/schema.sql': [
+        'CREATE TABLE users (id INT PRIMARY KEY, email TEXT);',
+        'CREATE TABLE orders (id INT PRIMARY KEY, user_id INT);',
+        'ALTER TABLE orders ADD CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users (id);',
+      ].join('\n'),
+      'models/account.py': [
+        'class Account(Base):',
+        '    __tablename__ = "accounts"',
+        '    id: Mapped[str] = mapped_column(String, primary_key=True)',
+        '    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"))',
+      ].join('\n'),
+      'models/doc.ts': [
+        '@Table({ tableName: "documents" })',
+        'export class DocumentModel extends Model {',
+        '  @Column title: string',
+        '  @BelongsTo(() => Account)',
+        '  account: Account',
+        '}',
+      ].join('\n'),
+      'src/lib.rs': 'mod worker;\nuse crate::worker::run;\n',
+      'src/worker.rs': 'pub fn run() {}\n',
+    })
+    const cacheDir = tmpProject({})
+    try {
+      // C8: ERD 最小通用核
+      const erd = extractErdEvidence(dir, ['db/schema.sql', 'models/account.py', 'models/doc.ts'])
+      if (!erd.active) return `C8 ERD 未激活：${JSON.stringify(erd)}`
+      if (!erd.data.relations.some((r) => r.from === 'orders' && r.to === 'users')) {
+        return `C8 SQL ALTER TABLE FOREIGN KEY 关系漏检：${JSON.stringify(erd.data.relations)}`
+      }
+      const acct = erd.data.entities.find((e) => e.name === 'Account')
+      if (!acct || !acct.fields.includes('id') || !acct.fields.includes('org_id')) {
+        return `C8 SQLAlchemy 2.0 Mapped/mapped_column 字段漏检：${JSON.stringify(acct)}`
+      }
+      if (!erd.data.entities.some((e) => e.name === 'DocumentModel' && e.fields.includes('title'))) {
+        return `C8 通用 @Table 实体/字段漏检：${JSON.stringify(erd.data.entities)}`
+      }
+
+      // C9: 四类图硬节点上限 + meta.truncated
+      const bigTree = { name: 'root', path: '', children: Array.from({ length: 150 }, (_, i) => ({ name: `f${i}.mjs`, path: `f${i}.mjs`, isFile: true, fileCount: 1 })) }
+      const tLayout = layoutTreeDiagram({ root: bigTree })
+      if (tLayout.nodes.length > MAX_TREE_NODES || !tLayout.meta.truncated || tLayout.meta.totalBeforeTruncate !== 151) {
+        return `C9 tree 未执行 <=${MAX_TREE_NODES} 截断：${JSON.stringify(tLayout.meta)}`
+      }
+      const bigErd = {
+        entities: Array.from({ length: 70 }, (_, i) => ({ name: `E${i}`, fields: ['id:int'] })),
+        relations: Array.from({ length: 69 }, (_, i) => ({ from: `E${i + 1}`, to: `E${i}`, label: 'fk' })),
+      }
+      const eLayout = layoutErdDiagram(bigErd)
+      if (eLayout.nodes.length > MAX_ERD_NODES || !eLayout.meta.truncated) {
+        return `C9 erd 未执行 <=${MAX_ERD_NODES} 截断：${JSON.stringify(eLayout.meta)}`
+      }
+      const bigClass = {
+        classes: Array.from({ length: 80 }, (_, i) => `Cls${i}`),
+        edges: Array.from({ length: 79 }, (_, i) => ({ from: `Cls${i + 1}`, to: `Cls${i}`, kind: 'extends' })),
+      }
+      const cLayout = layoutClassDiagram(bigClass)
+      if (cLayout.nodes.length > MAX_CLASS_NODES || !cLayout.meta.truncated) {
+        return `C9 class 未执行 <=${MAX_CLASS_NODES} 截断：${JSON.stringify(cLayout.meta)}`
+      }
+      const bigDf = {
+        stages: Array.from({ length: 80 }, (_, i) => ({ id: `s${i}`, label: `S${i}` })),
+        edges: Array.from({ length: 79 }, (_, i) => ({ from: `s${i}`, to: `s${i + 1}` })),
+      }
+      const dfLayout = layoutDataflowDiagram(bigDf)
+      if (dfLayout.nodes.length > MAX_DATAFLOW_NODES || !dfLayout.meta.truncated) {
+        return `C9 dataflow 未执行 <=${MAX_DATAFLOW_NODES} 截断：${JSON.stringify(dfLayout.meta)}`
+      }
+
+      // C9: Sweep-Line 大规模无重叠校验 + 重叠/穿盒反例检出
+      const gridNodes = Array.from({ length: 400 }, (_, i) => ({
+        id: `n${i}`, x: (i % 20) * 120 + 20, y: Math.floor(i / 20) * 80 + 20, w: 90, h: 40,
+      }))
+      const geoOk = verifyDiagramGeometry({ id: 'big', width: 2600, height: 1700, nodes: gridNodes, edges: [] })
+      if (!geoOk.ok) return `C9 Sweep-Line 误报无重叠网格：${JSON.stringify(geoOk.violations.slice(0, 3))}`
+      const geoOverlap = verifyDiagramGeometry({
+        id: 'ov', width: 500, height: 300,
+        nodes: [{ id: 'a', x: 20, y: 20, w: 100, h: 50 }, { id: 'b', x: 80, y: 40, w: 100, h: 50 }],
+        edges: [],
+      })
+      if (geoOverlap.ok || geoOverlap.stats.overlaps !== 1) return `C9 Sweep-Line 漏报重叠：${JSON.stringify(geoOverlap)}`
+      const geoCross = verifyDiagramGeometry({
+        id: 'cr', width: 500, height: 300,
+        nodes: [{ id: 'a', x: 10, y: 40, w: 40, h: 40 }, { id: 'mid', x: 100, y: 30, w: 60, h: 60 }, { id: 'b', x: 220, y: 40, w: 40, h: 40 }],
+        edges: [{ id: 'e1', fromId: 'a', toId: 'b', points: [{ x: 50, y: 60 }, { x: 220, y: 60 }] }],
+      })
+      if (geoCross.ok || geoCross.stats.crossings !== 1) return `C9 Sweep-Line 漏报边穿盒：${JSON.stringify(geoCross)}`
+
+      // C9: cache v2 (128 MB 上限) 精简不含 candidates + 缓存命中保真 Rust mod 边
+      if (ANALYSIS_CACHE_SCHEMA_VERSION !== 2 || MAX_ANALYSIS_CACHE_BYTES !== 128 * 1024 * 1024) {
+        return `C9 cache 常量异常：v=${ANALYSIS_CACHE_SCHEMA_VERSION} bytes=${MAX_ANALYSIS_CACHE_BYTES}`
+      }
+      const a1 = await analyzeRepoStatic(dir, { useCache: true, cacheRoot: cacheDir, includeGitChurn: false })
+      const cacheRaw = readFileSync(a1.cacheStats.cachePath, 'utf8')
+      if (cacheRaw.includes('"candidates"')) return 'C9 cache v2 仍残留冗余 candidates 字段'
+      const a2 = await analyzeRepoStatic(dir, { useCache: true, cacheRoot: cacheDir, includeGitChurn: false })
+      if (a2.cacheStats.hits === 0 || a2.cacheStats.misses !== 0) {
+        return `C9 二次分析未命中缓存：${JSON.stringify(a2.cacheStats)}`
+      }
+      if (!a2.edges.some((e) => e.from === 'src/lib.rs' && e.to === 'src/worker.rs')) {
+        return `C9 cache v2 命中后 Rust mod 边丢失：${JSON.stringify(a2.edges)}`
+      }
+      return true
+    } finally {
+      rmTree(dir)
+      rmTree(cacheDir)
+    }
   }])
 }

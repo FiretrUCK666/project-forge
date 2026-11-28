@@ -60,7 +60,7 @@ import {
   samePath,
 } from './lib/text.mjs'
 
-const { AGENTS_MAX_BYTES } = protocol
+const { AGENTS_MANAGED_MAX_BYTES } = protocol
 
 export function computeArtifactPlan(facts) {
   const maturity = facts?.maturity ?? 'partial'
@@ -95,7 +95,7 @@ export function computeArtifactPlan(facts) {
     if (!ignores.hasGitattributes) missingIgnores.push('.gitattributes')
     if (!ignores.hasGitignore) missingIgnores.push('.gitignore')
     if ((ignores.unignoredOutputDirs?.length ?? 0) > 0) missingIgnores.push('未忽略产物目录')
-    if ((ignores.ignoredButTracked?.length ?? 0) > 0) missingIgnores.push('已入库忽略文件')
+    if ((ignores.ignoredButTracked?.length ?? 0) > 0 && !hasDecision(facts, 'ignore-tracked-legacy')) missingIgnores.push('已入库忽略文件')
     if ((ignores.ignoredGovernancePaths?.length ?? 0) > 0) missingIgnores.push('治理路径被 .gitignore 遮蔽')
     // 「版本库在」与「有历史」是两件事：只 init 没提交的目录，文件全在 `??` 里、
     // `git log` 报错，而只看「.git 在不在」就会写「已就绪」——用户拿到的是一句空话。
@@ -171,7 +171,7 @@ export function computeArtifactPlan(facts) {
     const driftReasons = []
     if ((reentry.staleAgentPaths?.length ?? 0) > 0) driftReasons.push('失效路径')
     if ((reentry.staleAgentScripts?.length ?? 0) > 0) driftReasons.push('失效脚本')
-    if ((docs.agentsBytes ?? 0) > AGENTS_MAX_BYTES) driftReasons.push('超过 30KB 上限')
+    if ((docs.agentsManagedBytes ?? 0) > AGENTS_MANAGED_MAX_BYTES) driftReasons.push('受管区超过 24KB 上限')
     if ((docs.agentsMarkers?.fills?.length ?? 0) > 0) driftReasons.push('未填占位')
     if (otherAi.length > 0) driftReasons.push('待合流其他 AI 规则')
     if (isForeignUnmanaged) {

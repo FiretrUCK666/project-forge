@@ -144,25 +144,72 @@ export function verifyDiagramGeometry(diagramLayout, {
     }
   }
 
+  // 按 X 轴排序构建扫描线与前缀最大右边界索引（O((N + E) log N + K)）
+  const sortedNodes = []
   for (let i = 0; i < checkNodes.length; i += 1) {
-    const a = checkNodes[i]
-    if (!isBoxValid(a)) continue
-    for (let j = i + 1; j < checkNodes.length; j += 1) {
-      const b = checkNodes[j]
-      if (!isBoxValid(b)) continue
-      const area = computeOverlapArea(a, b, epsilon)
+    const b = checkNodes[i]
+    if (!isBoxValid(b)) continue
+    sortedNodes.push({
+      box: b,
+      id: String(b.id || i),
+      x1: b.x,
+      x2: b.x + b.w,
+      y1: b.y,
+      y2: b.y + b.h,
+      origIdx: i,
+    })
+  }
+  sortedNodes.sort((a, b) => (a.x1 - b.x1) || (a.y1 - b.y1) || (a.origIdx - b.origIdx))
+
+  const prefixMaxX2 = new Array(sortedNodes.length)
+  let runningMaxX2 = -Infinity
+  for (let i = 0; i < sortedNodes.length; i += 1) {
+    if (sortedNodes[i].x2 > runningMaxX2) runningMaxX2 = sortedNodes[i].x2
+    prefixMaxX2[i] = runningMaxX2
+  }
+
+  // X 轴排序扫描线检测节点重叠：一旦右侧节点 x1 >= a.x2 - epsilon 即可提前中止内层循环
+  for (let i = 0; i < sortedNodes.length; i += 1) {
+    const a = sortedNodes[i]
+    const xLimit = a.x2 - epsilon
+    for (let j = i + 1; j < sortedNodes.length; j += 1) {
+      const b = sortedNodes[j]
+      if (b.x1 >= xLimit) break
+      if (b.y2 <= a.y1 + epsilon || b.y1 >= a.y2 - epsilon) continue
+      const area = computeOverlapArea(a.box, b.box, epsilon)
       if (area > 0) {
         overlaps += 1
         violations.push({
           code: GEOMETRY_VIOLATION_CODES.NODE_OVERLAP,
           diagramId,
-          aId: String(a.id || i),
-          bId: String(b.id || j),
+          aId: a.id,
+          bId: b.id,
           area,
-          message: `Nodes "${a.id}" and "${b.id}" overlap (area=${area})`,
+          message: `Nodes "${a.box.id}" and "${b.box.id}" overlap (area=${area})`,
         })
       }
     }
+  }
+
+  const lowerBoundPrefixMaxX2 = (threshold) => {
+    let lo = 0
+    let hi = sortedNodes.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if (prefixMaxX2[mid] <= threshold) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+  const upperBoundX1 = (limit) => {
+    let lo = 0
+    let hi = sortedNodes.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if (sortedNodes[mid].x1 < limit) lo = mid + 1
+      else hi = mid
+    }
+    return lo
   }
 
   for (const edge of rawEdges) {
@@ -193,11 +240,18 @@ export function verifyDiagramGeometry(diagramLayout, {
       const p1 = pts[k]
       const p2 = pts[k + 1]
       if (!Number.isFinite(p1?.x) || !Number.isFinite(p1?.y) || !Number.isFinite(p2?.x) || !Number.isFinite(p2?.y)) continue
-      for (const box of checkNodes) {
-        if (!isBoxValid(box)) continue
-        const bid = String(box.id || '')
+      const segMinX = Math.min(p1.x, p2.x)
+      const segMaxX = Math.max(p1.x, p2.x)
+      const segMinY = Math.min(p1.y, p2.y)
+      const segMaxY = Math.max(p1.y, p2.y)
+      const lo = lowerBoundPrefixMaxX2(segMinX + epsilon)
+      const hi = upperBoundX1(segMaxX - epsilon)
+      for (let idx = lo; idx < hi; idx += 1) {
+        const cand = sortedNodes[idx]
+        if (cand.x2 <= segMinX + epsilon || cand.y2 <= segMinY + epsilon || cand.y1 >= segMaxY - epsilon) continue
+        const bid = String(cand.box.id || '')
         if (bid && (bid === fromId || bid === toId)) continue
-        if (segmentIntersectsRectInterior(p1, p2, box, epsilon)) {
+        if (segmentIntersectsRectInterior(p1, p2, cand.box, epsilon)) {
           crossings += 1
           edgeCrossed = true
           violations.push({

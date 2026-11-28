@@ -13,7 +13,7 @@ import { join } from 'node:path'
 
 import { survey } from './survey.mjs'
 import { flushAndExit, isMainModule, readTextSafe } from './lib/text.mjs'
-import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, parseMarkers } from './lib/protocol.mjs'
+import { AGENTS_MANAGED_MAX_BYTES, AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, measureAgentsBytes, parseMarkers } from './lib/protocol.mjs'
 import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
 import { inspectKitManifestForReview, validateDevProfileRegion } from './lib/agents-sections.mjs'
 import {
@@ -23,7 +23,6 @@ import {
   collectSecretsSummary,
   collectStaleCommandsInfo,
   collectUnfilledReleaseNotes,
-  detectToolingAgentsIgnoreGaps,
   findDoNotEditTrackedBuildOverlap,
   findTradeoffContradictions,
   inspectContract,
@@ -163,8 +162,9 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
         }))
     }
     if (facts.ignores.ignoredButTracked.length > 0) {
-      add(finding('missing', 'git', 'git.ignored-tracked',
-        `有 ${facts.ignores.ignoredButTracked.length} 个已入库文件同时命中忽略规则（${facts.ignores.ignoredButTracked.slice(0, 3).join('、')}）——忽略规则对已入库的文件无效，要 \`git rm --cached\``, {
+      add(finding('notice', 'git', 'git.ignored-tracked',
+        `有 ${facts.ignores.ignoredButTracked.length} 个已入库文件同时命中忽略规则（${facts.ignores.ignoredButTracked.slice(0, 3).join('、')}）——忽略规则对已入库的文件无效，可按需 \`git rm --cached\` 或在「取舍」写 \`ignore-tracked-legacy\``, {
+          decision: 'ignore-tracked-legacy',
           ref: { file: 'references/version-control.md', section: '忽略规则' },
         }))
     }
@@ -255,11 +255,18 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
         ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
       }))
   } else {
-    const agentsBytes = facts.docs.agentsBytes ?? Buffer.byteLength(agentsText, 'utf8')
-    const oversize = agentsBytes > AGENTS_MAX_BYTES
-    if (oversize) {
+    const sizeInfo = measureAgentsBytes(agentsText, facts.docs.agents.file)
+    const agentsBytes = sizeInfo.bytes
+    const managedOversize = sizeInfo.managedOversize
+    const customOversize = sizeInfo.customOversize
+    if (managedOversize) {
       add(finding('missing', 'agents', 'agents.oversize',
-        `${facts.docs.agents.file} 体积超过 ${AGENTS_MAX_BYTES} 字节上限（当前 ${agentsBytes} 字节）——请将长篇架构设计与细节外置到 docs/TDD.md`, {
+        `${facts.docs.agents.file} 受管区体积超过 ${AGENTS_MANAGED_MAX_BYTES} 字节上限（managed=${sizeInfo.managedBytes}B，custom=${sizeInfo.customBytes}B，total=${agentsBytes}B）——请将长篇架构设计与细节外置到 docs/TDD.md`, {
+          ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+        }))
+    } else if (customOversize) {
+      add(finding('notice', 'agents', 'agents.custom-oversize',
+        `${facts.docs.agents.file} 总长超过 ${AGENTS_MAX_BYTES} 字节参考线但受管区合规（managed=${sizeInfo.managedBytes}B <= ${AGENTS_MANAGED_MAX_BYTES}B，custom=${sizeInfo.customBytes}B，total=${agentsBytes}B）——不阻断交付，可选紧凑指针模式外置长篇子模块规范到 <subdir>/AGENTS.md 或 docs/TDD.md`, {
           ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
         }))
     } else if (agentsBytes > AGENTS_WARN_BYTES) {
@@ -332,7 +339,7 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
           `${facts.docs.agents.file} 有 ${contract.health.drifted.length} 段与模板不一致：${contract.health.drifted.join('、')}——这几段本该与模板渲染结果逐字相同`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
-      } else if (!oversize) {
+      } else if (!managedOversize) {
         const dpChk = validateDevProfileRegion(agentsText)
         if (!dpChk.ok) {
           add(finding('missing', 'agents', 'agents.dev-profile-invalid',
@@ -342,6 +349,10 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
         } else {
           add(finding('ok', 'agents', 'agents.ready', `${facts.docs.agents.file} 已就绪，没有未填的占位，结构也完整`))
         }
+      }
+      if (contract.state === 'ok' && (contract.health.skippedByHeading?.length ?? 0) > 0) {
+        add(finding('notice', 'agents', 'agents.skipped-by-heading',
+          `${facts.docs.agents.file} 因既有同名标题跳过自动注入 ${contract.health.skippedByHeading.length} 节（${contract.health.skippedByHeading.map((s) => `${s.id}<-"${s.heading}"`).join('、')}）`))
       }
     }
     if (facts.docs.otherAiConventions.length > 0) {
@@ -358,9 +369,10 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
   if (agentsText) {
     const existsRel = (rel) => existsSync(join(root, rel))
     for (const item of verifyClaims(agentsText, facts, existsRel)) {
-      add(finding(item.ok ? 'ok' : 'missing', 'agents', item.id, item.detail, {
-        ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
-      }))
+      const ref = { ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' } }
+      if (item.ok) add(finding('ok', 'agents', item.id, item.detail, ref))
+      else if (item.level === 'notice') add(finding('notice', 'agents', item.id, item.detail, ref))
+      else add(finding('missing', 'agents', item.id, item.detail, ref))
     }
     const parsedAgents = parseAgentsProfile(root)
     const buildOverlaps = findDoNotEditTrackedBuildOverlap(root, facts, parsedAgents.doNotEdit)
@@ -474,21 +486,6 @@ export async function reviewProject(targetDir, { scopes, facts: precomputedFacts
       const extraNote = kState.customCount > 0 ? `，已豁免定制 ${kState.customCount} 项` : ''
       add(finding('ok', 'kit', 'kit.ready',
         `受管 \`.agents/skills/\` 套件已就绪（${kState.filesCount} 个托管文件，版本 ${kState.forgeVersion ?? '未知'}${extraNote}）`))
-    }
-  }
-
-  if (!decisions.has('no-kit')) {
-    const toolingGaps = detectToolingAgentsIgnoreGaps(root)
-    const eslintGap = toolingGaps.find((g) => g.tool === 'eslint')
-    if (eslintGap) {
-      add(finding('notice', 'kit', 'kit.eslint-agents-ignore',
-        `检测到 ESLint 配置（\`${eslintGap.configFile}\`）未忽略 \`.agents/**\`——装配技能套件后 lint 会扫描 \`.agents/skills/\` 产生大量噪音；建议${eslintGap.advice}`))
-    }
-    const otherGaps = toolingGaps.filter((g) => g.tool !== 'eslint')
-    if (otherGaps.length > 0) {
-      const detail = otherGaps.map((g) => `${g.tool}（\`${g.configFile}\`：${g.advice}）`).join('；')
-      add(finding('notice', 'kit', 'kit.tooling-agents-ignore',
-        `检测到原生静态/格式化配置未忽略 \`.agents/**\`——装配技能套件后可能扫描 \`.agents/skills/\` 产生噪音；建议${detail}`))
     }
   }
 

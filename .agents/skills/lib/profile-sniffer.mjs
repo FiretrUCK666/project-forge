@@ -11,6 +11,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { isMacOsJunkPath, posixPath, readJsonSafe, readTextSafe } from './git.mjs'
+import { classifyCommandText, commandHeadOf, splitCommandSegments, validateExecutableCommandShape } from './command-lex.mjs'
 import {
   ECOSYSTEM_MANIFEST_BY_KIND,
   ECOSYSTEM_MANIFEST_TABLE,
@@ -108,9 +109,44 @@ export function extractYamlRunBlocks(relFile, text) {
         i = j
       }
       if (!isYamlStepObject) {
-        const cleanLines = blockLines.map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-        for (const [offset, clean] of cleanLines.entries()) {
-          steps.push({ file: relFile, line: startLine + offset + 1, cmd: clean })
+        let idx = 0
+        while (idx < blockLines.length) {
+          const clean = blockLines[idx].trim()
+          if (!clean || clean.startsWith('#')) { idx += 1; continue }
+          const stepStart = startLine + idx + 1
+          let chunk = clean
+          const hdM = /<<-?\s*['"]?([A-Za-z0-9_]+)['"]?/.exec(clean)
+          if (hdM) {
+            const endTag = hdM[1]
+            idx += 1
+            while (idx < blockLines.length) {
+              const sub = blockLines[idx].trim()
+              chunk += `\n${sub}`
+              idx += 1
+              if (sub === endTag) break
+            }
+            steps.push({ file: relFile, line: stepStart, cmd: chunk })
+            continue
+          }
+          if (/^(?:if|for|while|until|case)\b/.test(clean) && !/\b(?:fi|done|esac)\s*$/.test(clean)) {
+            let depth = 1
+            idx += 1
+            while (idx < blockLines.length && depth > 0) {
+              const sub = blockLines[idx].trim()
+              chunk += `\n${sub}`
+              if (/^(?:if|for|while|until|case)\b/.test(sub) && !/\b(?:fi|done|esac)\s*$/.test(sub)) depth += 1
+              else if (/^(?:fi|done|esac)\b/.test(sub)) depth -= 1
+              idx += 1
+            }
+            steps.push({ file: relFile, line: stepStart, cmd: chunk })
+            continue
+          }
+          while (/(?:^|[^\\])\\\s*$/.test(chunk) && idx + 1 < blockLines.length) {
+            idx += 1
+            chunk += `\n${blockLines[idx].trim()}`
+          }
+          steps.push({ file: relFile, line: stepStart, cmd: chunk })
+          idx += 1
         }
       }
     } else {
@@ -282,9 +318,40 @@ export function discoverWorkspacePackages(repoRoot, fileRelList = null) {
   }
 }
 
+const RUNNER_HEADS = new Set(['npm', 'pnpm', 'yarn', 'bun', 'deno', 'uv', 'poetry', 'bundle', 'npx', 'pnpx', 'pipenv', 'pdm', 'hatch', 'rye'])
+const RUNNER_SUBVERBS = new Set(['run', 'exec', 'task', 'x'])
+const CI_CONTROL_FLOW_RE = /(?:^|[;&|]\s*)(?:if|then|elif|else|fi|for|while|until|do|done|case|esac)\b|<<-?\s*['"]?[A-Za-z0-9_]+['"]?|;;/i
+
 function classifyCiCommand(cmd) {
-  for (const kind of CI_COMMAND_KINDS) {
-    if (kind.re.test(cmd)) return kind.key
+  const direct = classifyCommandText(cmd, CI_COMMAND_KINDS)
+  if (direct) return direct
+  for (const seg of splitCommandSegments(cmd)) {
+    const words = seg.trim().split(/\s+/).filter(Boolean)
+    const headRaw = commandHeadOf(seg)
+    if (!headRaw) continue
+    const headIdx = words.indexOf(headRaw)
+    const headBase = headRaw.split(/[/\\]/).pop().toLowerCase()
+    let target = null
+    if (/^python3?(?:\.exe)?$/i.test(headBase)) {
+      const mIdx = words.indexOf('-m', headIdx + 1)
+      if (mIdx >= 0 && words[mIdx + 1]) target = words[mIdx + 1]
+    } else if (RUNNER_HEADS.has(headBase)) {
+      for (let i = headIdx + 1; i < words.length; i += 1) {
+        const w = words[i]
+        if (w.startsWith('-')) {
+          if (/^--(?:prefix|dir|cwd|directory|filter|manifest-path)$/i.test(w) || w === '-C') i += 1
+          continue
+        }
+        if (RUNNER_SUBVERBS.has(w.toLowerCase())) continue
+        target = w
+        break
+      }
+    }
+    if (!target) continue
+    const leaf = target.split(/[/\\]/).pop()
+    for (const kind of CI_COMMAND_KINDS) {
+      if (kind.re.test(leaf)) return kind.key
+    }
   }
   return undefined
 }
@@ -304,35 +371,89 @@ function normalizeCmdKey(cmd) {
   return String(cmd ?? '').trim().replace(/\s+/g, ' ')
 }
 
-/** 统一三层优先级命令嗅探：Dev Profile / 中立 CI + Taskfile / 递归子包清单。 */
-export function sniffLayeredCommands(repoRoot, { profile = null, fileRelList = null } = {}) {
-  const detectionEvidence = []
-  const ci = scanNeutralCiSteps(repoRoot)
-  const taskRunners = scanDeclaredTaskRunners(repoRoot)
-  const discovery = discoverWorkspacePackages(repoRoot, fileRelList)
-  const ciCommands = {}
-  const ciSources = {}
-  const ciCommandsByKind = { test: [], lint: [], build: [], install: [] }
-  const ciVerifyCommands = []
+/**
+ * 结构化单步 CI 命令候选提取器（唯一真相源）：
+ * 逐 workflow/step 提取可执行单步命令，自动过滤 `${{`、多行控制流/未闭合续行与超长命令，
+ * 严禁跨 workflow 使用 `&&` 拼接。
+ */
+export function extractStructuredCiSteps(repoRoot, { neutralCi = null, maxCmdBytes = 256 } = {}) {
+  const ci = neutralCi ?? scanNeutralCiSteps(repoRoot)
+  const steps = []
+  const omittedSteps = []
+  const commands = {}
+  const sources = {}
+  const commandsByKind = { test: [], lint: [], build: [], install: [] }
+  const verifyCommands = []
   const seenVerify = new Set()
-  const ciE2eCommands = []
+  const e2eCommands = []
+  const evidence = []
 
-  for (const step of ci.steps) {
-    const normCmd = normalizeCmdKey(step.cmd)
-    if (!normCmd) continue
-    if (HEAVY_E2E_CMD_RE.test(normCmd)) { if (!ciE2eCommands.includes(normCmd)) ciE2eCommands.push(normCmd); continue }
+  for (const step of ci.steps ?? []) {
+    const rawCmd = String(step?.cmd ?? '').trim()
+    if (!rawCmd) continue
+    if (/[\r\n]/.test(rawCmd) || rawCmd.includes('${{') || /(?:^|[^\\])\\\s*$/.test(rawCmd)) continue
+    if (CI_CONTROL_FLOW_RE.test(rawCmd)) continue
+    const normCmd = normalizeCmdKey(rawCmd)
+    const byteLen = Buffer.byteLength(normCmd, 'utf8')
+    if (byteLen > maxCmdBytes) {
+      if (byteLen <= 4096 && validateExecutableCommandShape(normCmd, { allowNone: false }).ok && !HEAVY_E2E_CMD_RE.test(normCmd)) {
+        const longKind = classifyCiCommand(normCmd)
+        if (longKind) omittedSteps.push({ file: step.file, line: step.line, cmd: normCmd, kind: longKind, bytes: byteLen })
+      }
+      continue
+    }
+    if (!validateExecutableCommandShape(normCmd, { allowNone: false }).ok) continue
+    if (HEAVY_E2E_CMD_RE.test(normCmd)) {
+      if (!e2eCommands.includes(normCmd)) e2eCommands.push(normCmd)
+      continue
+    }
     const kind = classifyCiCommand(normCmd)
     if (!kind) continue
-    if (!ciCommandsByKind[kind].includes(normCmd)) {
-      ciCommandsByKind[kind].push(normCmd)
-      detectionEvidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: normCmd })
+    steps.push({ file: step.file, line: step.line, cmd: normCmd, kind })
+    if (!commandsByKind[kind].includes(normCmd)) {
+      commandsByKind[kind].push(normCmd)
+      evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: normCmd })
     }
-    if (ciSources[kind] === undefined) ciSources[kind] = step.file
-    if (kind !== 'install' && !seenVerify.has(normCmd)) { seenVerify.add(normCmd); ciVerifyCommands.push(normCmd) }
+    if (sources[kind] === undefined) sources[kind] = step.file
+    if (kind !== 'install' && !seenVerify.has(normCmd)) {
+      seenVerify.add(normCmd)
+      verifyCommands.push(normCmd)
+    }
   }
-  for (const [kind, cmds] of Object.entries(ciCommandsByKind)) {
-    if (cmds.length > 0) ciCommands[kind] = kind === 'test' && cmds.length > 1 ? cmds.join(' && ') : cmds[0]
+  for (const [kind, cmds] of Object.entries(commandsByKind)) {
+    if (cmds.length > 0) commands[kind] = cmds[0]
   }
+  return {
+    steps,
+    omittedSteps,
+    commands,
+    commandsByKind,
+    sources,
+    ciConfigFiles: ci.ciConfigFiles ?? [],
+    evidence,
+    e2eCommands,
+    verifyCommands,
+  }
+}
+
+/** 统一三层优先级命令嗅探：Dev Profile / 中立 CI + Taskfile / 递归子包清单。 */
+export function sniffLayeredCommands(repoRoot, { profile = null, fileRelList = null } = {}) {
+  const structuredCi = extractStructuredCiSteps(repoRoot)
+  const taskRunners = scanDeclaredTaskRunners(repoRoot)
+  const discovery = discoverWorkspacePackages(repoRoot, fileRelList)
+  const detectionEvidence = [...structuredCi.evidence]
+  const ciCommands = { ...structuredCi.commands }
+  const ciSources = { ...structuredCi.sources }
+  const ciCommandsByKind = {
+    test: [...structuredCi.commandsByKind.test],
+    lint: [...structuredCi.commandsByKind.lint],
+    build: [...structuredCi.commandsByKind.build],
+    install: [...structuredCi.commandsByKind.install],
+  }
+  const ciVerifyCommands = [...structuredCi.verifyCommands]
+  const seenVerify = new Set(ciVerifyCommands)
+  const ciE2eCommands = [...structuredCi.e2eCommands]
+
   for (const ev of taskRunners.evidence) {
     if (ciCommands[ev.kind] === undefined) {
       ciCommands[ev.kind] = ev.command
@@ -412,32 +533,24 @@ function extractPathArgsFromScript(scriptStr) {
   return [...new Set(dirs)]
 }
 
-/** 探测目标仓实际已配置的原生静态/类型校验工具，并生成 `.agents/` 忽略隔离建议（绝不自动改写第三方配置）。 */
+/** 探测目标仓实际已配置的原生静态/类型校验工具（仅返回 `{ configured, hasNativeConfig }`，不做 `.agents/` 配置文本猜测）。 */
 export function detectOptionalNativeCheckers(repoRoot) {
   const configured = []
-  const agentIgnoreAdvice = []
   const pkg = readJsonSafe(join(repoRoot, 'package.json'))
   const scripts = (pkg && typeof pkg.scripts === 'object' && pkg.scripts) ? pkg.scripts : {}
   const pm = resolveNodePackageManager(repoRoot, pkg)
   const runScript = (name) => (pm === 'npm' ? `npm run ${name}` : `${pm} ${name}`)
   const hasFile = (...names) => names.find((n) => existsSync(join(repoRoot, n)))
-  const mentionsAgents = (rel) => Boolean(rel && /\.agents\b/.test(readTextSafe(join(repoRoot, rel)) ?? ''))
-
-  const addAdvice = (id, tool, configFile, alreadyIgnored, suggestion) => {
-    agentIgnoreAdvice.push({ id, tool, configFile, alreadyIgnored, suggestion })
-  }
 
   const oxlintCfg = hasFile('.oxlintrc.json', '.oxlintrc.jsonc', 'oxlint.config.ts', 'oxlint.config.mts', 'oxlint.config.js', 'oxlint.config.mjs')
     || (pkg?.oxlint ? 'package.json' : null)
   if (oxlintCfg) {
     configured.push({ id: 'oxlint', tool: 'oxlint', configFile: oxlintCfg, command: scripts.lint ? runScript('lint') : null, declared: Boolean(scripts.lint) })
-    addAdvice('oxlint', 'oxlint', oxlintCfg, mentionsAgents(oxlintCfg), `在 \`${oxlintCfg}\` 的 \`ignorePatterns\` 中添加 \`".agents/**"\``)
   }
 
   const oxfmtCfg = hasFile('.oxfmtrc.json', '.oxfmtrc.jsonc', '.oxfmtrc', 'oxfmt.config.ts', 'oxfmt.config.js', 'oxfmt.config.mjs')
   if (oxfmtCfg) {
     configured.push({ id: 'oxfmt', tool: 'oxfmt', configFile: oxfmtCfg, command: scripts.fmt ? runScript('fmt') : null, declared: Boolean(scripts.fmt) })
-    addAdvice('oxfmt', 'oxfmt', oxfmtCfg, mentionsAgents(oxfmtCfg), `在 \`${oxfmtCfg}\` 的 \`ignorePatterns\` 中添加 \`".agents/**"\``)
   }
 
   const eslintCfg = hasFile('eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts', '.eslintrc.json', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.yml', '.eslintrc.yaml')
@@ -445,27 +558,22 @@ export function detectOptionalNativeCheckers(repoRoot) {
   if (eslintCfg || eslintIgnore || scripts.lint) {
     const cfg = eslintCfg ?? eslintIgnore ?? 'package.json'
     configured.push({ id: 'eslint', tool: 'eslint', configFile: cfg, command: scripts.lint ? runScript('lint') : null, declared: Boolean(scripts.lint) })
-    addAdvice('eslint', 'eslint', cfg, mentionsAgents(eslintCfg) || mentionsAgents(eslintIgnore),
-      eslintIgnore ? '在 `.eslintignore` 添加 `.agents/`' : `在 \`${cfg}\` 的 \`ignores\` 中添加 \`".agents/**"\``)
   }
 
   const biomeCfg = hasFile('biome.json', 'biome.jsonc')
   if (biomeCfg) {
     configured.push({ id: 'biome', tool: 'biome', configFile: biomeCfg, command: scripts.lint ? runScript('lint') : null, declared: Boolean(scripts.lint) })
-    addAdvice('biome', 'biome', biomeCfg, mentionsAgents(biomeCfg), `在 \`${biomeCfg}\` 的 \`files.ignore\`（或 \`!/.agents\`）中添加 \`".agents/**"\``)
   }
 
   const dprintCfg = hasFile('dprint.json', 'dprint.jsonc')
   if (dprintCfg) {
     configured.push({ id: 'dprint', tool: 'dprint', configFile: dprintCfg, command: scripts.fmt ? runScript('fmt') : null, declared: Boolean(scripts.fmt) })
-    addAdvice('dprint', 'dprint', dprintCfg, mentionsAgents(dprintCfg), `在 \`${dprintCfg}\` 的 \`excludes\` 中添加 \`"**/.agents/**"\``)
   }
 
   const tsCfg = hasFile('tsconfig.json')
   if (tsCfg) {
     const tcKey = ['typecheck', 'type-check', 'check-types'].find((k) => scripts[k])
     configured.push({ id: 'typescript', tool: 'tsc', configFile: tsCfg, command: tcKey ? runScript(tcKey) : null, declared: Boolean(tcKey) })
-    addAdvice('typescript', 'tsc', tsCfg, mentionsAgents(tsCfg), `若 \`${tsCfg}\` 未限定 \`include\`，建议在 \`exclude\` 中添加 \`".agents"\``)
   }
 
   const pyProj = readTextSafe(join(repoRoot, 'pyproject.toml')) ?? ''
@@ -473,29 +581,24 @@ export function detectOptionalNativeCheckers(repoRoot) {
   const ruffCfg = hasFile('ruff.toml', '.ruff.toml') || (/\[tool\.ruff\b/.test(pyProj) ? 'pyproject.toml' : null)
   if (ruffCfg) {
     configured.push({ id: 'ruff', tool: 'ruff', configFile: ruffCfg, command: 'ruff check .', declared: true })
-    addAdvice('ruff', 'ruff', ruffCfg, mentionsAgents(ruffCfg), `在 \`${ruffCfg}\` 的 \`extend-exclude\` 中添加 \`".agents"\``)
   }
   const mypyCfg = hasFile('mypy.ini', '.mypy.ini') || (/\[tool\.mypy\b/.test(pyProj) ? 'pyproject.toml' : (/\[mypy\b/.test(setupCfg) ? 'setup.cfg' : null))
   if (mypyCfg) {
     configured.push({ id: 'mypy', tool: 'mypy', configFile: mypyCfg, command: 'mypy .', declared: true })
-    addAdvice('mypy', 'mypy', mypyCfg, mentionsAgents(mypyCfg), `在 \`${mypyCfg}\` 的 \`exclude\` 中添加 \`".agents"\``)
   }
   const pyrightCfg = hasFile('pyrightconfig.json') || (/\[tool\.pyright\b/.test(pyProj) ? 'pyproject.toml' : null)
   if (pyrightCfg) {
     configured.push({ id: 'pyright', tool: 'pyright', configFile: pyrightCfg, command: 'pyright', declared: true })
-    addAdvice('pyright', 'pyright', pyrightCfg, mentionsAgents(pyrightCfg), `在 \`${pyrightCfg}\` 的 \`exclude\` 中添加 \`".agents"\``)
   }
   const preCommitCfg = hasFile('.pre-commit-config.yaml', '.pre-commit-config.yml')
   if (preCommitCfg) {
     configured.push({ id: 'pre-commit', tool: 'pre-commit', configFile: preCommitCfg, command: 'pre-commit run --all-files', declared: true })
-    addAdvice('pre-commit', 'pre-commit', preCommitCfg, mentionsAgents(preCommitCfg), `在 \`${preCommitCfg}\` 的 \`exclude\` 中添加 \`^\\.agents/\``)
   }
   const mdLintCfg = hasFile('.markdownlint.json', '.markdownlint.jsonc', '.markdownlint.yaml', '.markdownlint.yml', '.markdownlintrc')
   const mdLintIgnore = hasFile('.markdownlintignore')
   if (mdLintCfg || mdLintIgnore) {
     const targetMdCfg = mdLintCfg ?? mdLintIgnore
     configured.push({ id: 'markdownlint', tool: 'markdownlint', configFile: targetMdCfg, command: null, declared: true })
-    addAdvice('markdownlint', 'markdownlint', targetMdCfg, mentionsAgents(mdLintCfg) || mentionsAgents(mdLintIgnore), '在 `.markdownlintignore` 中添加 `.agents/`')
   }
   const prettierCfg = hasFile(
     '.prettierrc', '.prettierrc.json', '.prettierrc.yml', '.prettierrc.yaml', '.prettierrc.json5',
@@ -506,27 +609,11 @@ export function detectOptionalNativeCheckers(repoRoot) {
   if (prettierCfg || prettierIgnore) {
     const targetPrettierCfg = prettierCfg ?? prettierIgnore
     const fmtKey = scripts.format ? 'format' : (scripts.fmt ? 'fmt' : null)
-    const ignoresAgents = mentionsAgents(prettierIgnore) || mentionsAgents(prettierCfg)
-    const ignoresWorktrees = Boolean(
-      (prettierIgnore && /\.worktrees\b/.test(readTextSafe(join(repoRoot, prettierIgnore)) ?? ''))
-      || (prettierCfg && /\.worktrees\b/.test(readTextSafe(join(repoRoot, prettierCfg)) ?? '')),
-    )
-    const missingIgnore = [
-      ...(!ignoresAgents ? ['.agents/'] : []),
-      ...(!ignoresWorktrees ? ['.worktrees/'] : []),
-    ]
     configured.push({ id: 'prettier', tool: 'prettier', configFile: targetPrettierCfg, command: fmtKey ? runScript(fmtKey) : null, declared: Boolean(fmtKey) })
-    addAdvice(
-      'prettier',
-      'prettier',
-      prettierIgnore ?? targetPrettierCfg,
-      ignoresAgents && ignoresWorktrees,
-      `在 \`.prettierignore\` 中添加 ${(missingIgnore.length > 0 ? missingIgnore : ['.agents/', '.worktrees/']).map((p) => `\`${p}\``).join(' 与 ')}`,
-    )
   }
   if (existsSync(join(repoRoot, 'Cargo.toml'))) configured.push({ id: 'clippy', tool: 'cargo-clippy', configFile: 'Cargo.toml', command: 'cargo clippy --all-targets', declared: true })
   if (existsSync(join(repoRoot, 'go.mod'))) configured.push({ id: 'go-vet', tool: 'go-vet', configFile: 'go.mod', command: 'go vet ./...', declared: true })
-  return { configured, hasNativeConfig: configured.length > 0, agentIgnoreAdvice }
+  return { configured, hasNativeConfig: configured.length > 0 }
 }
 
 /** 探测目标仓测试分层元数据（package.json 脚本、测试框架配置、Pytest markers、Cargo/Go 结构）。 */

@@ -12,17 +12,54 @@ import {
 } from './visual-router.mjs'
 
 export const LEAF_STACK_THRESHOLD = 3
+export const MAX_TREE_NODES = 120
+export const MAX_ERD_NODES = 48
+export const MAX_CLASS_NODES = 60
 
 const measureTreeNodeWidth = (label, minW = 136, maxW = 220) => Math.max(minW, Math.min(maxW, 32 + displayWidth(truncateLabel(label, 24)) * 8))
 
+function countRawTreeNodes(raw) {
+  if (!raw || typeof raw !== 'object') return 0
+  let total = 1
+  for (const c of Array.isArray(raw.children) ? raw.children : []) total += countRawTreeNodes(c)
+  return total
+}
+
+function truncateTreeByBfs(root, maxNodes) {
+  const kept = new Set([root])
+  const queue = [root]
+  while (queue.length > 0 && kept.size < maxNodes) {
+    const cur = queue.shift()
+    const sortedKids = [...cur.children].sort((a, b) => (
+      (Number(a.isFile) - Number(b.isFile))
+      || (b.fileCount - a.fileCount)
+      || a.id.localeCompare(b.id)
+    ))
+    for (const kid of sortedKids) {
+      if (kept.size >= maxNodes) break
+      kept.add(kid)
+      queue.push(kid)
+    }
+  }
+  const prune = (n) => {
+    n.children = n.children.filter((c) => kept.has(c))
+    for (const c of n.children) prune(c)
+  }
+  prune(root)
+}
+
 /** Clean-Room 轮廓紧凑排布（contour packing）+ >=3 叶子节点垂直叠放列表。 */
 export function layoutTreeDiagram(evidence, {
-  nodeH = 40, leafH = 34, levelGapY = 54, nodeGapX = 24, leafGapY = 10, spineInset = 18, pad = 36,
+  nodeH = 40, leafH = 34, levelGapY = 54, nodeGapX = 24, leafGapY = 10, spineInset = 18, pad = 36, maxNodes = MAX_TREE_NODES,
 } = {}) {
   const rootRaw = evidence?.root
   if (!rootRaw || typeof rootRaw !== 'object') {
-    return { id: 'tree', kind: 'tree', width: 420, height: 260, nodes: [], edges: [], groups: [], meta: { stackedLeafGroups: 0, totalNodes: 0 } }
+    return {
+      id: 'tree', kind: 'tree', width: 420, height: 260, nodes: [], edges: [], groups: [],
+      meta: { stackedLeafGroups: 0, totalNodes: 0, truncated: false, totalBeforeTruncate: 0, keptCount: 0 },
+    }
   }
+  const totalBeforeTruncate = countRawTreeNodes(rootRaw)
 
   let seq = 0, stackedLeafGroups = 0
   const buildInternal = (raw, depth, parentId) => {
@@ -38,6 +75,8 @@ export function layoutTreeDiagram(evidence, {
     }
   }
   const root = buildInternal(rootRaw, 0, null)
+  const cap = Math.max(1, Number(maxNodes) || MAX_TREE_NODES)
+  if (totalBeforeTruncate > cap) truncateTreeByBfs(root, cap)
 
   const shiftSubtree = (sub, dx, dy) => {
     sub.x = roundCoord(sub.x + dx); sub.y = roundCoord(sub.y + dy)
@@ -128,17 +167,23 @@ export function layoutTreeDiagram(evidence, {
   collect(root)
 
   const dims = expandLayoutBounds(nodes, edges, [], pad)
-  return { id: 'tree', kind: 'tree', width: dims.width, height: dims.height, nodes, edges, groups: [], meta: { stackedLeafGroups, totalNodes: nodes.length } }
+  return {
+    id: 'tree', kind: 'tree', width: dims.width, height: dims.height, nodes, edges, groups: [],
+    meta: { stackedLeafGroups, totalNodes: nodes.length, truncated: totalBeforeTruncate > nodes.length, totalBeforeTruncate, keptCount: nodes.length },
+  }
 }
 
 /** ERD 分层实体网格布局：按外键引用分层，字段数决定卡片高度，调用 visual-router 避障路由。 */
 export function layoutErdDiagram(evidence, {
-  cardW = 228, headerH = 38, rowH = 22, cardPadBottom = 12, gapX = 64, gapY = 64, pad = 40,
+  cardW = 228, headerH = 38, rowH = 22, cardPadBottom = 12, gapX = 64, gapY = 64, pad = 40, maxNodes = MAX_ERD_NODES, maxCols = 8,
 } = {}) {
   const entities = Array.isArray(evidence?.entities) ? evidence.entities : []
   const relations = Array.isArray(evidence?.relations) ? evidence.relations : []
   if (entities.length === 0) {
-    return { id: 'erd', kind: 'erd', width: 420, height: 260, nodes: [], edges: [], groups: [], meta: { entityCount: 0 } }
+    return {
+      id: 'erd', kind: 'erd', width: 420, height: 260, nodes: [], edges: [], groups: [],
+      meta: { entityCount: 0, relationCount: 0, truncated: false, totalBeforeTruncate: 0, keptCount: 0 },
+    }
   }
 
   const entMap = new Map()
@@ -146,8 +191,25 @@ export function layoutErdDiagram(evidence, {
     const name = String(e?.name || '').trim()
     if (name) entMap.set(name, { id: name, label: name, shortLabel: truncateLabel(name, 22), source: String(e.source || ''), fields: Array.isArray(e.fields) ? e.fields.map(String) : [] })
   }
-  const ids = [...entMap.keys()].sort()
-  const pairs = relations.filter((r) => entMap.has(r.from) && entMap.has(r.to) && r.from !== r.to).map((r) => [r.to, r.from])
+  const totalBeforeTruncate = entMap.size
+  const cap = Math.max(1, Number(maxNodes) || MAX_ERD_NODES)
+  let ids = [...entMap.keys()].sort()
+  if (ids.length > cap) {
+    const deg = new Map(ids.map((id) => [id, 0]))
+    for (const r of relations) {
+      if (entMap.has(r.from) && entMap.has(r.to) && r.from !== r.to) {
+        deg.set(r.from, (deg.get(r.from) || 0) + 1)
+        deg.set(r.to, (deg.get(r.to) || 0) + 1)
+      }
+    }
+    ids = [...ids]
+      .sort((a, b) => (((deg.get(b) || 0) * 10 + (entMap.get(b)?.fields.length || 0)) - ((deg.get(a) || 0) * 10 + (entMap.get(a)?.fields.length || 0))) || a.localeCompare(b))
+      .slice(0, cap)
+      .sort()
+  }
+  const keptSet = new Set(ids)
+  const keptRelations = relations.filter((r) => keptSet.has(r.from) && keptSet.has(r.to) && r.from !== r.to)
+  const pairs = keptRelations.map((r) => [r.to, r.from])
   const { rank } = kahnTopoSort(ids, pairs, (a, b) => a.localeCompare(b))
   const byTier = new Map()
   for (const id of ids) {
@@ -160,19 +222,22 @@ export function layoutErdDiagram(evidence, {
   let curY = pad
   for (const t of [...byTier.keys()].sort((a, b) => a - b)) {
     const rowItems = byTier.get(t).sort((a, b) => a.id.localeCompare(b.id))
-    let maxH = 0
-    rowItems.forEach((ent, colIdx) => {
-      const visibleFields = ent.fields.slice(0, 12), extraFieldCount = Math.max(0, ent.fields.length - visibleFields.length)
-      const h = headerH + Math.max(1, visibleFields.length + (extraFieldCount > 0 ? 1 : 0)) * rowH + cardPadBottom
-      const x = pad + colIdx * (cardW + gapX), y = curY
-      const node = { ...ent, visibleFields, extraFieldCount, tier: t, x, y, w: cardW, h, cx: roundCoord(x + cardW / 2), cy: roundCoord(y + h / 2) }
-      nodes.push(node); boxMap.set(node.id, node)
-      if (h > maxH) maxH = h
-    })
-    curY += maxH + gapY
+    for (let offset = 0; offset < rowItems.length; offset += maxCols) {
+      const slice = rowItems.slice(offset, offset + maxCols)
+      let maxH = 0
+      slice.forEach((ent, colIdx) => {
+        const visibleFields = ent.fields.slice(0, 12), extraFieldCount = Math.max(0, ent.fields.length - visibleFields.length)
+        const h = headerH + Math.max(1, visibleFields.length + (extraFieldCount > 0 ? 1 : 0)) * rowH + cardPadBottom
+        const x = pad + colIdx * (cardW + gapX), y = curY
+        const node = { ...ent, visibleFields, extraFieldCount, tier: t, x, y, w: cardW, h, cx: roundCoord(x + cardW / 2), cy: roundCoord(y + h / 2) }
+        nodes.push(node); boxMap.set(node.id, node)
+        if (h > maxH) maxH = h
+      })
+      curY += maxH + gapY
+    }
   }
 
-  const rawEdges = relations.filter((r) => boxMap.has(r.from) && boxMap.has(r.to) && r.from !== r.to).map((r, idx) => {
+  const rawEdges = keptRelations.filter((r) => boxMap.has(r.from) && boxMap.has(r.to) && r.from !== r.to).map((r, idx) => {
     const hasMany = entMap.get(r.to)?.fields?.some((f) => f.includes('[]')) || r.cardinality === '1:N'
     return { id: `erd:${r.from}->${r.to}:${idx}`, fromId: r.from, toId: r.to, label: String(r.label || 'fk'), cardinality: r.cardinality === '1:1' ? '1:1' : (hasMany || r.label ? '1:N' : '1:1') }
   })
@@ -182,22 +247,42 @@ export function layoutErdDiagram(evidence, {
     e.labelX = roundCoord(mid?.x ?? 0); e.labelY = roundCoord((mid?.y ?? 0) - 8)
   }
   const dims = expandLayoutBounds(nodes, edges, [], pad)
-  return { id: 'erd', kind: 'erd', width: dims.width, height: dims.height, nodes, edges, groups: [], meta: { entityCount: nodes.length, relationCount: edges.length } }
+  return {
+    id: 'erd', kind: 'erd', width: dims.width, height: dims.height, nodes, edges, groups: [],
+    meta: { entityCount: nodes.length, relationCount: edges.length, truncated: totalBeforeTruncate > nodes.length, totalBeforeTruncate, keptCount: nodes.length },
+  }
 }
 
 /** Class 拓扑分层 + 半列步进（half-col）水平交错布局。 */
 export function layoutClassDiagram(evidence, {
-  cardW = 200, cardH = 66, gapX = 56, gapY = 72, pad = 44,
+  cardW = 200, cardH = 66, gapX = 56, gapY = 72, pad = 44, maxNodes = MAX_CLASS_NODES,
 } = {}) {
   const rawEdges = Array.isArray(evidence?.edges) ? evidence.edges : []
   const nameSet = new Set(Array.isArray(evidence?.classes) ? evidence.classes : [])
   for (const e of rawEdges) { if (e?.from) nameSet.add(e.from); if (e?.to) nameSet.add(e.to) }
-  const ids = [...nameSet].sort()
+  let ids = [...nameSet].sort()
+  const totalBeforeTruncate = ids.length
   if (ids.length === 0) {
-    return { id: 'class', kind: 'class', width: 420, height: 260, nodes: [], edges: [], groups: [], meta: { halfColStaggered: false } }
+    return {
+      id: 'class', kind: 'class', width: 420, height: 260, nodes: [], edges: [], groups: [],
+      meta: { halfColStaggered: false, truncated: false, totalBeforeTruncate: 0, keptCount: 0 },
+    }
   }
+  const cap = Math.max(1, Number(maxNodes) || MAX_CLASS_NODES)
+  if (ids.length > cap) {
+    const deg = new Map(ids.map((id) => [id, 0]))
+    for (const e of rawEdges) {
+      if (e?.from && e?.to && e.from !== e.to) {
+        if (deg.has(e.from)) deg.set(e.from, deg.get(e.from) + 1)
+        if (deg.has(e.to)) deg.set(e.to, deg.get(e.to) + 1)
+      }
+    }
+    ids = [...ids].sort((a, b) => ((deg.get(b) || 0) - (deg.get(a) || 0)) || a.localeCompare(b)).slice(0, cap).sort()
+  }
+  const keptSet = new Set(ids)
+  const keptEdges = rawEdges.filter((e) => e?.from && e?.to && keptSet.has(e.from) && keptSet.has(e.to) && e.from !== e.to)
 
-  const pairs = rawEdges.filter((e) => e?.from && e?.to && e.from !== e.to).map((e) => [e.to, e.from])
+  const pairs = keptEdges.map((e) => [e.to, e.from])
   const { rank } = kahnTopoSort(ids, pairs, (a, b) => a.localeCompare(b))
   const byLayer = new Map()
   for (const id of ids) {
@@ -229,13 +314,16 @@ export function layoutClassDiagram(evidence, {
     implements: { lineStyle: 'dashed', marker: 'hollow-triangle' },
     embeds: { lineStyle: 'dotted', marker: 'hollow-diamond' },
   }
-  const edgeInputs = rawEdges.filter((e) => boxMap.has(e.from) && boxMap.has(e.to) && e.from !== e.to).map((e, idx) => {
+  const edgeInputs = keptEdges.filter((e) => boxMap.has(e.from) && boxMap.has(e.to) && e.from !== e.to).map((e, idx) => {
     const kind = String(e.kind || 'extends'), st = styleMap[kind] || styleMap.extends
     return { id: `cls:${e.from}->${e.to}:${kind}:${idx}`, fromId: e.from, toId: e.to, kind, lineStyle: st.lineStyle, marker: st.marker, outSide: 'top', inSide: 'bottom' }
   })
   const { edges } = routeEdgesOrthogonal(edgeInputs, boxMap, nodes, { clearance: 14, pad: 16 })
   const dims = expandLayoutBounds(nodes, edges, [], pad)
-  return { id: 'class', kind: 'class', width: dims.width, height: dims.height, nodes, edges, groups: [], meta: { halfColStaggered, layerCount: layers.length } }
+  return {
+    id: 'class', kind: 'class', width: dims.width, height: dims.height, nodes, edges, groups: [],
+    meta: { halfColStaggered, layerCount: layers.length, truncated: totalBeforeTruncate > nodes.length, totalBeforeTruncate, keptCount: nodes.length },
+  }
 }
 
 /** Sequence 参与者生命线与严格递增消息序列布局。 */

@@ -281,7 +281,7 @@ export function registerOnboardingCases(cases) {
       'README.md': '# node-ok\n\n测试节点项目示例，包含标准包管理命令脚本并用于校准验证。\n',
       'src/index.mjs': 'export const ok = 1\n',
     })
-    gitInit(nodeDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+    gitInit(nodeDir, { branch: 'main', name: 'alice', email: 'alice@acme-fixture.dev' })
     const docsDir = tmpProject({ 'README.md': '# pure-docs\n\n纯文档仓库说明文档示例。\n' })
     const bootDir = tmpProject({})
 
@@ -747,7 +747,7 @@ export function registerOnboardingCases(cases) {
 
     for (const shape of shapes) {
       const dir = tmpProject(shape.files)
-      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@acme-fixture.dev' })
       try {
         const sv = await runNode('survey.mjs', [dir, '--json'])
         if (sv.status !== 0) return `${shape.name} survey 失败：${sv.stderr}`

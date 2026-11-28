@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-28T07:21:39.125Z",
+  "installedAt": "2026-11-28T10:45:42.002Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -211,7 +211,7 @@
       "sha256": "755831fadb471f858647a5247f839796ef2a856f1c9742bbb93c61a4e4469c11"
     },
     "lib/command-lex.mjs": {
-      "sha256": "bd67c6ff761219e13fd8d6773cdafb2732083794c460ebed52166aca29f1adea"
+      "sha256": "065864dc8e7d2128b1fbd8c32b8cab7447653ba4b392b147e527e5bad832d477"
     },
     "lib/context-brief.mjs": {
       "sha256": "2f8b366c6cf50a982fb31eaf884b48d9984fd2d8235ea9ac16dbdfea1e11fb34"
@@ -304,7 +304,7 @@
       "sha256": "2ab39c3efdc1d6ee53b21592d538b881570b4fda232ba9acc22ceef6a845a387"
     },
     "lib/feature-map.mjs": {
-      "sha256": "37455209de20b1927178c925d48b2fc1c0f7ba3e557e1f3b6f53ef5c2386c79a"
+      "sha256": "48eb9a5c6b26bb215cb97981102c9900be8af28d83e680e2b93623236e984401"
     },
     "lib/gate-enforcement.mjs": {
       "sha256": "3ef70f03841ab70c4193de2c59376cb0271be7597ebbb4dc8230f515076f9549"
@@ -352,7 +352,7 @@
       "sha256": "de0f3599388713c42b0a43f9a7c80df268b7591f644a64b6c5520e6d50370516"
     },
     "lib/import-graph.mjs": {
-      "sha256": "cc30af7ec30c85652f43e996b85b6bcbbd42b72b02b054007e3c03de9487a42f"
+      "sha256": "5b6fe846f18983bda37af3e28c2f7e629639aac910c673c17a21f7251a750760"
     },
     "lib/intake-triage.mjs": {
       "sha256": "315f80455dbf14c84347fce18c7ffc16a07f28506ba26fddf7b20bbf2a2a4b8a"
@@ -424,10 +424,10 @@
       "sha256": "6a04faab98b4d78147a2bfe75cfb3c24586baaafa7429a171c5062a43a73011c"
     },
     "lib/profile-sniffer.mjs": {
-      "sha256": "1f18ddb16da4fc38c298c696969cc1458071488153c0f12ce0a4d0bb56791519"
+      "sha256": "c2364ae5be4b391e4c446620ae7ebf96a90a412704021868e9af633052913d05"
     },
     "lib/profile.mjs": {
-      "sha256": "09471461f06babd4d174ff86974a3efca86ca9724ca3c66df747db201b94792e"
+      "sha256": "0feab5d2ada74493c6b470a01a6cfd614ada86773ed246fdb107c805d8421a0b"
     },
     "lib/review-comment-render.mjs": {
       "sha256": "fd115e047a140a2655e6e2a360a3bde18e2e021c10c43cbc884fdc1e484929d8"
@@ -448,10 +448,10 @@
       "sha256": "8f9f760c9d6a2a741a1f7b8c11da0d0217ac4820e4abf1ef9443fb7c6fce7fba"
     },
     "lib/static-analyzer.mjs": {
-      "sha256": "e63e26ad9f8e63347d507dbcbeba18471a4329e37074bdcfd4b9c9dc6d4bbbb1"
+      "sha256": "40d6163fcfb1f4ed3b333eb9e601d9b1d4cb92f3c7577046ba406e73afb25229"
     },
     "lib/static-evidence-erd.mjs": {
-      "sha256": "4ae66f9d81c58a1cdfb8678c0e31e81f79bd8371b23e2e18a658e0e2a9f2ec0c"
+      "sha256": "2d4856434ae35d352418fad242ce1d8588f4ee84181874a339285ce5e525e202"
     },
     "lib/static-evidence.mjs": {
       "sha256": "9151e8d2d8268e672ce3dcadc8d14c44458a2d9a9cb5c57196a8ef575580c7be"
@@ -499,7 +499,7 @@
       "sha256": "40f5718abcd7bc0b42c9bafe7bf9b40b1ef35eac2673b3b40b7f3370cf3d85bb"
     },
     "lib/tool-owned.mjs": {
-      "sha256": "26ea59041068e3f40d105f3569dc243877c7fb3bdc8bef0d0955e234acb1dfa8"
+      "sha256": "a265269cb63730b3d3a96b541e6f9a672f829f0efd8ca76735c59c676fdb4953"
     },
     "lib/verdict.mjs": {
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
@@ -517,13 +517,13 @@
       "sha256": "1550e5be59c29c6beec66d0a2dc20a03ca3d8b7d28fbc1f11a092c1595c1fa1f"
     },
     "lib/visual-geometry-check.mjs": {
-      "sha256": "9f006c9079ad28bd40de76372b83e8bd9e06d21a195b860359f5ab7c6d14bcb7"
+      "sha256": "6c7afafc0eb5593457af85d430189499e6fe0272ef0e4e97d472d91c280c5e19"
     },
     "lib/visual-layout-charts.mjs": {
-      "sha256": "68d3864e519ca46256c980f32c6e84d24045ec192b372b442362ce3e34dc156f"
+      "sha256": "63c66de0dfe01e87c2de9969b5180fc03e5c2e692e99326b21517fd342d9a42a"
     },
     "lib/visual-layout-diagrams.mjs": {
-      "sha256": "52732378d8df7fbc2a0deae061a5e28eaf4b2b0d7fb4571537b60493e4d058ed"
+      "sha256": "ae93c2ed07fb9676eb26120e988f36eb46dee18a959d0b09ef5be1f790dfcfd2"
     },
     "lib/visual-layout.mjs": {
       "sha256": "b0dc601aeea14dc3f3368a33f9367ad16f66687a4eb37633ae9d23eb4415e516"

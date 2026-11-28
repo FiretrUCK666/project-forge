@@ -477,18 +477,13 @@ export function registerR7RootfixCases(cases) {
     }
   }])
 
-  cases.push(['[R7-C5] handoff.mjs 软链所有权分层判定与跨生态 linter .agents/ 忽略探测表', async () => {
+  cases.push(['[R7-C5] handoff.mjs 软链所有权分层判定（已跟踪/已忽略放行，未跟踪悬空越界截断）', async () => {
     const { scan } = await import('../handoff.mjs')
-    const { detectToolingAgentsIgnoreGaps } = await import('../lib/review-helpers.mjs')
 
     const dir = tmpProject({
       '.gitignore': 'tmp-ignored-link\n',
       'README.md': '# Demo\n',
       'tests/bin/cli.js': 'console.log(1)\n',
-      'ruff.toml': '[lint]\nselect = ["E"]\n',
-      'mypy.ini': '[mypy]\nstrict = True\n',
-      '.markdownlint.json': '{ "default": true }\n',
-      '.pre-commit-config.yaml': 'repos: []\n',
     })
     const outsideDir = tmpProject({ 'ext.txt': 'outside' })
     try {
@@ -514,22 +509,6 @@ export function registerR7RootfixCases(cases) {
         if (!badScan.truncated) {
           return `未跟踪未忽略的悬空越界软链应标 truncated=true：${JSON.stringify(badScan.scanCoverage)}`
         }
-      }
-
-      // 2. 跨生态探测表覆盖 Ruff / mypy / markdownlint / pre-commit
-      if (typeof detectToolingAgentsIgnoreGaps !== 'function') {
-        return 'review-helpers.mjs 未导出 detectToolingAgentsIgnoreGaps'
-      }
-      const gaps = detectToolingAgentsIgnoreGaps(dir)
-      const gapTools = new Set(gaps.map((g) => g.tool))
-      for (const expected of ['ruff', 'mypy', 'markdownlint', 'pre-commit']) {
-        if (!gapTools.has(expected)) return `detectToolingAgentsIgnoreGaps 漏检 ${expected}：${JSON.stringify(gaps)}`
-      }
-      // 加上 .agents 忽略后再检应消解
-      writeFileSync(join(dir, 'ruff.toml'), 'extend-exclude = [".agents"]\n', 'utf8')
-      const gapsAfter = detectToolingAgentsIgnoreGaps(dir)
-      if (gapsAfter.some((g) => g.tool === 'ruff')) {
-        return `已配置 extend-exclude .agents 的 ruff 仍被误报：${JSON.stringify(gapsAfter)}`
       }
       return true
     } finally {

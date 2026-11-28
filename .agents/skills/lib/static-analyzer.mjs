@@ -7,21 +7,22 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { findSccs } from './doc-graph.mjs'
 import {
   BROAD_CODE_EXT_RE, COMMON_SKIP_DIRS, gitLsFilesTextAndCode, gitRun, gitRunBuffer,
-  isMacOsJunkPath, posixPath, readJsonSafe, readTextSafe, writeJsonAtomic,
+  isMacOsJunkPath, posixPath, readJsonSafe, readTextSafe, writeAtomic,
 } from './git.mjs'
 import { readGitIndexPathsFast, readHeadFast, resolveCommonGitDir, resolveGitDirFast } from './git-fast.mjs'
 import { isCleanWorktreeFast } from './git-status-fast.mjs'
-import { buildDirFileIndex, extractImportsForArch, resolveGoModules, resolveLocalImportTarget } from './import-graph.mjs'
+import { buildDirFileIndex, expandImportCandidates, extractImportsForArch, resolveGoModules, resolveLocalImportTarget } from './import-graph.mjs'
 import { extractSymbols, isSymbolCandidatePath } from './symbol-index.mjs'
 
-export const ANALYSIS_CACHE_SCHEMA_VERSION = 1
+export const ANALYSIS_CACHE_SCHEMA_VERSION = 2
 export const MAX_ANALYZE_FILE_BYTES = 512 * 1024
+export const MAX_ANALYSIS_CACHE_BYTES = 128 * 1024 * 1024
 
 /**
  * 解析仓外静态分析增量缓存路径：
@@ -50,11 +51,31 @@ function isCodeAnalyzable(rel) {
 
 function loadAnalysisCache(cachePath) {
   if (!existsSync(cachePath)) return { files: {}, existed: false, recovered: false }
-  const raw = readJsonSafe(cachePath, 16 * 1024 * 1024)
+  const raw = readJsonSafe(cachePath, MAX_ANALYSIS_CACHE_BYTES)
   if (!raw || typeof raw !== 'object' || raw.schemaVersion !== ANALYSIS_CACHE_SCHEMA_VERSION || !raw.files || typeof raw.files !== 'object') {
     return { files: {}, existed: true, recovered: true }
   }
   return { files: raw.files, existed: true, recovered: false }
+}
+
+function serializeBoundedCache(filesMap, maxBytes = MAX_ANALYSIS_CACHE_BYTES) {
+  const fullPayload = JSON.stringify({ schemaVersion: ANALYSIS_CACHE_SCHEMA_VERSION, files: filesMap })
+  const fullBytes = Buffer.byteLength(fullPayload, 'utf8')
+  if (fullBytes <= maxBytes) return { payload: fullPayload, bytes: fullBytes, truncated: false }
+  const header = `{"schemaVersion":${ANALYSIS_CACHE_SCHEMA_VERSION},"files":{`
+  const footer = '}}'
+  let curBytes = Buffer.byteLength(header, 'utf8') + Buffer.byteLength(footer, 'utf8')
+  const parts = []
+  for (const key of Object.keys(filesMap).sort()) {
+    const entryStr = `${JSON.stringify(key)}:${JSON.stringify(filesMap[key])}`
+    const addBytes = Buffer.byteLength(entryStr, 'utf8') + (parts.length > 0 ? 1 : 0)
+    if (curBytes + addBytes > maxBytes) break
+    parts.push(entryStr)
+    curBytes += addBytes
+  }
+  if (parts.length === 0) return { payload: null, bytes: fullBytes, truncated: true }
+  const bounded = `${header}${parts.join(',')}${footer}`
+  return { payload: bounded, bytes: Buffer.byteLength(bounded, 'utf8'), truncated: true }
 }
 
 function parseGitIndexBlobShas(lsBuf, diffBuf) {
@@ -328,13 +349,18 @@ function finalizeAnalysisGraph({ root, cachePath, isGit, listedFiles, gitIndexSt
     const text = readTextSafe(f.full, MAX_ANALYZE_FILE_BYTES)
     if (text === undefined) continue
     const ext = f.rel.includes('.') ? f.rel.split('.').pop().toLowerCase() : ''
-    const imports = extractImportsForArch(f.rel, text, goModules)
+    const rawImports = extractImportsForArch(f.rel, text, goModules)
+    const compactImports = rawImports.map((imp) => (
+      imp.kind && imp.kind !== 'import'
+        ? { specifier: imp.specifier, line: imp.line, kind: imp.kind }
+        : { specifier: imp.specifier, line: imp.line }
+    ))
     const symInfo = extractSymbols(text, ext)
     const entry = {
       blobSha,
       mtimeMs,
       size,
-      imports,
+      imports: compactImports,
       symbols: symInfo.symbols,
       symbolSupported: symInfo.supported,
       lang: symInfo.lang,
@@ -348,16 +374,23 @@ function finalizeAnalysisGraph({ root, cachePath, isGit, listedFiles, gitIndexSt
     analyzedByRel.set(f.rel, entry)
   }
 
+  let cacheTruncated = false
+  let cacheBytes = 0
   const prevKeysCount = Object.keys(prevCacheFiles).length
   const nextKeysCount = Object.keys(nextCacheFiles).length
   const shouldWriteCache = useCache && (misses > 0 || cacheState.recovered || !cacheState.existed || prevKeysCount !== nextKeysCount)
   if (shouldWriteCache && (nextKeysCount > 0 || cacheState.recovered)) {
     try {
-      writeJsonAtomic(cachePath, {
-        schemaVersion: ANALYSIS_CACHE_SCHEMA_VERSION,
-        files: nextCacheFiles,
-      })
+      const serialized = serializeBoundedCache(nextCacheFiles, MAX_ANALYSIS_CACHE_BYTES)
+      cacheTruncated = serialized.truncated
+      cacheBytes = serialized.bytes
+      if (serialized.payload !== null) {
+        mkdirSync(dirname(cachePath), { recursive: true })
+        writeAtomic(cachePath, serialized.payload)
+      }
     } catch { /* 仓外缓存写入异常时保持分析结果可读 */ }
+  } else if (useCache && existsSync(cachePath)) {
+    try { cacheBytes = statSync(cachePath).size } catch { cacheBytes = 0 }
   }
 
   const fileSet = new Set(analyzedByRel.keys())
@@ -376,7 +409,10 @@ function finalizeAnalysisGraph({ root, cachePath, isGit, listedFiles, gitIndexSt
   for (const rel of [...fileSet].sort()) {
     const info = analyzedByRel.get(rel)
     for (const imp of info?.imports ?? []) {
-      const target = resolveLocalImportTarget(imp.candidates, fileSet, { dirIndex })
+      const candidates = Array.isArray(imp.candidates)
+        ? imp.candidates
+        : expandImportCandidates(rel, imp.specifier, { goModules, kind: imp.kind })
+      const target = resolveLocalImportTarget(candidates, fileSet, { dirIndex })
       if (!target || target === rel) continue
       const key = `${rel}\0${target}`
       if (seenEdgeKeys.has(key)) continue
@@ -441,6 +477,8 @@ function finalizeAnalysisGraph({ root, cachePath, isGit, listedFiles, gitIndexSt
       cachePath,
       useCache,
       recovered: cacheState.recovered,
+      truncated: cacheTruncated,
+      cacheBytes,
     },
   }
 }

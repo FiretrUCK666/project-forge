@@ -27,6 +27,8 @@
  * 而交付体检不该跑用户项目的构建。那一层由项目自己的门禁负责。
  */
 
+import { markerRegions } from './protocol.mjs'
+
 const PATH_EXT = /\.(?:mjs|cjs|js|ts|py|sh|ps1|rs|go|java|json|ya?ml|toml|lock|txt|cfg|ini|mdx?)$/i
 
 const NOT_A_PATH = [
@@ -38,8 +40,9 @@ const NOT_A_PATH = [
   /^\$[A-Za-z_{]/,             // 环境变量根：`$HOME/x.y`、`${HOME}/x.y`
   /^%[A-Za-z_]+%[\\/]/,        // Windows 环境变量根：`%APPDATA%\x.ps1`
   /^<.*>$/,                    // 占位符
-  /[<>*?]/,                    // 占位符或通配
+  /[<>*?,]/,                   // 占位符、通配或逗号黏连
   /\/$/,                       // 目录尾斜杠：目录可能是有意不建的，不在这里判
+  /^(?:path\/to|foo\/bar|example|your-[a-z0-9._-]*)\//i, // 国际通用示例占位前缀
 ]
 
 /** 反引号里的行内代码：`` `xxx` ``。 */
@@ -237,7 +240,7 @@ export function claimsOf(text) {
     const after = source.slice(m.index + m[0].length, m.index + m[0].length + 24)
     const before = source.slice(Math.max(0, m.index - 16), m.index)
     const optional = OPTIONAL_SUFFIX_RE.test(after) || OPTIONAL_PREFIX_RE.test(before)
-    for (const word of token.split(/\s+/)) {
+    for (const word of token.split(/[\s,]+/)) {
       if (!looksLikeRepoPath(word)) continue
       paths.add(normalizeClaimPath(word))
       // 可选路径单独记一份：它仍然要参与「契约里写了什么」的统计，
@@ -253,7 +256,7 @@ export function claimsOf(text) {
       const code = line.replace(/\s+#.*$/, '').trim()
       if (code.length === 0 || code.startsWith('#')) continue
       for (const b of code.matchAll(BRANCH_CMD)) branches.add(b[1])
-      for (const word of code.split(/\s+/)) {
+      for (const word of code.split(/[\s,]+/)) {
         if (looksLikeRepoPath(word)) paths.add(normalizeClaimPath(word))
       }
     }
@@ -297,6 +300,7 @@ export function verifyClaims(text, facts, exists) {
     out.push({
       id: 'claim.branch',
       ok: wrong.length === 0,
+      level: wrong.length === 0 ? 'ok' : 'missing',
       detail: wrong.length === 0
         ? `契约里的分支名与当前默认分支（${actual}）一致`
         : `契约里写着 ${wrong.join('、')}，而当前默认分支是 ${actual}——照它跑会切到一条不存在的分支`,
@@ -312,17 +316,39 @@ export function verifyClaims(text, facts, exists) {
     const missing = allPaths.filter((p) => !exists(p))
     const required = missing.filter((p) => !optional.has(p))
     const optionalMissing = missing.filter((p) => optional.has(p))
-    // 只有**可选**路径缺席时不算失约：契约原文写的就是「若存在」。
-    // 但它也不是「都还在」——把两者混成一句话，读的人就分不清自己在看哪一种。
     const optionalNote = optionalMissing.length > 0
       ? `（另有 ${optionalMissing.length} 处写着「若存在」的路径确实还没建：${optionalMissing.join('、')}）`
       : ''
+    let level = required.length === 0 ? 'ok' : 'missing'
+    let managedOnlyMissing = false
+    if (required.length > 0) {
+      const source = String(text ?? '').replace(/\r\n/g, '\n')
+      const { regions } = markerRegions(source, 'AGENTS.md')
+      if (regions.length > 0) {
+        const lines = source.split('\n')
+        const managedChunks = regions.map((r) => lines.slice(r.start, r.end + 1).join('\n'))
+        const devProfileBody = extractSectionBody(source, 'Dev Profile')
+        if (devProfileBody) managedChunks.push(`## Dev Profile\n${devProfileBody}`)
+        const managedClaims = claimsOf(managedChunks.join('\n\n'))
+        const managedSet = new Set([
+          ...managedClaims.paths,
+          ...managedClaims.dirs.map((d) => d.replace(/\/+$/, '')),
+        ])
+        if (!required.some((p) => managedSet.has(p))) {
+          level = 'notice'
+          managedOnlyMissing = true
+        }
+      }
+    }
     out.push({
       id: 'claim.path',
       ok: required.length === 0,
+      level,
       detail: required.length === 0
         ? `${allPaths.length - optionalMissing.length} 个契约里点名的路径都还在${optionalNote}`
-        : `契约里点名的这些路径已经不在了：${required.join('、')}——照着它做的人会找不到东西${optionalNote}`,
+        : (managedOnlyMissing
+            ? `契约非受管手写正文中存在疑似旧路径：${required.join('、')}——未触及受管区或 Dev Profile，不阻断交付，可按需核对${optionalNote}`
+            : `契约里点名的这些路径已经不在了：${required.join('、')}——照着它做的人会找不到东西${optionalNote}`),
     })
   }
 
@@ -332,6 +358,7 @@ export function verifyClaims(text, facts, exists) {
     out.push({
       id: 'claim.script',
       ok: missingScripts.length === 0,
+      level: missingScripts.length === 0 ? 'ok' : 'missing',
       detail: missingScripts.length === 0
         ? `契约里引用的 ${scripts.length} 个脚本都在 package.json 中`
         : `契约里引用的这些包管理器脚本已不在 package.json 中：${missingScripts.join('、')}——照它跑会报脚本不存在`,

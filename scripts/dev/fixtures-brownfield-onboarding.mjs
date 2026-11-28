@@ -193,8 +193,8 @@ export function registerBrownfieldOnboardingCases(cases) {
     })
 
     try {
-      gitInit(skillDir, { branch: 'main', name: 'Dev', email: 'dev@acme.test' })
-      gitInit(oversizeDir, { branch: 'main', name: 'Dev', email: 'dev@acme.test' })
+      gitInit(skillDir, { branch: 'main', name: 'Dev', email: 'dev@acme-fixture.dev' })
+      gitInit(oversizeDir, { branch: 'main', name: 'Dev', email: 'dev@acme-fixture.dev' })
 
       // 1. 自有技能在 AGENTS.md 中严格只出现一次（无重复注入）
       const eq = await runNode('equip.mjs', [skillDir, '--no-backup'])
@@ -208,14 +208,19 @@ export function registerBrownfieldOnboardingCases(cases) {
         return `C3 自有技能出现重复或缺失注入（my-sop=${sopHits}, team-helper=${helperHits}）`
       }
 
-      // 2. >15KB 自定义手写 AGENTS.md --upgrade 默认阻断并显式给出 --allow-custom-oversize
-      const denyUp = await runNode('compose-agents.mjs', [oversizeDir, '--upgrade', '--no-backup'])
-      if (denyUp.status === 0) return 'C3 超 30KB 合并未阻断写入'
-      if (!denyUp.stderr.includes('--allow-custom-oversize') || !denyUp.stderr.includes('managed=') || !denyUp.stderr.includes('custom=')) {
-        return `C3 超限报错未显式提示 --allow-custom-oversize 或拆解：${denyUp.stderr}`
+      // 2. >15KB 自定义手写 AGENTS.md --upgrade 降级软提示退出 0、完整保留原有长文并输出 managed/custom 分解与指针模式提示
+      const softUp = await runNode('compose-agents.mjs', [oversizeDir, '--upgrade', '--no-backup'])
+      if (softUp.status !== 0) return `C3 自定义长文超 30KB 应降级 notice 退出 0：${softUp.stderr}`
+      if (!softUp.stderr.includes('--allow-custom-oversize') || !softUp.stderr.includes('managed=') || !softUp.stderr.includes('custom=')) {
+        return `C3 自定义超限软提示缺少 managed/custom 拆解或兼容提示：${softUp.stderr}`
+      }
+      const afterSoft = readFileSync(join(oversizeDir, 'AGENTS.md'), 'utf8')
+      if (!afterSoft.includes(hugeCustomMarker) || !afterSoft.includes('<!-- project-forge: begin Dev Profile -->')) {
+        return 'C3 --upgrade 未保留自定义长文或未追加 Dev Profile'
       }
 
-      // 3. 传入 --allow-custom-oversize 成功升级且完整保留原有手写长文
+      // 3. 兼容参数 --allow-custom-oversize 继续接受并成功退出 0
+      writeFileSync(join(oversizeDir, 'AGENTS.md'), hugeHandAgents, 'utf8')
       const allowUp = await runNode('compose-agents.mjs', [oversizeDir, '--upgrade', '--allow-custom-oversize', '--no-backup'])
       if (allowUp.status !== 0) return `C3 --upgrade --allow-custom-oversize 失败：${allowUp.stderr}`
       const afterAllow = readFileSync(join(oversizeDir, 'AGENTS.md'), 'utf8')
@@ -260,8 +265,8 @@ export function registerBrownfieldOnboardingCases(cases) {
     })
 
     try {
-      gitInit(askDir, { branch: 'main', name: 'Dev', email: 'dev@acme.test' })
-      gitInit(readyDir, { branch: 'main', name: 'Dev', email: 'dev@acme.test' })
+      gitInit(askDir, { branch: 'main', name: 'Dev', email: 'dev@acme-fixture.dev' })
+      gitInit(readyDir, { branch: 'main', name: 'Dev', email: 'dev@acme-fixture.dev' })
 
       // 1. 正向：needsHuman.count > 0 时停在 S2，[NEXT STEP] 严禁出现 equip.mjs 或 backup.mjs
       const fAsk = await survey(askDir)
@@ -317,6 +322,140 @@ export function registerBrownfieldOnboardingCases(cases) {
     } finally {
       rmTree(askDir)
       rmTree(readyDir)
+    }
+  }])
+
+  cases.push(['Slice1 C3/C5/C6/C7：核心节防误跳 + skippedByHeading、ignoredButTracked 降级、claims 双态/拆词、裸取舍开关、命令校验与提交提示稳定', async () => {
+    const { validateDevProfileRegion } = await import('../lib/agents-sections.mjs')
+    const { verifyClaims, claimsOf } = await import('../lib/claims.mjs')
+    const { readDecisionMap, parseAgentsProfile } = await import('../../kit/skills/lib/profile.mjs')
+    const { sanitizeVerificationTool } = await import('../../kit/skills/lib/feature-map.mjs')
+    const { validateExecutableCommandShape } = await import('../../kit/skills/lib/command-lex.mjs')
+    const { commitStyleHint } = await import('../lib/agents-defaults.mjs')
+
+    const bizPrefix = [
+      '# BizApp Handbook',
+      '',
+      '## Project Overview',
+      'Real-time collaborative document platform with rich domain docs.',
+      '',
+      '## Real-time Collaboration',
+      'Users edit documents together over CRDT websockets. Example placeholder: `path/to/doc.ts`, `foo/bar/sample.mjs`.',
+      '',
+      '## General Guidelines',
+      'Keep UI responsive and accessible. Also see `src/legacy-old-file.ts` for historical notes.',
+      '',
+      '## Architectural Decisions',
+      'Postgres + Redis architecture.',
+      '',
+      '```yaml',
+      'files: src/a.mjs,src/b.mjs',
+      '```',
+      '',
+    ].join('\n')
+    const dir = tmpProject({
+      'package.json': JSON.stringify({ name: 'biz-app', version: '1.0.0', private: true, scripts: { test: 'node -e "process.exit(0)"' } }),
+      'README.md': '# biz-app\n\nReal-time collaborative app test fixture.\n',
+      'LICENSE': 'MIT License\n',
+      '.gitignore': 'ignored-legacy.log\n.worktrees/\n',
+      'ignored-legacy.log': 'legacy tracked content\n',
+      'src/a.mjs': 'export const a = 1\n',
+      'src/b.mjs': 'export const b = 2\n',
+      'AGENTS.md': bizPrefix,
+    })
+    gitInit(dir, { branch: 'main', name: 'Dev', email: 'dev@biz-fixture.dev' })
+    // 强行将 ignored-legacy.log 加入索引模拟上游历史 ignoredButTracked
+    const { gitCommitFast, gitSync } = await import('./fixtures-helpers.mjs')
+    gitSync(dir, ['add', '-f', 'ignored-legacy.log'])
+    gitCommitFast(dir, 'chore: legacy tracked ignored file')
+
+    try {
+      await runNode('equip.mjs', [dir, '--no-backup'])
+      const up = await runNode('compose-agents.mjs', [dir, '--upgrade', '--no-backup'])
+      if (up.status !== 0) return `C3 --upgrade 失败：${up.stderr}`
+      const upgraded = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      if (!upgraded.startsWith(bizPrefix.trimEnd())) {
+        return 'C3 --upgrade 未字节级保留既有 AGENTS.md 原文前缀'
+      }
+      for (const coreId of ['意图路由', 'Dev Profile', '修改守则', '日常协作与风险分流', '取舍']) {
+        if (!upgraded.includes(`<!-- project-forge: begin ${coreId} -->`)) {
+          return `C3 核心受管节 ${coreId} 被业务标题误跳过未注入`
+        }
+      }
+      if (!up.stderr.includes('skippedByHeading')) {
+        return `C3 --upgrade 跳过 Project Overview 时未输出 skippedByHeading 诊断：${up.stderr}`
+      }
+
+      // 填实占位并在 ## 取舍 测试裸开关 + evergreen-docs 跨区回读
+      const hydrated = upgraded
+        .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填实。')
+        .replace(/^((?:quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit):\s*)<[^>\n]+>/gm, '$1none')
+        .replace('<!-- project-forge: end 取舍 -->', '- no-git-hooks\n- evergreen-docs: docs/GUIDE.md, README.md\n<!-- project-forge: end 取舍 -->')
+      writeFileSync(join(dir, 'AGENTS.md'), hydrated, 'utf8')
+
+      // C5: ignoredButTracked 降级为 notice 且不阻断；C6: 非受管正文旧路径降级 notice；C3: skippedByHeading 在 review 中报出
+      const rev = await reviewProject(dir)
+      const igFinding = rev.results.find((r) => r.id === 'git.ignored-tracked')
+      if (!igFinding || igFinding.level !== 'notice' || igFinding.decision !== 'ignore-tracked-legacy') {
+        return `C5 git.ignored-tracked 应为 notice 且带 decision ignore-tracked-legacy：${JSON.stringify(igFinding)}`
+      }
+      const pathFinding = rev.results.find((r) => r.id === 'claim.path')
+      if (!pathFinding || pathFinding.level !== 'notice') {
+        return `C6 已融合仓非受管正文疑似旧路径应降级为 notice：${JSON.stringify(pathFinding)}`
+      }
+      if (!rev.results.some((r) => r.id === 'agents.skipped-by-heading' && r.level === 'notice')) {
+        return `C3 review 未输出 agents.skipped-by-heading 诊断：${JSON.stringify(rev.results.filter((r) => r.scope === 'agents'))}`
+      }
+      if (rev.missing.length > 0) {
+        return `C3/C5/C6 已融合仓不应被历史 ignoredButTracked 或非受管正文旧路径阻断：${JSON.stringify(rev.missing)}`
+      }
+
+      // C6: claimsOf 按 /[\s,]+/ 拆词且过滤 path/to/* 与 foo/bar/*
+      const cl = claimsOf(bizPrefix)
+      if (!cl.paths.includes('src/a.mjs') || !cl.paths.includes('src/b.mjs')) {
+        return `C6 claimsOf 未按逗号拆词识别 src/a.mjs,src/b.mjs：${JSON.stringify(cl.paths)}`
+      }
+      if (cl.paths.some((p) => p.startsWith('path/to/') || p.startsWith('foo/bar/'))) {
+        return `C6 claimsOf 未过滤国际通用占位前缀：${JSON.stringify(cl.paths)}`
+      }
+      // C6 反向：无受管标记的纯 AGENTS.md 中缺失路径维持 missing
+      const pureRes = verifyClaims('# Pure\n\nRun `src/nonexistent.mjs`.\n', {}, () => false)
+      const purePath = pureRes.find((x) => x.id === 'claim.path')
+      if (!purePath || purePath.ok || purePath.level !== 'missing') {
+        return `C6 无受管标记纯契约缺失路径应维持 missing：${JSON.stringify(purePath)}`
+      }
+      // C6: 裸取舍开关与 evergreen-docs 跨区回读
+      const dm = readDecisionMap(hydrated)
+      if (dm.get('no-git-hooks') !== 'true') return `C6 readDecisionMap 未识别裸取舍开关：${JSON.stringify([...dm.entries()])}`
+      const prof = parseAgentsProfile(dir)
+      if (!prof.evergreenDocs.includes('docs/GUIDE.md')) {
+        return `C6 parseAgentsProfile 未从 ## 取舍 兼容回读 evergreen-docs：${JSON.stringify(prof.evergreenDocs)}`
+      }
+
+      // C7: validateExecutableCommandShape 拦截中文自然语言，放行合法 CLI 与 none；接入 Dev Profile 与 feature-map
+      if (validateExecutableCommandShape('运行测试并检查输出', { allowNone: true }).ok) return 'C7 误放行中文自然语言命令'
+      if (!validateExecutableCommandShape('none', { allowNone: true }).ok) return 'C7 误拦截显式 none'
+      if (!validateExecutableCommandShape('npm test && node --version', { allowNone: false }).ok) return 'C7 误拦截合法命令'
+      const badDp = validateDevProfileRegion('<!-- project-forge: begin Dev Profile -->\n## Dev Profile\n```yaml\nquick-test: 请运行全部单元测试\nfull-test: npm test\nsmoke-verify: none\nmerge-gate: npm test\narch-rules: none\nhigh-risk: src/\ndo-not-edit: docs/archive/\n```\n<!-- project-forge: end Dev Profile -->\n')
+      if (badDp.ok) return 'C7 validateDevProfileRegion 误放行中文自然语言命令'
+      const badTool = sanitizeVerificationTool({ id: 't1', kind: 'cli', command: '请手动打开页面确认' })
+      if (badTool.command !== null) return `C7 sanitizeVerificationTool 未清洗自然语言伪命令：${JSON.stringify(badTool)}`
+
+      // C7: commitStyleHint 在 1 次与 6 次 plain 提交间保持文本稳定，compose-agents --check 均退出 0
+      const h1 = commitStyleHint({ conventions: { commitStyle: 'plain' }, git: { commits: 1 } })
+      const h6 = commitStyleHint({ conventions: { commitStyle: 'plain' }, git: { commits: 6 } })
+      if (h1 !== h6) return `C7 commitStyleHint 在 commits=1 与 6 间发生跳变：${h1} !== ${h6}`
+      const chkBefore = await runNode('compose-agents.mjs', [dir, '--check'])
+      if (chkBefore.status !== 0) return `C7 少提交态 --check 失败：${chkBefore.stderr}`
+      for (let i = 0; i < 6; i += 1) {
+        writeFileSync(join(dir, 'src/a.mjs'), `export const a = ${i + 2}\n`, 'utf8')
+        gitCommitFast(dir, `plain update ${i + 1}`)
+      }
+      const chkAfter = await runNode('compose-agents.mjs', [dir, '--check'])
+      if (chkAfter.status !== 0) return `C7 跨越 5 次 plain 提交后 --check 自破：${chkAfter.stderr}`
+      return true
+    } finally {
+      rmTree(dir)
     }
   }])
 }

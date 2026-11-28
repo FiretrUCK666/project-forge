@@ -35,7 +35,77 @@ export function resolveGoModules(repoRoot) {
 }
 
 /**
- * 剥离注释后按语言提取静态导入条目 `{ line, specifier, candidates }`。
+ * 按文件扩展名与导入指示符生成仓内候选相对路径（单一真相源，供静态抽取与缓存重建共用）。
+ */
+export function expandImportCandidates(relFile, specifier, { goModules = [], kind = 'import' } = {}) {
+  const normFile = posixPath(relFile)
+  const ext = normFile.toLowerCase().split('.').pop() ?? ''
+  const curDir = pathPosix.dirname(normFile)
+  const spec = String(specifier ?? '').trim()
+  if (!spec) return []
+
+  if (JS_TS_EXTS.has(ext)) {
+    if (spec.startsWith('.')) {
+      const base = pathPosix.normalize(pathPosix.join(curDir, spec))
+      return [base, `${base}.js`, `${base}.mjs`, `${base}.ts`, `${base}.tsx`, `${base}/index.js`, `${base}/index.mjs`, `${base}/index.ts`]
+    }
+    const cands = [spec]
+    if (spec.startsWith('@/')) cands.push(`src/${spec.slice(2)}`)
+    return cands
+  }
+
+  if (ext === 'py') {
+    const dotM = /^(\.+)(.*)$/.exec(spec)
+    if (dotM) {
+      let base = curDir
+      for (let up = 1; up < dotM[1].length; up += 1) base = pathPosix.dirname(base)
+      const sub = dotM[2].replace(/\./g, '/')
+      const joined = sub ? pathPosix.normalize(base === '.' ? sub : pathPosix.join(base, sub)) : base
+      return [joined, `${joined}.py`, `${joined}/__init__.py`]
+    }
+    const slash = spec.replace(/\./g, '/')
+    return [slash, `${slash}.py`, `${slash}/__init__.py`]
+  }
+
+  if (ext === 'go') {
+    const cands = [spec, `${spec}/_.go`]
+    for (const gm of goModules) {
+      if (spec.startsWith(`${gm.mod}/`)) {
+        const sub = spec.slice(gm.mod.length + 1)
+        const localPkg = gm.dirRel ? `${gm.dirRel}/${sub}` : sub
+        cands.unshift(localPkg, `${localPkg}/_.go`)
+      }
+    }
+    if (goModules.length === 0 && /^[^/]+\.[^/]+\/[^/]+\/.+/.test(spec)) {
+      const segs = spec.split('/')
+      if (segs.length >= 3) cands.unshift(segs.slice(2).join('/'), `${segs.slice(2).join('/')}/_.go`)
+      if (segs.length >= 4) cands.unshift(segs.slice(3).join('/'), `${segs.slice(3).join('/')}/_.go`)
+    }
+    return cands
+  }
+
+  if (ext === 'java' || ext === 'kt' || ext === 'kts') {
+    const slash = spec.replace(/\./g, '/')
+    return [slash, `${slash}.${ext}`, `src/main/java/${slash}.java`]
+  }
+
+  if (ext === 'rs') {
+    if (kind === 'mod') {
+      const joined = curDir === '.' ? spec : pathPosix.join(curDir, spec)
+      return [`${joined}.rs`, `${joined}/mod.rs`]
+    }
+    const slash = spec.replace(/::/g, '/')
+    const parentSlash = slash.includes('/') ? slash.slice(0, slash.lastIndexOf('/')) : ''
+    const cands = [slash, `src/${slash}`, `src/${slash}.rs`, `src/${slash}/mod.rs`]
+    if (parentSlash) cands.push(`src/${parentSlash}.rs`, `src/${parentSlash}/mod.rs`)
+    return cands
+  }
+
+  return [spec]
+}
+
+/**
+ * 剥离注释后按语言提取静态导入条目 `{ line, specifier, kind?, candidates }`。
  * 支持 JS/TS、Python、Go、Java/Kotlin、Rust。
  */
 export function extractImportsForArch(relFile, text, goModules = []) {
@@ -43,7 +113,6 @@ export function extractImportsForArch(relFile, text, goModules = []) {
   const ext = posixPath(relFile).toLowerCase().split('.').pop() ?? ''
   const codeLines = stripCodeCommentsLines(text, ext)
   const stripped = codeLines.join('\n')
-  const curDir = pathPosix.dirname(posixPath(relFile))
 
   if (JS_TS_EXTS.has(ext)) {
     const patterns = [
@@ -55,15 +124,7 @@ export function extractImportsForArch(relFile, text, goModules = []) {
         const spec = m[1].trim()
         if (!spec) continue
         const line = stripped.slice(0, m.index ?? 0).split('\n').length
-        const cands = []
-        if (spec.startsWith('.')) {
-          const base = pathPosix.normalize(pathPosix.join(curDir, spec))
-          cands.push(base, `${base}.js`, `${base}.mjs`, `${base}.ts`, `${base}.tsx`, `${base}/index.js`, `${base}/index.mjs`, `${base}/index.ts`)
-        } else {
-          cands.push(spec)
-          if (spec.startsWith('@/')) cands.push(`src/${spec.slice(2)}`)
-        }
-        results.push({ line, specifier: spec, candidates: cands })
+        results.push({ line, specifier: spec, candidates: expandImportCandidates(relFile, spec, { goModules }) })
       }
     }
     return results
@@ -76,19 +137,7 @@ export function extractImportsForArch(relFile, text, goModules = []) {
       const fromM = /^from\s+(\.+[A-Za-z0-9_.]*|[A-Za-z0-9_.]+)\s+import\b/.exec(code)
       if (fromM) {
         const mod = fromM[1]
-        const cands = []
-        const dotM = /^(\.+)(.*)$/.exec(mod)
-        if (dotM) {
-          let base = curDir
-          for (let up = 1; up < dotM[1].length; up += 1) base = pathPosix.dirname(base)
-          const sub = dotM[2].replace(/\./g, '/')
-          const joined = sub ? pathPosix.normalize(base === '.' ? sub : pathPosix.join(base, sub)) : base
-          cands.push(joined, `${joined}.py`, `${joined}/__init__.py`)
-        } else {
-          const slash = mod.replace(/\./g, '/')
-          cands.push(slash, `${slash}.py`, `${slash}/__init__.py`)
-        }
-        results.push({ line: i + 1, specifier: mod, candidates: cands })
+        results.push({ line: i + 1, specifier: mod, candidates: expandImportCandidates(relFile, mod, { goModules }) })
         continue
       }
       const impM = /^import\s+([A-Za-z0-9_.,\s]+)$/.exec(code)
@@ -96,8 +145,7 @@ export function extractImportsForArch(relFile, text, goModules = []) {
         for (const seg of impM[1].split(',')) {
           const mod = seg.trim().split(/\s+as\s+/i)[0].trim()
           if (!mod) continue
-          const slash = mod.replace(/\./g, '/')
-          results.push({ line: i + 1, specifier: mod, candidates: [slash, `${slash}.py`, `${slash}/__init__.py`] })
+          results.push({ line: i + 1, specifier: mod, candidates: expandImportCandidates(relFile, mod, { goModules }) })
         }
       }
     }
@@ -116,20 +164,7 @@ export function extractImportsForArch(relFile, text, goModules = []) {
         : /^import\s+(?:[A-Za-z0-9_.]+\s+)?"([^"]+)"/.exec(line)
       if (!m) continue
       const spec = m[1].trim()
-      const cands = [spec, `${spec}/_.go`]
-      for (const gm of goModules) {
-        if (spec.startsWith(`${gm.mod}/`)) {
-          const sub = spec.slice(gm.mod.length + 1)
-          const localPkg = gm.dirRel ? `${gm.dirRel}/${sub}` : sub
-          cands.unshift(localPkg, `${localPkg}/_.go`)
-        }
-      }
-      if (goModules.length === 0 && /^[^/]+\.[^/]+\/[^/]+\/.+/.test(spec)) {
-        const segs = spec.split('/')
-        if (segs.length >= 3) cands.unshift(segs.slice(2).join('/'), `${segs.slice(2).join('/')}/_.go`)
-        if (segs.length >= 4) cands.unshift(segs.slice(3).join('/'), `${segs.slice(3).join('/')}/_.go`)
-      }
-      results.push({ line: i + 1, specifier: spec, candidates: cands })
+      results.push({ line: i + 1, specifier: spec, candidates: expandImportCandidates(relFile, spec, { goModules }) })
     }
     return results
   }
@@ -139,8 +174,7 @@ export function extractImportsForArch(relFile, text, goModules = []) {
       const m = /^\s*import\s+(?:static\s+)?([A-Za-z0-9_.]+)(?:\.\*)?\s*;?/.exec(codeLines[i])
       if (!m) continue
       const spec = m[1]
-      const slash = spec.replace(/\./g, '/')
-      results.push({ line: i + 1, specifier: spec, candidates: [slash, `${slash}.${ext}`, `src/main/java/${slash}.java`] })
+      results.push({ line: i + 1, specifier: spec, candidates: expandImportCandidates(relFile, spec, { goModules }) })
     }
     return results
   }
@@ -150,18 +184,13 @@ export function extractImportsForArch(relFile, text, goModules = []) {
       const useM = /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+(?:crate::|self::|super::)?([A-Za-z0-9_:]+)/.exec(codeLines[i])
       if (useM) {
         const spec = useM[1]
-        const slash = spec.replace(/::/g, '/')
-        const parentSlash = slash.includes('/') ? slash.slice(0, slash.lastIndexOf('/')) : ''
-        const cands = [slash, `src/${slash}`, `src/${slash}.rs`, `src/${slash}/mod.rs`]
-        if (parentSlash) cands.push(`src/${parentSlash}.rs`, `src/${parentSlash}/mod.rs`)
-        results.push({ line: i + 1, specifier: spec, candidates: cands })
+        results.push({ line: i + 1, specifier: spec, candidates: expandImportCandidates(relFile, spec, { goModules }) })
         continue
       }
       const modM = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z0-9_]+)\s*;/.exec(codeLines[i])
       if (modM) {
         const name = modM[1]
-        const joined = curDir === '.' ? name : pathPosix.join(curDir, name)
-        results.push({ line: i + 1, specifier: name, candidates: [`${joined}.rs`, `${joined}/mod.rs`] })
+        results.push({ line: i + 1, specifier: name, kind: 'mod', candidates: expandImportCandidates(relFile, name, { goModules, kind: 'mod' }) })
       }
     }
   }

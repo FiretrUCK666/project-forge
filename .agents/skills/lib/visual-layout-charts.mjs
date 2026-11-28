@@ -12,6 +12,7 @@ import {
 } from './visual-router.mjs'
 
 export const QUIET_GAP_RATIO = 4
+export const MAX_DATAFLOW_NODES = 60
 
 function findLongestAcyclicSpine(states, transitions) {
   const adj = new Map(states.map((s) => [s, []])), indeg = new Map(states.map((s) => [s, 0]))
@@ -116,7 +117,7 @@ export function layoutLifecycleDiagram(evidence, {
 
 /** Dataflow 阶段管道流布局：按 needs 拓扑分层生成分阶段通道列与避障路由边。 */
 export function layoutDataflowDiagram(evidence, {
-  nodeW = 196, nodeH = 56, colGap = 72, rowGap = 24, colPadX = 18, colHeadH = 38, colPadBottom = 18, pad = 36,
+  nodeW = 196, nodeH = 56, colGap = 72, rowGap = 24, colPadX = 18, colHeadH = 38, colPadBottom = 18, pad = 36, maxNodes = MAX_DATAFLOW_NODES,
 } = {}) {
   const rawStages = Array.isArray(evidence?.stages) ? evidence.stages : []
   const rawEdges = Array.isArray(evidence?.edges) ? evidence.edges : []
@@ -129,12 +130,29 @@ export function layoutDataflowDiagram(evidence, {
     if (e?.from && !stageMap.has(e.from)) stageMap.set(e.from, { id: e.from, label: e.from.split(':').pop(), source: '', kind: 'stage' })
     if (e?.to && !stageMap.has(e.to)) stageMap.set(e.to, { id: e.to, label: e.to.split(':').pop(), source: '', kind: 'stage' })
   }
-  const ids = [...stageMap.keys()].sort()
+  let ids = [...stageMap.keys()].sort()
+  const totalBeforeTruncate = ids.length
   if (ids.length === 0) {
-    return { id: 'dataflow', kind: 'dataflow', width: 420, height: 260, nodes: [], edges: [], groups: [], meta: { stageCount: 0 } }
+    return {
+      id: 'dataflow', kind: 'dataflow', width: 420, height: 260, nodes: [], edges: [], groups: [],
+      meta: { stageCount: 0, columnCount: 0, truncated: false, totalBeforeTruncate: 0, keptCount: 0 },
+    }
   }
+  const cap = Math.max(1, Number(maxNodes) || MAX_DATAFLOW_NODES)
+  if (ids.length > cap) {
+    const deg = new Map(ids.map((id) => [id, 0]))
+    for (const e of rawEdges) {
+      if (stageMap.has(e.from) && stageMap.has(e.to) && e.from !== e.to) {
+        deg.set(e.from, (deg.get(e.from) || 0) + 1)
+        deg.set(e.to, (deg.get(e.to) || 0) + 1)
+      }
+    }
+    ids = [...ids].sort((a, b) => ((deg.get(b) || 0) - (deg.get(a) || 0)) || a.localeCompare(b)).slice(0, cap).sort()
+  }
+  const keptSet = new Set(ids)
+  const keptEdges = rawEdges.filter((e) => keptSet.has(e.from) && keptSet.has(e.to) && e.from !== e.to)
 
-  const pairs = rawEdges.filter((e) => stageMap.has(e.from) && stageMap.has(e.to) && e.from !== e.to).map((e) => [e.from, e.to])
+  const pairs = keptEdges.map((e) => [e.from, e.to])
   const { rank } = kahnTopoSort(ids, pairs, (a, b) => a.localeCompare(b))
   const byCol = new Map()
   for (const id of ids) {
@@ -157,10 +175,13 @@ export function layoutDataflowDiagram(evidence, {
     })
   })
 
-  const edgeInputs = rawEdges.filter((e) => boxMap.has(e.from) && boxMap.has(e.to) && e.from !== e.to).map((e, idx) => ({ id: `df:${e.from}->${e.to}:${idx}`, fromId: e.from, toId: e.to, label: String(e.label || '') }))
+  const edgeInputs = keptEdges.filter((e) => boxMap.has(e.from) && boxMap.has(e.to) && e.from !== e.to).map((e, idx) => ({ id: `df:${e.from}->${e.to}:${idx}`, fromId: e.from, toId: e.to, label: String(e.label || '') }))
   const { edges } = routeEdgesOrthogonal(edgeInputs, boxMap, nodes, { clearance: 14, pad: 14 })
   const dims = expandLayoutBounds(nodes, edges, groups, pad, 460)
-  return { id: 'dataflow', kind: 'dataflow', width: dims.width, height: dims.height, nodes, edges, groups, meta: { stageCount: nodes.length, columnCount: cols.length } }
+  return {
+    id: 'dataflow', kind: 'dataflow', width: dims.width, height: dims.height, nodes, edges, groups,
+    meta: { stageCount: nodes.length, columnCount: cols.length, truncated: totalBeforeTruncate > nodes.length, totalBeforeTruncate, keptCount: nodes.length },
+  }
 }
 
 function medianPositive(values) {

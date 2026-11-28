@@ -1,0 +1,105 @@
+/**
+ * injections-data-parallel-dispatch.mjs —— 并行波次调度、归因路由与跨端对齐故障注入表（I350–I361）。
+ *
+ * 导出 `INJECTIONS_PARALLEL_DISPATCH` 供 `injections-data.mjs` 自动发现加载。
+ */
+
+export const INJECTIONS_PARALLEL_DISPATCH = [
+  {
+    id: 'I350',
+    what: 'flow-start-helpers 忽略 --planning 限制放行常规未过审 start',
+    file: 'kit/skills/dev-flow/scripts/flow-start-helpers.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-start-helpers.mjs'],
+    from: '  const planGate = evaluatePlanExitGate(gateRoot, {',
+    to: '  return { blocked: false }\n  const planGate = evaluatePlanExitGate(gateRoot, {',
+    expect: 'C1：规划隔离 --planning',
+  },
+  {
+    id: 'I351',
+    what: 'plan-sync 去掉重复键 planSyncKeys 幂等跳过导致重复刷屏',
+    file: 'kit/skills/lib/plan-sync.mjs',
+    from: '  if (seenInLedger || fallbackKeys?.keys.includes(syncKey)) {',
+    to: '  if (false && (seenInLedger || fallbackKeys?.keys.includes(syncKey))) {',
+    expect: 'C2：plan-sync 经 TaskBackend 幂等同步',
+  },
+  {
+    id: 'I352',
+    what: 'plan-sync 无远端 API 后端伪造返回 synced: true',
+    file: 'kit/skills/lib/plan-sync.mjs',
+    from: "      ok: true, synced: false, status: 'NOT_APPLICABLE', notApplicable: true,",
+    to: "      ok: true, synced: true, status: 'SYNCED', notApplicable: false,",
+    expect: 'C2：plan-sync 经 TaskBackend 幂等同步',
+  },
+  {
+    id: 'I353',
+    what: 'plan-exit-gate 跳过 passed 记录的 recordedSha === currentSha 强校验',
+    file: 'kit/skills/lib/plan-exit-gate.mjs',
+    from: '      if (recordedSha !== currentSha) {',
+    to: '      if (false && recordedSha !== currentSha) {',
+    expect: 'C3：账本态 planCritique、严格白名单 SHA 校验',
+  },
+  {
+    id: 'I354',
+    what: 'critique-rounds 在停损后继续拦截 critiqueRejectDoc 写入新轮次意见',
+    file: 'kit/skills/lib/critique-rounds.mjs',
+    from: '  const effectiveRound = round !== null && round !== undefined',
+    to: "  if (priorRounds.some((r) => Boolean(r.stopLossTriggered))) throw makePlanError('STOP_LOSS_ESCALATE', EXIT.HUMAN, 'blocked')\n  const effectiveRound = round !== null && round !== undefined",
+    expect: 'C3：账本态 planCritique、严格白名单 SHA 校验',
+  },
+  {
+    id: 'I355',
+    what: 'doc-substantive 删除 DOC_REGRESSION_CORE_EMPTIED 核心节删空防退化守卫',
+    file: 'kit/skills/lib/doc-substantive.mjs',
+    from: "        code: 'DOC_REGRESSION_CORE_EMPTIED',",
+    to: "        code: 'DOC_REGRESSION_IGNORED',",
+    expect: 'C4：删除 DOC_REGRESSION_ANCHOR_LOST',
+  },
+  {
+    id: 'I356',
+    what: 'handoff-package 返工意见退回只读不存在的 last.findings 而忽略 mustFix',
+    file: 'kit/skills/lib/handoff-package.mjs',
+    from: '  const mustFix = Array.isArray(last?.mustFix) ? last.mustFix : []',
+    to: '  const mustFix = []',
+    expect: 'C5：flow status --all 聚合看板与 handoff-package',
+  },
+  {
+    id: 'I357',
+    what: 'doc-slice-graph 静默过滤未就绪 draft 前置 depends_on 导致混入 Wave 1',
+    file: 'kit/skills/lib/doc-slice-graph.mjs',
+    from: '      if (!readyOrTrackedIds.has(d)) unreadyDeps.push(d)',
+    to: '      if (!readyOrTrackedIds.has(d)) { activeOrPendingDeps.pop(); continue }',
+    expect: 'C6：doc-slice-graph 单源调度禁止未就绪 draft 前置进 Wave 1',
+  },
+  {
+    id: 'I358',
+    what: 'doc-slice-graph 对写域重叠仍误抛 BLOCKED_SLICE_OVERLAP 而非 serial-by-overlap',
+    file: 'kit/skills/lib/doc-slice-graph.mjs',
+    from: '  const warnings = [\n    ...checkWaveScopeOverlap(repoRoot, g),\n    ...(closing ? [] : collectStagedMasterCoverageWarnings(repoRoot, g)),\n  ]\n  return { ok: errors.length === 0, errors, warnings,',
+    to: "  const warnings = checkWaveScopeOverlap(repoRoot, g)\n  errors.push(...warnings.map((w) => ({ ...w, code: 'BLOCKED_SLICE_OVERLAP' })))\n  return { ok: errors.length === 0, errors, warnings: [],",
+    expect: 'C6：doc-slice-graph 单源调度禁止未就绪 draft 前置进 Wave 1',
+  },
+  {
+    id: 'I359',
+    what: 'flow-merge 吞掉多目标写回失败而不记录 ledger.syncFailures',
+    file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
+    from: '  if (syncFailures.length > 0) {\n    ledger.syncFailures = [...(Array.isArray(ledger.syncFailures) ? ledger.syncFailures : []), ...syncFailures]\n  }',
+    to: '  if (false && syncFailures.length > 0) {\n    ledger.syncFailures = []\n  }\n  ledger.syncFailures = []',
+    expect: 'C7a：外部 PR 受理、SPEC issue 继承',
+  },
+  {
+    id: 'I360',
+    what: 'workflow-policy-next 跳过 review-pack record 实证佐证强校验',
+    file: 'kit/skills/lib/workflow-policy-next.mjs',
+    from: '  if (!hasRecordEvidence) {',
+    to: '  if (false && !hasRecordEvidence) {',
+    expect: 'C7a：外部 PR 受理、SPEC issue 继承',
+  },
+  {
+    id: 'I361',
+    what: 'govern-state buildClusterReport 放行 *.pass 信号导致聚簇噪音',
+    file: 'kit/skills/dev-govern/scripts/govern-state.mjs',
+    from: "    if (/\\.pass$/i.test(String(ev.pattern ?? ''))) continue",
+    to: '    // disabled *.pass filter',
+    expect: 'C7b：escalation 默认建单',
+  },
+]

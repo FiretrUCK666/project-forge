@@ -1,0 +1,207 @@
+# 发布说明投递：推 v* 标签就把 docs/release-notes/<标签>.md 原文贴到发布页；
+# 已存在则更新正文，写完回读比对。
+#
+# 说明的唯一来源是那个文件：它在打标签之前就写好、提交、推上来，所以这里只负责投递，
+# 不生成、不改写。取的是**默认分支**而不是标签那棵树——标签不可变，读标签的话漏推说明
+# 就只剩「挪标签」（禁止）或「发新补丁版」两条路；读默认分支时，补推 + 重跑一次就修好了。
+# 顺序要求一点没松：说明不在默认分支上，这一步直接红。
+#
+# 重跑会用文件内容覆盖正文——要保留发布页面上的手工改写，就不要重跑这个工作流。
+#
+# 同一个 job 还做两件事：
+#   - **发版门禁**：标签与 SKILL.md 的 `metadata.version` 必须同号。
+#   - **用户包**：用 `git archive` 按 `.gitattributes` 的排除规则导出（固定根目录 `project-forge/`），
+#     核对条目之后挂到发布页上。拿到压缩包的人不需要 git，也不需要这个仓库的协作设施。
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的标签名（例如 v6.0.0；手动触发必填）'
+        required: true
+        default: ''
+
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # 声明这个 job 会写仓库的发布。凭据优先用 secrets.RELEASE_TOKEN，没配就退回内置令牌；
+    # 两者都靠这一行权限，所以它既不能删，也不能只写在注释里。
+    permissions:
+      contents: write
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      INPUT_TAG: ${{ inputs.tag }}
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: 校验触发标签非空（防 workflow_dispatch 落回默认分支名）
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -z "$INPUT_TAG" ]; then
+            echo "::error::手动触发（workflow_dispatch）必须填写 tag 参数（例如 v6.0.0），不可留空。"
+            exit 1
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::未能解析目标标签名。"
+            exit 1
+          fi
+
+      - name: 检出（取默认分支；工具与说明永远用最新的那版）
+        uses: actions/checkout@v4
+        with:
+          # 工具取默认分支，**不是**触发时的 ref。推标签时 `github.ref` 就是那个标签，
+          # 而标签里的工具是那一版当时的——用它去补漏，等于拿旧工具修旧页面。
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 发版门禁（标签与**它那棵树里**的 SKILL.md 版本必须同号）
+        run: |
+          # 版本从**标签指向的那次提交**里读，不从工作区读。
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::仓库中找不到标签 $TAG。请先确认标签已推送。"
+            exit 1
+          fi
+          EXPECTED="${TAG#v}"
+          ACTUAL=$(git show "$TAG:SKILL.md" \
+            | sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+            | head -1)
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::在标签 $TAG 的 SKILL.md 里读不到 metadata.version。标签指向的提交里没有这个字段。"
+            exit 1
+          fi
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::标签是 $TAG（对应 $EXPECTED），而它那棵树里的 metadata.version 是「$ACTUAL」。两者必须同号。"
+            exit 1
+          fi
+          echo "版本对齐：$TAG 与它那棵树里的 SKILL.md 同号（$ACTUAL）"
+
+      - name: 说明文件必须已经在默认分支上，而且不是空壳
+        run: |
+          # 这一步拦的正是最常见的那次失败：顺序反了，标签先推、说明没推。
+          TAG_FILE="docs/release-notes/$TAG.md"
+          if [ -f "$TAG_FILE" ]; then
+            NOTES="$TAG_FILE"
+            echo "说明文件模式：$NOTES"
+          elif [ -f CHANGELOG.md ]; then
+            NOTES="$RUNNER_TEMP/$TAG.md"
+            BARE_TAG="${TAG#v}"
+            awk -v tag="$TAG" -v bare="$BARE_TAG" '
+              index($0, "## [" tag "]") == 1 || index($0, "## [" bare "]") == 1 { inside = 1; print "# " tag; next }
+              inside && /^## / { exit }
+              inside { print }
+            ' CHANGELOG.md > "$NOTES"
+            if [ ! -s "$NOTES" ]; then
+              echo "::error::CHANGELOG.md 里找不到「## [$TAG]」或「## [$BARE_TAG]」这一节。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+              exit 1
+            fi
+            echo "变更记录模式：从 CHANGELOG.md 截取了 $TAG 对应小节"
+          else
+            echo "::error::找不到 $TAG_FILE（且仓库根无 CHANGELOG.md）。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+            exit 1
+          fi
+          if [ ! -s "$NOTES" ]; then
+            echo "::error::$NOTES 是空文件。"
+            exit 1
+          fi
+          # 第一行必须是这一版的标签名。只有标题没有正文的说明，贴到发布页上等于什么都没说。
+          if ! grep -qE '^# +[^ ]' "$NOTES"; then
+            echo "::error::$NOTES 缺一级标题：第一行应当是这一版的标签名。"
+            exit 1
+          fi
+          BODY_LINES=$(awk '!/^[[:space:]]*$/ && !/^#/ { n += 1 } END { print n + 0 }' "$NOTES")
+          if [ "$BODY_LINES" -eq 0 ]; then
+            echo "::error::$NOTES 除了标题之外没有正文。"
+            exit 1
+          fi
+          # **判据必须是「独立成行的注释标记」**，不是全文含这几个字。
+          if grep -qE '^[[:space:]]*<!--[[:space:]]*project-forge:[[:space:]]*fill\b' "$NOTES"; then
+            echo "::error::$NOTES 里还有没填完的 project-forge: fill 占位。填掉它们，删掉标记行，再重跑。"
+            exit 1
+          fi
+          echo "NOTES=$NOTES" >> "$GITHUB_ENV"
+
+      - name: 产出用户包（按 .gitattributes 的排除规则导出，并核对条目）
+        run: |
+          git archive --format=tar "$TAG" | tar -t > package-list.txt
+          node scripts/dev/preflight.mjs --package package-list.txt
+          # 附件名与解压前缀固定为 project-forge/（不带版本号），确保解压后目录名与 SKILL.md 的 name 一致。
+          git archive --format=zip --prefix="project-forge/" \
+            -o "project-forge.zip" "$TAG"
+          echo "ASSET=project-forge.zip" >> "$GITHUB_ENV"
+
+      - name: 写发布说明（建或更新，写完回读比对）
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          run_gh() {
+            OUT=$("$@" 2>&1) || {
+              CODE=$?
+              printf '%s\n' "$OUT" >&2
+              if printf '%s' "$OUT" | grep -qiE '\b(401|403)\b|Bad credentials|Resource not accessible'; then
+                echo "::error::GitHub Release 接口返回 401/403：若仓库配置了 secrets.RELEASE_TOKEN，说明令牌已过期或缺少 Contents 写权限，请在仓库 Settings -> Secrets and variables -> Actions 立即刷新；未配置时请检查工作流 permissions: contents: write。"
+              fi
+              return "$CODE"
+            }
+            printf '%s\n' "$OUT"
+          }
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            run_gh gh release edit "$TAG" --repo "$REPO" --notes-file "$NOTES"
+          else
+            run_gh gh release create "$TAG" --repo "$REPO" --verify-tag \
+              --title "$TAG" --notes-file "$NOTES"
+          fi
+
+          # 回读比对。
+          gh release view "$TAG" --repo "$REPO" --json body --jq .body > readback.md
+          norm() {
+            awk '{ sub(/[ \t]+$/, "") } { line[NR] = $0 }
+                 END { n = NR; while (n > 0 && line[n] == "") n -= 1
+                       for (i = 1; i <= n; i += 1) print line[i] }' "$1"
+          }
+          norm "$NOTES" > want.txt
+          norm readback.md > got.txt
+          if ! diff -u want.txt got.txt; then
+            echo "::error::回读的正文与说明文件不一致——正文在传输中被改写了。请打开页面确认实际内容。"
+            exit 1
+          fi
+          echo "回读一致：$TAG 的正文与 $NOTES 逐字相同。"
+
+      - name: 把用户包挂到这一版的发布页上
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          OUT=$(gh release upload "$TAG" "$ASSET" --repo "$REPO" --clobber 2>&1) || {
+            CODE=$?
+            printf '%s\n' "$OUT" >&2
+            if printf '%s' "$OUT" | grep -qiE '\b(401|403)\b|Bad credentials|Resource not accessible'; then
+              echo "::error::上传发布附件返回 401/403：请检查并刷新仓库 Actions Secret 中的 RELEASE_TOKEN（需目标仓库 Contents 读写权限）。"
+            fi
+            exit "$CODE"
+          }
+          printf '%s\n' "$OUT"
+
+      - name: 回读校验已上传用户包（存在性 / SHA256 / CRC32）
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          ASSETS_OUT=$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[] | "\(.name)\t\(.size)"')
+          printf '%s\n' "$ASSETS_OUT"
+          if ! printf '%s\n' "$ASSETS_OUT" | grep -qE "^${ASSET}[[:space:]]+[1-9][0-9]*$"; then
+            echo "::error::发布页上找不到非空附件 $ASSET，上传可能静默失败。"
+            exit 1
+          fi
+          TMP_ZIP="$RUNNER_TEMP/readback-${ASSET}"
+          rm -f "$TMP_ZIP"
+          gh release download "$TAG" -p "$ASSET" --repo "$REPO" -O "$TMP_ZIP"
+          node --input-type=module -e "import { readFileSync, statSync } from 'node:fs'; import { createHash } from 'node:crypto'; import { readZip } from './scripts/zip.mjs'; const [local, remote] = process.argv.slice(1); const b1 = readFileSync(local), b2 = readFileSync(remote); const h1 = createHash('sha256').update(b1).digest('hex'), h2 = createHash('sha256').update(b2).digest('hex'); if (statSync(local).size !== statSync(remote).size || h1 !== h2) { console.error('readback mismatch', { s1: statSync(local).size, s2: statSync(remote).size, h1, h2 }); process.exit(1); } const entries = readZip(b2); if (entries.length === 0) { console.error('empty zip'); process.exit(1); } console.log('readback SHA256 & readZip CRC32 OK:', entries.length, 'entries');" "$ASSET" "$TMP_ZIP"
+          rm -f "$TMP_ZIP"

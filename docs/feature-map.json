@@ -1,0 +1,1806 @@
+{
+  "version": 2,
+  "domains": [
+    {
+      "id": "entry-governance",
+      "name": "入口契约与交付治理",
+      "description": "SKILL.md 总入口路由、AGENTS.md 受管契约渲染、交付体检与交棒扫描",
+      "entrypoints": [
+        "SKILL.md",
+        "scripts/compose-agents.mjs",
+        "scripts/review.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#2-系统架构全景与模块边界"
+      ]
+    },
+    {
+      "id": "onboarding-engine",
+      "name": "接入勘察与技能装配 (S1-S4)",
+      "description": "只读环境勘察、写前仓外 zip 快照备份与 v3 账本技能装配",
+      "entrypoints": [
+        "scripts/survey.mjs",
+        "scripts/equip.mjs",
+        "scripts/backup.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"
+      ]
+    },
+    {
+      "id": "kit-skills-core",
+      "name": "核心研发流技能 (探索/规划/改码/流转)",
+      "description": "按需只读定位、动态视觉简报规划、词法改码门禁与隔离工作树流转",
+      "entrypoints": [
+        "kit/skills/dev-explore/scripts/repo-map.mjs",
+        "kit/skills/dev-plan/scripts/doc-plan.mjs",
+        "kit/skills/dev-edit/scripts/edit-gate.mjs",
+        "kit/skills/dev-flow/scripts/flow.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转"
+      ]
+    },
+    {
+      "id": "kit-skills-quality",
+      "name": "质量闭环技能 (验证/审查/治理/迭代)",
+      "description": "功能地图视觉投影、双门独立审查、静态体检治理与测试覆盖迭代",
+      "entrypoints": [
+        "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
+        "kit/skills/dev-review/scripts/review-pack.mjs",
+        "kit/skills/dev-govern/scripts/govern-audit.mjs",
+        "kit/skills/dev-iterate/scripts/iterate.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#6-四大工程支柱与调度机制"
+      ]
+    },
+    {
+      "id": "dev-verification",
+      "name": "自举门禁、契约对拍与 CI",
+      "description": "全仓结构预检、CLI 参数三重对拍、合入门禁真源与 GitHub 工作流",
+      "entrypoints": [
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/merge-gate.mjs",
+        ".github/workflows/check.yml"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#8-核心不变量安全红线与门禁体系"
+      ]
+    }
+  ],
+  "features": [
+    {
+      "id": "survey",
+      "name": "只读勘察与双轴身份缺口判定",
+      "domain": "onboarding-engine",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "maintainer",
+        "explore"
+      ],
+      "entrypoints": [
+        "scripts/survey.mjs",
+        "scripts/lib/platform/index.mjs"
+      ],
+      "modules": [
+        "scripts/survey.mjs",
+        "scripts/lib/platform/index.mjs",
+        "scripts/lib/platform/github.mjs",
+        "scripts/lib/platform/registry.mjs",
+        "scripts/lib/survey-scan.mjs",
+        "scripts/lib/survey-workspace.mjs",
+        "scripts/lib/survey-ecosystem.mjs",
+        "scripts/lib/survey-docs.mjs",
+        "scripts/lib/survey-reentry.mjs",
+        "scripts/lib/survey-git-fast.mjs",
+        "scripts/lib/survey-questions.mjs",
+        "scripts/lib/survey-gap-rules.mjs",
+        "scripts/lib/survey-plan.mjs",
+        "scripts/lib/navigation.mjs",
+        "scripts/lib/platform/github-client.mjs",
+        "scripts/lib/platform/github-probe.mjs",
+        "scripts/lib/render.mjs",
+        "scripts/lib/text.mjs",
+        "kit/skills/lib/platform-registry.mjs",
+        "kit/skills/lib/platform-http.mjs",
+        "kit/skills/lib/platform-providers.mjs",
+        "kit/skills/lib/platform.mjs",
+        "kit/skills/lib/platform-probe.mjs",
+        "kit/skills/lib/proc-budget.mjs",
+        "kit/skills/lib/git-core.mjs",
+        "kit/skills/lib/git.mjs",
+        "kit/skills/lib/git-index-fast.mjs",
+        "kit/skills/lib/git-worktree-env.mjs",
+        "kit/skills/lib/exec.mjs",
+        "kit/skills/lib/profile-sniffer.mjs",
+        "kit/skills/lib/doc-graph.mjs",
+        "kit/skills/lib/profile.mjs",
+        "kit/skills/lib/git-fast.mjs",
+        "kit/skills/lib/git-status-fast.mjs",
+        "kit/skills/lib/git-fast-objects.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/credential-scan.mjs",
+        "kit/skills/lib/profile-sniffer-packages.mjs",
+        "scripts/lib/survey-workspace-secrets.mjs"
+      ],
+      "businessFlows": [
+        "只读扫描目标仓生态、Git 拓扑与文档现状并输出 JSON/Markdown",
+        "按双轴五态身份判定缺口与 artifactPlan 十三项定界"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-survey-json",
+          "kind": "command",
+          "command": "node scripts/survey.mjs . --json",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "勘察",
+            "survey",
+            "缺口",
+            "身份判定"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-survey.mjs",
+        "scripts/dev/fixtures-heterogeneous-survey.mjs",
+        "scripts/dev/fixtures-engine-hardening.mjs",
+        "scripts/dev/fixtures-git-fast.mjs",
+        "scripts/dev/fixtures-platform.mjs",
+        "docs/archive/specs/261117-issue49-survey-honesty-spec.md",
+        "docs/archive/specs/261118-issue74-b4a-heterogeneous-survey-spec.md",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4",
+        "docs/TDD.md#4-身份判定平台注册表与传输通道"
+      ],
+      "description": "只读扫描目标仓生态、Git 拓扑与双轴五态身份，输出结构化缺口与 13 项行动方案。"
+    },
+    {
+      "id": "equip",
+      "name": "统一技能集装配、v3 账本三方融合与 ABI 回滚校验",
+      "domain": "onboarding-engine",
+      "dependsOn": [
+        "survey",
+        "backup",
+        "cli"
+      ],
+      "actors": [
+        "maintainer"
+      ],
+      "entrypoints": [
+        "scripts/equip.mjs",
+        "scripts/equip-ci.mjs",
+        "scripts/zip.mjs"
+      ],
+      "modules": [
+        "scripts/equip.mjs",
+        "scripts/equip-ci.mjs",
+        "scripts/zip.mjs",
+        "scripts/lib/equip-bootstrap.mjs",
+        "scripts/lib/equip-upgrade.mjs",
+        "scripts/lib/merge3.mjs",
+        "scripts/lib/equip-integrity.mjs",
+        "scripts/lib/artifact-executors.mjs",
+        "scripts/lib/starter-templates.mjs",
+        "scripts/lib/fs-atomic.mjs",
+        "scripts/lib/protocol.mjs",
+        "scripts/lib/tar.mjs",
+        "kit/skills/lib/skill-discovery.mjs",
+        "kit/skills/lib/tool-owned.mjs",
+        "kit/skills/lib/overlay.mjs",
+        "scripts/backup.mjs",
+        "kit/skills/lib/session-state.mjs"
+      ],
+      "businessFlows": [
+        "将 8 套 kit/skills 幂等装配到 .agents/skills 并校验字节一致与扩展槽豁免",
+        "三方合并无冲突融合、.mjs 冲突零标记保底与语法/ESM ABI 异常瞬时回滚",
+        "空白目录 --bootstrap-empty 起步与写前仓外 .zip 快照备份"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-equip-check",
+          "kind": "command",
+          "command": "node scripts/equip.mjs . --check",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "equip",
+            "装配",
+            "技能套件",
+            "manifest",
+            "merge3",
+            "overlay"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-equip.mjs",
+        "scripts/dev/fixtures-onboarding.mjs",
+        "scripts/dev/fixtures-iterate-evolution.mjs",
+        "scripts/dev/fixtures-skills-hooks.mjs",
+        "scripts/dev/fixtures-core.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#v3-账本三方融合abi-回滚与跨代自更新"
+      ],
+      "description": "将 8 套内置技能幂等装配到 .agents/skills/，执行 v3 三方融合与语法/ABI 异常回滚。"
+    },
+    {
+      "id": "compose-agents",
+      "name": "受管工程契约渲染与预算门禁",
+      "domain": "entry-governance",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "maintainer",
+        "coordinator"
+      ],
+      "entrypoints": [
+        "scripts/compose-agents.mjs"
+      ],
+      "modules": [
+        "scripts/compose-agents.mjs",
+        "scripts/lib/agents-defaults.mjs",
+        "scripts/lib/agents-sections.mjs",
+        "scripts/lib/markdown.mjs",
+        "kit/skills/lib/command-lex.mjs",
+        "scripts/lib/template.mjs",
+        "scripts/lib/compose-agents-helpers.mjs",
+        "kit/skills/lib/session-state.mjs"
+      ],
+      "businessFlows": [
+        "从 templates/agents-project.md 渲染受管区间并保留手写段落",
+        "校验 AGENTS.md 字节预算与无条件残留"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-compose-agents",
+          "kind": "command",
+          "command": "node scripts/compose-agents.mjs . --check",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "AGENTS.md",
+            "compose-agents",
+            "意图路由",
+            "契约预算"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-contracts.mjs",
+        "scripts/dev/fixtures-engine-hardening.mjs",
+        "scripts/dev/fixtures-doc-fill.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#7-三层常青文档与工作区安全"
+      ],
+      "description": "从模板渲染 AGENTS.md 受管工程契约并保留手写段落，严守 30 KB 预算与零残留。"
+    },
+    {
+      "id": "delivery-review-handoff",
+      "name": "交付体检、文档同步、更新与交棒净度扫描",
+      "domain": "entry-governance",
+      "dependsOn": [
+        "survey",
+        "compose-agents"
+      ],
+      "actors": [
+        "maintainer",
+        "reviewer"
+      ],
+      "entrypoints": [
+        "scripts/review.mjs",
+        "scripts/handoff.mjs",
+        "scripts/sync-toc.mjs",
+        "scripts/update.mjs"
+      ],
+      "modules": [
+        "scripts/review.mjs",
+        "scripts/handoff.mjs",
+        "scripts/sync-toc.mjs",
+        "scripts/update.mjs",
+        "scripts/lib/review-helpers.mjs",
+        "scripts/lib/update-net.mjs",
+        "scripts/lib/update-ops.mjs",
+        "kit/skills/lib/no-changelog-voice.mjs",
+        "scripts/lib/claims.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "assets/readme/hero.svg",
+        "assets/readme/hero-en.svg",
+        "assets/readme/architecture.svg",
+        "assets/readme/architecture-en.svg",
+        "assets/readme/docs-layers.svg",
+        "assets/readme/docs-layers-en.svg",
+        "assets/readme/skills-cycle.svg",
+        "assets/readme/skills-cycle-en.svg",
+        "assets/readme/workflow.svg",
+        "assets/readme/workflow-en.svg"
+      ],
+      "businessFlows": [
+        "核对交付体检缺口与契约声明回查",
+        "扫描标记残留与交棒净度退出码",
+        "同步双语 README 目录与浅深色自适应 SVG 图解 (assets/readme/*.svg)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-delivery-review",
+          "kind": "command",
+          "command": "node scripts/review.mjs .",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "review.mjs",
+            "handoff",
+            "体检",
+            "交棒"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-handoff-review.mjs",
+        "scripts/dev/fixtures-claims.mjs",
+        "scripts/dev/fixtures-engine-hardening.mjs",
+        "scripts/dev/fixtures-review-contracts.mjs",
+        "docs/archive/specs/261117-issue52-review-independence-spec.md",
+        "docs/archive/specs/261118-issue57-review-empirical-gate-spec.md",
+        "docs/archive/specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md",
+        "scripts/dev/fixtures-repo-alignment.mjs",
+        "scripts/dev/injections-data-repo-alignment.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#模块与目录职责",
+        "docs/TDD.md#7-三层常青文档与工作区安全"
+      ],
+      "description": "执行交付完整性体检、文档声明回查、双语目录同步与交棒净度扫描。"
+    },
+    {
+      "id": "dev-explore",
+      "name": "只读资产探索与零写入按需定位",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "explore",
+        "planner"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-explore/scripts/repo-map.mjs",
+        "kit/skills/dev-explore/scripts/doc-locate.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-explore/scripts/repo-map.mjs",
+        "kit/skills/dev-explore/scripts/repo-map-helpers.mjs",
+        "kit/skills/dev-explore/scripts/doc-locate.mjs",
+        "kit/skills/lib/cli.mjs",
+        "kit/skills/lib/doc-locator.mjs",
+        "kit/skills/lib/markdown-scan.mjs",
+        "kit/skills/lib/session-orient.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/shared.mjs",
+        "kit/skills/lib/symbol-index.mjs",
+        "kit/skills/dev-explore/SKILL.md"
+      ],
+      "businessFlows": [
+        "枚举全仓多生态包清单、CI 步骤、可复用模块并增量预填 feature-map",
+        "零写入按节区与符号行号切片定位文档与源码"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-repo-map-json",
+          "kind": "command",
+          "command": "node .agents/skills/dev-explore/scripts/repo-map.mjs . --json",
+          "scriptPath": null,
+          "riskLevel": "low",
+          "triggerHints": [
+            "repo-map",
+            "doc-locate",
+            "探索",
+            "按需定位"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-explore.mjs",
+        "scripts/dev/fixtures-locate-intake.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转",
+        "docs/TDD.md#八个技能分工与确定性阻断点"
+      ],
+      "description": "只读探测多生态包清单与 CI 步骤，按需按节区与符号行号切片定位源码与文档。"
+    },
+    {
+      "id": "dev-plan",
+      "name": "五档需求分流与四层文档内审",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli",
+        "dev-explore",
+        "flow-truth-exit",
+        "flow-truth-evidence"
+      ],
+      "actors": [
+        "planner",
+        "critic",
+        "human"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-plan/scripts/doc-plan.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-plan/scripts/doc-plan.mjs",
+        "kit/skills/dev-plan/scripts/doc-plan-ops.mjs",
+        "kit/skills/dev-plan/scripts/doc-audit.mjs",
+        "kit/skills/dev-plan/scripts/doc-audit-helpers.mjs",
+        "kit/skills/dev-plan/scripts/triage-rules.mjs",
+        "kit/skills/lib/plan-index.mjs",
+        "kit/skills/lib/plan-sync.mjs",
+        "kit/skills/lib/plan-exit-gate.mjs",
+        "kit/skills/lib/doc-slice-graph.mjs",
+        "kit/skills/lib/pending-decisions.mjs",
+        "kit/skills/lib/criteria-lock.mjs",
+        "kit/skills/lib/critique-rounds.mjs",
+        "kit/skills/lib/critique-diff.mjs",
+        "kit/skills/lib/critique-store.mjs",
+        "kit/skills/lib/doc-facts.mjs",
+        "kit/skills/lib/doc-frontmatter.mjs",
+        "kit/skills/lib/doc-renumber.mjs",
+        "kit/skills/lib/doc-requirements.mjs",
+        "kit/skills/lib/doc-shape.mjs",
+        "kit/skills/lib/doc-substantive.mjs",
+        "kit/skills/lib/doc-template-render.mjs",
+        "kit/skills/lib/doc-templates.mjs",
+        "kit/skills/lib/doc-toc.mjs",
+        "kit/skills/lib/doc-verify.mjs",
+        "kit/skills/lib/docs.mjs",
+        "kit/skills/lib/tdd-facts.mjs",
+        "kit/skills/lib/tdd-parity.mjs",
+        "kit/skills/lib/tdd-scaffold.mjs",
+        "kit/skills/lib/tdd-shape.mjs",
+        "kit/skills/lib/tdd-structure.mjs",
+        "kit/skills/dev-plan/scripts/doc-audit-repo.mjs",
+        "kit/skills/dev-plan/SKILL.md",
+        "kit/skills/lib/harness-context.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/doc-approval.mjs",
+        "kit/skills/lib/mutability.mjs",
+        "kit/skills/lib/doc-plan-clarify.mjs",
+        "kit/skills/lib/doc-facts-commands.mjs",
+        "kit/skills/lib/plan-next.mjs",
+        "kit/skills/templates/docs-prd.md",
+        "kit/skills/templates/docs-spec.md",
+        "kit/skills/templates/docs-tdd.md",
+        "kit/skills/templates/docs-todo.md",
+        "kit/skills/lib/visual-brief.mjs",
+        "kit/skills/lib/visual-brief-store.mjs",
+        "kit/skills/lib/visual-brief-doc-extract.mjs",
+        "kit/skills/dev-plan/scripts/doc-plan-brief.mjs"
+      ],
+      "businessFlows": [
+        "按 Case 1-5 确定性三出口（direct / sandbox / plan-first）分流生成 PRD/SPEC/Todo 与冻结 C1..Cn（保留 fileCount>=12 PRD 判据与 Case 5/PRD 正交）",
+        "执行独立内审、不可自审、全历史换人与 3 轮停损校验",
+        "按四层单源模板生成 PRD/SPEC/Todo/TDD 并守护 S1-S4 分流防降档与不可自审边界",
+        "统筹 triage 与 note 按需在仓外投影 Living Visual Brief，支持宿主中立 UI 原型挂载与确认快照防漂移"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-doc-plan-audit",
+          "kind": "command",
+          "command": "node scripts/dev/fixtures.mjs --domain doc-rules",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "doc-plan",
+            "PRD",
+            "SPEC",
+            "Todo",
+            "内审"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-doc-rules.mjs",
+        "scripts/dev/fixtures-doc-triage.mjs",
+        "scripts/dev/fixtures-doc-closure.mjs",
+        "scripts/dev/fixtures-plan-wave.mjs",
+        "scripts/dev/fixtures-plan-wave-slices.mjs",
+        "scripts/dev/fixtures-doc-depth.mjs",
+        "scripts/dev/fixtures-doc-shapes.mjs",
+        "scripts/dev/fixtures-docs.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-trace-sync.mjs",
+        "scripts/dev/fixtures-gates-retro-routing.mjs",
+        "scripts/dev/injections-data-trace-sync.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-r6b-plan.mjs",
+        "scripts/dev/injections-data-r6b.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs",
+        "scripts/dev/fixtures-health-sweep.mjs",
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-living-brief.mjs",
+        "scripts/dev/fixtures-studio-ux.mjs",
+        "scripts/dev/injections-data-studio-ux.mjs",
+        "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度",
+        "docs/TDD.md#7-三层常青文档与工作区安全"
+      ],
+      "description": "按 Case 1-5 分流生成 PRD/SPEC/Todo 与冻结 C1..Cn，并投射仓外实时规划简报。"
+    },
+    {
+      "id": "dev-edit",
+      "name": "改码边界核对与词法静态门禁",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli",
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "implementer"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-edit/scripts/edit-gate.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-edit/scripts/edit-gate.mjs",
+        "kit/skills/lib/import-graph.mjs",
+        "kit/skills/lib/static-gates.mjs",
+        "kit/skills/lib/static-gates-assertions.mjs",
+        "kit/skills/lib/static-gates-comment-hygiene.mjs",
+        "kit/skills/lib/static-gates-lexer.mjs",
+        "kit/skills/lib/git-core.mjs",
+        "kit/skills/dev-edit/SKILL.md"
+      ],
+      "businessFlows": [
+        "改前核对 do-not-edit、紧文件预警与相邻复用符号",
+        "改后剥离注释字面量拦截压制注释、死代码、过程命名与单测反作弊"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-edit-gate",
+          "kind": "command",
+          "command": "node .agents/skills/dev-edit/scripts/edit-gate.mjs --mode standalone --changed --base main --json",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "edit-gate",
+            "改码门禁",
+            "压制注释",
+            "死代码"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-edit-pyramid.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#八个技能分工与确定性阻断点"
+      ],
+      "description": "改前核对禁改区与复用模块，改后剥离注释/字面量拦截压制注释、死代码与反作弊。"
+    },
+    {
+      "id": "dev-flow",
+      "name": "隔离工作树流转、分诊、实证与清理",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "cli",
+        "dev-plan",
+        "dev-edit",
+        "dev-verify-tools",
+        "flow-truth-exit",
+        "flow-truth-evidence"
+      ],
+      "actors": [
+        "coordinator",
+        "implementer",
+        "reviewer"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-flow/scripts/flow.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-flow/scripts/flow.mjs",
+        "kit/skills/dev-flow/scripts/flow-next.mjs",
+        "kit/skills/dev-flow/scripts/flow-inspect.mjs",
+        "kit/skills/dev-flow/scripts/flow-intake.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle-finalize.mjs",
+        "kit/skills/dev-flow/scripts/flow-merge.mjs",
+        "kit/skills/dev-flow/scripts/flow-merge-claim.mjs",
+        "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
+        "kit/skills/lib/workflow-policy.mjs",
+        "kit/skills/lib/gate-receipt.mjs",
+        "kit/skills/lib/sandbox-scope.mjs",
+        "kit/skills/dev-flow/scripts/flow-sandbox.mjs",
+        "kit/skills/lib/pr-template-hydrate.mjs",
+        "kit/skills/lib/issue-quality.mjs",
+        "kit/skills/lib/issue-template-hydrate.mjs",
+        "kit/skills/lib/task-backend.mjs",
+        "kit/skills/lib/task-backend-local.mjs",
+        "kit/skills/dev-flow/scripts/flow-issue-core.mjs",
+        "kit/skills/dev-flow/scripts/flow-issues.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs",
+        "kit/skills/dev-flow/scripts/flow-sync.mjs",
+        "kit/skills/dev-flow/scripts/flow-trial-merge.mjs",
+        "kit/skills/dev-flow/scripts/flow-context.mjs",
+        "kit/skills/dev-flow/scripts/flow-explore.mjs",
+        "kit/skills/dev-flow/scripts/worktree-deps.mjs",
+        "kit/skills/lib/worktree-dep-pool.mjs",
+        "kit/skills/lib/master-criteria-sync.mjs",
+        "kit/skills/lib/doc-comments.mjs",
+        "kit/skills/lib/empirical-artifacts.mjs",
+        "kit/skills/lib/github-client.mjs",
+        "kit/skills/lib/github-labels.mjs",
+        "kit/skills/lib/github-parse.mjs",
+        "kit/skills/lib/context-brief.mjs",
+        "kit/skills/lib/handoff-package.mjs",
+        "kit/skills/lib/intake-triage.mjs",
+        "kit/skills/lib/ledger.mjs",
+        "kit/skills/lib/local-issues.mjs",
+        "kit/skills/lib/task-graph.mjs",
+        "kit/skills/lib/workflow-helpers.mjs",
+        "kit/skills/lib/workflow-policy-next.mjs",
+        "kit/skills/dev-flow/scripts/flow-batch.mjs",
+        "kit/skills/dev-flow/SKILL.md",
+        "kit/skills/dev-flow/scripts/flow-start-helpers.mjs",
+        "kit/skills/dev-flow/scripts/flow-start-provenance.mjs",
+        "kit/skills/lib/harness-context.mjs",
+        "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/gate-enforcement.mjs",
+        "kit/skills/lib/mutability.mjs"
+      ],
+      "businessFlows": [
+        "双轴身份探测、全局 intake 分诊、高频隔离沙箱（start --sandbox + promote 真实差分路由）与 Worktree 隔离启动",
+        "Case 2/3/4 开工确定性 Issue 绑定（先复用、八类豁免、质量建单回链与 BLOCKED_MISSING_ISSUE_BINDING）",
+        "归档锁 finalize、三轴正交分层 verify（外环硬拒 inner:true 与干净 HEAD gate-receipt 复用）、submit 提审、试合 merge 与销毁 scratch 清理",
+        "按切片依赖拓扑排波次并为就绪切片生成交接包",
+        "校验 Actor/HostMode/Slot 隔离边界、previewHash 安全删分支及波次调度闭环"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-flow-inspect",
+          "kind": "command",
+          "command": "node .agents/skills/dev-flow/scripts/flow.mjs inspect --json",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "flow",
+            "worktree",
+            "cleanup",
+            "verify",
+            "submit"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow.mjs",
+        "scripts/dev/fixtures-flow-cleanup.mjs",
+        "scripts/dev/fixtures-e2e-gate.mjs",
+        "scripts/dev/fixtures-attribution-routing.mjs",
+        "scripts/dev/fixtures-plan-wave.mjs",
+        "scripts/dev/fixtures-empirical-cycle.mjs",
+        "scripts/dev/fixtures-parallel-dispatch.mjs",
+        "scripts/dev/fixtures-flow-explore-gate.mjs",
+        "scripts/dev/fixtures-flow-defects.mjs",
+        "scripts/dev/fixtures-flow-state.mjs",
+        "scripts/dev/fixtures-flow-parallel.mjs",
+        "scripts/dev/fixtures-flow-docs.mjs",
+        "docs/archive/specs/261120-issue113-flow-truth-spec.md",
+        "docs/archive/specs/261120-issue116-w25-flow-defects-spec.md",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-trace-sync.mjs",
+        "scripts/dev/fixtures-gates-retro-routing.mjs",
+        "scripts/dev/injections-data-trace-sync.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-w6c-context-brief.mjs",
+        "scripts/dev/fixtures-r6a-state.mjs",
+        "scripts/dev/injections-data-r6a.mjs",
+        "scripts/dev/fixtures-r6d-contracts.mjs",
+        "scripts/dev/injections-data-r6d.mjs",
+        "scripts/dev/fixtures-r7-rootfix.mjs",
+        "scripts/dev/injections-data-r7.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs",
+        "scripts/dev/fixtures-health-sweep.mjs",
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs",
+        "scripts/dev/fixtures-policy-axes.mjs",
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs",
+        "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转",
+        "docs/TDD.md#worktree-隔离per-slot-状态隔离与七步收尾"
+      ],
+      "description": "驱动隔离工作树启动、Issue 绑定认领、finalize 归档、verify 实证、提审与七步清理。"
+    },
+    {
+      "id": "dev-verify-tools",
+      "name": "验证工具生命周期与免日期过时校验",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-explore",
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "implementer",
+        "reviewer",
+        "maintainer"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-verify-tools/scripts/verify-tools.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
+        "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs",
+        "kit/skills/dev-verify-tools/scripts/verify-tools-render.mjs",
+        "kit/skills/lib/feature-map.mjs",
+        "kit/skills/lib/feature-map-graph.mjs",
+        "kit/skills/lib/import-graph.mjs",
+        "kit/skills/lib/static-analyzer.mjs",
+        "kit/skills/lib/static-evidence.mjs",
+        "kit/skills/lib/static-evidence-erd.mjs",
+        "kit/skills/lib/diff-materiality.mjs",
+        "kit/skills/lib/visual-layout.mjs",
+        "kit/skills/lib/visual-router.mjs",
+        "kit/skills/lib/visual-layout-diagrams.mjs",
+        "kit/skills/lib/visual-layout-charts.mjs",
+        "kit/skills/lib/visual-geometry-check.mjs",
+        "kit/skills/lib/visual-render-svg.mjs",
+        "kit/skills/lib/visual-render-client.mjs",
+        "kit/skills/lib/visual-render-client-diagrams.mjs",
+        "kit/skills/lib/visual-render-panels.mjs",
+        "kit/skills/lib/visual-render.mjs",
+        "kit/skills/lib/visual-render-assets.mjs",
+        "kit/skills/lib/architecture-map.mjs",
+        "kit/skills/lib/verify-state.mjs",
+        "kit/skills/dev-verify-tools/SKILL.md"
+      ],
+      "businessFlows": [
+        "仓外 scratch 试制探针并通过 edit-gate 与实跑后沉淀注册 docs/feature-map.json",
+        "按变更文件反查复用工具并基于 symbol-index 与 Git 树哈希执行低/中/高风险过时处置",
+        "审计僵尸引用、高风险盲区与跨 >=2 PR 临时脚本固化提示并安全清理",
+        "按 (slotKey, moduleTreeHash, symbolHash) 隔离每槽位 cache.json 验证缓存"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-tools-self-audit",
+          "kind": "command",
+          "command": "node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit --json",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "verify-tools",
+            "feature-map",
+            "过时校验",
+            "scratch"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-verify-tools.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-health-sweep.mjs",
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-feature-map-v2.mjs",
+        "scripts/dev/fixtures-visual-engine.mjs",
+        "scripts/dev/injections-data-visual-engine.mjs",
+        "scripts/dev/fixtures-static-analyzer.mjs",
+        "scripts/dev/injections-data-static-analyzer.mjs",
+        "scripts/dev/fixtures-visual-layout-v2.mjs",
+        "scripts/dev/injections-data-visual-layout-v2.mjs",
+        "scripts/dev/fixtures-studio-ux.mjs",
+        "scripts/dev/injections-data-studio-ux.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#7-三层常青文档与工作区安全",
+        "docs/TDD.md#worktree-隔离per-slot-状态隔离与七步收尾"
+      ],
+      "description": "管理验证探针试制沉淀、免手工日期过时校验与架构全景图离线确定性渲染。"
+    },
+    {
+      "id": "dev-review",
+      "name": "先实证后 Diff 独立双门审查与六锁",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-edit",
+        "dev-flow",
+        "dev-verify-tools",
+        "flow-truth-exit",
+        "flow-truth-evidence"
+      ],
+      "actors": [
+        "reviewer",
+        "human"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-review/scripts/review-pack.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-review/scripts/review-pack.mjs",
+        "kit/skills/dev-review/scripts/review-context.mjs",
+        "kit/skills/dev-review/scripts/review-gates.mjs",
+        "kit/skills/dev-review/scripts/review-empirical.mjs",
+        "kit/skills/dev-review/scripts/review-empirical-state.mjs",
+        "kit/skills/dev-review/scripts/review-locks.mjs",
+        "kit/skills/dev-review/scripts/review-ledger.mjs",
+        "kit/skills/dev-review/scripts/review-diff.mjs",
+        "kit/skills/dev-review/scripts/review-pr.mjs",
+        "kit/skills/dev-review/scripts/review-sync.mjs",
+        "kit/skills/lib/verdict.mjs",
+        "kit/skills/lib/review-comment-render.mjs",
+        "kit/skills/dev-review/SKILL.md",
+        "kit/skills/lib/gate-enforcement.mjs",
+        "kit/skills/lib/harness-context.mjs"
+      ],
+      "businessFlows": [
+        "按变更文件装配受波及 businessFlows、依赖逆邻域与运行时能力切片",
+        "无论有无预设工具均强制先业务流实证与故障注入再解锁 --include-diff",
+        "校验 --e2e-evidence 实质内容并执行六锁防死循环审查记账",
+        "默认 enforceGates=true、校验可执行故障注入并阻断 Round 2+ 未闭合项放行"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-review-empirical-fixtures",
+          "kind": "command",
+          "command": "node scripts/dev/fixtures.mjs --domain review-empirical",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "review-pack",
+            "include-diff",
+            "实证门禁",
+            "故障注入"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-review-empirical.mjs",
+        "scripts/dev/fixtures-review.mjs",
+        "scripts/dev/fixtures-verify-tools.mjs",
+        "scripts/dev/fixtures-attribution-routing.mjs",
+        "scripts/dev/fixtures-empirical-cycle.mjs",
+        "scripts/dev/fixtures-review-contracts.mjs",
+        "scripts/dev/fixtures-review-govern.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s2.mjs",
+        "scripts/dev/injections-data-conv-s2.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs",
+        "scripts/dev/fixtures-health-sweep.mjs",
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs",
+        "scripts/dev/fixtures-policy-axes.mjs",
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs",
+        "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转",
+        "docs/TDD.md#支柱二工具无关结构化实证与界面防敷衍"
+      ],
+      "description": "先业务流实证与故障注入再审 Diff，执行不可自审、全历史换人与三轮停损六锁门禁。"
+    },
+    {
+      "id": "dev-govern",
+      "name": "基线增量审计与倒金字塔复盘治理",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-explore",
+        "dev-edit",
+        "dev-verify-tools"
+      ],
+      "actors": [
+        "maintainer",
+        "coordinator"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-govern/scripts/govern-audit.mjs",
+        "kit/skills/dev-govern/scripts/govern-retro.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-govern/scripts/govern-audit.mjs",
+        "kit/skills/dev-govern/scripts/govern-checks.mjs",
+        "kit/skills/dev-govern/scripts/govern-checks-hygiene.mjs",
+        "kit/skills/dev-govern/scripts/govern-docs.mjs",
+        "kit/skills/dev-govern/scripts/govern-evergreen.mjs",
+        "kit/skills/dev-govern/scripts/govern-retro.mjs",
+        "kit/skills/dev-govern/scripts/govern-state.mjs",
+        "kit/skills/dev-govern/scripts/govern-tests.mjs",
+        "kit/skills/dev-govern/scripts/release-prep-collect.mjs",
+        "kit/skills/dev-govern/scripts/release-prep-lib.mjs",
+        "kit/skills/lib/escalation.mjs",
+        "kit/skills/lib/issue-quality.mjs",
+        "kit/skills/lib/issue-template-hydrate.mjs",
+        "kit/skills/lib/signals.mjs",
+        "kit/skills/dev-govern/SKILL.md",
+        "kit/skills/lib/credential-scan.mjs"
+      ],
+      "businessFlows": [
+        "增量审计全仓卫生、测试分层元数据与文档同步",
+        "聚合 signals.jsonl 复发指纹按严格三层倒金字塔升格",
+        "reconcile 扫描 kit/ 与 feature-map 锚点覆盖并由权威长青文档重置滞后计数"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-govern-audit",
+          "kind": "command",
+          "command": "node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "govern",
+            "审计",
+            "retro",
+            "signals"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-govern.mjs",
+        "scripts/dev/fixtures-edit-pyramid.mjs",
+        "scripts/dev/fixtures-iterate-evolution.mjs",
+        "scripts/dev/fixtures-escalation-stoploss.mjs",
+        "scripts/dev/fixtures-kernel-dedup.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱三先最小运行复现poc-first与整类根治tier-1--tier-2",
+        "docs/TDD.md#7-三层常青文档与工作区安全"
+      ],
+      "description": "执行代码卫生增量审计、常青文档与功能地图校准，以及基于信号复发的倒金字塔复盘。"
+    },
+    {
+      "id": "dev-iterate",
+      "name": "正向测试扩展、盲区定向补测与并发压测迭代",
+      "domain": "kit-skills-quality",
+      "dependsOn": [
+        "cli",
+        "dev-edit",
+        "dev-verify-tools",
+        "dev-govern"
+      ],
+      "actors": [
+        "implementer",
+        "maintainer"
+      ],
+      "entrypoints": [
+        "kit/skills/dev-iterate/scripts/iterate.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-iterate/scripts/iterate.mjs",
+        "kit/skills/dev-iterate/scripts/iterate-plan.mjs",
+        "kit/skills/dev-iterate/scripts/iterate-cycle.mjs",
+        "kit/skills/lib/suite-inventory.mjs",
+        "kit/skills/dev-iterate/SKILL.md"
+      ],
+      "businessFlows": [
+        "自动交叉比对 feature-map 盲区/signals 热点/近期变更或按 --focus 定向生成原生测试",
+        "经 edit-gate 反作弊校验后落盘目标仓原生测试目录并增量挂回 testRefs",
+        "分片并发实跑原生测试套件，捕获失败/超时/性能越阈后写信号并经 escalation 建单"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-dev-iterate-plan",
+          "kind": "command",
+          "command": "node .agents/skills/dev-iterate/scripts/iterate.mjs plan . --json",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "iterate",
+            "补测试",
+            "集成测试",
+            "E2E测试",
+            "压测"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-iterate-evolution.mjs",
+        "scripts/dev/fixtures-empirical-cycle.mjs",
+        "docs/archive/specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-r6c-gates.mjs",
+        "scripts/dev/injections-data-r6c.mjs",
+        "scripts/dev/fixtures-health-sweep.mjs",
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-feature-map-v2.mjs",
+        "scripts/dev/fixtures-visual-engine.mjs",
+        "scripts/dev/injections-data-visual-engine.mjs",
+        "scripts/dev/fixtures-static-analyzer.mjs",
+        "scripts/dev/injections-data-static-analyzer.mjs",
+        "scripts/dev/fixtures-visual-layout-v2.mjs",
+        "scripts/dev/injections-data-visual-layout-v2.mjs",
+        "scripts/dev/fixtures-studio-ux.mjs",
+        "scripts/dev/injections-data-studio-ux.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"
+      ],
+      "description": "识别功能与流转盲区、定向生成原生测试并并发分片实跑，异常自动建单转入修复流。"
+    },
+    {
+      "id": "preflight-gate",
+      "name": "全仓结构自检、边界校验与端到端冒烟",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "equip",
+        "compose-agents",
+        "delivery-review-handoff",
+        "flow-truth-cli-parity",
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "maintainer",
+        "implementer",
+        "reviewer"
+      ],
+      "entrypoints": [
+        "scripts/dev/preflight.mjs"
+      ],
+      "modules": [
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/preflight-suite.mjs",
+        "scripts/dev/preflight-suite-checks.mjs",
+        "scripts/dev/preflight-kernel-parity.mjs",
+        "scripts/dev/preflight-contracts.mjs",
+        "scripts/dev/preflight-contract-rules.mjs",
+        "scripts/dev/preflight-e2e.mjs",
+        "scripts/dev/cli-parity.mjs",
+        "scripts/dev/evidence.mjs",
+        "scripts/dev/bench.mjs",
+        "scripts/dev/write-probe-audit.mjs"
+      ],
+      "businessFlows": [
+        "校验语法、零第三方依赖、架构边界、孤儿脚本与套件一致性",
+        "执行端到端冒烟与全量故障注入验证"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-preflight-smoke",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "preflight",
+            "冒烟",
+            "门禁",
+            "merge-gate"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures.mjs",
+        "scripts/dev/verify-injections.mjs",
+        "scripts/dev/fixtures-w4-harness.mjs",
+        "scripts/dev/injections-data-w4-harness.mjs",
+        "scripts/dev/fixtures-w5-blind-fixes.mjs",
+        "scripts/dev/injections-data-w5-blind-fixes.mjs",
+        "scripts/dev/fixtures-r6d-contracts.mjs",
+        "scripts/dev/injections-data-r6d.mjs",
+        "scripts/dev/fixtures-r7-rootfix.mjs",
+        "scripts/dev/injections-data-r7.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs",
+        "scripts/dev/fixtures-health-sweep.mjs",
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs",
+        "scripts/dev/fixtures-policy-axes.mjs",
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs",
+        "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#全链路自证与门禁矩阵"
+      ],
+      "description": "校验全仓零第三方依赖、单向架构边界、孤儿脚本、契约对拍与端到端冒烟。"
+    },
+    {
+      "id": "flow-truth-gate",
+      "name": "合入门禁单源派生与四档互斥结论",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "maintainer",
+        "reviewer"
+      ],
+      "entrypoints": [
+        "scripts/dev/merge-gate.mjs",
+        "kit/skills/lib/gate-truth.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/gate-truth.mjs",
+        "scripts/dev/merge-gate.mjs"
+      ],
+      "businessFlows": [
+        "从流水线结构谓词圈定清单并逐块实跑",
+        "输出 passed/failed/unverified/not-applicable 四档且不互相折叠"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-merge-gate",
+          "kind": "command",
+          "command": "node scripts/dev/merge-gate.mjs --dry-run",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "合入门禁",
+            "merge-gate",
+            "四档"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#关键不变量"
+      ],
+      "description": "直接从 CI 流水线结构派生合入门禁清单并逐块实跑，输出四档互斥结论。"
+    },
+    {
+      "id": "flow-truth-exit",
+      "name": "退出码四档单点分层与阻断码登记",
+      "domain": "dev-verification",
+      "dependsOn": [],
+      "actors": [
+        "coordinator",
+        "implementer",
+        "reviewer"
+      ],
+      "entrypoints": [
+        "kit/skills/lib/exit-codes.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/exit-codes.mjs"
+      ],
+      "businessFlows": [
+        "统一 0/1/2/3/4 四档语义与阻断码到档位映射",
+        "全脚本引用常量而非手写字面量"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-exit-codes",
+          "kind": "command",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "退出码",
+            "exit code",
+            "阻断码"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#关键不变量"
+      ],
+      "description": "单源统一 0/1/2/3/4 四档退出码语义及 109 个阻断码映射，禁止脚本硬编码。"
+    },
+    {
+      "id": "flow-truth-evidence",
+      "name": "实证文本实质判据与放行理由契约",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "implementer",
+        "reviewer",
+        "human"
+      ],
+      "entrypoints": [
+        "kit/skills/lib/evidence-substance.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/evidence-substance.mjs",
+        "kit/skills/lib/doc-approval.mjs"
+      ],
+      "businessFlows": [
+        "判断一段文字算不算实证（提审与观察共用）",
+        "放行理由更严一档：必须说清绕过什么，不设措辞白名单"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-evidence-substance",
+          "kind": "command",
+          "command": "node scripts/dev/fixtures.mjs --domain flow-truth",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "实证",
+            "放行理由",
+            "占位词"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs",
+        "scripts/dev/injections-data-flow-truth.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#关键不变量",
+        "docs/TDD.md#支柱二工具无关结构化实证与界面防敷衍"
+      ],
+      "description": "校验实证观察文本实质性及门禁绕过放行理由，拦截空洞占位词与敷衍勾选。"
+    },
+    {
+      "id": "flow-truth-cli-parity",
+      "name": "参数注册表、帮助声明与读取点三重对拍",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "cli"
+      ],
+      "actors": [
+        "maintainer"
+      ],
+      "entrypoints": [
+        "scripts/dev/cli-parity.mjs"
+      ],
+      "modules": [
+        "scripts/dev/cli-parity.mjs",
+        "kit/skills/lib/subcommand-meta.mjs"
+      ],
+      "businessFlows": [
+        "帮助里声明的必须注册得上、注册了的必须有人读",
+        "暗参数按名字锁基线，只许变短"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-cli-parity",
+          "kind": "command",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "参数对拍",
+            "cli-parity",
+            "暗参数",
+            "死参数"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow-truth.mjs",
+        "scripts/dev/fixtures-r6d-contracts.mjs",
+        "scripts/dev/injections-data-r6d.mjs",
+        "scripts/dev/fixtures-r7-rootfix.mjs",
+        "scripts/dev/injections-data-r7.mjs",
+        "scripts/dev/fixtures-issue-quality.mjs",
+        "scripts/dev/injections-data-issue-quality.mjs",
+        "scripts/dev/fixtures-issue-binding.mjs",
+        "scripts/dev/injections-data-issue-binding.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs",
+        "scripts/dev/fixtures-health-sweep.mjs",
+        "scripts/dev/injections-data-health-sweep.mjs",
+        "scripts/dev/fixtures-r8-bugfixes.mjs",
+        "scripts/dev/fixtures-policy-axes.mjs",
+        "scripts/dev/injections-data-policy-axes.mjs",
+        "scripts/dev/fixtures-sandbox-dual-loop.mjs",
+        "scripts/dev/injections-data-sandbox-flow.mjs",
+        "scripts/dev/fixtures-heterogeneous-dual-loop.mjs",
+        "scripts/dev/injections-data-triage-parity.mjs",
+        "scripts/dev/fixtures-multi-platform.mjs",
+        "scripts/dev/injections-data-multi-platform.mjs",
+        "scripts/dev/live-forge-e2e.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#全链路自证与门禁矩阵"
+      ],
+      "description": "三重对拍 CLI 参数注册表、帮助声明与脚本读取点，消除漂移与隐式参数。"
+    },
+    {
+      "id": "backup",
+      "name": "写前增量快照与回滚",
+      "domain": "onboarding-engine",
+      "dependsOn": [],
+      "actors": [
+        "maintainer"
+      ],
+      "entrypoints": [
+        "scripts/backup.mjs"
+      ],
+      "modules": [
+        "scripts/backup.mjs"
+      ],
+      "businessFlows": [
+        "写前增量快照与回滚 主入口 (scripts/backup.mjs)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-backup",
+          "kind": "command",
+          "command": "node scripts/backup.mjs list .",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "backup",
+            "写前增量快照与回滚"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-equip.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"
+      ],
+      "description": "写操作前生成仓外 .zip 增量快照并支持按 treeSha256 校验恢复或回滚。"
+    },
+    {
+      "id": "skill",
+      "name": "SKILL 总入口与调度契约",
+      "domain": "entry-governance",
+      "dependsOn": [],
+      "actors": [
+        "maintainer",
+        "coordinator"
+      ],
+      "entrypoints": [
+        "SKILL.md"
+      ],
+      "modules": [
+        "SKILL.md"
+      ],
+      "businessFlows": [
+        "[cli] CLI:SKILL.md (SKILL.md)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-skill-manifest",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "SKILL.md",
+            "skill",
+            "路由",
+            "门控"
+          ]
+        }
+      ],
+      "testRefs": [
+        "docs/archive/specs/261116-issue43-v7-m5-align-skills-docs-bootstrap-spec.md",
+        "docs/archive/specs/261118-issue71-b1-skill-discovery-spec.md",
+        "scripts/dev/fixtures-repo-alignment.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#2-系统架构全景与模块边界"
+      ],
+      "description": "提供顶层路由入口、四步调度流程、核心脚本清单与全局红线门控表。"
+    },
+    {
+      "id": "cli",
+      "name": "CLI 标准参数解析与下一跳",
+      "domain": "kit-skills-core",
+      "dependsOn": [
+        "flow-truth-exit"
+      ],
+      "actors": [
+        "coordinator",
+        "implementer",
+        "planner"
+      ],
+      "entrypoints": [
+        "kit/skills/lib/cli.mjs"
+      ],
+      "modules": [
+        "kit/skills/lib/cli.mjs"
+      ],
+      "businessFlows": [
+        "cli 主入口 (kit/skills/lib/cli.mjs)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-cli",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "cli"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-core.mjs",
+        "scripts/dev/fixtures-conv-s3.mjs",
+        "scripts/dev/injections-data-conv-s3.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#2-系统架构全景与模块边界"
+      ],
+      "description": "提供零依赖标准参数解析、--agent/--mode 规范化与单源 nextSteps 输出格式。"
+    },
+    {
+      "id": "check",
+      "name": "CI 持续验证流水线 (check.yml)",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "preflight-gate",
+        "flow-truth-gate"
+      ],
+      "actors": [
+        "maintainer"
+      ],
+      "entrypoints": [
+        ".github/workflows/check.yml"
+      ],
+      "modules": [
+        ".github/workflows/check.yml"
+      ],
+      "businessFlows": [
+        "[job] check.yml (.github/workflows/check.yml)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-check",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "check",
+            "check.yml"
+          ]
+        }
+      ],
+      "testRefs": [
+        ".github/workflows/check.yml",
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/e2e-zip-harness.mjs",
+        "scripts/dev/fixtures.mjs",
+        "scripts/dev/verify-injections.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#全链路自证与门禁矩阵"
+      ],
+      "description": "在 GitHub Actions 跑通预检、缺口覆盖、全量夹具、真包 E2E、注入与包清单校验。"
+    },
+    {
+      "id": "release",
+      "name": "标签发版流水线 (release.yml)",
+      "domain": "dev-verification",
+      "dependsOn": [
+        "check",
+        "skill"
+      ],
+      "actors": [
+        "maintainer",
+        "human"
+      ],
+      "entrypoints": [
+        ".github/workflows/release.yml"
+      ],
+      "modules": [
+        ".github/workflows/release.yml"
+      ],
+      "businessFlows": [
+        "[job] release.yml (.github/workflows/release.yml)"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-release",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "release",
+            "release.yml"
+          ]
+        }
+      ],
+      "testRefs": [
+        ".github/workflows/release.yml",
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/e2e-zip-harness.mjs",
+        "scripts/dev/evidence.mjs"
+      ],
+      "docAnchors": [
+        "docs/TDD.md#8-核心不变量安全红线与门禁体系"
+      ],
+      "description": "校验版本发布说明与打包产物边界，执行人工明令后的标签发版流水线。"
+    }
+  ],
+  "flows": [
+    {
+      "id": "s1-s4-onboarding-flow",
+      "name": "S1-S4 接入与装配主流程",
+      "actors": [
+        "maintainer",
+        "explore",
+        "human"
+      ],
+      "features": [
+        "skill",
+        "survey",
+        "backup",
+        "equip",
+        "compose-agents",
+        "dev-verify-tools",
+        "delivery-review-handoff"
+      ],
+      "steps": [
+        {
+          "feature": "skill",
+          "actor": "maintainer",
+          "action": "加载根入口路由与全局门控契约"
+        },
+        {
+          "feature": "survey",
+          "actor": "explore",
+          "action": "执行只读勘察并生成 13 项行动计划"
+        },
+        {
+          "feature": "backup",
+          "actor": "maintainer",
+          "action": "创建仓外写前 .zip 增量快照备份"
+        },
+        {
+          "feature": "equip",
+          "actor": "maintainer",
+          "action": "按 v3 账本装配或升级内置研发技能集"
+        },
+        {
+          "feature": "compose-agents",
+          "actor": "maintainer",
+          "action": "在预算内渲染 AGENTS.md 受管契约区"
+        },
+        {
+          "feature": "dev-verify-tools",
+          "actor": "maintainer",
+          "action": "同步 feature-map v2 并渲染离线架构图"
+        },
+        {
+          "feature": "delivery-review-handoff",
+          "actor": "maintainer",
+          "action": "核对交付体检对齐度并执行交棒净度扫描"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#3-外部项目治理与跨代升级s1-s4"
+      ]
+    },
+    {
+      "id": "brainstorm-to-plan-flow",
+      "name": "澄清探索到定案规划流程",
+      "actors": [
+        "explore",
+        "planner",
+        "critic",
+        "human"
+      ],
+      "features": [
+        "dev-explore",
+        "dev-plan",
+        "dev-verify-tools",
+        "dev-flow"
+      ],
+      "steps": [
+        {
+          "feature": "dev-explore",
+          "actor": "explore",
+          "action": "只读定位已核实路径与可复用模块"
+        },
+        {
+          "feature": "dev-plan",
+          "actor": "planner",
+          "action": "分流 Case 3/4、投影实时规划简报并挂载原型"
+        },
+        {
+          "feature": "dev-plan",
+          "actor": "critic",
+          "action": "执行文档内审与独立 Critique 并批准冻结 C1..Cn"
+        },
+        {
+          "feature": "dev-flow",
+          "actor": "coordinator",
+          "action": "按切片依赖波次派发隔离工作树实施任务"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱一宿主无关双态规划门禁与波次并行调度"
+      ]
+    },
+    {
+      "id": "worktree-impl-review-merge-flow",
+      "name": "隔离实现、双门审查与合并流程",
+      "actors": [
+        "coordinator",
+        "implementer",
+        "reviewer"
+      ],
+      "features": [
+        "dev-flow",
+        "dev-edit",
+        "dev-verify-tools",
+        "dev-review",
+        "flow-truth-gate"
+      ],
+      "steps": [
+        {
+          "feature": "dev-flow",
+          "actor": "implementer",
+          "action": "启动隔离 impl 工作树并认领绑定 Issue"
+        },
+        {
+          "feature": "dev-edit",
+          "actor": "implementer",
+          "action": "通过改前边界核对与词法静态 edit-gate 检查"
+        },
+        {
+          "feature": "dev-verify-tools",
+          "actor": "implementer",
+          "action": "运行受波及验证探针并保持架构图实时同步"
+        },
+        {
+          "feature": "flow-truth-gate",
+          "actor": "implementer",
+          "action": "执行合入门禁真源检查锁定 verifiedHead"
+        },
+        {
+          "feature": "dev-review",
+          "actor": "reviewer",
+          "action": "执行独立实证复核、故障注入与双门审查"
+        },
+        {
+          "feature": "dev-flow",
+          "actor": "reviewer",
+          "action": "合并已验证 PR 并执行人工确认七步收尾清理"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#5-八个内置技能与日常研发流转"
+      ]
+    },
+    {
+      "id": "govern-and-iterate-flow",
+      "name": "代码体检治理与测试迭代流程",
+      "actors": [
+        "maintainer",
+        "coordinator",
+        "implementer"
+      ],
+      "features": [
+        "dev-govern",
+        "dev-verify-tools",
+        "dev-iterate",
+        "dev-plan",
+        "preflight-gate"
+      ],
+      "steps": [
+        {
+          "feature": "dev-govern",
+          "actor": "maintainer",
+          "action": "运行只读体检审计、长青校准与信号复盘"
+        },
+        {
+          "feature": "dev-verify-tools",
+          "actor": "maintainer",
+          "action": "审计功能地图拓扑完整性与架构图同步状态"
+        },
+        {
+          "feature": "dev-iterate",
+          "actor": "implementer",
+          "action": "识别业务流盲区、补全原生测试并分片实跑"
+        },
+        {
+          "feature": "dev-plan",
+          "actor": "planner",
+          "action": "将稳定复现的缺口建单升格为正式规划切片"
+        },
+        {
+          "feature": "preflight-gate",
+          "actor": "maintainer",
+          "action": "执行全仓结构预检、参数对拍与端到端冒烟"
+        }
+      ],
+      "docAnchors": [
+        "docs/TDD.md#支柱四有界优化循环与只锁客观输出边界"
+      ]
+    }
+  ]
+}

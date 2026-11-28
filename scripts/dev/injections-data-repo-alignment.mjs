@@ -48,10 +48,10 @@ export const INJECTIONS_REPO_ALIGNMENT = [
   },
   {
     id: 'I391',
-    what: 'registry.mjs: 无远端拓扑 probeTopologyEnv 伪装返回 github 能力表而非 none',
-    file: 'scripts/lib/platform/registry.mjs',
-    from: "  if (topology.mode === 'none') {\n    const res = await probeGitHubEnv({ ...opts, sshHostMap: effectiveHostMap })\n    return { ...res, providerId: 'none', capabilities: NONE_CAPABILITIES }\n  }",
-    to: "  if (topology.mode === 'none') {\n    const res = await probeGitHubEnv({ ...opts, sshHostMap: effectiveHostMap })\n    return { ...res, providerId: 'github', capabilities: GITHUB_PROVIDER.capabilities }\n  }",
+    what: 'platform/index.mjs: 无远端拓扑 probeTopologyEnv 伪装返回 github 能力表而非 none',
+    file: 'scripts/lib/platform/index.mjs',
+    from: "  if (topology.mode === 'none') {\n    const res = await probeEngineGitHubEnv({ ...opts, sshHostMap: effectiveHostMap })\n    return { ...res, providerId: 'none', capabilities: NONE_CAPABILITIES }\n  }",
+    to: "  if (topology.mode === 'none') {\n    const res = await probeEngineGitHubEnv({ ...opts, sshHostMap: effectiveHostMap })\n    return { ...res, providerId: 'github', capabilities: GITHUB_PROVIDER.capabilities }\n  }",
     expect: 'C2：registry.mjs 无远端返回 none/全 false 能力表且 ledger/task-backend/flow 无隐性 github 默认',
   },
   {

@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { hasExploredEvidence } from '../../kit/skills/lib/ledger.mjs'
-import { readTaskLedger, resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { readTaskLedger, resolveRepoRoots } from './test-shared.mjs'
 import { handleExplore } from '../../kit/skills/dev-flow/scripts/flow-explore.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import { handleSubmit, handleVerify } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'

@@ -89,7 +89,7 @@ export const VERIFIED_API_TIERS = Object.freeze(new Set([
 
 /** 判断平台通道层级是否为已认证的本地 API 通道（供身份归属与标签/PR 写操作共享）。 */
 export function isVerifiedTier(tier) {
-  return typeof tier === 'string' && VERIFIED_API_TIERS.has(tier)
+  return VERIFIED_API_TIERS.has(String(tier ?? '').trim())
 }
 
 export function resolveIdentityLayers({

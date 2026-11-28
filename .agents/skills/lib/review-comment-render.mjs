@@ -1,5 +1,5 @@
 /**
- * review-comment-render.mjs —— 独立审查 PR 全量评论与 Issue 紧凑摘要单源渲染器。
+ * review-comment-render.mjs —— 独立审查 PR 与 Issue 全量证据对等单源渲染器。
  *
  * 从 doc-comments.mjs 拆出以控制单文件体积，由 doc-comments.mjs / docs.mjs 汇总导出。
  * 严格零第三方依赖（仅 Node 18+ 内置模块）。
@@ -50,8 +50,8 @@ function buildReadableNextNote({ isFull, stopLoss, verdict, round, role, prNum, 
 
 /**
  * 单源渲染结构化审查评论：
- * - `isFull === true`（PR 或无 PR 工单 `!prNum`）：输出固定三字段 + 条件 `止损记录` + `#### 验收标准逐条核对` + 完整 `Must Fix`/`Should Fix`/`Pre-existing`；
- * - `isFull === false`（已关联 `PR #N` 的 Issue）：仅输出紧凑结论、阻塞定位与指向 `PR #N` 的指针摘要。
+ * - 默认（`isFull === true`，`buildReviewComments` 对 PR 与 Issue 双方统一启用）：输出完整三固定字段（`逐条标准状态`/`故障注入记录`/`实证核验`）+ 条件 `止损记录` + `#### 验收标准逐条核对` + 完整 `Must Fix`/`Should Fix`/`Pre-existing`；
+ * - 显式传入 `isFull === false` 时仅用于调用方主动请求紧凑摘要视图。
  */
 export function renderReviewSection({
   isFull = true,
@@ -98,10 +98,11 @@ export function renderReviewSection({
     lines.push('', '#### 验收标准逐条核对', '', '| 标准 | 状态 | 核对内容与阻塞定位 |', '| --- | --- | --- |')
     for (const c of criteria) {
       const hits = verdict === 'changes' ? mustFixList.filter((m) => blockerMatchesCriterion(m, c.id)) : []
-      const stLabel = hits.length > 0 ? 'FAIL' : 'PASS'
+      const isPending = hits.length === 0 && (c.status === 'pending' || c.unverified === true)
+      const stLabel = hits.length > 0 ? 'FAIL' : (isPending ? 'PENDING' : 'PASS')
       const note = hits.length > 0
         ? hits.map((h) => `[${h.id}] \`${formatBlockerLoc(h)}\`: ${cleanMdCell(h.summary)}`).join('；')
-        : `${cleanMdCell(c.text)}${c.checked ? '' : '（待确认勾选）'}`
+        : (isPending ? `${cleanMdCell(c.text)}（待核验）` : cleanMdCell(c.text))
       lines.push(`| ${cleanMdCell(c.id)} | ${stLabel} | ${note} |`)
     }
   }
@@ -152,11 +153,11 @@ export function renderReviewSection({
   return lines.join('\n')
 }
 
-/** 渲染结构化 PR 全量审查单与 Issue 摘要/全量单（无 PR 工单时 Issue 同样走完整单源结构）。 */
+/** 渲染结构化 PR 与 Issue 全量对等审查单（双方均完整包含逐条标准核对表与故障注入记录）。 */
 export function buildReviewComments(opts = {}) {
-  const { prNum = null, statePayload = {} } = opts
+  const { statePayload = {} } = opts
   const stateTag = Object.keys(statePayload).length > 0 ? `<!-- pf-state:${JSON.stringify(statePayload)} -->` : ''
   const prCommentBody = renderReviewSection({ ...opts, isFull: true, isIssue: false })
-  const issueCommentBody = renderReviewSection({ ...opts, isFull: !prNum, isIssue: true })
+  const issueCommentBody = renderReviewSection({ ...opts, isFull: true, isIssue: true })
   return { prCommentBody, issueCommentBody, stateTag }
 }

@@ -35,10 +35,10 @@ export function registerR5OnboardingCases(cases) {
     try {
       const hits = detectIgnoredGovernancePaths(dir)
       const hitPaths = new Set(hits.map((h) => h.path))
-      if (!hitPaths.has('.agents/skills/lib/shared.mjs') || !hitPaths.has('.agents/skills/templates/docs-todo.md')) {
+      if (!hitPaths.has('.agents/skills/lib/git.mjs') || !hitPaths.has('.agents/skills/templates/docs-todo.md')) {
         return `detectIgnoredGovernancePaths 漏报未锚定规则遮蔽：${JSON.stringify(hits)}`
       }
-      const libHit = hits.find((h) => h.path === '.agents/skills/lib/shared.mjs')
+      const libHit = hits.find((h) => h.path === '.agents/skills/lib/git.mjs')
       if (!libHit?.advice?.includes('/lib')) {
         return `锚定建议缺少 /lib 指引：${JSON.stringify(libHit)}`
       }
@@ -182,8 +182,8 @@ export function registerR5OnboardingCases(cases) {
       // 2. equip 装配后模拟崩溃残留 3 段式 .tmp-pid-ts-seq：checkEquip 清理死进程残留并通过，活进程残留保留
       const eq = equip(dir, { noBackup: true })
       if (!eq.manifestUpdated) return '测试前置条件：equip 未成功装配'
-      const deadTmp = join(dir, '.agents/skills/lib/shared.mjs.tmp-999999-1700000000-1')
-      const liveTmp = join(dir, `.agents/skills/lib/shared.mjs.tmp-${liveProc.pid}-1700000000-2`)
+      const deadTmp = join(dir, '.agents/skills/lib/git.mjs.tmp-999999-1700000000-1')
+      const liveTmp = join(dir, `.agents/skills/lib/git.mjs.tmp-${liveProc.pid}-1700000000-2`)
       writeFileSync(deadTmp, 'stale crash leftover\n', 'utf8')
       const handoffWithDeadTmp = handoffScan(dir)
       if (!handoffWithDeadTmp.staleTemps.some((t) => t.file.endsWith('.tmp-999999-1700000000-1') && !t.alive)) {

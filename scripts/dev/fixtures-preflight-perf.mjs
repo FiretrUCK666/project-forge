@@ -157,7 +157,7 @@ export function registerPreflightPerfCases(cases) {
       const badScript = join(dirtyDir, 'scripts', 'survey.mjs')
       writeFileSync(badScript, `${readFileSync(badScript, 'utf8')}\nconst = ;\n`, 'utf8')
 
-      const badKitScript = join(dirtyDir, 'kit', 'skills', 'lib', 'shared.mjs')
+      const badKitScript = join(dirtyDir, 'kit', 'skills', 'lib', 'git.mjs')
       writeFileSync(badKitScript, `${readFileSync(badKitScript, 'utf8')}\nfunction () {}\n`, 'utf8')
 
       const badReadme = join(dirtyDir, 'README.md')
@@ -167,7 +167,7 @@ export function registerPreflightPerfCases(cases) {
       if (!suite.ok) return suite.error
 
       const hasScriptSyntaxErr = suite.failures.some((f) => f.includes('scripts/survey.mjs') && f.includes('语法错误'))
-      const hasKitSyntaxErr = suite.failures.some((f) => f.includes('kit/skills/lib/shared.mjs') && f.includes('语法错误'))
+      const hasKitSyntaxErr = suite.failures.some((f) => f.includes('kit/skills/lib/git.mjs') && f.includes('语法错误'))
       const hasBomErr = suite.failures.some((f) => f.includes('README.md') && f.includes('UTF-8 BOM'))
       const hasVoiceErr = suite.failures.some((f) => f.includes('README.md:') && f.includes('履历体'))
       if (!hasScriptSyntaxErr || !hasKitSyntaxErr || !hasBomErr || !hasVoiceErr) {

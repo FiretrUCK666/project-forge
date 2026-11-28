@@ -14,7 +14,7 @@ import { extractImportsForArch, resolveGoModules, resolveLocalImportTarget } fro
 import { projectVisualBriefViewModel, upsertVisualBrief } from '../../kit/skills/lib/visual-brief.mjs'
 import { buildVisualModel } from '../../kit/skills/lib/visual-layout.mjs'
 import { renderVisualHtml } from '../../kit/skills/lib/visual-render.mjs'
-import { scanCircularImports, scanDuplicateExportDefs } from './preflight-kernel-parity.mjs'
+import { scanCircularImports, scanDeadProdLibModules, scanDuplicateExportDefs } from './preflight-kernel-parity.mjs'
 
 async function loadAnalyzerMods() {
   const analyzer = await import('../../kit/skills/lib/static-analyzer.mjs')
@@ -597,12 +597,30 @@ export function registerStaticAnalyzerCases(cases) {
       ])
       if (acyclicSccs.length !== 0) return `scanCircularImports 对无环图误报: ${JSON.stringify(acyclicSccs)}`
 
+      // 默认空白名单下，跨模块重复导出（含历史白名单同名函数）必须被拦
       const dupV = scanDuplicateExportDefs([
-        { rel: 'kit/skills/lib/m1.mjs', codeText: 'export function dupFn() {}\nexport function runCli() {}\nexport function handleFoo() {}\n' },
-        { rel: 'kit/skills/lib/m2.mjs', codeText: 'export function dupFn() {}\nexport function runCli() {}\nexport function handleFoo() {}\nexport { reexp } from "./m1.mjs"\n' },
-      ], {})
-      if (dupV.length !== 1 || dupV[0].name !== 'dupFn') {
-        return `scanDuplicateExportDefs 判定异常: ${JSON.stringify(dupV)}`
+        { rel: 'kit/skills/lib/m1.mjs', codeText: 'export function dupFn() {}\nexport function displayWidth() {}\nexport function runCli() {}\nexport function handleFoo() {}\n' },
+        { rel: 'kit/skills/lib/m2.mjs', codeText: 'export function dupFn() {}\nexport function displayWidth() {}\nexport function runCli() {}\nexport function handleFoo() {}\nexport { reexp } from "./m1.mjs"\n' },
+      ])
+      const dupNames = dupV.map((v) => v.name).sort()
+      if (dupNames.length !== 2 || dupNames[0] !== 'displayWidth' || dupNames[1] !== 'dupFn') {
+        return `scanDuplicateExportDefs 默认白名单判定异常: ${JSON.stringify(dupV)}`
+      }
+
+      // 零生产调用方死库门禁正反双向自证
+      const deadLibs = scanDeadProdLibModules([
+        { rel: 'scripts/survey.mjs', codeText: 'import { usedEng } from "./lib/used-engine.mjs"\nexport const s = usedEng\n' },
+        { rel: 'scripts/lib/used-engine.mjs', codeText: 'export const usedEng = 1\n' },
+        { rel: 'scripts/lib/dead-engine.mjs', codeText: 'export const dead = 1\n' },
+        { rel: 'kit/skills/dev-flow/scripts/flow.mjs', codeText: 'import { a } from "../../lib/used-static.mjs"\nconst b = await import("../../lib/used-dyn.mjs")\nexport const f = [a, b]\n' },
+        { rel: 'kit/skills/lib/used-static.mjs', codeText: 'export const a = 1\n' },
+        { rel: 'kit/skills/lib/used-dyn.mjs', codeText: 'export const b = 2\n' },
+        { rel: 'kit/skills/lib/orphan.mjs', codeText: 'export const orphan = 3\n' },
+        { rel: 'kit/skills/lib/self-only.mjs', codeText: 'import { selfRef } from "./self-only.mjs"\nexport const selfRef = selfRef\n' },
+      ])
+      const expectedDead = ['kit/skills/lib/orphan.mjs', 'kit/skills/lib/self-only.mjs', 'scripts/lib/dead-engine.mjs']
+      if (JSON.stringify(deadLibs) !== JSON.stringify(expectedDead)) {
+        return `scanDeadProdLibModules 正反双向判定异常: actual=${JSON.stringify(deadLibs)} expected=${JSON.stringify(expectedDead)}`
       }
       return true
     } finally {

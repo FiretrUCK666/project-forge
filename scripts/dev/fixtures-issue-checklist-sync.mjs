@@ -11,7 +11,7 @@ import { createLocalIssue, getLocalIssue } from '../../kit/skills/lib/local-issu
 import { PLAN_SUMMARY_END, PLAN_SUMMARY_START, syncIssueCriteriaCheckboxes, syncIssueSummaryBody, syncPlanPhaseToBackend } from '../../kit/skills/lib/plan-sync.mjs'
 import { createGitHubClient } from '../../kit/skills/lib/github-client.mjs'
 import { createTaskBackend } from '../../kit/skills/lib/task-backend.mjs'
-import { resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { resolveRepoRoots } from './test-shared.mjs'
 import { handleBatch } from '../../kit/skills/dev-flow/scripts/flow-batch.mjs'
 import { handleIntake } from '../../kit/skills/dev-flow/scripts/flow-intake.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'

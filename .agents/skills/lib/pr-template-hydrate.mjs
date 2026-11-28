@@ -243,12 +243,87 @@ function removeSectionByHeading(md, headingTitle) {
   return cur
 }
 
-function updateChecklistByEvidence(md, { verifyPassed, finalized, hasNoSecrets }) {
+const DOC_SYNC_FILE_RE = /^(?:README(?:\.[A-Za-z-]+)?\.md|AGENTS\.md|CONTRIBUTING\.md|RELEASING\.md|SKILL\.md|docs\/TDD\.md|references\/.*\.md)$/i
+const FIXTURE_OR_TEST_FILE_RE = /(?:^|\/)(?:fixtures(?:-[^/]+)?\.[^/]+|injections-data(?:-[^/]+)?\.[^/]+|[^/]*coverage[^/]*\.[^/]+|[^/]+\.(?:test|spec)\.[^/]+|[^/]+_test\.[^/]+|test_[^/]+\.[^/]+)$/i
+const SURVEY_OR_GATE_FILE_RE = /(?:^|\/)(?:survey(?:-[^/]+)?|review|static-gates(?:-[^/]+)?|[^/]+-gate(?:-[^/]+)?)\.[^/]+$/i
+
+function formatFileSample(list, limit = 3, unit = '项') {
+  const shown = list.slice(0, limit).map((f) => `\`${f}\``).join('、')
+  return list.length > limit ? `${shown} 等 ${list.length} ${unit}` : shown
+}
+
+function collectPassedGateLabels(evidence, ledger, verifyPassed) {
+  const gates = evidence?.gates && typeof evidence.gates === 'object' ? evidence.gates : null
+  const labelMap = { gate: 'merge-gate', full: 'full-test', smoke: 'smoke-verify', quick: 'quick-test', docStatic: 'doc-static' }
+  const out = []
+  if (gates) {
+    for (const key of ['gate', 'full', 'smoke', 'quick', 'docStatic']) {
+      const g = gates[key]
+      if (!g || g.status === 'skipped-explicit-none') continue
+      if (g.exitCode === 0 && g.ok !== false && g.succeeded !== false) out.push(labelMap[key] ?? key)
+    }
+  }
+  if (out.length === 0 && verifyPassed) {
+    const mode = String(ledger?.verifiedMode ?? '').trim()
+    out.push(labelMap[mode] ?? (mode || 'verify'))
+  }
+  return out
+}
+
+function updateChecklistByEvidence(md, {
+  verifyPassed, finalized, hasNoSecrets, shortHead = 'HEAD',
+  changedFiles = [], evidence = null, policy = null, ledger = null,
+}) {
+  const normFiles = (Array.isArray(changedFiles) ? changedFiles : []).map((f) => posixPath(String(f ?? '')).trim()).filter(Boolean)
+  const passedGates = collectPassedGateLabels(evidence, ledger, verifyPassed)
+  const gateWeakened = Boolean(
+    policy?.gateWeakened
+    || (Array.isArray(policy?.gateWeakeningFindings) && policy.gateWeakeningFindings.length > 0),
+  )
+  const touchedDocs = normFiles.filter((f) => DOC_SYNC_FILE_RE.test(f))
+  const touchedFixtures = normFiles.filter((f) => FIXTURE_OR_TEST_FILE_RE.test(f))
+  const touchesSurveyOrGate = normFiles.some((f) => SURVEY_OR_GATE_FILE_RE.test(f))
+  const archivedDocs = [...new Set([
+    ledger?.archivedPrdFile,
+    ledger?.archivedSpecFile,
+    ledger?.archivedTodoFile,
+    ...normFiles.filter((f) => f.startsWith('docs/archive/')),
+  ].filter(Boolean))]
+  const caseType = Number(ledger?.caseType ?? 3)
+
   return md.replace(/^- \[ \] (.+)$/gm, (full, label) => {
-    const t = String(label)
-    if (verifyPassed && /(?:验证|测试|门禁|构建|全绿|通过|\b(?:test|tests|verify|verified|check|checks|gate|build|ci|lint|pass|passed|green)\b)/i.test(t)) return `- [x] ${t}`
-    if (finalized && /(?:文档|Todo|SPEC|README|TDD|归档|\b(?:docs?|documentation|spec|todo|readme|tdd|archived?|changelog)\b)/i.test(t)) return `- [x] ${t}`
-    if (hasNoSecrets && /(?:敏感|凭据|密钥|无多余|无关|\b(?:secrets?|credentials?|tokens?|keys?|clean|unrelated)\b)/i.test(t)) return `- [x] ${t}`
+    const t = String(label).trim()
+    if (/(?:弱化.*门禁|跳过测试|weaken.*gate|skip.*test)/i.test(t)) {
+      if (gateWeakened) return `- [ ] ${t}（检出疑似弱化门禁或跳过测试项，须人工审阅确认）`
+      if (verifyPassed) return `- [x] ${t}（静态扫描未检出弱化门禁或跳过测试）`
+      return full
+    }
+    if (/(?:双向夹具|正反双向|fixtures|coverage)/i.test(t)) {
+      if (touchedFixtures.length > 0) return `- [x] ${t}（已补/更新：${formatFileSample(touchedFixtures, 3, '项')}）`
+      if (touchesSurveyOrGate) return `- [ ] ${t}（触及勘察/门禁判定但未检测到夹具变更，请补齐正反双向用例）`
+      return `- [x] ${t}（未改动勘察/门禁判定，不适用）`
+    }
+    if (/(?:敏感|凭据|密钥|本机路径|emoji|\b(?:secrets?|credentials?|tokens?|keys?)\b)/i.test(t)) {
+      if (!hasNoSecrets) return full
+      const archNote = archivedDocs.length > 0
+        ? `已归档：${formatFileSample(archivedDocs, 3, '份')}`
+        : (caseType <= 2 ? `Case ${caseType} 无规划文档归档` : (finalized ? '已完成归档同步' : '待归档同步'))
+      const checked = archivedDocs.length > 0 || caseType <= 2 || finalized
+      return `${checked ? '- [x]' : '- [ ]'} ${t}（${archNote}；静态卫生校验 0 阻塞）`
+    }
+    if (/(?:验证|测试|门禁|构建|全绿|通过|\b(?:test|tests|verify|verified|check|checks|gate|build|ci|lint|pass|passed|green)\b)/i.test(t)) {
+      if (!verifyPassed) return full
+      return `- [x] ${t}（已实证：${passedGates.join(' / ')} 退出码 0 @ \`${shortHead}\`）`
+    }
+    if (/(?:文档|Todo|SPEC|README|TDD|AGENTS|归档|\b(?:docs?|documentation|spec|todo|readme|tdd|archived?|changelog)\b)/i.test(t)) {
+      if (touchedDocs.length > 0) return `- [x] ${t}（已同步：${formatFileSample(touchedDocs, 4, '份')}）`
+      if (finalized && archivedDocs.length > 0) return `- [x] ${t}（已归档：${formatFileSample(archivedDocs, 3, '份')}）`
+      if (/(?:README|用户可见|命令变更)/i.test(t) && (finalized || verifyPassed)) {
+        return `- [x] ${t}（本次仅内部重构/缺陷修复，未触及用户可见命令，不适用）`
+      }
+      if (finalized) return `- [x] ${t}（已核对无需额外同步或已完成归档）`
+      return full
+    }
     return full
   })
 }
@@ -420,7 +495,16 @@ export function hydratePrTemplateBody({
   } else if (cleanRawBody && !body.includes(cleanRawBody)) {
     body = `${body.trimEnd()}\n\n${cleanRawBody}`
   }
-  body = updateChecklistByEvidence(body, { verifyPassed, finalized: Boolean(ledger?.finalized), hasNoSecrets: verifyPassed })
+  body = updateChecklistByEvidence(body, {
+    verifyPassed,
+    finalized: Boolean(ledger?.finalized),
+    hasNoSecrets: verifyPassed,
+    shortHead,
+    changedFiles,
+    evidence,
+    policy,
+    ledger,
+  })
   const rendered = `${body.replace(/\n{3,}/g, '\n\n').trimEnd()}\n\n${pfTag}\n`
   assertNoAsciiControlChars(rendered, 'PR 模板渲染正文')
   assertWellFormedMarkdownBody(rendered, 'PR 模板渲染正文')

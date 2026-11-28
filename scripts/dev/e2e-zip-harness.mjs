@@ -407,7 +407,7 @@ async function runScenarioF(pkgRoot, sandbox, env) {
   runGit(repoF, ['add', '-A'])
   runGit(repoF, ['commit', '-qm', 'chore: equip'])
 
-  const { resolveRepoRoots } = await import(pathToFileURL(join(pkgRoot, 'kit/skills/lib/shared.mjs')).href)
+  const { resolveRepoRoots } = await import(pathToFileURL(join(pkgRoot, 'kit/skills/lib/git.mjs')).href)
   const { handleStart } = await import(pathToFileURL(join(pkgRoot, 'kit/skills/dev-flow/scripts/flow-inspect.mjs')).href)
   const roots = await resolveRepoRoots(repoF)
   const depBlock = await handleStart({

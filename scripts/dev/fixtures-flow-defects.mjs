@@ -145,7 +145,7 @@ export function registerFlowDefectsCases(cases) {
   // ---------------------------------------------------------------------------
 
   cases.push(['C2 轮次收口三态：整轮 pass 不再批量置已解决，未提及项保持原状态并单列', async () => {
-    const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots } = await import('./test-shared.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const { issueTokenFor } = await import('./fixtures-helpers.mjs')
 

@@ -12,11 +12,14 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { withFileLockSync } from './exec.mjs'
+import { resolveCommonGitDir } from './git-fast.mjs'
 import {
   canonicalPath, isInsideDir, posixPath, readJsonSafe, readTextSafe,
   samePath, sha256File, sha256Text, writeAtomic, writeJsonAtomic,
 } from './git.mjs'
 import { discoverWorkspacePackages, parseAgentsProfile } from './profile.mjs'
+
+export { resolveCommonGitDir }
 
 export const NODE_LOCKFILES = Object.freeze(['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb'])
 export const PY_LOCKFILES = Object.freeze(['uv.lock', 'poetry.lock', 'Pipfile.lock', 'requirements.txt', 'requirements-dev.txt'])
@@ -62,21 +65,6 @@ export function classifyHeavyDir(relPath) {
     return 'S'
   }
   return 'unknown'
-}
-
-export function resolveCommonGitDir(mainAbs) {
-  const dotGit = join(mainAbs, '.git')
-  const st = statSafe(dotGit)
-  if (!st) return null
-  if (st.isDirectory()) return dotGit
-  if (st.isFile()) {
-    const m = /^gitdir:\s*(.+)$/mi.exec(readTextSafe(dotGit) ?? '')
-    if (!m) return null
-    const actualGitDir = resolve(mainAbs, m[1].trim())
-    const commonRef = readTextSafe(join(actualGitDir, 'commondir'))
-    return commonRef?.trim() ? resolve(actualGitDir, commonRef.trim()) : actualGitDir
-  }
-  return null
 }
 
 export function resolveDepPoolRoot(mainAbs) {

@@ -93,7 +93,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs override \
   [--task <id>] --human-approved --reason "<裁决理由>"
 ```
 
-说明：`record` 经 `TaskBackend` 适配三态（`github` 通过单源 `renderReviewSection({ isFull })` 按 `审核不通过（退回）/审核通过 · Round N` 拼装含三固定字段（`逐条标准状态`/`故障注入记录`/`实证核验`，触发停损时条件附 `止损记录`）、`验收标准逐条核对`、`Must Fix`/`Should Fix`/`Pre-existing` 与 `pf-state` 的 PR 完整单，以及有 `prNum` 时含 `file:line` 核心原因与 `PR #N` 指向的 Issue 紧凑摘要单，无 PR 工单则输出完整单，实时双写评论并贴 `changes-requested`/`reviewed` 标签；403 自动降级，离线/`mcp-delegate` 输出 `githubSync.delegatedPayloads`；`generic-git`/`local-only` 写本地台账），同时写入 `signals.jsonl` 供 `dev-govern`（`retro`）进化。
+说明：`record` 经 `TaskBackend` 适配三态（`github` 通过单源 `renderReviewSection({ isFull: true })` 按 `审核不通过（退回）/审核通过 · Round N` 拼装含三固定字段（`逐条标准状态`/`故障注入记录`/`实证核验`，触发停损时条件附 `止损记录`）、`验收标准逐条核对`、`Must Fix`/`Should Fix`/`Pre-existing` 与 `pf-state` 的 PR 与 Issue 全量对等审查单，双方均完整包含逐条标准核对表与故障注入记录，实时双写评论并贴 `changes-requested`/`reviewed` 标签；403 自动降级，离线/`mcp-delegate` 输出 `githubSync.delegatedPayloads`；`generic-git`/`local-only` 写本地台账），同时写入 `signals.jsonl` 供 `dev-govern`（`retro`）进化。
 
 ## 输出与下一跳（合入或返工闭环）
 

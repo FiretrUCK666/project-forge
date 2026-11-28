@@ -9,7 +9,7 @@ import os from 'node:os'
 import path, { resolve } from 'node:path'
 
 import { EXIT } from './exit-codes.mjs'
-import { resolveGitDirFast } from './git-fast.mjs'
+import { resolveCommonGitDir, resolveGitDirFast } from './git-fast.mjs'
 import {
   posixPath, readJsonSafe, readTextSafe, sha256Text, withFileLock, withFileLockSync, writeJsonAtomic,
 } from './git.mjs'
@@ -19,20 +19,11 @@ function makeStoreError(code, exitCode, message) {
   return Object.assign(new Error(message), { code, exitCode })
 }
 
-function resolveCommonGitDir(rawGitDir) {
-  if (!rawGitDir || !existsSync(rawGitDir)) return null
-  const resolved = resolve(rawGitDir)
-  const cdFile = path.join(resolved, 'commondir')
-  if (!existsSync(cdFile)) return resolved
-  const common = resolve(resolved, (readTextSafe(cdFile) ?? '').trim())
-  return existsSync(common) ? common : resolved
-}
-
 export function resolveEffectiveRoots(repoRoot, mainRoot, gitDir) {
   const rawGitDir = gitDir && existsSync(resolve(gitDir))
     ? resolve(gitDir)
     : (resolveGitDirFast(repoRoot) ?? (mainRoot && mainRoot !== repoRoot ? resolveGitDirFast(mainRoot) : null))
-  const effGitDir = resolveCommonGitDir(rawGitDir)
+  const effGitDir = resolveCommonGitDir(rawGitDir, { treatAsGitDir: true })
   let effMainRoot = mainRoot && mainRoot !== repoRoot ? resolve(mainRoot) : resolve(repoRoot)
   if ((!mainRoot || mainRoot === repoRoot) && effGitDir && path.basename(effGitDir) === '.git') {
     effMainRoot = path.dirname(effGitDir)
@@ -41,7 +32,7 @@ export function resolveEffectiveRoots(repoRoot, mainRoot, gitDir) {
 }
 
 export function sidecarCritiqueFile(repoRoot, effectiveGitDir) {
-  const commonGitDir = resolveCommonGitDir(effectiveGitDir) ?? effectiveGitDir
+  const commonGitDir = resolveCommonGitDir(effectiveGitDir, { treatAsGitDir: true }) ?? effectiveGitDir
   if (commonGitDir) return path.join(commonGitDir, 'project-forge-flow', 'plan-critique-state.json')
   return path.join(os.tmpdir(), 'pf-plan-critique', `${sha256Text(resolve(repoRoot)).slice(0, 16)}.json`)
 }

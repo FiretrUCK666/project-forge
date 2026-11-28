@@ -71,7 +71,7 @@ export function registerAttributionRoutingCases(cases) {
   cases.push(['C1：双层正交身份 resolveIdentityLayers 与能力驱动 formatAttribution 零假 @mention', async () => {
     const ghParse = await import('../../kit/skills/lib/github-parse.mjs')
     const docComments = await import('../../kit/skills/lib/doc-comments.mjs')
-    const shared = await import('../../kit/skills/lib/shared.mjs')
+    const shared = await import('./test-shared.mjs')
     const platform = await import('../../kit/skills/lib/platform.mjs')
     const { GitHubBackend, GenericRemoteBackend, LocalOnlyBackend } = await import('../../kit/skills/lib/task-backend.mjs')
 

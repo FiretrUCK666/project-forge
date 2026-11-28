@@ -18,7 +18,7 @@ cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
   const { mountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
-  const { resolveRepoRoots, writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+  const { resolveRepoRoots, writeTaskLedger } = await import('./test-shared.mjs')
 
   const dir = tmpProject({
     '.gitignore': '.worktrees/\nnode_modules/\n',
@@ -99,7 +99,7 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleSync } = await import('../../kit/skills/dev-flow/scripts/flow-sync.mjs')
   const { handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
-  const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+  const { resolveRepoRoots } = await import('./test-shared.mjs')
 
   const dir = tmpProject({
     '.gitignore': '.worktrees/\n',
@@ -190,7 +190,7 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
 }])
 
 cases.push(['L1 withFileLock 并发互斥、gitRun .git/*.lock 退避与 computeWorktreeEnv 隔离', async () => {
-  const { computeWorktreeEnv, gitRun, withFileLock } = await import('../../kit/skills/lib/shared.mjs')
+  const { computeWorktreeEnv, gitRun, withFileLock } = await import('./test-shared.mjs')
   const dir = tmpProject({})
   try {
     const lockFile = join(dir, '.git', 'project-forge-flow', 'locks', 'test.lock')
@@ -225,7 +225,7 @@ cases.push(['L1 withFileLock 并发互斥、gitRun .git/*.lock 退避与 compute
 }])
 
 cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调度闭环', async () => {
-  const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+  const { resolveRepoRoots } = await import('./test-shared.mjs')
   const dir = tmpProject({
     '.gitignore': '.worktrees/\n',
     'AGENTS.md': [
@@ -370,7 +370,7 @@ cases.push(['13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push �
 }])
 
 cases.push(['profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非vendor深层Java子包+Windows安全+detectionEvidence)', async () => {
-  const { sniffLayeredCommands } = await import('../../kit/skills/lib/shared.mjs')
+  const { sniffLayeredCommands } = await import('./test-shared.mjs')
   const dir = tmpProject({
     'package.json': '{"name":"mono-root","version":"1.0.0","scripts":{"lint":"eslint ."}}\n',
     '.circleci/config.yml': [

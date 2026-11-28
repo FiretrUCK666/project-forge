@@ -480,13 +480,18 @@ cases.push(['Case 2 条款截断/全角/跨端回退与单源评论瘦身去噪�
     if (!syncOnline.synced || getIssueCalls !== 1
       || !remotePrBody.includes('#### 验收标准逐条核对')
       || !remotePrBody.includes('远端异步条款一')
+      || remotePrBody.includes('（待确认勾选）')
       || remotePrBody.includes('node ".agents/')
       || remotePrBody.includes('审查来源')
       || remotePrBody.includes('对比基线')
       || remotePrBody.includes('止损记录')
-      || remoteIssBody.includes('#### 验收标准逐条核对')
+      || !remoteIssBody.includes('#### 验收标准逐条核对')
+      || !remoteIssBody.includes('- **故障注入记录**：')
+      || !remoteIssBody.includes('远端异步条款一')
+      || remoteIssBody.includes('详见 PR #50')
+      || remoteIssBody.includes('（待确认勾选）')
       || !remoteIssBody.includes('PR #50')) {
-      return `远端 backend.getIssue 回退或单源瘦身断言失败：calls=${getIssueCalls}\nPR:\n${remotePrBody}\nISS:\n${remoteIssBody}`
+      return `远端 backend.getIssue 回退或 PR/Issue 全量证据对等断言失败：calls=${getIssueCalls}\nPR:\n${remotePrBody}\nISS:\n${remoteIssBody}`
     }
 
     let offlineCalls = 0

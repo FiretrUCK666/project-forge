@@ -7,7 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { getLocalIssue } from '../../kit/skills/lib/local-issues.mjs'
-import { readSignalsJsonl, readTaskLedger, resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { readSignalsJsonl, readTaskLedger, resolveRepoRoots } from './test-shared.mjs'
 import {
   readVerificationEvidence,
   scoreExecutionResult,
@@ -328,7 +328,7 @@ export function registerStageBLoopB5Cases(cases) {
 
   cases.push(['C7+C8：precheck 先于命令执行、quick --target 跳过门禁钩子、mcp-delegate/离线理由拦截、HUMAN_MERGE_AUTHORITY 退出 4 与 verify-tools 收敛', async () => {
     const { GenericRemoteBackend } = await import('../../kit/skills/lib/task-backend-local.mjs')
-    const { updateTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { updateTaskLedger } = await import('./test-shared.mjs')
     const { VALID_TOOL_KINDS } = await import('../../kit/skills/lib/feature-map.mjs')
     void VALID_TOOL_KINDS
 

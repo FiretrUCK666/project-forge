@@ -415,7 +415,7 @@ cases.push(["交接包第一眼就是现在这一步", async () => {
 // 同一个「写操作前不联网探」的洞，在认领、归档、提审、合并、清理各处反复出现。
 // 所以判据要盯住全量静态门禁、shared 导出、只读惰性非回归，以及不传 mock 的真实子进程双态。
 cases.push(["写操作必须联网探通道，不许静默降级成本地记账", async () => {
-  const sharedMod = await import("../../kit/skills/lib/shared.mjs")
+  const sharedMod = await import("./test-shared.mjs")
   if (typeof sharedMod.probeForWrite !== "function") return "shared.mjs 缺少 probeForWrite 导出"
   const { probeForWrite } = await import("../../kit/skills/lib/platform.mjs")
   if (typeof probeForWrite !== "function") return "platform.mjs probeForWrite 没导出"
@@ -509,7 +509,7 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
     writeFileSync(join(dir, "upstream.mjs"), "export const up = 1\n")
     gitCommitFast(dir, "advance main", { files: ["upstream.mjs"], name: "alice", email: "alice@example.com" })
 
-    const { resolveRepoRoots } = await import("../../kit/skills/lib/shared.mjs")
+    const { resolveRepoRoots } = await import("./test-shared.mjs")
     const { inspectWorkspace } = await import("../../kit/skills/dev-flow/scripts/flow-inspect.mjs")
     const { writeTaskLedger, readTaskLedger } = await import("../../kit/skills/lib/ledger.mjs")
     const { runCli: runGovernCli } = await import("../../kit/skills/dev-govern/scripts/govern-audit.mjs")
@@ -742,7 +742,7 @@ cases.push(["记审查结论必须交实证佐证", async () => {
     gitInit(dir)
     gitCommitFast(dir, "init")
     const { handleStart } = await import("../../kit/skills/dev-flow/scripts/flow-inspect.mjs")
-    const { resolveRepoRoots } = await import("../../kit/skills/lib/shared.mjs")
+    const { resolveRepoRoots } = await import("./test-shared.mjs")
     const roots = await resolveRepoRoots(dir)
     await handleStart({ task: "ev", case: "2", slug: "ev", "no-issue": true, reason: "回归夹具聚焦审查实证拦截" }, roots)
 

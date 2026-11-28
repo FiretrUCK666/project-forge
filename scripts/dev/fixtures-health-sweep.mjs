@@ -20,7 +20,7 @@ import {
 import { computeWorktreeEnv, execShellCommand, withFileLock, withFileLockSync } from '../../kit/skills/lib/exec.mjs'
 import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { assertWellFormedMarkdownBody, hydratePrTemplateBody } from '../../kit/skills/lib/pr-template-hydrate.mjs'
-import { resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { resolveRepoRoots } from './test-shared.mjs'
 import {
   evaluateToolStaleness, readVerifyCache, reclaimVerifySlotCache,
   syncVerifyCacheOnMerge, writeVerifyCacheEntry,

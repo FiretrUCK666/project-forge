@@ -12,7 +12,7 @@ import { parseDocFilename } from './doc-frontmatter.mjs'
 import { EXIT } from './exit-codes.mjs'
 import { stripHomedirLeaks } from './git-core.mjs'
 import { posixPath, readJsonSafe, readTextSafe, sha256Text, writeJsonAtomic } from './git.mjs'
-import { resolveGitDirFast } from './git-fast.mjs'
+import { resolveCommonGitDir } from './git-fast.mjs'
 import { listTaskLedgers } from './ledger.mjs'
 import { indexPlanDocs } from './plan-index.mjs'
 import { readSessionState } from './session-state.mjs'
@@ -28,17 +28,6 @@ const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif|svg)$/i
 const HTML_EXT_RE = /\.(?:html?|xhtml)$/i
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
 const TERMINAL_DOC_STATUSES = new Set(['implemented', 'done', 'archived', 'superseded', 'dropped'])
-
-function resolveCommonGitDir(mainRoot) {
-  const gd = resolveGitDirFast(mainRoot)
-  if (!gd || !existsSync(gd)) return null
-  const cdFile = join(gd, 'commondir')
-  if (existsSync(cdFile)) {
-    const raw = (readTextSafe(cdFile) ?? '').trim()
-    if (raw) return isAbsolute(raw) ? resolve(raw) : resolve(gd, raw)
-  }
-  return gd
-}
 
 export function resolveBriefsDir(mainRoot) {
   const root = resolve(String(mainRoot || process.cwd()))

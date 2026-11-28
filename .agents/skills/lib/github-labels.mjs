@@ -132,17 +132,6 @@ export async function createLabelViaApi({
   return { ok: false, status: Number(res?.status || res?.code || 0), name: cleanName, error: msg || 'create-label-failed' }
 }
 
-/** 便携式建标导出（支持传入已构造的 client 或底层回调）。 */
-export async function createLabel(repo, name, opts = {}) {
-  if (repo && typeof repo === 'object') {
-    return createLabel(repo.repo, repo.name, repo)
-  }
-  if (opts?.client && typeof opts.client.createLabel === 'function') {
-    return opts.client.createLabel(repo, name, opts)
-  }
-  return createLabelViaApi({ repo, name, ...opts })
-}
-
 /**
  * 经 REST `POST /repos/{owner}/{repo}/issues/{number}/labels` 贴标：
  * - 若仓库缺失标签（422/404/缺失）自动建标后重试；

@@ -40,7 +40,7 @@ import { relative, resolve } from 'node:path'
 // 那种调用下会**什么都不做并返回 0**，而「exit 0、零输出」会被调用方读成「目录已是
 // 最新」，那是本工具最不该给出的答案。
 import { flushAndExit, isMainModule, readUtf8Strict } from './lib/text.mjs'
-import { scanLines, fencedSpans, markerPositions } from './lib/markdown.mjs'
+import { scanLines, fencedSpans, markerPositions } from '../kit/skills/lib/markdown-scan.mjs'
 import { tempPathFor, clearStaleTemps, reportTemps, writeAtomic } from './lib/fs-atomic.mjs'
 
 const START = '<!-- toc:start -->'

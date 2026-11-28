@@ -454,7 +454,7 @@ cases.push(['测试分层控频与反膨胀治理：tests.* 正反双向检出�
 }])
 
 cases.push(['异构项目四处误报根除：权威架构文档识别、Dev Profile 测试入口、TDD 命令串与 .exec/TEMP 零误报', async () => {
-  const { resolveAuthoritativeTddPath } = await import('../../kit/skills/lib/shared.mjs')
+  const { resolveAuthoritativeTddPath } = await import('./test-shared.mjs')
   const { extractLineCommentInfo } = await import('../../kit/skills/lib/static-gates.mjs')
 
   // 1. 词法剥离器：Rust 'a 生命周期、C 宏常量定义、注释内跳过标记不误报
@@ -738,7 +738,7 @@ cases.push(['govern-docs.mjs：托管 .agents/skills 镜像与夹具免报 docs.
 }])
 
 cases.push(['static-gates + govern-checks + review-gates + repo-map：FIXTURE_FILE_RE 豁免夹具/注入且不放行普通长脚本', async () => {
-  const shared = await import('../../kit/skills/lib/shared.mjs')
+  const shared = await import('./test-shared.mjs')
   if (!(shared.FIXTURE_FILE_RE instanceof RegExp) || typeof shared.isTestOrFixtureFile !== 'function') {
     return 'shared.mjs 未导出 FIXTURE_FILE_RE 或 isTestOrFixtureFile'
   }

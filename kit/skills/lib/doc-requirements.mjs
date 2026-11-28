@@ -2,8 +2,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { CUSTOM_DECL_REL, parseDocFrontmatter } from './doc-frontmatter.mjs'
-import { collectOwnerHistory, normOwnerId } from './doc-approval.mjs'
+import { collectOwnerHistory } from './doc-approval.mjs'
 import { isStubValue } from './doc-substantive.mjs'
+import { checkAuthorIsNotImplementer as checkAuthorSeparation } from './harness-context.mjs'
 import { RISK_NON_DECISION_HEADING_RE } from './pending-decisions.mjs'
 import { readTextSafe } from './git.mjs'
 
@@ -625,24 +626,25 @@ export function resolveSectionPresence(text, docRequirements) {
  * **不判不等于放行**：缺 owner 的文档在 `approve` 时另有门禁，缺账本的任务
  * `flow next` 会退回「先规划或 start」。
  */
-export function checkAuthorIsNotImplementer(repoRoot, specRel, implementerId) {
+export function checkDocAuthorIsNotImplementer(repoRoot, specRel, implementerId) {
   if (!specRel || !implementerId) return []
   const abs = join(repoRoot, specRel)
   if (!existsSync(abs)) return []
   const fm = parseDocFrontmatter(readTextSafe(abs) ?? '')
-  // 按「历史负责人 ∪ 当前负责人」比对：换个身份写验收标准，仍是同一个人写的。
+  // 按「历史负责人 ∪ 当前负责人」比对，单源委托 harness-context.mjs 的角色分离原语。
   const owners = collectOwnerHistory(fm.data)
   if (owners.length === 0) return []
-  const norm = normOwnerId
-  const matched = owners.find((o) => norm(o) === norm(implementerId))
-  if (!matched) return []
+  const sep = checkAuthorSeparation(owners, implementerId, { file: specRel })
+  if (sep.ok) return []
   return [{
     code: 'SELF_AUTHORED_ACCEPTANCE',
     file: specRel,
-    owner: String(matched),
+    owner: String(sep.author),
     implementerId: String(implementerId),
-    message: `${specRel} 的作者（${matched}）就是这个任务的实施者（${implementerId}）`
+    message: `${specRel} 的作者（${sep.author}）就是这个任务的实施者（${implementerId}）`
       + '——干活的人给自己定验收标准，一定会写一份自己能轻松通过的，'
       + '「动手前冻结标准」这件事就失去了意义。请换一个不参与实施的人来写或复核这份规划。',
   }]
 }
+
+export { checkDocAuthorIsNotImplementer as checkAuthorIsNotImplementer }

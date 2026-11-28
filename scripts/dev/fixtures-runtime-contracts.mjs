@@ -333,7 +333,7 @@ export function registerRuntimeContractsCases(cases) {
       }
 
       // 2. claim 冲突时 BLOCKED_ISSUE_ALREADY_CLAIMED 的 takeover nextStep 包含 --agent
-      const { createGitHubClient } = await import('../../kit/skills/lib/shared.mjs')
+      const { createGitHubClient } = await import('./test-shared.mjs')
       const ledger = readTaskLedger(dir, 't-claim-next')
       ledger.role = 'maintainer'
       ledger.providerId = 'github'

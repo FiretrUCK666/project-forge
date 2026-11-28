@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { scanLines } from './markdown.mjs'
+import { scanLines } from '../../kit/skills/lib/markdown-scan.mjs'
 import { PF_MANIFEST_REL, REGION_MIGRATIONS, markerRegions, parseMarkers } from './protocol.mjs'
 import { readJsonSafe } from './text.mjs'
 import { DEV_PROFILE_KEYS, isAnglePlaceholder } from '../../kit/skills/lib/profile.mjs'

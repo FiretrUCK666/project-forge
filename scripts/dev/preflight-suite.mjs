@@ -224,13 +224,6 @@ function checkDevProfileParity({ ROOT, rel, readText, walk, fail, note }) {
     }
   }
 
-  const sharedText = readText(join(ROOT, 'kit', 'skills', 'lib', 'shared.mjs'))
-  for (const sym of ['DEV_PROFILE_KEYS', 'parseAgentsProfile', 'parseDevProfile', 'resolveAuthoritativeTddPath']) {
-    if (!new RegExp(`\\b${sym}\\b`).test(sharedText)) {
-      fail(`Dev Profile 单源核对：kit/skills/lib/shared.mjs 未重导出 ${sym}`)
-    }
-  }
-
   const allProductAndKitScripts = [
     ...walk(join(ROOT, 'kit', 'skills'), (f) => f.endsWith('.mjs')),
     ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs') && !rel(f).startsWith('scripts/dev/')),
@@ -251,7 +244,7 @@ function checkDevProfileParity({ ROOT, rel, readText, walk, fail, note }) {
     fail(`Dev Profile 键集核对：scripts/lib/agents-defaults.mjs buildDevProfileVars 缺少 ${missingDefaults.join(', ')}`)
   }
 
-  note(`Dev Profile：templates + ${profileRel} + shared.mjs + agents-defaults.mjs ${expected.length} 键单源对齐，全仓零重复解析器副本`)
+  note(`Dev Profile：templates + ${profileRel} + agents-defaults.mjs ${expected.length} 键单源对齐，全仓零重复解析器副本`)
 }
 
 function checkOrphanScripts({ ROOT, rel, readText, walk, fail, note }) {
@@ -364,17 +357,19 @@ async function checkPlatformSemanticParity({ ROOT, readText, fail, note }) {
     fail('平台语义对齐：双端 NONE_CAPABILITIES 必须对齐 10 键能力矩阵')
   }
 
-  const probeAdapterSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github-probe.mjs'))
-  const ghAdapterSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github.mjs'))
+  const engPlatformSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'index.mjs'))
   const kitProbeSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'platform-probe.mjs'))
   const kitPlatSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'platform.mjs'))
-  if (!probeAdapterSrc.includes('kit/skills/lib/platform-probe.mjs')) {
-    fail('平台语义对齐：scripts/lib/platform/github-probe.mjs 必须单源复用 kit/skills/lib/platform-probe.mjs')
+  if (!engPlatformSrc.includes('kit/skills/lib/platform-probe.mjs')) {
+    fail('平台语义对齐：scripts/lib/platform/index.mjs 必须单源复用 kit/skills/lib/platform-probe.mjs')
   }
-  if (!ghAdapterSrc.includes('kit/skills/lib/platform.mjs')) {
-    fail('平台语义对齐：scripts/lib/platform/github.mjs 必须单源复用 kit/skills/lib/platform.mjs')
+  if (!engPlatformSrc.includes('kit/skills/lib/platform.mjs')) {
+    fail('平台语义对齐：scripts/lib/platform/index.mjs 必须单源复用 kit/skills/lib/platform.mjs')
   }
-  if (/accept-new/i.test(probeAdapterSrc) || /accept-new/i.test(kitProbeSrc) || /accept-new/i.test(kitPlatSrc)) {
+  if (!engPlatformSrc.includes('kit/skills/lib/platform-registry.mjs')) {
+    fail('平台语义对齐：scripts/lib/platform/index.mjs 必须单源复用 kit/skills/lib/platform-registry.mjs')
+  }
+  if (/accept-new/i.test(engPlatformSrc) || /accept-new/i.test(kitProbeSrc) || /accept-new/i.test(kitPlatSrc)) {
     fail('平台语义对齐：禁止使用 StrictHostKeyChecking=accept-new 自动写盘')
   }
   if (!kitProbeSrc.includes('StrictHostKeyChecking=yes')) {
@@ -386,12 +381,8 @@ async function checkPlatformSemanticParity({ ROOT, readText, fail, note }) {
 
   const kitHttpSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'platform-http.mjs'))
   const kitClientSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'github-client.mjs'))
-  const engClientSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github-client.mjs'))
   if (!kitHttpSrc.includes('AbortSignal.timeout') || !kitClientSrc.includes('./platform-http.mjs') || !kitProbeSrc.includes('./platform-http.mjs')) {
     fail('平台语义对齐：双端 HTTP(S) 请求必须经 platform-http.mjs 显式设置 AbortSignal.timeout')
-  }
-  if (!engClientSrc.includes('kit/skills/lib/platform-probe.mjs')) {
-    fail('平台语义对齐：scripts/lib/platform/github-client.mjs 必须单源复用 kit/skills/lib/platform-probe.mjs')
   }
 
   const sshMap = new Map([['gh-work', 'github.com']])

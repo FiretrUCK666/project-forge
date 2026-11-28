@@ -13,7 +13,7 @@ import { buildMultiTaskWavePlan, evaluateSliceGraph, scanUnstartedReadySlices } 
 import { checkDocRegression, extractDocSnapshot } from '../../kit/skills/lib/doc-substantive.mjs'
 import { autoEscalateBlockingFindings } from '../../kit/skills/lib/escalation.mjs'
 import { buildHandoff } from '../../kit/skills/lib/handoff-package.mjs'
-import { readTaskLedger, resolveRepoRoots, updateTaskLedger } from '../../kit/skills/lib/shared.mjs'
+import { readTaskLedger, resolveRepoRoots, updateTaskLedger } from './test-shared.mjs'
 import { formatPlanExitGate, resolveApprovalBasis } from '../../kit/skills/lib/plan-exit-gate.mjs'
 import { syncPlanPhaseToBackend } from '../../kit/skills/lib/plan-sync.mjs'
 import { appendGovernSignal, readSignalsJsonl } from '../../kit/skills/lib/signals.mjs'

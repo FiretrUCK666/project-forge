@@ -16,7 +16,7 @@ export function registerFlowStateCases(cases) {
     const {
       determineWorkflowPolicy, evaluateNextState, readTaskLedger, resolveRepoRoots,
       runLowRiskDocStaticCheck,
-    } = await import('../../kit/skills/lib/shared.mjs')
+    } = await import('./test-shared.mjs')
     const { handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
 
     // 1. determineWorkflowPolicy 三档正反判定 + ownArchived 豁免
@@ -67,7 +67,7 @@ export function registerFlowStateCases(cases) {
   }])
 
   cases.push(['quick-only 仓库 --target 局部旁路拦截与全量放行', async () => {
-    const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -100,7 +100,7 @@ export function registerFlowStateCases(cases) {
   cases.push(['quick --target 旁路拦截、flow next ownerRole 与 submit 权责锁', async () => {
     const {
       evaluateNextState, readTaskLedger, resolveRepoRoots,
-    } = await import('../../kit/skills/lib/shared.mjs')
+    } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -173,7 +173,7 @@ export function registerFlowStateCases(cases) {
       try {
         gitSync(dir, ['config', `url.${bareUrl}.pushInsteadOf`, 'https://github.com/acme/c1.git'])
         const l1 = readTaskLedger(dir, 'c1-code')
-        const { writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+        const { writeTaskLedger } = await import('./test-shared.mjs')
         writeTaskLedger(dir, { ...l1, implementerId: 'alice' })
 
         const badCoord = await handleSubmit({ task: 'c1-code', agent: 'coordinator-hydrogen', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'alice' } }, client: mockClient } }, roots)
@@ -270,7 +270,7 @@ export function registerFlowStateCases(cases) {
   }])
 
   cases.push(['1:N 总控 PRD 保护、子 SPEC 归档互链与 OPEN PR 防重', async () => {
-    const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('./test-shared.mjs')
     const { handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
 
     const dir = tmpProject({
@@ -347,7 +347,7 @@ export function registerFlowStateCases(cases) {
   }])
 
   cases.push(['--detach 试合失败回滚与推进、Squash 清理与 1:1 归档正反', async () => {
-    const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim, handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -449,7 +449,7 @@ export function registerFlowStateCases(cases) {
         return `parseDiffHunkRanges count=0 删除锚定区间异常：${JSON.stringify(dRng)}`
       }
 
-      const { readTaskLedger, resolveRepoRoots: resRoots } = await import('../../kit/skills/lib/shared.mjs')
+      const { readTaskLedger, resolveRepoRoots: resRoots } = await import('./test-shared.mjs')
       const { handleStart: hStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
       const { handleVerify: hVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
       const { handleClaim: hClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')

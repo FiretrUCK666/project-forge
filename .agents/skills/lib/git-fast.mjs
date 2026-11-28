@@ -10,7 +10,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { prepareExecInvocation, resolveExecutable } from './exec.mjs'
-import { LIKELY_DEFAULT_BRANCHES, readTextSafe } from './git-core.mjs'
+import { LIKELY_DEFAULT_BRANCHES, isMacMetadataName, readTextSafe } from './git-core.mjs'
 import {
   collectAncestorsDagFast,
   computePatchRawDigest,
@@ -28,6 +28,7 @@ import {
   isPathInGitIndexFast,
   parsePorcelainV2BranchZ,
   readGitIndexPathsFast,
+  resolveCommonGitDir,
   resolveGitDirFast,
 } from './git-index-fast.mjs'
 
@@ -46,6 +47,7 @@ export {
   readGitIndexPathsFast,
   readGitObjectFast,
   readReflogFast,
+  resolveCommonGitDir,
   resolveGitDirFast,
 }
 
@@ -393,49 +395,70 @@ export function parseRawAndUnifiedDiff(bufOrText) {
   return { entries, diffText }
 }
 
-/** 零子进程读取 loose/packed refs 推导默认分支（reftable 仓或 strict 模式下无可用引用时返回 null）。 */
-export function readRefsFast(gitCommonDir, curBranch, initDefaultBranch, { strict = true } = {}) {
+/** 零子进程扫描 loose 与 packed-refs 中的 tags、localBranches、remoteOriginBranches 与 origin/HEAD。 */
+export function listRefsFast(gitCommonDir) {
   if (!gitCommonDir || existsSync(join(gitCommonDir, 'reftable'))) return null
-  const origHeadPath = join(gitCommonDir, 'refs', 'remotes', 'origin', 'HEAD')
-  const origHeadText = readTextSafe(origHeadPath)
+  let originHeadBranch
+  const origHeadText = readTextSafe(join(gitCommonDir, 'refs', 'remotes', 'origin', 'HEAD'))
   if (origHeadText) {
     const m = /^ref:\s*refs\/remotes\/origin\/(.+)$/im.exec(origHeadText.trim())
-    if (m) return m[1].trim()
+    if (m) originHeadBranch = m[1].trim()
   }
-  const localHeads = new Set()
-  const originHeads = new Set()
-  const scanLoose = (dirAbs, bucket) => {
-    if (!existsSync(dirAbs)) return
+  const packed = readTextSafe(join(gitCommonDir, 'packed-refs')) ?? ''
+  if (!originHeadBranch && packed) {
+    const sym = /^ref:\s*refs\/remotes\/origin\/([^\s]+)\s+refs\/remotes\/origin\/HEAD$/m.exec(packed)
+    if (sym) originHeadBranch = sym[1].trim()
+  }
+  const scanLoose = (dirAbs, excludeName = null) => {
+    const set = new Set()
+    if (!existsSync(dirAbs)) return set
     const stack = [{ abs: dirAbs, rel: '' }]
     while (stack.length > 0) {
       const cur = stack.pop()
       let entries = []
       try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
       for (const e of entries) {
+        if (isMacMetadataName(e.name)) continue
         const name = cur.rel ? `${cur.rel}/${e.name}` : e.name
         if (e.isDirectory()) stack.push({ abs: join(cur.abs, e.name), rel: name })
-        else if (e.isFile() && name !== 'HEAD') bucket.add(name)
+        else if (e.isFile() && name !== excludeName) set.add(name)
       }
     }
+    return set
   }
-  scanLoose(join(gitCommonDir, 'refs', 'heads'), localHeads)
-  scanLoose(join(gitCommonDir, 'refs', 'remotes', 'origin'), originHeads)
-  const packed = readTextSafe(join(gitCommonDir, 'packed-refs'))
+  const tagSet = scanLoose(join(gitCommonDir, 'refs', 'tags'))
+  const localHeads = scanLoose(join(gitCommonDir, 'refs', 'heads'))
+  const originHeads = scanLoose(join(gitCommonDir, 'refs', 'remotes', 'origin'), 'HEAD')
   if (packed) {
     for (const line of packed.split('\n')) {
       if (!line || line.startsWith('#') || line.startsWith('^')) continue
       const sp = line.indexOf(' ')
       if (sp <= 0) continue
       const refName = line.slice(sp + 1).trim()
-      if (refName.startsWith('refs/heads/')) localHeads.add(refName.slice(11))
-      else if (refName.startsWith('refs/remotes/origin/')) {
-        const n = refName.slice(20)
-        if (n !== 'HEAD') originHeads.add(n)
+      if (refName.startsWith('refs/tags/')) tagSet.add(refName.slice(10))
+      else if (refName.startsWith('refs/heads/')) localHeads.add(refName.slice(11))
+      else if (refName.startsWith('refs/remotes/origin/') && refName !== 'refs/remotes/origin/HEAD') {
+        originHeads.add(refName.slice(20))
       }
     }
   }
+  return {
+    originHeadBranch,
+    tags: [...tagSet].sort(),
+    localBranches: [...localHeads].sort(),
+    remoteOriginBranches: [...originHeads].sort(),
+    localHeads,
+    originHeads,
+  }
+}
+
+/** 零子进程读取 loose/packed refs 推导默认分支（reftable 仓或 strict 模式下无可用引用时返回 null）。 */
+export function readRefsFast(gitCommonDir, curBranch, initDefaultBranch, { strict = true } = {}) {
+  const refs = listRefsFast(gitCommonDir)
+  if (!refs) return null
+  if (refs.originHeadBranch) return refs.originHeadBranch
   for (const cand of LIKELY_DEFAULT_BRANCHES) {
-    if (localHeads.has(cand) || originHeads.has(cand)) return cand
+    if (refs.localHeads.has(cand) || refs.originHeads.has(cand)) return cand
   }
   if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
   if (curBranch && curBranch !== 'HEAD' && curBranch !== '(detached)') return curBranch

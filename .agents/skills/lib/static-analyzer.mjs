@@ -8,31 +8,20 @@
 
 import { execFileSync } from 'node:child_process'
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 
 import { findSccs } from './doc-graph.mjs'
 import {
   BROAD_CODE_EXT_RE, COMMON_SKIP_DIRS, gitLsFilesTextAndCode, gitRun, gitRunBuffer,
   isMacOsJunkPath, posixPath, readJsonSafe, readTextSafe, writeJsonAtomic,
 } from './git.mjs'
-import { readGitIndexPathsFast, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
+import { readGitIndexPathsFast, readHeadFast, resolveCommonGitDir, resolveGitDirFast } from './git-fast.mjs'
 import { isCleanWorktreeFast } from './git-status-fast.mjs'
 import { buildDirFileIndex, extractImportsForArch, resolveGoModules, resolveLocalImportTarget } from './import-graph.mjs'
 import { extractSymbols, isSymbolCandidatePath } from './symbol-index.mjs'
 
 export const ANALYSIS_CACHE_SCHEMA_VERSION = 1
 export const MAX_ANALYZE_FILE_BYTES = 512 * 1024
-
-function resolveCommonGitDir(repoRoot) {
-  const gd = resolveGitDirFast(repoRoot)
-  if (!gd || !existsSync(gd)) return null
-  const cdFile = join(gd, 'commondir')
-  if (existsSync(cdFile)) {
-    const raw = (readTextSafe(cdFile) ?? '').trim()
-    if (raw) return isAbsolute(raw) ? resolve(raw) : resolve(gd, raw)
-  }
-  return gd
-}
 
 /**
  * 解析仓外静态分析增量缓存路径：

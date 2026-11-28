@@ -21,7 +21,7 @@ import {
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 
 export const VALID_TIERS = new Set(['integration', 'e2e', 'perf', 'regression'])
-export const SKIP_DIRS = new Set([...COMMON_SKIP_DIRS, '.git', '.worktrees', '.agents', 'docs'])
+export const ITERATE_SKIP_DIRS = new Set([...COMMON_SKIP_DIRS, '.git', '.worktrees', '.agents', 'docs'])
 
 export function walkSourceFiles(repoRoot, maxFiles = 1500) {
   const out = []
@@ -35,7 +35,7 @@ export function walkSourceFiles(repoRoot, maxFiles = 1500) {
       if (isMacOsJunkPath(entry.name)) continue
       const rel = relDir ? `${relDir}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
+        if (ITERATE_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
         stack.push(rel)
       } else if (entry.isFile()) {
         if (isToolOwnedPath(rel) || !CODE_EXT_RE.test(entry.name)) continue

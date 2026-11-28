@@ -150,7 +150,7 @@ cases.push(['本仓库：正文里没有节号指针', async () => {
 // ── v5 升级行为断言（C1..C11 正反双向） ───────────────────────────────
 
 cases.push(['五态身份：clone-readonly 防误判、自有缺 repository 判 maintainer、fork 与 undetermined 正反双向', async () => {
-  const { classifyWorkspaceIdentity } = await import('../lib/platform/github.mjs')
+  const { classifyWorkspaceIdentity } = await import('../lib/platform/index.mjs')
 
   // 1. local-only：.git/pf-local-mode 强制本地模式（哪怕有远端）
   const localMode = classifyWorkspaceIdentity({
@@ -229,7 +229,7 @@ cases.push(['五态身份：clone-readonly 防误判、自有缺 repository 判 
 }])
 
 cases.push(['双轨凭据：SSH 可用不误报缺凭据、protocolMismatch 给出切换命令、Token 绝不泄露到序列化输出', async () => {
-  const { probeGitHubEnv } = await import('../lib/platform/github.mjs')
+  const { probeGitHubEnv } = await import('../lib/platform/index.mjs')
 
   // 正面：SSH remote + ssh -T 成功 + HTTPS credential fill 返回空 -> ssh available，protocolMismatch=false，不误报
   const sshRunner = async (cmd, args) => {

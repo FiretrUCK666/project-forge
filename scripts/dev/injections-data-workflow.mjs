@@ -281,8 +281,8 @@ export const INJECTIONS_WORKFLOW = [
     id: 'I85',
     what: '干活的人给自己定验收标准不再被拦（作者与实施者同一人也放行）',
     file: 'kit/skills/lib/doc-requirements.mjs',
-    from: '  const matched = owners.find((o) => norm(o) === norm(implementerId))',
-    to: '  const matched = owners.find(() => false)',
+    from: '  const sep = checkAuthorSeparation(owners, implementerId, { file: specRel })',
+    to: '  const sep = { ok: true }',
     expect: 'SPEC 作者不得就是实施者',
   },
   {

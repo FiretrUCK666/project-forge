@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 import { flushAndExit, isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.mjs'
 import { isInsideDir } from '../kit/skills/lib/git-core.mjs'
-import { scanLines } from './lib/markdown.mjs'
+import { scanLines } from '../kit/skills/lib/markdown-scan.mjs'
 import { STALE_TEMP_RE, processAlive } from './lib/fs-atomic.mjs'
 import { VERIFY_EXIT } from '../kit/skills/lib/exit-codes.mjs'
 import {

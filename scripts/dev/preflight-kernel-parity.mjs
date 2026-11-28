@@ -59,6 +59,9 @@ const SINGLE_SOURCE_DEFS = Object.freeze([
   { name: 'DECIDED_RE', re: /\bconst\s+DECIDED_RE\s*=/, canonical: 'kit/skills/lib/pending-decisions.mjs' },
   { name: 'AGENTS_MAX_BYTES', re: /\bconst\s+AGENTS_MAX_BYTES\s*=/, canonical: 'kit/skills/lib/tool-owned.mjs' },
   { name: 'registerHostingProvider', re: /\bfunction\s+registerHostingProvider\s*\(/, canonical: 'kit/skills/lib/platform-registry.mjs' },
+  { name: 'resolveCommonGitDir', re: /\bfunction\s+resolveCommonGitDir\s*\(/, canonical: 'kit/skills/lib/git-index-fast.mjs' },
+  { name: 'displayWidth', re: /\bfunction\s+displayWidth\s*\(/, canonical: 'kit/skills/lib/markdown-scan.mjs' },
+  { name: 'compileScopePattern', re: /\bfunction\s+compileScopePattern\s*\(/, canonical: 'kit/skills/lib/git-core.mjs' },
 ])
 
 const RETIRED_DEAD_EXPORTS = Object.freeze([
@@ -72,36 +75,39 @@ const STANDARD_ENTRYPOINT_NAMES = new Set(['runCli', 'main'])
 const STANDARD_HANDLER_RE = /^handle[A-Z]/
 
 /**
- * 存量双栈/已知成对导出白名单（严锁精确文件对，仅允许收口清零、绝不允许新增第三个副本或未登记重名）。
+ * 跨模块重复导出白名单（严禁新增任何重复导出定义；已全部收敛清零）。
  */
-const DUPLICATE_EXPORT_ALLOWLIST = Object.freeze({
-  // 双栈平台层（scripts/lib/platform/ 与 kit/skills/lib/，收口清零目标）
-  GENERIC_GIT_PROVIDER: ['kit/skills/lib/platform-registry.mjs', 'scripts/lib/platform/registry.mjs'],
-  GITCODE_PROVIDER: ['kit/skills/lib/platform-registry.mjs', 'scripts/lib/platform/registry.mjs'],
-  GITEA_PROVIDER: ['kit/skills/lib/platform-registry.mjs', 'scripts/lib/platform/registry.mjs'],
-  GITEE_PROVIDER: ['kit/skills/lib/platform-registry.mjs', 'scripts/lib/platform/registry.mjs'],
-  GITHUB_PROVIDER: ['kit/skills/lib/platform-registry.mjs', 'scripts/lib/platform/github.mjs'],
-  GITLAB_PROVIDER: ['kit/skills/lib/platform-registry.mjs', 'scripts/lib/platform/registry.mjs'],
-  getHostingProvider: ['kit/skills/lib/platform-registry.mjs', 'scripts/lib/platform/registry.mjs'],
-  classifyWorkspaceIdentity: ['kit/skills/lib/platform.mjs', 'scripts/lib/platform/github.mjs'],
-  createGitHubClient: ['kit/skills/lib/github-client.mjs', 'scripts/lib/platform/github-client.mjs'],
-  probeGitHubEnv: ['kit/skills/lib/platform.mjs', 'scripts/lib/platform/github-probe.mjs'],
-  resolveWorkspaceIdentity: ['kit/skills/lib/platform.mjs', 'scripts/lib/platform/github.mjs'],
-  SKIP_DIRS: ['kit/skills/dev-iterate/scripts/iterate-plan.mjs', 'scripts/lib/survey-ecosystem.mjs'],
-  // 存量 kit 内部成对导出（严控不新增）
-  VERIFIED_API_TIERS: ['kit/skills/lib/github-client.mjs', 'kit/skills/lib/github-parse.mjs'],
-  checkAuthorIsNotImplementer: ['kit/skills/lib/doc-requirements.mjs', 'kit/skills/lib/harness-context.mjs'],
-  createLabel: ['kit/skills/lib/github-client.mjs', 'kit/skills/lib/github-labels.mjs'],
-  displayWidth: ['kit/skills/lib/doc-templates.mjs', 'kit/skills/lib/visual-router.mjs'],
-  hasBehavioralAssertion: ['kit/skills/lib/static-gates-assertions.mjs', 'kit/skills/lib/static-gates.mjs'],
-  isVerifiedTier: ['kit/skills/lib/github-client.mjs', 'kit/skills/lib/github-parse.mjs'],
-  scopesOverlap: ['kit/skills/lib/doc-slice-graph.mjs', 'kit/skills/lib/sandbox-scope.mjs'],
-  syncDetachedWorktree: ['kit/skills/lib/git-worktree-env.mjs', 'kit/skills/lib/git.mjs'],
-})
+const DUPLICATE_EXPORT_ALLOWLIST = Object.freeze({})
 
 const STATIC_REL_IMPORT_RE = /(?:^|[\n;])\s*(?:import|export)\s+(?:[^'"()]*?\s+from\s+)?['"](\.[^'"]+)['"]/g
 const DYNAMIC_REL_IMPORT_RE = /\bimport\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g
 const EXPORT_DEF_RE = /^\s*export\s+(?:async\s+)?(?:function|const|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm
+
+/** 扫描 `kit/skills/lib/` 与 `scripts/lib/` 零生产调用方死库文件（防止零引用兼容聚合层再次随包发布）。 */
+export function scanDeadProdLibModules(entries) {
+  const fileSet = new Set(entries.map((e) => e.rel))
+  const inDegree = new Map(entries.map((e) => [e.rel, 0]))
+  for (const { rel, codeText } of entries) {
+    const baseDir = dirname(rel)
+    const seen = new Set()
+    for (const re of [STATIC_REL_IMPORT_RE, DYNAMIC_REL_IMPORT_RE]) {
+      re.lastIndex = 0
+      let m
+      while ((m = re.exec(codeText)) !== null) {
+        const spec = m[1].trim()
+        if (!spec.startsWith('.')) continue
+        const target = relative('.', resolve('.', baseDir, spec)).replace(/\\/g, '/')
+        if (target !== rel && fileSet.has(target) && !seen.has(target)) {
+          seen.add(target)
+          inDegree.set(target, (inDegree.get(target) ?? 0) + 1)
+        }
+      }
+    }
+  }
+  return [...fileSet]
+    .filter((rel) => (rel.startsWith('kit/skills/lib/') || rel.startsWith('scripts/lib/')) && (inDegree.get(rel) ?? 0) === 0)
+    .sort()
+}
 
 /** 扫描产品层全部静态与动态相对导入，基于 Tarjan SCC 阻断任何循环导入。 */
 export function scanCircularImports(entries) {
@@ -198,6 +204,11 @@ export function runKernelParityChecks({ ROOT = DEFAULT_ROOT, rel, readText, fail
   const dupViolations = scanDuplicateExportDefs(parsedEntries)
   for (const v of dupViolations) {
     failFn(`内核对等：检测到未登记的跨模块重复导出定义 ${v.name}：${v.files.join(', ')}`)
+  }
+
+  const deadLibs = scanDeadProdLibModules(parsedEntries)
+  for (const deadLib of deadLibs) {
+    failFn(`内核对等：检测到零生产调用方库模块 ${deadLib}（仅限测试用的聚合出口须迁入 scripts/dev/，禁止随包分发）`)
   }
 
   const sample800 = `${Array.from({ length: 800 }, (_, i) => `const l${i} = ${i}`).join('\n')}\n`

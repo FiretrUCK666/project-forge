@@ -172,7 +172,7 @@ export function registerRepoAlignmentCases(cases) {
   cases.push(['C2：registry.mjs 无远端返回 none/全 false 能力表且 ledger/task-backend/flow 无隐性 github 默认（正反双向）', async () => {
     const {
       classifyTopologyIdentity, probeTopologyEnv, resolveTopologyIdentity,
-    } = await import('../lib/platform/registry.mjs')
+    } = await import('../lib/platform/index.mjs')
     const { createDefaultLedger } = await import('../../kit/skills/lib/ledger.mjs')
     const { createTaskBackend } = await import('../../kit/skills/lib/task-backend.mjs')
 
@@ -205,7 +205,7 @@ export function registerRepoAlignmentCases(cases) {
 
   cases.push(['C3：platform-registry.mjs 双端 10 键能力、5 方言、trim/toLowerCase、file:// 与 registerHostingProvider 对等（正反双向）', async () => {
     const kitPlatform = await import('../../kit/skills/lib/platform.mjs')
-    const engineRegistry = await import('../lib/platform/registry.mjs')
+    const engineRegistry = await import('../lib/platform/index.mjs')
 
     const kitGh = kitPlatform.getHostingProvider(' GitHub ')
     const engGh = engineRegistry.getHostingProvider(' GitHub ')

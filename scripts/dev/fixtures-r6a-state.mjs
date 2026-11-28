@@ -24,7 +24,7 @@ import { handleSubmit, handleVerify } from '../../kit/skills/dev-flow/scripts/fl
 import { handleClaim, handleMerge, handleRelease } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
 import { handleNext } from '../../kit/skills/dev-flow/scripts/flow-next.mjs'
 import { runTrialMerge } from '../../kit/skills/dev-flow/scripts/flow-trial-merge.mjs'
-import { resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { resolveRepoRoots } from './test-shared.mjs'
 import {
   EXIT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject,
 } from './fixtures-helpers.mjs'

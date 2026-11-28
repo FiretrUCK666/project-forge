@@ -35,7 +35,7 @@ import {
   STOP_REASONS, buildCyclePlan, formatCycleText, loadCycleState,
   mergeCycleGates, mergeCycleHistory, saveCycleState,
 } from './iterate-cycle.mjs'
-import { SKIP_DIRS, buildIterationPlan, walkSourceFiles } from './iterate-plan.mjs'
+import { ITERATE_SKIP_DIRS, buildIterationPlan, walkSourceFiles } from './iterate-plan.mjs'
 
 export { buildIterationPlan, validateGeneratedTestQuality }
 
@@ -156,7 +156,7 @@ function walkTestDirRecursive(repoRoot, startRel, maxFiles = 500) {
       if (isMacOsJunkPath(ent.name)) continue
       const rel = `${relDir}/${ent.name}`
       if (ent.isDirectory()) {
-        if (!SKIP_DIRS.has(ent.name) && !ent.name.startsWith('.')) stack.push(rel)
+        if (!ITERATE_SKIP_DIRS.has(ent.name) && !ent.name.startsWith('.')) stack.push(rel)
       } else if (ent.isFile() && TEST_FILE_RE.test(rel)) {
         out.push(posixPath(rel))
       }

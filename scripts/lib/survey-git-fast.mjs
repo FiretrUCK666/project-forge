@@ -1,14 +1,21 @@
 /**
- * survey-git-fast.mjs —— `.git` 配置文件、index 二进制条目与松散引用快读辅助。
+ * survey-git-fast.mjs —— 引擎侧 `.git` 快读适配层（单源复用 `kit/skills/lib/git-fast.mjs` 与 `git-index-fast.mjs`）。
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { detectCommitStyle } from '../../kit/skills/lib/git-core.mjs'
-import { readSystemGitConfigMapAsync } from '../../kit/skills/lib/git-fast.mjs'
-import { isMacMetadataName, readTextSafe } from './text.mjs'
+import {
+  listRefsFast,
+  readGitConfigFast,
+  readGitIndexPathsFast,
+  readSystemGitConfigMapAsync,
+  resolveCommonGitDir,
+  resolveGitDirFast,
+} from '../../kit/skills/lib/git-fast.mjs'
+import { readTextSafe } from './text.mjs'
 
 export { detectCommitStyle }
 
@@ -46,170 +53,55 @@ export function parsePorcelainV2(text) {
 export function inspectDotGitFast(root) {
   if (process.env.GIT_DIR || process.env.GIT_WORK_TREE) return null
   let wtRoot = resolve(root)
-  let dotGit = join(wtRoot, '.git')
   let isRepoRoot = true
-  if (!existsSync(dotGit)) {
+  if (!existsSync(join(wtRoot, '.git'))) {
     isRepoRoot = false
     let cur = dirname(wtRoot)
     while (cur !== wtRoot) {
       if (existsSync(join(cur, '.git'))) {
         wtRoot = cur
-        dotGit = join(cur, '.git')
         break
       }
       wtRoot = cur
       cur = dirname(cur)
     }
-    if (!existsSync(dotGit)) return null
+    if (!existsSync(join(wtRoot, '.git'))) return null
   }
   try {
-    const st = statSync(dotGit)
-    let workGitDir = dotGit
-    let commonDir = dotGit
-    if (st.isFile()) {
-      const m = /^gitdir:\s*(.+)$/im.exec(readTextSafe(dotGit) ?? '')
-      if (!m) return null
-      workGitDir = resolve(wtRoot, m[1].trim())
-      const commondirTxt = readTextSafe(join(workGitDir, 'commondir'))
-      commonDir = commondirTxt ? resolve(workGitDir, commondirTxt.trim()) : workGitDir
-    } else if (!st.isDirectory()) {
-      return null
-    }
-    if (!existsSync(join(workGitDir, 'HEAD'))) return null
+    const workGitDir = resolveGitDirFast(wtRoot)
+    if (!workGitDir || !existsSync(join(workGitDir, 'HEAD'))) return null
+    const commonDir = resolveCommonGitDir(workGitDir, { treatAsGitDir: true }) ?? workGitDir
     const cfgText = readTextSafe(join(commonDir, 'config')) ?? ''
     if (/^\s*bare\s*=\s*true\b/im.test(cfgText)) return null
     const isSha256 = /^\s*objectformat\s*=\s*sha256\b/im.test(cfgText)
     const isShallow = existsSync(join(commonDir, 'shallow'))
-    const hasRewrite = /^\s*\[url\b/im.test(cfgText) || /^\s*\[include(?:if)?\b/im.test(cfgText)
-    let remoteText = null
-    if (!hasRewrite) {
-      const remotes = new Map()
-      let curRemote = null
-      for (const rawLine of cfgText.split('\n')) {
-        const line = rawLine.replace(/(?:^|\s)[;#].*$/, '').trim()
-        const sec = /^\[remote\s+"([^"]+)"\]$/i.exec(line)
-        if (sec) {
-          curRemote = sec[1]
-          if (!remotes.has(curRemote)) remotes.set(curRemote, { u: [], p: [] })
-          continue
-        }
-        if (line.startsWith('[')) { curRemote = null; continue }
-        if (!curRemote) continue
-        const eq = line.indexOf('=')
-        if (eq <= 0) continue
-        const k = line.slice(0, eq).trim().toLowerCase()
-        const v = line.slice(eq + 1).trim()
-        if (k === 'url' && v) remotes.get(curRemote).u.push(v)
-        else if (k === 'pushurl' && v) remotes.get(curRemote).p.push(v)
-      }
-      const lines = []
-      for (const [name, entry] of remotes.entries()) {
-        const f = entry.u[0]
-        const p = entry.p[0] ?? f
-        if (f) lines.push(`${name}\t${f} (fetch)`)
-        if (p) lines.push(`${name}\t${p} (push)`)
-      }
-      remoteText = lines.join('\n')
-    }
-
-    let originHeadBranch
-    const origHead = readTextSafe(join(commonDir, 'refs', 'remotes', 'origin', 'HEAD'))
-    if (origHead) {
-      const m = /^ref:\s*refs\/remotes\/origin\/(.+)$/im.exec(origHead.trim())
-      if (m) originHeadBranch = m[1].trim()
-    }
-    const packed = readTextSafe(join(commonDir, 'packed-refs')) ?? ''
-    if (!originHeadBranch && packed) {
-      const sym = /^ref:\s*refs\/remotes\/origin\/([^\s]+)\s+refs\/remotes\/origin\/HEAD$/m.exec(packed)
-      if (sym) originHeadBranch = sym[1].trim()
-    }
+    const fastCfg = readGitConfigFast(commonDir, { systemMap: false })
+    const remoteText = fastCfg ? fastCfg.remoteText : null
     const useReftable = existsSync(join(commonDir, 'reftable'))
-    const walkLooseRefs = (dirAbs, excludeName = null) => {
-      const set = new Set()
-      if (!existsSync(dirAbs)) return set
-      const stack = [{ abs: dirAbs, rel: '' }]
-      while (stack.length > 0) {
-        const cur = stack.pop()
-        let entries = []
-        try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
-        for (const e of entries) {
-          if (isMacMetadataName(e.name)) continue
-          const subRel = cur.rel ? `${cur.rel}/${e.name}` : e.name
-          if (e.isDirectory()) stack.push({ abs: join(cur.abs, e.name), rel: subRel })
-          else if (e.isFile() && subRel !== excludeName) set.add(subRel)
-        }
-      }
-      return set
-    }
-    let fastTags = null
-    let fastLocalBranches = null
-    let fastRemoteOriginBranches = null
-    if (!useReftable) {
-      const tagSet = walkLooseRefs(join(commonDir, 'refs', 'tags'))
-      const headSet = walkLooseRefs(join(commonDir, 'refs', 'heads'))
-      const remoteOriginSet = walkLooseRefs(join(commonDir, 'refs', 'remotes', 'origin'), 'HEAD')
-      if (packed) {
-        for (const line of packed.split('\n')) {
-          if (!line || line.startsWith('#') || line.startsWith('^')) continue
-          const sp = line.indexOf(' ')
-          if (sp <= 0) continue
-          const refName = line.slice(sp + 1).trim()
-          if (refName.startsWith('refs/tags/')) tagSet.add(refName.slice(10))
-          else if (refName.startsWith('refs/heads/')) headSet.add(refName.slice(11))
-          else if (refName.startsWith('refs/remotes/origin/') && refName !== 'refs/remotes/origin/HEAD') remoteOriginSet.add(refName.slice(20))
-        }
-      }
-      fastTags = [...tagSet].sort()
-      fastLocalBranches = [...headSet].sort()
-      fastRemoteOriginBranches = [...remoteOriginSet].sort()
-    }
+    const refs = useReftable ? null : listRefsFast(commonDir)
     return {
-      isRepoRoot, workTreeRoot: wtRoot, workGitDir, commonDir, isShallow, isSha256,
-      remoteText, originHeadBranch, fastTags, fastLocalBranches, fastRemoteOriginBranches, useReftable,
+      isRepoRoot,
+      workTreeRoot: wtRoot,
+      workGitDir,
+      commonDir,
+      isShallow,
+      isSha256,
+      remoteText,
+      originHeadBranch: refs?.originHeadBranch,
+      fastTags: refs ? refs.tags : null,
+      fastLocalBranches: refs ? refs.localBranches : null,
+      fastRemoteOriginBranches: refs ? refs.remoteOriginBranches : null,
+      useReftable,
     }
   } catch {
     return null
   }
 }
 
-/** 直接解析 Git index v2/v3 二进制条目列表，避免派生 `git ls-files -z`。 */
+/** 复用 `kit/skills/lib/git-index-fast.mjs` 读取 Git index v2/v3 路径数组。 */
 export function readGitIndexFast(workGitDir, isSha256 = false) {
-  if (!workGitDir || isSha256) return null
-  const idxPath = join(workGitDir, 'index')
-  if (!existsSync(idxPath)) return null
-  let buf
-  try { buf = readFileSync(idxPath) } catch { return null }
-  if (buf.length < 32 || buf.toString('ascii', 0, 4) !== 'DIRC') return null
-  const ver = buf.readUInt32BE(4)
-  if (ver !== 2 && ver !== 3) return null
-  const count = buf.readUInt32BE(8)
-  let off = 12
-  const paths = []
-  for (let i = 0; i < count; i += 1) {
-    if (off + 62 >= buf.length) return null
-    const flags = buf.readUInt16BE(off + 60)
-    if ((flags & 0x3000) !== 0) return null
-    let nameOff = off + 62
-    if (ver >= 3 && (flags & 0x4000) !== 0) {
-      if (nameOff + 2 >= buf.length) return null
-      nameOff += 2
-    }
-    const nul = buf.indexOf(0, nameOff)
-    if (nul < 0) return null
-    paths.push(buf.toString('utf8', nameOff, nul))
-    const len = nul - off + 1
-    off += (len + 7) & ~7
-  }
-  if (off > buf.length - 20) return null
-  while (off + 8 <= buf.length - 20) {
-    const sig = buf.toString('ascii', off, off + 4)
-    if (!/^[A-Za-z]{4}$/.test(sig)) return null
-    if (sig === 'link' || sig === 'sdir') return null
-    const sz = buf.readUInt32BE(off + 4)
-    off += 8 + sz
-  }
-  if (off !== buf.length - 20) return null
-  return paths
+  const paths = readGitIndexPathsFast(workGitDir, { isGitDir: true, isSha256 })
+  return paths ? [...paths] : null
 }
 
 export function mapProbeToAuth(probe) {

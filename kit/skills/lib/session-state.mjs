@@ -8,27 +8,16 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { EXIT } from './exit-codes.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
-import { resolveGitDirFast } from './git-fast.mjs'
+import { resolveCommonGitDir } from './git-fast.mjs'
 
 export const SESSION_SCHEMA_VERSION = 2
 export const MAX_ACTIVE_TOPICS = 5
 export const TOPIC_MAX_BYTES = 6144
 export const PRE_INIT_MAX_BYTES = 8192
-
-function resolveCommonGitDir(mainRoot) {
-  const gd = resolveGitDirFast(mainRoot)
-  if (!gd || !existsSync(gd)) return null
-  const cdFile = join(gd, 'commondir')
-  if (existsSync(cdFile)) {
-    const raw = (readTextSafe(cdFile) ?? '').trim()
-    if (raw) return isAbsolute(raw) ? resolve(raw) : resolve(gd, raw)
-  }
-  return gd
-}
 
 export function resolveSessionStatePath(mainRoot) {
   const root = resolve(String(mainRoot || process.cwd()))

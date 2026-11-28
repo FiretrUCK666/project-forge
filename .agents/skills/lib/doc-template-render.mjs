@@ -4,8 +4,39 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { renumberHeadings } from './doc-renumber.mjs'
-import { rewriteToc } from './doc-toc.mjs'
 import { readTextSafe } from './git.mjs'
+
+const H2_TOC_RE = /^##\s+(.+)$/
+const TOC_BLOCK_RE = /(^##\s+目录\s*\n)([\s\S]*?)(?=\n##\s)/m
+
+/** GitHub 风格的锚点（去中文序号前缀与标点，空格转连字符，转小写）。 */
+export function githubAnchor(heading) {
+  return String(heading ?? '')
+    .trim()
+    .replace(/^[一二三四五六七八九十百]+、\s*/, '')
+    .replace(/[`*_[\]()（）【】「」《》""''·.,:;!?/\\|+<>=~^$%@#&]/g, '')
+    .replace(/\s+/g, '-')
+    .toLowerCase()
+}
+
+/** 按正文里真实的二级标题重写 `## 目录` 区块。 */
+export function rewriteToc(text) {
+  const src = String(text ?? '')
+  const headings = []
+  for (const line of src.split('\n')) {
+    const m = H2_TOC_RE.exec(line)
+    if (!m) continue
+    const title = m[1].trim()
+    if (title === '目录') continue
+    headings.push(title)
+  }
+  if (headings.length === 0) return src
+  const entries = headings.map((h) => `- [${h}](#${githubAnchor(h)})`).join('\n')
+  if (TOC_BLOCK_RE.test(src)) {
+    return src.replace(TOC_BLOCK_RE, (_w, head) => `${head}${entries}\n`)
+  }
+  return src
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 

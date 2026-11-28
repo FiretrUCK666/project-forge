@@ -18,7 +18,6 @@ export const WRITE_PROBE_SKIP_FILES = new Set([
   'kit/skills/lib/github-labels.mjs',
   'kit/skills/lib/task-backend-local.mjs',
   'kit/skills/lib/task-backend.mjs',
-  'kit/skills/lib/shared.mjs',
 ])
 
 const MEMBER_WRITE_CALL_RE = /(?:\.|\?\.\s*)(createIssue|postComment|addLabels|removeLabel|createPr|mergePr|updatePrBase|claimTask|releaseTask|getCommitChecks|findOpenPrForBranch|listOpenPrsByBase|closePr|closeIssue)\s*\(/g

@@ -48,7 +48,7 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
   if (idAlias.role !== 'maintainer') return `SSH 别名仓库被误判为 ${idAlias.role} (${idAlias.reason})`
 
   // 3. probeSshTransport 强制 StrictHostKeyChecking=yes 且无 known_hosts 写盘副作用
-  const { probeSshTransport } = await import('../lib/platform/github-probe.mjs')
+  const { probeSshTransport } = await import('../lib/platform/index.mjs')
   let sawStrictYes = false
   const sshRes = await probeSshTransport({
     cwd: process.cwd(),
@@ -252,8 +252,8 @@ cases.push(['assets/readme/*.svg 与打包边界：SVG 安全结构与 isProduct
 }])
 
 cases.push(['多维护者团队协同：team-collaborator 与 owner 区分、防误判底线、零提交/外部 Fork 与离线 teamProbeHint', async () => {
-  const { classifyWorkspaceIdentity } = await import('../lib/platform/github.mjs')
-  const { resolveWorkspaceIdentity } = await import('../../kit/skills/lib/shared.mjs')
+  const { classifyWorkspaceIdentity } = await import('../lib/platform/index.mjs')
+  const { resolveWorkspaceIdentity } = await import('./test-shared.mjs')
   const { toMarkdown } = await import('../lib/render.mjs')
 
   const baseGitFacts = {
@@ -480,13 +480,13 @@ cases.push(['M1 惰性平台探测：默认 probeNetwork=false / PF_NO_REAL_AUTH
 }])
 
 cases.push(['Issue151 C4：匿名通用 HTTPS 远端判 undetermined、本地/file/standalone 放行 maintainer 与 q.git-identity', async () => {
-  const { GENERIC_GIT_PROVIDER, classifyTopologyIdentity } = await import('../lib/platform/registry.mjs')
+  const { classifyGenericIdentity, classifyTopologyIdentity } = await import('../lib/platform/index.mjs')
   const { mkdtempSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { pathToFileURL } = await import('node:url')
 
   // 1. 匿名 https://codeberg.org/... 无 standaloneMode / 无匹配 declaredRepo / 无凭据覆盖 -> undetermined
-  const anonRes = GENERIC_GIT_PROVIDER.classifyIdentity({
+  const anonRes = classifyGenericIdentity({
     gitFacts: { present: true, remote: 'https://codeberg.org/pmndrs/zustand.git', remoteUrls: { origin: 'https://codeberg.org/pmndrs/zustand.git' } },
   })
   if (anonRes.role !== 'undetermined') {
@@ -499,11 +499,11 @@ cases.push(['Issue151 C4：匿名通用 HTTPS 远端判 undetermined、本地/fi
   const fileRes = classifyTopologyIdentity({
     gitFacts: { present: true, remote: localFileUrl, remoteUrls: { origin: localFileUrl } },
   })
-  const standaloneRes = GENERIC_GIT_PROVIDER.classifyIdentity({
+  const standaloneRes = classifyGenericIdentity({
     gitFacts: { present: true, remote: 'https://codeberg.org/pmndrs/zustand.git', remoteUrls: { origin: 'https://codeberg.org/pmndrs/zustand.git' } },
     standaloneMode: true,
   })
-  const declaredMatchRes = GENERIC_GIT_PROVIDER.classifyIdentity({
+  const declaredMatchRes = classifyGenericIdentity({
     gitFacts: { present: true, remote: 'https://codeberg.org/pmndrs/zustand.git', remoteUrls: { origin: 'https://codeberg.org/pmndrs/zustand.git' } },
     declaredRepo: 'pmndrs/zustand',
   })

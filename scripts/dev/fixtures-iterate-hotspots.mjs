@@ -41,7 +41,7 @@ export function registerIterateHotspotsCases(cases) {
     })
     const bkRoot = tmpProject({})
     try {
-      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@acme-fixture.dev' })
       const env = { PF_BACKUP_DIR: bkRoot, PF_NO_REAL_AUTH_PROBE: '1' }
 
       // S1: 只读勘察 survey
@@ -329,7 +329,7 @@ export function registerIterateHotspotsCases(cases) {
       'nested/sub/readonly.txt': 'locked content\n',
     })
     try {
-      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@acme-fixture.dev' })
       mkdirSync(join(dir, 'node_modules/pkg-a'), { recursive: true })
       writeFileSync(join(dir, 'node_modules/pkg-a/index.js'), 'export const ver = "1.0.0"\n', 'utf8')
       // Class R vs S 锁文件探测 + 全局仓单元

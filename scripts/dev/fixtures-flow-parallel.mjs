@@ -445,13 +445,22 @@ cases.push(['零教学泄漏(CONVENTIONS_HINT 清除)、maskVolatile(I65)、--ad
       return `--adopt-custom 后 --check 未恢复通过：${adoptRes.stdout} ${adoptRes.stderr}`
     }
 
-    writeFileSync(join(dir, 'AGENTS.md'), `${readFileSync(join(dir, 'AGENTS.md'), 'utf8')}\n\n## 项目超长细节\n\n${'a'.repeat(32000)}\n`)
-    const overDeny = await runNode('compose-agents.mjs', [dir, '--check'])
-    if (overDeny.status === 0 || !/managed=/.test(overDeny.stderr) || !/custom=/.test(overDeny.stderr)) {
-      return `超限未报告 managed/custom 拆解或误放行：${overDeny.stderr}`
+    const baseAgents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    writeFileSync(join(dir, 'AGENTS.md'), `${baseAgents}\n\n## 项目超长细节\n\n${'a'.repeat(32000)}\n`)
+    const overNotice = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (overNotice.status !== 0 || !/managed=/.test(overNotice.stderr) || !/custom=/.test(overNotice.stderr)) {
+      return `自定义超 30KB 应降级 notice 退出 0 并报告 managed/custom 拆解：status=${overNotice.status} stderr=${overNotice.stderr}`
     }
     const overAllow = await runNode('compose-agents.mjs', [dir, '--check', '--allow-custom-oversize'])
-    if (overAllow.status !== 0) return `--allow-custom-oversize 未放行自定义长文：${overAllow.stderr}`
+    if (overAllow.status !== 0) return `--allow-custom-oversize 兼容参数应退出 0：${overAllow.stderr}`
+    // 反例：受管区本身膨胀超 24KB 仍必须硬阻断（注入在未标 customized 的 意图路由 区间内）
+    const bloatedManaged = baseAgents.replace('<!-- project-forge: end 意图路由 -->', `\n${'b'.repeat(26000)}\n<!-- project-forge: end 意图路由 -->`)
+    writeFileSync(join(dir, 'AGENTS.md'), bloatedManaged)
+    const managedDeny = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (managedDeny.status === 0 || !/managed=/.test(managedDeny.stderr)) {
+      return `受管区超 24KB 未硬阻断：status=${managedDeny.status} stderr=${managedDeny.stderr}`
+    }
+    writeFileSync(join(dir, 'AGENTS.md'), baseAgents)
 
     // 2. equip 重复幂等保留全部技能 + 二次编辑再采用
     const dg = await runNode('equip.mjs', [dir, '--no-backup'])

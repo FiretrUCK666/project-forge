@@ -181,14 +181,6 @@ export function toMarkdown(facts) {
     lines.push('**根目录没有清单，命令在子目录里**：' + subdirs.map((s) => `\`${s.dir}/\`（${s.kinds.join('、')}）`).join('、')
       + '——写契约与 CI 时要带上目录前缀，否则命令在仓库根跑不起来')
   }
-  const pendingIgnoreAdvice = (facts.artifacts?.nativeCheckers?.agentIgnoreAdvice ?? []).filter((a) => !a.alreadyIgnored)
-  if (pendingIgnoreAdvice.length > 0) {
-    lines.push('')
-    lines.push('**根 Linter/Formatter `.agents/` 隔离建议**（只读探测，不自动改写第三方配置）：')
-    for (const item of pendingIgnoreAdvice) {
-      lines.push(`- \`${item.tool}\`（${item.configFile}）：${item.suggestion}`)
-    }
-  }
   lines.push('')
 
   // 既有约定：默认分支、标签形状、提交风格、工作记录目录。
@@ -437,11 +429,14 @@ function appendRemoteAndAuthWizard(lines, facts) {
   if (needsBranchProtectionHint) {
     const branch = facts.conventions?.defaultBranch || git.originHeadBranch || git.initDefaultBranch || 'main'
     const targetPath = facts.target?.path || '.'
-    const hooksFlag = facts.git?.hooks?.hasConflict || hasDecision(facts, 'no-git-hooks') ? '' : ' --with-hooks'
+    const preserveHooks = Boolean(facts.git?.hooks?.hasConflict || hasDecision(facts, 'no-git-hooks'))
+    const hooksFallback = preserveHooks
+      ? '仓库已有既有本地 Hook 或已豁免 `no-git-hooks`，preserve 不接管 `core.hooksPath`，请确认既有钩子已含默认分支保护'
+      : `可改用 \`node scripts/equip.mjs "${targetPath}" --with-hooks\` 安装本地 \`.githooks/pre-push\` 防护`
     if (git.capabilities?.branchProtection === true) {
-      lines.push(`- **默认分支保护（开关 A，GitHub 可执行）**：运行 \`node scripts/equip-ci.mjs "${targetPath}" --protect-branch --branch ${branch}\`（仅禁直推/强推/删默认分支并要求 PR 与状态检查通过，**严禁设置 \`required_approving_review_count >= 1\`**；若遇 HTTP \`403\` 自动降级改用 \`node scripts/equip.mjs "${targetPath}"${hooksFlag || ' --with-hooks'}\`）。完成后在 \`AGENTS.md\`「## 取舍」写入 \`branch-protection\`（或 \`no-branch-protection\`）。`)
+      lines.push(`- **默认分支保护（开关 A，GitHub 可执行）**：运行 \`node scripts/equip-ci.mjs "${targetPath}" --protect-branch --branch ${branch}\`（仅禁直推/强推/删默认分支并要求 PR 与状态检查通过，**严禁设置 \`required_approving_review_count >= 1\`**；若遇 HTTP \`403\` 自动降级：${hooksFallback}）。完成后在 \`AGENTS.md\`「## 取舍」写入 \`branch-protection\`（或 \`no-branch-protection\`）。`)
     } else {
-      lines.push(`- **默认分支保护（开关 A，通用托管指引）**：当前远端不支持统一分支保护 API，请在托管仓库设置中为默认分支（\`${branch}\`）手动开启开关 A（禁直推/强推/删默认分支、要求变更提案与门禁检查通过，**不默认强制他人审批**），并建议运行 \`node scripts/equip.mjs "${targetPath}" --with-hooks\` 安装本地 \`.githooks/pre-push\` 防护；完成后在 \`AGENTS.md\`「## 取舍」写入 \`branch-protection\`（或 \`no-branch-protection\`）。`)
+      lines.push(`- **默认分支保护（开关 A，通用托管指引）**：当前远端不支持统一分支保护 API，请在托管仓库设置中为默认分支（\`${branch}\`）手动开启开关 A（禁直推/强推/删默认分支、要求变更提案与门禁检查通过，**不默认强制他人审批**），${hooksFallback}；完成后在 \`AGENTS.md\`「## 取舍」写入 \`branch-protection\`（或 \`no-branch-protection\`）。`)
     }
   }
   lines.push('')

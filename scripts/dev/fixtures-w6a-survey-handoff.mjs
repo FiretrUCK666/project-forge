@@ -124,7 +124,7 @@ export function registerW6aSurveyHandoffCases(cases) {
       }
       const hooksSafe = detectGitHooksState(safeDir)
       if (!hooksSafe.hasConflict
-        || !hooksSafe.conflicts.some((c) => c.kind === 'simple-git-hooks')
+        || !hooksSafe.conflicts.some((c) => c.kind === 'root-hook-config' && c.path === 'package.json#simple-git-hooks')
         || !hooksSafe.conflicts.some((c) => c.kind === 'custom-git-hooks')) {
         return `C1 未探测到 simple-git-hooks 或自定义 .git/hooks：${JSON.stringify(hooksSafe)}`
       }
@@ -226,9 +226,9 @@ export function registerW6aSurveyHandoffCases(cases) {
       }
 
       const checkers = detectOptionalNativeCheckers(denoPnpmDir)
-      const adviceTools = (checkers.agentIgnoreAdvice ?? []).map((a) => a.tool)
-      if (!adviceTools.includes('oxlint') || !adviceTools.includes('dprint')) {
-        return `C2 detectOptionalNativeCheckers 漏检 oxlint/dprint 隔离建议：${JSON.stringify(checkers)}`
+      const cfgTools = (checkers.configured ?? []).map((a) => a.tool)
+      if (!checkers.hasNativeConfig || !cfgTools.includes('oxlint') || !cfgTools.includes('dprint') || 'agentIgnoreAdvice' in checkers) {
+        return `C2 detectOptionalNativeCheckers 契约异常（应保留 configured/hasNativeConfig 且无 agentIgnoreAdvice）：${JSON.stringify(checkers)}`
       }
 
       // 严格零写入：survey() 不得写入 .git/project-forge-flow/session-state.json

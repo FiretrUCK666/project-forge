@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { scanLines } from '../../kit/skills/lib/markdown-scan.mjs'
+import { validateExecutableCommandShape } from '../../kit/skills/lib/command-lex.mjs'
 import { PF_MANIFEST_REL, REGION_MIGRATIONS, markerRegions, parseMarkers } from './protocol.mjs'
 import { readJsonSafe } from './text.mjs'
 import { DEV_PROFILE_KEYS, isAnglePlaceholder } from '../../kit/skills/lib/profile.mjs'
@@ -159,6 +160,22 @@ function normalizeBody(bodyLines, volatile = []) {
 
 const HEADING_PREFIX = /^#{2,3}\s+(?:\d+[.)、]\s*)?(?:[一二三四五六七八九十]+[、.)]\s*)?/
 
+export const CORE_PROTECTED_SECTIONS = Object.freeze(new Set([
+  '意图路由',
+  'Dev Profile',
+  '修改守则',
+  '日常协作与风险分流',
+  '取舍',
+]))
+
+const CORE_SECTION_STRICT_RE = {
+  意图路由: /^(?:意图路由|intent\s+routing)(?:$|[：:（(\s])/i,
+  'Dev Profile': /^dev\s+profile(?:$|[：:（(\s])/i,
+  修改守则: /^(?:修改守则|工程修改守则|硬性规范|编码规范|开发规范|项目红线|coding\s+rules)(?:$|[：:（(与和])/i,
+  日常协作与风险分流: /^(?:日常协作(?:与风险分流)?|改动怎么落地|协作流程|daily\s+collaboration)(?:$|[：:（(与])/i,
+  取舍: /^(?:取舍|工程取舍|engineering\s+trade-?offs?)(?:$|[：:（(])/i,
+}
+
 const SECTION_KEYWORDS = {
   意图路由: { words: ['意图路由', 'Intent Routing'] },
   行事总纲: { words: ['行事总纲', '决策准则', 'Operating Principles', 'Core Principles'] },
@@ -175,18 +192,12 @@ const SECTION_KEYWORDS = {
       'Setup', 'Install', 'Build', 'Test Commands', 'Verif', 'Commands', 'Environment'],
     exclude: ['审查', '流程', '审核', '评审', '环境变量', 'review'],
   },
-  修改守则: {
-    words: ['修改守则', '硬性规范', '编码规范', '开发规范', '项目红线', '红线',
-      'Coding Rules', 'Guidelines', 'Conventions', 'Standards'],
-  },
+  修改守则: { words: ['修改守则', '硬性规范', '编码规范', '开发规范', '项目红线', 'Coding Rules'] },
   版本与发布: { words: ['版本管理', '版本与发布', '发版', '发布流程', 'Version', 'Release', 'Publish'] },
-  日常协作与风险分流: {
-    words: ['日常协作', '改动怎么落地', '协作流程', '工作流', '分支管理',
-      'Workflow', 'Collaboration', 'Contributing', 'Pull Request'],
-  },
+  日常协作与风险分流: { words: ['日常协作', '改动怎么落地', '协作流程', 'Daily Collaboration'] },
   高风险路径: { words: ['高风险路径', '高风险', 'High Risk', 'Sensitive Paths'] },
   改哪看哪: { words: ['改哪看哪', '联动同步', 'Coupled'] },
-  取舍: { words: ['取舍', '技术选型', 'Decisions', 'Trade-off', 'Tradeoff'] },
+  取舍: { words: ['取舍', '工程取舍', 'Engineering Trade-off', 'Engineering Tradeoff'] },
 }
 
 function renderedTitleOf(id, rendered) {
@@ -204,20 +215,54 @@ export function headingLines(text) {
     .join('\n')
 }
 
-export function sectionAlreadyPresent(id, headingsText, rendered) {
+function findMatchingHeading(id, headingsText, rendered) {
+  const rawLines = String(headingsText ?? '').split('\n').filter(Boolean)
+  if (CORE_PROTECTED_SECTIONS.has(id)) {
+    const strictRe = CORE_SECTION_STRICT_RE[id]
+    for (const line of rawLines) {
+      const title = line.replace(HEADING_PREFIX, '').trim()
+      if (strictRe && strictRe.test(title)) return title
+    }
+    return null
+  }
   const rule = SECTION_KEYWORDS[id]
   if (rule !== undefined) {
-    const titles = headingsText.split('\n').map((line) => line.replace(HEADING_PREFIX, '').trim())
-    return titles.some((title) => {
+    for (const line of rawLines) {
+      const title = line.replace(HEADING_PREFIX, '').trim()
       const lower = title.toLowerCase()
-      if ((rule.exclude ?? []).some((w) => lower.includes(w.toLowerCase()))) return false
-      return rule.words.some((w) => lower.includes(w.toLowerCase()))
-    })
+      if ((rule.exclude ?? []).some((w) => lower.includes(w.toLowerCase()))) continue
+      if (rule.words.some((w) => lower.includes(w.toLowerCase()))) return title
+    }
+    return null
   }
   const normal = renderedTitleOf(id, rendered)
-  if (normal === undefined) return false
-  return headingsText.split('\n')
-    .some((line) => line.replace(HEADING_PREFIX, '').trim() === normal)
+  if (normal === undefined) return null
+  for (const line of rawLines) {
+    const title = line.replace(HEADING_PREFIX, '').trim()
+    if (title === normal) return title
+  }
+  return null
+}
+
+export function sectionAlreadyPresent(id, headingsText, rendered) {
+  return findMatchingHeading(id, headingsText, rendered) !== null
+}
+
+export function analyzeContractSections(existingText, rendered, removedRegions = null) {
+  const existing = String(existingText ?? '').replace(/\r\n/g, '\n')
+  const presentIds = new Set(markerRegions(existing, 'AGENTS.md').regions.map((r) => r.id))
+  const wanted = markerRegions(rendered, 'AGENTS.md').regions.map((r) => r.id)
+  const headings = headingLines(existing)
+  const removedSet = removedRegions instanceof Set ? removedRegions : new Set(removedRegions ?? [])
+  const missingRegions = []
+  const skippedByHeading = []
+  for (const id of wanted) {
+    if (presentIds.has(id) || removedSet.has(id)) continue
+    const matchedHeading = findMatchingHeading(id, headings, rendered)
+    if (matchedHeading !== null) skippedByHeading.push({ id, heading: matchedHeading })
+    else missingRegions.push(id)
+  }
+  return { missingRegions, skippedByHeading }
 }
 
 export function missingRegionsOf(presentIds, rendered, existingText, removedRegions = null) {
@@ -512,7 +557,9 @@ export function findMissingIntentRoutingSkills(root, agentsText) {
   return missing
 }
 
-/** 校验 AGENTS.md Dev Profile 区间非空且不含未填占位值。 */
+const DEV_PROFILE_COMMAND_KEYS = new Set(['quick-test', 'full-test', 'smoke-verify', 'merge-gate'])
+
+/** 校验 AGENTS.md Dev Profile 区间非空、不含未填占位值且命令键符合可执行 CLI 形态。 */
 export function validateDevProfileRegion(agentsText) {
   const text = String(agentsText ?? '').replace(/\r\n/g, '\n')
   const { regions } = markerRegions(text, 'AGENTS.md')
@@ -527,9 +574,17 @@ export function validateDevProfileRegion(agentsText) {
   const entries = parseDevProfileYamlEntries(yamlMatch[1])
   const isUnfilled = (v) => !v || isAnglePlaceholder(v) || /^(?:待填|待补充|tbd|fixme)$/i.test(v)
   for (const entry of entries) {
+    const keyLower = entry.key.toLowerCase()
+    const isCmdKey = DEV_PROFILE_COMMAND_KEYS.has(keyLower)
     if (entry.inlineVal) {
       if (isUnfilled(entry.inlineVal)) {
         return { ok: false, reason: `Dev Profile 键 ${entry.key} 仍为占位或空值（${entry.inlineVal}）` }
+      }
+      if (isCmdKey) {
+        const shape = validateExecutableCommandShape(entry.inlineVal, { allowNone: true })
+        if (!shape.ok) {
+          return { ok: false, reason: `Dev Profile 命令键 ${entry.key} 非可执行命令形态（${shape.reason}：${entry.inlineVal}）` }
+        }
       }
       continue
     }
@@ -539,6 +594,14 @@ export function validateDevProfileRegion(agentsText) {
     const badItem = entry.listItems.find((item) => isUnfilled(item))
     if (badItem !== undefined) {
       return { ok: false, reason: `Dev Profile 键 ${entry.key} 仍为占位或空值（${badItem || '空'}）` }
+    }
+    if (isCmdKey) {
+      for (const item of entry.listItems) {
+        const shape = validateExecutableCommandShape(item, { allowNone: true })
+        if (!shape.ok) {
+          return { ok: false, reason: `Dev Profile 命令键 ${entry.key} 含非可执行命令项（${shape.reason}：${item}）` }
+        }
+      }
     }
   }
   return entries.length > 0 ? { ok: true } : { ok: false, reason: 'Dev Profile 配置块为空' }

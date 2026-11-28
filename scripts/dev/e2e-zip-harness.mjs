@@ -80,7 +80,7 @@ function ensureSeededGitTemplate(sandbox) {
   mkdirSync(tpl, { recursive: true })
   runGit(tpl, ['init', '-q', '-b', 'main'])
   runGit(tpl, ['config', 'user.name', 'alice'])
-  runGit(tpl, ['config', 'user.email', 'alice@example.com'])
+  runGit(tpl, ['config', 'user.email', 'alice@acme-fixture.dev'])
   SEEDED_GIT_TEMPLATE = join(tpl, '.git')
   return SEEDED_GIT_TEMPLATE
 }
@@ -92,7 +92,7 @@ function initGitRepo(dir, files = {}, origin = null) {
   } else {
     runGit(dir, ['init', '-q', '-b', 'main'])
     runGit(dir, ['config', 'user.name', 'alice'])
-    runGit(dir, ['config', 'user.email', 'alice@example.com'])
+    runGit(dir, ['config', 'user.email', 'alice@acme-fixture.dev'])
   }
   writeFiles(dir, files)
   if (origin) runGit(dir, ['remote', 'add', 'origin', origin])

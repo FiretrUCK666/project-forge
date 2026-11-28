@@ -25,13 +25,13 @@ import { reviewProject } from '../review.mjs'
 import { gitCommitFast, gitInit, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerR5OnboardingCases(cases) {
-  cases.push(['R5-PR3 C1：.gitignore 遮蔽关键治理路径检测（survey / equip / review 正反双向）', async () => {
+  cases.push(['R5-PR3 C1：.gitignore 遮蔽关键治理路径检测与零副作用 !.agents/skills/** 回纳建议（正反双向）', async () => {
     const dir = tmpProject({
       '.gitignore': 'node_modules/\nlib\ntemplates/\n',
       'README.md': '# shadow-demo\n\nGitignore shadowing test project.\n',
       'src/index.mjs': 'export const ok = 1\n',
     })
-    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5.test' })
+    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5-fixture.dev' })
     try {
       const hits = detectIgnoredGovernancePaths(dir)
       const hitPaths = new Set(hits.map((h) => h.path))
@@ -39,8 +39,8 @@ export function registerR5OnboardingCases(cases) {
         return `detectIgnoredGovernancePaths 漏报未锚定规则遮蔽：${JSON.stringify(hits)}`
       }
       const libHit = hits.find((h) => h.path === '.agents/skills/lib/git.mjs')
-      if (!libHit?.advice?.includes('/lib')) {
-        return `锚定建议缺少 /lib 指引：${JSON.stringify(libHit)}`
+      if (!libHit?.advice?.includes('!.agents/skills/') || !libHit?.advice?.includes('!.agents/skills/**') || libHit.advice.includes('锚定为 `/lib`')) {
+        return `回纳建议应优先使用 !.agents/skills/ 与 !.agents/skills/** 且禁止建议根锚定 /lib：${JSON.stringify(libHit)}`
       }
 
       const facts = await survey(dir)
@@ -52,23 +52,23 @@ export function registerR5OnboardingCases(cases) {
       }
 
       const eq = equip(dir, { noBackup: true })
-      if ((eq.warnings?.length ?? 0) === 0 || !eq.warnings.some((w) => w.includes('/lib'))) {
-        return `equip 未输出 .gitignore 遮蔽告警：${JSON.stringify(eq.warnings)}`
+      if ((eq.warnings?.length ?? 0) === 0 || !eq.warnings.some((w) => w.includes('!.agents/skills/**'))) {
+        return `equip 未输出 .gitignore 遮蔽精确回纳告警：${JSON.stringify(eq.warnings)}`
       }
 
       const revBad = await reviewProject(dir)
       const govMissing = revBad.missing.find((f) => f.id === 'git.ignored-governance')
-      if (!govMissing || !govMissing.title.includes('/lib')) {
-        return `review 未报阻塞级 git.ignored-governance 或缺 /lib 建议：${JSON.stringify(revBad.missing)}`
+      if (!govMissing || !govMissing.title.includes('!.agents/skills/**')) {
+        return `review 未报阻塞级 git.ignored-governance 或缺 !.agents/skills/** 建议：${JSON.stringify(revBad.missing)}`
       }
 
-      // 反面：锚定为 /lib 与 /templates/ 后全部清零
-      writeFileSync(join(dir, '.gitignore'), 'node_modules/\n/lib\n/templates/\n', 'utf8')
+      // 反面：末尾追加零副作用精确回纳规则后全部清零，无需改写原仓 lib/templates/
+      writeFileSync(join(dir, '.gitignore'), 'node_modules/\nlib\ntemplates/\n!.agents/skills/\n!.agents/skills/**\n', 'utf8')
       const cleanHits = detectIgnoredGovernancePaths(dir)
-      if (cleanHits.length > 0) return `锚定 /lib 后仍误报遮蔽：${JSON.stringify(cleanHits)}`
+      if (cleanHits.length > 0) return `追加 !.agents/skills/** 后仍误报遮蔽：${JSON.stringify(cleanHits)}`
       const revClean = await reviewProject(dir)
       if (revClean.missing.some((f) => f.id === 'git.ignored-governance')) {
-        return `锚定 /lib 后 review 仍误报 git.ignored-governance：${JSON.stringify(revClean.missing)}`
+        return `追加 !.agents/skills/** 后 review 仍误报 git.ignored-governance：${JSON.stringify(revClean.missing)}`
       }
       return true
     } finally {
@@ -95,7 +95,7 @@ export function registerR5OnboardingCases(cases) {
         '',
       ].join('\n'),
     })
-    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5.test' })
+    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5-fixture.dev' })
     try {
       const rm = await generateRepoMap(dir, { writeFeatureMap: true })
       const fm = rm.featureMapIndex
@@ -170,7 +170,7 @@ export function registerR5OnboardingCases(cases) {
       'src/main/java/com/acme/platform/module/service/impl/v1/DeepService.java': 'package com.acme;\nclass DeepService {}\n',
       'src/main/java/com/acme/a/b/c/d/e/f/g/h/i/j/k/l/m/n/UltraDeep.java': 'package com.acme;\nclass UltraDeep {}\n',
     })
-    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5.test' })
+    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5-fixture.dev' })
     const liveProc = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })
     try {
       // 1. 深度 > 6 且含深度 > 14 纯代码子树（无标记文件）时 handoff --verify 应返回 0
@@ -260,11 +260,11 @@ export function registerR5OnboardingCases(cases) {
     }
   }])
 
-  cases.push(['R5-PR3 C5：受跟踪 dist/ 归入 high-risk、## 取舍矛盾告警与 ESLint .agents/** 忽略检查', async () => {
+  cases.push(['R5-PR3 C5：受跟踪 dist/ 归入 high-risk 与 ## 取舍矛盾告警（且不输出静态 .agents/ linter 猜测）', async () => {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\nnode_modules/\n',
       'package.json': JSON.stringify({ name: 'r5-c5', version: '1.0.0', scripts: { test: 'node -e "process.exit(0)"' } }, null, 2) + '\n',
-      'README.md': '# r5-c5\n\nTracked dist, tradeoff contradiction, and eslint ignore test.\n',
+      'README.md': '# r5-c5\n\nTracked dist and tradeoff contradiction test.\n',
       'LICENSE': 'MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy...\n',
       '.github/workflows/ci.yml': 'name: CI\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n',
       'eslint.config.mjs': 'export default [{ rules: { "no-console": "warn" } }]\n',
@@ -293,7 +293,7 @@ export function registerR5OnboardingCases(cases) {
         '',
       ].join('\n'),
     })
-    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5.test' })
+    gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@r5-fixture.dev' })
     try {
       const vars = buildDevProfileVars({
         ecosystem: { kinds: ['node'], manifests: ['package.json'], packageScripts: ['test'] },
@@ -312,12 +312,11 @@ export function registerR5OnboardingCases(cases) {
       if (!revBad.notice.some((f) => f.id === 'agents.tradeoff-contradiction')) {
         return `未告警 ## 取舍与 LICENSE/workflow 矛盾：${JSON.stringify(revBad.notice)}`
       }
-      if (!revBad.notice.some((f) => f.id === 'kit.eslint-agents-ignore')) {
-        return `未发出 ESLint 缺少 .agents/** 忽略警告：${JSON.stringify(revBad.notice)}`
+      if (allIds.has('kit.eslint-agents-ignore') || allIds.has('kit.tooling-agents-ignore')) {
+        return `不应再产出静态 .agents/ linter 忽略猜测结论：${JSON.stringify([...allIds])}`
       }
 
-      // 反面：移出 do-not-edit、修正取舍为不适用/MIT、添加 .agents/** 到 eslint.config.mjs 后全部消解
-      writeFileSync(join(dir, 'eslint.config.mjs'), 'export default [{ ignores: [".agents/**"] }]\n', 'utf8')
+      // 反面：移出 do-not-edit、修正取舍为不适用/MIT 后全部消解
       writeFileSync(join(dir, 'AGENTS.md'), [
         '# r5-c5',
         '',
@@ -340,9 +339,9 @@ export function registerR5OnboardingCases(cases) {
         '```',
         '',
       ].join('\n'), 'utf8')
-      gitCommitFast(dir, 'fix: resolve review contradictions and eslint ignore')
+      gitCommitFast(dir, 'fix: resolve review contradictions')
       const revGood = await reviewProject(dir)
-      for (const unexpectedId of ['agents.do-not-edit-tracked-build', 'agents.tradeoff-contradiction', 'kit.eslint-agents-ignore']) {
+      for (const unexpectedId of ['agents.do-not-edit-tracked-build', 'agents.tradeoff-contradiction']) {
         if (revGood.results.some((r) => r.id === unexpectedId)) {
           return `修正后仍误报 ${unexpectedId}：${JSON.stringify(revGood.results.filter((r) => r.id === unexpectedId))}`
         }

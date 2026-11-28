@@ -22,6 +22,7 @@ import {
 } from './lib/agents-defaults.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 import {
+  analyzeContractSections,
   collectMissingSections,
   driftRegions,
   findMissingIntentRoutingSkills,
@@ -45,7 +46,7 @@ import {
   writeManifestRegions,
 } from './lib/compose-agents-helpers.mjs'
 
-const { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, markerRegions, parseMarkers, stripMarkers } = protocol
+const { AGENTS_MANAGED_MAX_BYTES, AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, markerRegions, parseMarkers, stripMarkers } = protocol
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -63,12 +64,18 @@ function checkAgentsBytes(text, fileName = 'AGENTS.md') {
     managedBytes += Buffer.byteLength(lines.slice(r.start, r.end + 1).join('\n'), 'utf8')
   }
   const customBytes = Math.max(0, bytes - managedBytes)
+  const totalOversize = bytes > AGENTS_MAX_BYTES
+  const managedOversize = managedBytes > AGENTS_MANAGED_MAX_BYTES
+  const customOversize = !managedOversize && totalOversize
   return {
     bytes,
     managedBytes,
     customBytes,
-    oversize: bytes > AGENTS_MAX_BYTES,
-    warn: bytes >= AGENTS_WARN_BYTES && bytes <= AGENTS_MAX_BYTES,
+    totalOversize,
+    managedOversize,
+    customOversize,
+    oversize: managedOversize,
+    warn: !managedOversize && !customOversize && bytes >= AGENTS_WARN_BYTES && bytes <= AGENTS_MAX_BYTES,
   }
 }
 
@@ -293,7 +300,9 @@ async function main(argv) {
       process.stderr.write(`${agentsName} 的标记没成对：${info.broken.join('、')}\n`)
       return 1
     }
-    const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
+    if ((info.skippedByHeading?.length ?? 0) > 0) {
+      process.stderr.write(`[诊断 skippedByHeading] 因既有同名标题跳过自动注入 ${info.skippedByHeading.length} 节：${info.skippedByHeading.map((s) => `${s.id}<-"${s.heading}"`).join('、')}\n`)
+    }
     if (info.regions.length === 0) {
       const coverage = handWrittenCoverage(info.text ?? '')
       if (!coverage.ok) {
@@ -304,12 +313,8 @@ async function main(argv) {
           + '  加 `--upgrade` 会追加缺的节，原有内容一个字节不动。\n')
         return 1
       }
-      if (sizeInfo.oversize && !allowOversizeBypass) {
-        process.stderr.write(`${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
-        return 1
-      }
-      if (sizeInfo.oversize && allowOversizeBypass) {
-        process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
+      if (sizeInfo.customOversize) {
+        process.stderr.write(`[提示${allowCustomOversize ? '/已显式放行' : ''}] ${agentsName} 自定义正文超参考线（不阻断）：${formatOversizeBreakdown(sizeInfo)}。\n`)
       }
       const missingHandSkills = findMissingIntentRoutingSkills(root, info.text)
       if (missingHandSkills.length > 0) {
@@ -324,13 +329,11 @@ async function main(argv) {
       return 0
     }
     let bad = false
-    if (sizeInfo.oversize) {
-      if (allowOversizeBypass) {
-        process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
-      } else {
-        process.stderr.write(`${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
-        bad = true
-      }
+    if (sizeInfo.managedOversize) {
+      process.stderr.write(`${agentsName} 受管区体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
+      bad = true
+    } else if (sizeInfo.customOversize) {
+      process.stderr.write(`[提示${allowCustomOversize ? '/已显式放行' : ''}] ${agentsName} 自定义正文超参考线（不阻断）：${formatOversizeBreakdown(sizeInfo)}。\n`)
     }
     if (info.fills.length > 0) {
       process.stderr.write(`${agentsName} 还有 ${info.fills.length} 处未填的占位\n`)
@@ -383,20 +386,23 @@ async function main(argv) {
       process.stdout.write('这份文件已经有受管标记，用默认模式刷新即可（--upgrade 只用于手写文件）。\n')
       return 0
     }
+    const { skippedByHeading } = analyzeContractSections(existing, rendered)
     const additions = collectMissingSections(rendered, existing)
+    if (skippedByHeading.length > 0) {
+      process.stderr.write(`[诊断 skippedByHeading] 因既有同名标题跳过自动注入 ${skippedByHeading.length} 节：${skippedByHeading.map((s) => `${s.id}<-"${s.heading}"`).join('、')}\n`)
+    }
     if (additions.length === 0) {
       process.stdout.write('模板里的节都已在文件中，无需追加。\n')
       return 0
     }
     const nextText = `${existing.trimEnd()}\n\n${additions.join('\n\n')}\n`
     const sizeInfo = checkAgentsBytes(nextText, agentsName)
-    const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
-    if (sizeInfo.oversize && !allowOversizeBypass) {
-      process.stderr.write(`追加后 ${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
+    if (sizeInfo.managedOversize) {
+      process.stderr.write(`追加后 ${agentsName} 受管区体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
     }
-    if (sizeInfo.oversize && allowOversizeBypass) {
-      process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
+    if (sizeInfo.customOversize) {
+      process.stderr.write(`[提示${allowCustomOversize ? '/已显式放行' : ''}] ${agentsName} 自定义正文超参考线（不阻断）：${formatOversizeBreakdown(sizeInfo)}。\n`)
     } else if (sizeInfo.warn) {
       process.stderr.write(`[警告] ${agentsName} 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）接近上限 ${AGENTS_MAX_BYTES} 字节。\n`)
     }
@@ -426,13 +432,12 @@ async function main(argv) {
     const refreshed = refreshRegions(existing, rendered, volatileValues(facts), baselineRegions, removedSet)
     const nextText = refreshed.changed ? refreshed.text : existing
     const sizeInfo = checkAgentsBytes(nextText, agentsName)
-    const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
-    if (sizeInfo.oversize && !allowOversizeBypass) {
-      process.stderr.write(`刷新后 ${agentsName} 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
+    if (sizeInfo.managedOversize) {
+      process.stderr.write(`刷新后 ${agentsName} 受管区体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
     }
-    if (sizeInfo.oversize && allowOversizeBypass) {
-      process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
+    if (sizeInfo.customOversize) {
+      process.stderr.write(`[提示${allowCustomOversize ? '/已显式放行' : ''}] ${agentsName} 自定义正文超参考线（不阻断）：${formatOversizeBreakdown(sizeInfo)}。\n`)
     } else if (sizeInfo.warn) {
       process.stderr.write(`[警告] ${agentsName} 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
     }
@@ -462,7 +467,7 @@ async function main(argv) {
       const convergedRefresh = refreshRegions(nextText, convergedRendered, volatileValues(convergedFacts), convergedBaseline, removedSet)
       if (convergedRefresh.changed) {
         const convergedSize = checkAgentsBytes(convergedRefresh.text, agentsName)
-        if (!convergedSize.oversize || (allowCustomOversize && convergedSize.managedBytes <= AGENTS_MAX_BYTES && convergedSize.customBytes > 0)) {
+        if (!convergedSize.managedOversize) {
           writeAtomic(agentsPath, convergedRefresh.text)
           writeManifestRegions(
             root,
@@ -499,11 +504,13 @@ async function generate(root, agentsPath, template, { manifest, fileName = 'AGEN
     return 2
   }
   const sizeInfo = checkAgentsBytes(content, fileName)
-  if (sizeInfo.oversize) {
-    process.stderr.write(`生成的 ${fileName} 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
+  if (sizeInfo.managedOversize) {
+    process.stderr.write(`生成的 ${fileName} 受管区体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
     return 1
   }
-  if (sizeInfo.warn) {
+  if (sizeInfo.customOversize) {
+    process.stderr.write(`[提示] ${fileName} 自定义正文超参考线（不阻断）：${formatOversizeBreakdown(sizeInfo)}。\n`)
+  } else if (sizeInfo.warn) {
     process.stderr.write(`[警告] ${fileName} 体积 ${sizeInfo.bytes} 字节已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
   }
   mkdirSync(dirname(agentsPath), { recursive: true })
@@ -514,7 +521,7 @@ async function generate(root, agentsPath, template, { manifest, fileName = 'AGEN
   const convergedContent = renderAgentsTemplate(convergedFacts, template, root, { manifest: convergedManifest })
   if (convergedContent !== content) {
     const convergedSize = checkAgentsBytes(convergedContent, fileName)
-    if (!convergedSize.oversize) {
+    if (!convergedSize.managedOversize) {
       content = convergedContent
       writeAtomic(agentsPath, content)
       writeManifestRegions(root, content)
@@ -541,10 +548,16 @@ export async function contractHealth(root, { facts: precomputedFacts } = {}) {
     return {
       broken: [targetInfo.error],
       missing: [],
+      skippedByHeading: [],
       drifted: [],
       customized: [],
       handWritten: false,
       bytes: 0,
+      managedBytes: 0,
+      customBytes: 0,
+      totalOversize: false,
+      managedOversize: false,
+      customOversize: false,
       oversize: false,
     }
   }
@@ -554,15 +567,21 @@ export async function contractHealth(root, { facts: precomputedFacts } = {}) {
     ? manifest.data.removedAgentsRegions : [])
   const info = inspectAgentsFile(agentsPath, rendered, removedSet, agentsName)
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
-  const { bytes, oversize } = checkAgentsBytes(existing, agentsName)
+  const { bytes, managedBytes, customBytes, totalOversize, managedOversize, customOversize } = checkAgentsBytes(existing, agentsName)
   return {
     broken: info.broken ?? [],
     missing: info.regions.length === 0 ? [] : info.missingRegions ?? [],
+    skippedByHeading: info.skippedByHeading ?? [],
     drifted: info.broken.length > 0 ? [] : driftRegions(existing, rendered, volatileValues(facts)),
     customized: info.customized ?? [],
     handWritten: info.regions.length === 0,
     bytes,
-    oversize,
+    managedBytes,
+    customBytes,
+    totalOversize,
+    managedOversize,
+    customOversize,
+    oversize: managedOversize,
   }
 }
 

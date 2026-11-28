@@ -371,7 +371,7 @@ cases.push(['equip.mjs：首次装备、幂等、三态升级与退役删除、�
   }
 }])
 
-cases.push(['compose-agents.mjs：超 30KB 硬阻断、未标 customized 但 SHA256 变化时保护不覆盖', async () => {
+cases.push(['compose-agents.mjs：受管区超 24KB 硬阻断、自定义超 30KB 降级 notice、未标 customized 保护不覆盖', async () => {
   const dir = tmpProject({
     'package.json': '{"name":"cap-demo","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(0)\\""}}\n',
     'README.md': '# cap-demo\n\n体积限制与基线保护测试仓。\n',
@@ -398,12 +398,25 @@ cases.push(['compose-agents.mjs：超 30KB 硬阻断、未标 customized 但 SHA
       return `未标 customized 的手工改动没有被保护跳过：stderr=${g2.stderr}`
     }
 
-    // 2. 反面：AGENTS.md 超 30KB 时刷新必须退出 1 阻断写入
-    const oversized = `${original}\n\n## 补充说明\n\n${'x'.repeat(32000)}\n`
-    writeFileSync(agentsFile, oversized, 'utf8')
+    // 2. 分层预算正例：仅自定义正文超 30KB（受管区 <= 24576B）时降级软提示退出 0 且不改动原文
+    const customOversized = `${original}\n\n## 补充说明\n\n${'x'.repeat(32000)}\n`
+    writeFileSync(agentsFile, customOversized, 'utf8')
+    const gCustom = await runAbsAsync('scripts/compose-agents.mjs', [dir])
+    if (gCustom.status !== 0 || !/managed=/.test(gCustom.stderr || '') || !/custom=/.test(gCustom.stderr || '')) {
+      return `仅自定义超 30KB 应降级 notice 退出 0 并输出 managed/custom 分解：status=${gCustom.status} stderr=${gCustom.stderr}`
+    }
+    if (!readFileSync(agentsFile, 'utf8').includes('## 补充说明')) return '自定义超限软提示时误改动了原文件'
+
+    // 3. 分层预算反例（兼守护 I24）：受管区本身超 24576 字节时刷新必须退出 1 阻断写入
+    const managedOversized = original.replace(
+      '<!-- project-forge: end 项目定位 -->',
+      `\n${'m'.repeat(26000)}\n<!-- project-forge: end 项目定位 -->`,
+    )
+    if (managedOversized === original) return '测试前置替换未命中 项目定位 受管区末尾标记'
+    writeFileSync(agentsFile, managedOversized, 'utf8')
     const g3 = await runAbsAsync('scripts/compose-agents.mjs', [dir])
-    if (g3.status === 0) return 'AGENTS.md 超过 30720 字节时 compose-agents 没有报错阻断'
-    if (!readFileSync(agentsFile, 'utf8').includes('## 补充说明')) return '超限阻断时改动了原文件'
+    if (g3.status === 0) return 'AGENTS.md 受管区超过 24576 字节时 compose-agents 没有报错阻断'
+    if (!readFileSync(agentsFile, 'utf8').includes('m'.repeat(100))) return '受管区超限阻断时改动了原文件'
 
     return true
   } finally { rmTree(dir) }

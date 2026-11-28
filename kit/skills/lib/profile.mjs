@@ -87,7 +87,7 @@ export function parseArchRuleItem(rawRule) {
   return { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` }
 }
 
-/** 从 AGENTS.md 的「## 取舍」节读出已表态键值映射，返回 `Map<id, value>`。 */
+/** 从 AGENTS.md 的「## 取舍」节读出已表态键值映射，返回 `Map<id, value>`（兼容无冒号裸取舍开关）。 */
 export function readDecisionMap(agentsText) {
   const map = new Map()
   if (typeof agentsText !== 'string') return map
@@ -100,7 +100,12 @@ export function readDecisionMap(agentsText) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('<!--') || trimmed.startsWith('>') || trimmed.startsWith('```')) continue
     const m = /^\s*(?:[-*]\s*)?`?([a-z][a-z0-9._-]*)`?\s*[:：]\s*(.*)$/.exec(line)
-    if (m) map.set(m[1], m[2].trim())
+    if (m) {
+      map.set(m[1], m[2].trim())
+      continue
+    }
+    const bare = /^\s*(?:[-*]\s*)?`?([a-z][a-z0-9._-]*)`?\s*(?:<!--[\s\S]*?-->)?\s*$/.exec(line)
+    if (bare) map.set(bare[1], 'true')
   }
   return map
 }
@@ -133,6 +138,95 @@ export function resolveDecisionValue(decisions, agentsText, key) {
   if (typeof decisions === 'string') return readDecisionMap(decisions).get(key) ?? null
   if (agentsText) return readDecisionMap(agentsText).get(key) ?? null
   return null
+}
+
+const DESIGN_DOC_EXT_RE = /\.(?:md|mdx|markdown|rst|txt|adoc|asciidoc)$/i
+const DESIGN_DOC_STEM_RE = /(?:^|[-_.])(?:architecture|design|tdd|rfc|adr|spec)(?:[-_.]|$)/i
+const DESIGN_DOC_ROOT_DIRS = Object.freeze([
+  'docs/design', 'docs/architecture', 'docs/adr', 'docs/rfcs',
+  'doc', 'documentation', 'rfcs', 'adr',
+])
+const DESIGN_DOC_SKIP_DIRS = new Set([
+  '.git', '.worktrees', '.agents', 'node_modules', 'vendor', 'third_party',
+  'dist', 'build', 'out', 'target', '__pycache__', '.venv', 'venv', 'fixtures',
+])
+
+function walkDesignDir(root, relDir, maxDepth, out) {
+  const queue = [{ rel: relDir, depth: relDir ? relDir.split('/').length : 0 }]
+  while (queue.length > 0 && out.length < 2000) {
+    const { rel, depth } = queue.shift()
+    const abs = rel ? join(root, rel) : root
+    if (!existsSync(abs)) continue
+    let entries = []
+    try { entries = readdirSync(abs, { withFileTypes: true }) } catch { continue }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    for (const ent of entries) {
+      if (isMacOsJunkPath(ent.name) || ent.name === '.gitkeep') continue
+      const nextRel = rel ? `${rel}/${ent.name}` : ent.name
+      if (ent.isDirectory()) {
+        if (depth < maxDepth && !DESIGN_DOC_SKIP_DIRS.has(ent.name)) queue.push({ rel: nextRel, depth: depth + 1 })
+      } else if (ent.isFile() && DESIGN_DOC_EXT_RE.test(ent.name)) {
+        out.push(nextRel)
+      }
+    }
+  }
+}
+
+/**
+ * 单源发现仓库存量架构/设计文档（基于 `readdirSync` + `toLowerCase()` 去重，消除大小写不敏感 FS 重复条目）。
+ */
+export function discoverDesignDocs(repoRoot, files = null) {
+  const seenLower = new Set()
+  const found = []
+  const add = (rawRel) => {
+    const rel = posixPath(String(rawRel ?? '')).replace(/^\.\//, '')
+    if (!rel) return
+    const low = rel.toLowerCase()
+    if (low === 'docs/tdd.md') return
+    if (seenLower.has(low)) return
+    seenLower.add(low)
+    found.push(rel)
+  }
+
+  const isTopOrDocsDesignFile = (rel) => {
+    if (!DESIGN_DOC_EXT_RE.test(rel)) return false
+    const slash = rel.lastIndexOf('/')
+    const dir = slash >= 0 ? rel.slice(0, slash) : ''
+    if (dir !== '' && dir.toLowerCase() !== 'docs') return false
+    const base = slash >= 0 ? rel.slice(slash + 1) : rel
+    const stem = base.replace(DESIGN_DOC_EXT_RE, '')
+    return DESIGN_DOC_STEM_RE.test(stem)
+  }
+
+  if (Array.isArray(files) && files.length > 0) {
+    const normList = files
+      .map((f) => posixPath(String(f?.rel ?? f)).replace(/^\.\//, ''))
+      .filter(Boolean)
+      .sort()
+    for (const rel of normList) {
+      const low = rel.toLowerCase()
+      if (isTopOrDocsDesignFile(rel)) { add(rel); continue }
+      if (DESIGN_DOC_ROOT_DIRS.some((d) => low.startsWith(`${d}/`)) && DESIGN_DOC_EXT_RE.test(rel)) add(rel)
+    }
+    return found.sort()
+  }
+
+  for (const dirRel of ['', 'docs']) {
+    const dirAbs = dirRel ? join(repoRoot, dirRel) : repoRoot
+    if (!existsSync(dirAbs)) continue
+    let entries = []
+    try { entries = readdirSync(dirAbs, { withFileTypes: true }) } catch { continue }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    for (const ent of entries) {
+      if (!ent.isFile() || isMacOsJunkPath(ent.name)) continue
+      const fullRel = dirRel ? `${dirRel}/${ent.name}` : ent.name
+      if (isTopOrDocsDesignFile(fullRel)) add(fullRel)
+    }
+  }
+  const nested = []
+  for (const dirRel of DESIGN_DOC_ROOT_DIRS) walkDesignDir(repoRoot, dirRel, 4, nested)
+  for (const rel of nested) add(rel)
+  return found.sort()
 }
 
 /**
@@ -454,6 +548,13 @@ export function parseAgentsProfile(repoRoot) {
           const row = /^\|\s*`([^`]+)`\s*\|/.exec(fullLines[i].trim())
           if (row && !isPlaceholderVal(row[1])) profile.highRisk.push(row[1].trim())
         }
+      }
+    }
+
+    if (profile.evergreenDocs.length === 0 && !explicitNone.has('evergreen-docs')) {
+      const evDecision = readDecisionMap(text).get('evergreen-docs')
+      if (typeof evDecision === 'string' && evDecision.trim() && !isExplicitNoneValue(evDecision)) {
+        for (const item of parseListValue(evDecision.replace(/、/g, ','))) profile.evergreenDocs.push(item)
       }
     }
 

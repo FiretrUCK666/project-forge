@@ -7,7 +7,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { readJsonSafe, readTextSafe } from './text.mjs'
+import { readTextSafe } from './text.mjs'
 import { parseMarkers } from './protocol.mjs'
 import { detectTrackedBuildArtifacts } from './agents-defaults.mjs'
 import { COMMAND_DISPLAY_MAX_BYTES, splitCommandSegments, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
@@ -37,16 +37,16 @@ export function readdirSyncSafe(dir) {
   try { return readdirSync(dir) } catch { return [] }
 }
 
-const PLACEHOLDER_NAME = /^(?:administrator|admin|root|user|default|ubuntu|ec2-user|vagrant|runner|builder)$/i
-const PLACEHOLDER_EMAIL_DOMAIN = /@(?:localhost|.*\.local|.*\.localdomain|.*\.internal)$/i
+const PLACEHOLDER_NAME = /^(?:administrator|admin|root|user|default|ubuntu|ec2-user|vagrant|runner|builder|test-[a-z0-9._-]+)$/i
+const PLACEHOLDER_EMAIL_DOMAIN = /@(?:localhost|example\.(?:com|org|net)|(?:[^@\s]+\.)?(?:local|localdomain|internal|example|invalid|test))$/i
 
 /**
- * 系统占位署名：名字是系统默认值之一，或邮箱落在本地无效域名上。
+ * 系统占位署名：名字是系统/测试占位值，或邮箱落在本地或 RFC 2606 保留无效域名上。
  */
 export function placeholderIdentity(name, email) {
   const hits = []
-  if (typeof name === 'string' && PLACEHOLDER_NAME.test(name.trim())) hits.push(`署名是系统默认值「${name.trim()}」`)
-  if (typeof email === 'string' && PLACEHOLDER_EMAIL_DOMAIN.test(email.trim())) hits.push(`邮箱落在本地无效域名上（${email.trim()}）`)
+  if (typeof name === 'string' && PLACEHOLDER_NAME.test(name.trim())) hits.push(`署名是占位默认值「${name.trim()}」`)
+  if (typeof email === 'string' && PLACEHOLDER_EMAIL_DOMAIN.test(email.trim())) hits.push(`邮箱落在本地或 RFC 2606 保留无效域名上（${email.trim()}）`)
   return hits
 }
 
@@ -277,11 +277,6 @@ export function collectMissingRemoteCapabilities(caps) {
 
 const NOT_APPLICABLE_DECISION_RE = /^(?:不适用|不采用|不启用|n\/a|not\s+applicable|false|no|否)(?=$|[\s，,。；;：:（(])/i
 const SKIP_LICENSE_DECISION_RE = /^(?:暂不|暂未|不放|不公开|不对外|私有|不授权|保留版权|proprietary|无|none|skip|n\/a|不适用)(?=$|[\s，,。；;：:（(])/i
-const ESLINT_CONFIG_FILES = Object.freeze([
-  'eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs',
-  'eslint.config.ts', 'eslint.config.mts', 'eslint.config.cts',
-  '.eslintrc.json', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.yml', '.eslintrc.yaml', '.eslintrc',
-])
 
 /** 检查 `AGENTS.md` `do-not-edit` 是否与受 Git 跟踪的 `dist/` / `build/` 构建产物重叠。 */
 export function findDoNotEditTrackedBuildOverlap(root, facts, doNotEditGlobs = []) {
@@ -324,113 +319,6 @@ export function findTradeoffContradictions(root, facts, decisionMap) {
     }
   }
   return issues
-}
-
-/** 跨生态 Linter / Formatter / Typechecker `.agents/` 忽略探测规则表（只读探测，绝不静默改写宿主配置）。 */
-export const TOOLING_AGENTS_IGNORE_RULES = Object.freeze([
-  {
-    tool: 'ruff',
-    configFiles: ['ruff.toml', '.ruff.toml'],
-    pyprojectSectionRe: /\[tool\.ruff\b/,
-    advice: (cfg) => `在 \`${cfg}\` 的 \`extend-exclude\` 中添加 \`".agents"\``,
-  },
-  {
-    tool: 'mypy',
-    configFiles: ['mypy.ini', '.mypy.ini'],
-    setupCfgSectionRe: /\[mypy\b/,
-    pyprojectSectionRe: /\[tool\.mypy\b/,
-    advice: (cfg) => `在 \`${cfg}\` 的 \`exclude\` 中添加 \`".agents"\``,
-  },
-  {
-    tool: 'pyright',
-    configFiles: ['pyrightconfig.json'],
-    pyprojectSectionRe: /\[tool\.pyright\b/,
-    advice: (cfg) => `在 \`${cfg}\` 的 \`exclude\` 中添加 \`".agents"\``,
-  },
-  {
-    tool: 'pre-commit',
-    configFiles: ['.pre-commit-config.yaml', '.pre-commit-config.yml'],
-    advice: (cfg) => `在 \`${cfg}\` 的 \`exclude\` 中添加 \`^\\.agents/\``,
-  },
-  {
-    tool: 'markdownlint',
-    configFiles: ['.markdownlint.json', '.markdownlint.jsonc', '.markdownlint.yaml', '.markdownlint.yml', '.markdownlintrc'],
-    ignoreFiles: ['.markdownlintignore'],
-    advice: () => '在 `.markdownlintignore` 中添加 `.agents/`',
-  },
-  {
-    tool: 'oxlint',
-    configFiles: ['.oxlintrc.json', '.oxlintrc.jsonc', 'oxlint.config.ts', 'oxlint.config.mts', 'oxlint.config.js', 'oxlint.config.mjs'],
-    pkgKey: 'oxlint',
-    advice: (cfg) => `在 \`${cfg}\` 的 \`ignorePatterns\` 中添加 \`".agents/**"\``,
-  },
-  {
-    tool: 'oxfmt',
-    configFiles: ['.oxfmtrc.json', '.oxfmtrc.jsonc', '.oxfmtrc', 'oxfmt.config.ts', 'oxfmt.config.js', 'oxfmt.config.mjs'],
-    advice: (cfg) => `在 \`${cfg}\` 的 \`ignorePatterns\` 中添加 \`".agents/**"\``,
-  },
-  {
-    tool: 'biome',
-    configFiles: ['biome.json', 'biome.jsonc'],
-    advice: (cfg) => `在 \`${cfg}\` 的 \`files.ignore\`（或 \`!/.agents\`）中添加 \`".agents/**"\``,
-  },
-  {
-    tool: 'dprint',
-    configFiles: ['dprint.json', 'dprint.jsonc'],
-    advice: (cfg) => `在 \`${cfg}\` 的 \`excludes\` 中添加 \`"**/.agents/**"\``,
-  },
-])
-
-/** 跨生态探测已配置检查/格式化工具中尚未忽略 `.agents/**` 的配置清单（纯只读）。 */
-export function detectToolingAgentsIgnoreGaps(root) {
-  const gaps = []
-  const eslintGap = checkEslintAgentsIgnore(root)
-  if (eslintGap) {
-    gaps.push({ tool: 'eslint', configFile: eslintGap.configFile, advice: eslintGap.advice })
-  }
-  const pkg = readJsonSafe(join(root, 'package.json'))
-  const pyProjText = readTextSafe(join(root, 'pyproject.toml')) ?? ''
-  const setupCfgText = readTextSafe(join(root, 'setup.cfg')) ?? ''
-  const mentionsAgents = (rel) => Boolean(rel && /\.agents\b/.test(readTextSafe(join(root, rel)) ?? ''))
-
-  for (const rule of TOOLING_AGENTS_IGNORE_RULES) {
-    const directCfg = (rule.configFiles ?? []).find((f) => existsSync(join(root, f))) ?? null
-    const pyProjHit = !directCfg && rule.pyprojectSectionRe && rule.pyprojectSectionRe.test(pyProjText) ? 'pyproject.toml' : null
-    const setupHit = !directCfg && !pyProjHit && rule.setupCfgSectionRe && rule.setupCfgSectionRe.test(setupCfgText) ? 'setup.cfg' : null
-    const pkgHit = !directCfg && !pyProjHit && !setupHit && rule.pkgKey && pkg?.[rule.pkgKey] ? 'package.json' : null
-    const cfg = directCfg ?? pyProjHit ?? setupHit ?? pkgHit
-    const ignoreFile = (rule.ignoreFiles ?? []).find((f) => existsSync(join(root, f))) ?? null
-    if (!cfg && !ignoreFile) continue
-    if (mentionsAgents(cfg) || mentionsAgents(ignoreFile)) continue
-    const targetCfg = cfg ?? ignoreFile
-    gaps.push({
-      tool: rule.tool,
-      configFile: targetCfg,
-      advice: rule.advice(targetCfg),
-    })
-  }
-  return gaps
-}
-
-/** 检测仓库是否存在 ESLint 配置却未忽略 `.agents/**`。 */
-export function checkEslintAgentsIgnore(root) {
-  const pkg = readJsonSafe(join(root, 'package.json'))
-  const cfgFile = ESLINT_CONFIG_FILES.find((f) => existsSync(join(root, f)))
-    ?? (pkg?.eslintConfig ? 'package.json' : null)
-  const ignoreFile = existsSync(join(root, '.eslintignore')) ? '.eslintignore' : null
-  if (!cfgFile && !ignoreFile) return null
-  const mentionsAgents = (rel) => Boolean(rel && /\.agents\b/.test(readTextSafe(join(root, rel)) ?? ''))
-  const pkgIgnoreOk = Array.isArray(pkg?.eslintIgnore) && pkg.eslintIgnore.some((p) => /\.agents\b/.test(String(p)))
-  if (mentionsAgents(cfgFile) || mentionsAgents(ignoreFile) || pkgIgnoreOk) return null
-  const target = ignoreFile ?? cfgFile
-  const advice = ignoreFile
-    ? '在 `.eslintignore` 添加 `.agents/`'
-    : (cfgFile === 'package.json'
-        ? '在 `package.json` 的 `eslintConfig.ignorePatterns` 或 `.eslintignore` 中添加 `.agents/**`'
-        : (/^eslint\.config\./.test(cfgFile)
-            ? `在 \`${cfgFile}\` 的 \`ignores\` 中添加 \`".agents/**"\``
-            : `在 \`${cfgFile}\` 的 \`ignorePatterns\` 或 \`.eslintignore\` 中添加 \`.agents/**\``))
-  return { configFile: target, advice }
 }
 
 export function renderReviewReport(result, strict) {

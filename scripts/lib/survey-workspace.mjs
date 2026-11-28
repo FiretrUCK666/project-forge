@@ -679,6 +679,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
 }
 
 export const GOVERNANCE_CHECK_PATHS = Object.freeze([
+  '.agents/skills/.pf-manifest.json',
   '.agents/skills/lib/git.mjs',
   '.agents/skills/templates/docs-todo.md',
   '.agents/skills/dev-flow/scripts/flow.mjs',
@@ -689,15 +690,12 @@ export const GOVERNANCE_CHECK_PATHS = Object.freeze([
 
 function buildGitignoreAnchorAdvice(pattern, path, source = '.gitignore') {
   const pat = String(pattern ?? '').trim()
-  if (!pat) return `检查 \`${source}\` 中遮蔽 \`${path}\` 的规则`
-  const bare = pat.replace(/\/+$/, '')
-  if (!pat.startsWith('/') && !/[*?[\]]/.test(pat) && !bare.includes('/')) {
-    return `将 \`${source}\` 中的 \`${pat}\` 锚定为 \`/${pat}\`（避免误伤 \`.agents/skills/\` 等子目录）`
+  const normPath = String(path ?? '').replace(/\\/g, '/')
+  if (normPath === '.agents/skills' || normPath.startsWith('.agents/skills/')) {
+    return `在 \`${source}\` 末尾追加零副作用精确回纳规则 \`!.agents/skills/\` 与 \`!.agents/skills/**\`（保留原有 \`${pat || '忽略'}\` 规则不改写）`
   }
-  if (/[*?[\]]/.test(pat)) {
-    return `在 \`${source}\` 为 \`${path}\` 添加放行规则（如 \`!${path}\`）或收窄 \`${pat}\``
-  }
-  return `收窄或移除 \`${source}\` 中的 \`${pat}\`，避免治理文件无法被 Git 跟踪`
+  if (!pat) return `检查 \`${source}\` 中遮蔽 \`${normPath}\` 的规则，或在末尾追加 \`!${normPath}\``
+  return `在 \`${source}\` 末尾为 \`${normPath}\` 追加精确回纳规则 \`!${normPath}\`（保留既有 \`${pat}\` 规则的原始语义）`
 }
 
 function parseIgnoredGovernanceOutput(stdout) {

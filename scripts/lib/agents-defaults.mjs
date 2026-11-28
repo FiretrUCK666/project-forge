@@ -8,7 +8,6 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { MIN_COMMIT_STYLE_SAMPLES } from '../../kit/skills/lib/git-core.mjs'
 import { hasDotGitInAncestors } from '../../kit/skills/lib/git-fast.mjs'
 import { DEFAULT_HIGH_RISK_PATHS, defaultHighRiskPaths } from '../../kit/skills/lib/profile.mjs'
 import * as protocol from './protocol.mjs'
@@ -231,15 +230,9 @@ export function explorationStrategyBlock(facts) {
 
 export function commitStyleHint(facts) {
   const style = facts.conventions?.commitStyle
-  const commits = facts.git?.commits
-  // 有效样本不足 MIN_COMMIT_STYLE_SAMPLES（5 条）时防抖返回中性提示，不把浅克隆或初创仓误宣称为固定 plain 风格
-  if (style === 'plain' && typeof commits === 'number' && commits < MIN_COMMIT_STYLE_SAMPLES) {
-    return '提交风格：沿用项目既有历史的写法，不混用多套格式，不用内部编号充当说明'
-  }
   const observed = {
     conventional: '本项目历史提交用的是「类型: 说明」的约定式格式',
     gitmoji: '本项目历史提交以 emoji 标记开头',
-    plain: '本项目历史提交是平铺的一句说明',
   }[style]
   if (!observed) return '提交风格：沿用项目既有历史的写法，不混用多套格式，不用内部编号充当说明'
   return `${observed}——沿用它，不要混用第二套格式，不用内部编号充当说明`

@@ -8,6 +8,7 @@ import { basename, join } from 'node:path'
 import {
   ECOSYSTEM_MANIFEST_BY_KIND,
   discoverWorkspacePackages,
+  extractStructuredCiSteps,
   hasDotnetMinVer,
   hasPytestEvidence,
   isDotnetTestProject,
@@ -17,11 +18,9 @@ import {
   resolveJavaWrapper,
   resolveNodePackageManager,
   scanDeclaredTaskRunners,
-  scanNeutralCiSteps,
 } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { BROAD_CODE_EXT_RE, COMMON_OUTPUT_DIRS, matchGlobList } from '../../kit/skills/lib/git-core.mjs'
 import { summarizeSkillDescription } from '../../kit/skills/lib/skill-discovery.mjs'
-import { classifyCommandText, COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
 import { isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
 import { normalizeDeclaredRepo } from '../../kit/skills/lib/platform.mjs'
@@ -493,38 +492,18 @@ export function detectEcosystem(root, fileRelList = null) {
   return s
 }
 
-/** 从 CI 配置与任务文件读取语言无关命令。 */
-const COMMAND_KINDS = [
-  { key: 'test', re: /\b(?:test|tests|runtest|spec|specs|check|verify|validate|preflight|pytest|unittest|vitest|jest|mocha|rspec|ctest|phpunit)\b/i },
-  { key: 'lint', re: /\b(?:lint|clippy|rubocop|eslint|flake8|pylint|ruff|mypy|pyright|biome|format|fmt|hlint|vet)\b/i },
-  { key: 'build', re: /\b(?:build|compile|bundle|package|make|assemble)\b/i },
-  { key: 'install', re: /\b(?:install|deps|dependencies|setup|bootstrap|restore)\b/i },
-]
-
+/** 从 CI 配置读取语言无关结构化单步命令（单源实现于 profile-sniffer.mjs，绝不跨 workflow 拼接）。 */
 export function detectCiCommands(root, neutralCi = null) {
-  const commands = {}
-  const sources = {}
-  const evidence = []
-  const testCmds = []
-  const { steps } = neutralCi ?? scanNeutralCiSteps(root)
-  for (const step of steps) {
-    const cleanCmd = String(step.cmd ?? '').trim().replace(/\s+/g, ' ')
-    const kind = cleanCmd ? classifyCommandText(cleanCmd, COMMAND_KINDS) : null
-    if (!kind) continue
-    if (kind === 'test') {
-      if (!testCmds.includes(cleanCmd)) {
-        testCmds.push(cleanCmd)
-        sources[kind] ??= step.file
-        evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: cleanCmd })
-      }
-    } else if (commands[kind] === undefined) {
-      commands[kind] = cleanCmd
-      sources[kind] = step.file
-      evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: cleanCmd })
+  const { commands, sources, evidence, omittedSteps } = extractStructuredCiSteps(root, { neutralCi })
+  const outCommands = { ...commands }
+  const outSources = { ...sources }
+  for (const om of omittedSteps ?? []) {
+    if (outCommands[om.kind] === undefined && om.bytes > 500) {
+      outCommands[om.kind] = om.cmd
+      outSources[om.kind] = om.file
     }
   }
-  if (testCmds.length > 0) commands.test = testCmds.join(' && ')
-  return { commands, sources, evidence }
+  return { commands: outCommands, sources: outSources, evidence }
 }
 
 export function detectDeclaredTaskCommands(root, preRunners = null) {

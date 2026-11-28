@@ -114,7 +114,7 @@ async function runNodeOwnSkillsDay2AndUpgrade(tracker, envExtra) {
     'packages/web/AGENTS.md': '# web-module\n\nKeep frontend clean.\n',
     'docs/specs/260101-existing-spec.md': '# Existing Foreign Spec\n\nDo not delete.\n',
   })
-  gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+  gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@acme-fixture.dev' })
 
   try {
     const s1 = await survey(dir, { quiet: true })
@@ -211,7 +211,7 @@ async function runPythonBlindSample(tracker, envExtra) {
     'tests/test_calc.py': 'import unittest\nfrom src.calc import add\n\nclass T(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n\nif __name__ == "__main__":\n    unittest.main()\n',
     'tests/smoke.py': 'import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))\nfrom src.calc import add\nassert add(10, 5) == 15\nprint("PY_SMOKE_OK")\n',
   })
-  gitInit(dir, { branch: 'main', name: 'bob', email: 'bob@example.com' })
+  gitInit(dir, { branch: 'main', name: 'bob', email: 'bob@acme-fixture.dev' })
   try {
     const s = await survey(dir, { quiet: true })
     const eq = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--no-backup'], dir, envExtra)
@@ -253,7 +253,7 @@ async function runPolyglotGoRustBlindSample(tracker, envExtra) {
     'Cargo.toml': '[package]\nname = "blind_rust"\nversion = "0.1.0"\nedition = "2021"\n',
     'src/lib.rs': 'pub fn mul(a: i32, b: i32) -> i32 { a * b }\n#[cfg(test)]\nmod tests {\n  use super::*;\n  #[test]\n  fn it_works() { assert_eq!(mul(3, 4), 12); }\n}\n',
   })
-  gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@example.com' })
+  gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@acme-fixture.dev' })
   try {
     const s = await survey(dir, { quiet: true })
     const eq = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--no-backup'], dir, envExtra)
@@ -294,7 +294,7 @@ async function runZeroHintAndWeakModelGuard(tracker, sandbox, envExtra) {
   })
   const bareDir = join(sandbox, 'zh-bare.git')
   gitInitBare(bareDir)
-  gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+  gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@acme-fixture.dev' })
   gitSync(dir, ['remote', 'add', 'origin', 'https://github.com/acme/blind-demo.git'])
   gitSync(dir, ['config', `url.${bareDir.replace(/\\/g, '/')}.pushInsteadOf`, 'https://github.com/acme/blind-demo.git'])
   try {

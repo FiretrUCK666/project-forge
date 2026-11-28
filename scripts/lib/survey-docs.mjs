@@ -12,6 +12,7 @@ import { scanNeutralCiSteps } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { isManagedPlanDoc } from '../../kit/skills/lib/doc-frontmatter.mjs'
 import { ARCHITECTURE_MAP_REL, verifyArchitectureMapSync } from '../../kit/skills/lib/architecture-map.mjs'
 import { FEATURE_MAP_REL } from '../../kit/skills/lib/feature-map.mjs'
+import { discoverDesignDocs } from '../../kit/skills/lib/profile.mjs'
 
 const { LIKELY_DEFAULT_BRANCHES } = protocol
 const parseMarkers = protocol.parseMarkers
@@ -200,40 +201,7 @@ function normalizedRelList(root, files, fallbackDirs, opts) {
 }
 
 function detectExistingDesignDocs(root, files = null) {
-  const found = new Set()
-  const candidates = [
-    'ARCHITECTURE.md', 'architecture.md', 'DESIGN.md', 'design.md',
-    'docs/ARCHITECTURE.md', 'docs/architecture.md', 'docs/DESIGN.md', 'docs/design.md',
-  ]
-  for (const rel of candidates) {
-    if (existsSync(join(root, rel))) found.add(rel)
-  }
-  for (const dirRel of ['', 'docs']) {
-    const dirAbs = dirRel ? join(root, dirRel) : root
-    if (!existsSync(dirAbs)) continue
-    let names = []
-    try { names = readdirSync(dirAbs) } catch { continue }
-    for (const name of names) {
-      if (isMacMetadataName(name)) continue
-      const fullRel = dirRel ? `${dirRel}/${name}` : name
-      if (fullRel === 'docs/TDD.md') continue
-      if (/(?:-|_)tdd\.md$|^tdd\.md$/i.test(name)) {
-        found.add(fullRel)
-      }
-    }
-  }
-  const designRoots = [
-    'docs/design', 'docs/architecture', 'docs/adr', 'docs/rfcs',
-    'doc', 'documentation', 'rfcs', 'adr',
-  ]
-  const scanned = Array.isArray(files) && files.length > 0
-    ? files.map((f) => String(f?.rel ?? f).replace(/\\/g, '/'))
-    : walkBoundedRelFiles(root, designRoots, { maxDepth: 4 })
-  for (const rel of scanned) {
-    const inDesignDir = designRoots.some((d) => rel.startsWith(`${d}/`))
-    if (inDesignDir && DOC_EXT_RE.test(rel)) found.add(rel)
-  }
-  return [...found].sort()
+  return discoverDesignDocs(root, files)
 }
 
 function detectNonStandardArtifacts(root, readmes, files = null) {
@@ -534,7 +502,20 @@ function partitionPlanDir(root, dirRel) {
   const prdDirContent = prdPart.content
   const preservedForeignPlanDocs = [...new Set([...specsPart.foreign, ...todoPart.foreign, ...prdPart.foreign])].sort()
   let agentsBytes = 0
-  if (agents) { try { agentsBytes = statSync(join(root, agents)).size } catch { agentsBytes = 0 } }
+  let agentsManagedBytes = 0
+  let agentsCustomBytes = 0
+  if (agents) {
+    const agentsText = textByRel?.get(agents) ?? readTextSafe(join(root, agents))
+    if (typeof agentsText === 'string') {
+      const measured = protocol.measureAgentsBytes(agentsText, agents)
+      agentsBytes = measured.bytes
+      agentsManagedBytes = measured.managedBytes
+      agentsCustomBytes = measured.customBytes
+    } else {
+      try { agentsBytes = statSync(join(root, agents)).size } catch { agentsBytes = 0 }
+      agentsCustomBytes = agentsBytes
+    }
+  }
   const featureMap = existsSync(join(root, FEATURE_MAP_REL)) ? FEATURE_MAP_REL : undefined
   const architectureMap = existsSync(join(root, ARCHITECTURE_MAP_REL)) ? ARCHITECTURE_MAP_REL : undefined
   const architectureMapSync = featureMap ? verifyArchitectureMapSync(root) : { ok: true, skipped: true, reason: 'feature-map-absent', relPath: ARCHITECTURE_MAP_REL }
@@ -546,6 +527,8 @@ function partitionPlanDir(root, dirRel) {
     nonMdReadmes: nonStandard.nonMdReadmes,
     agents: agents ? { file: agents } : undefined,
     agentsBytes,
+    agentsManagedBytes,
+    agentsCustomBytes,
     agentsMarkers: parseAgentMarkers(root, agents, textByRel),
     contributing,
     contributingFiles,
@@ -587,73 +570,103 @@ const WORK_DIR_CANDIDATES = ['docs/todo', 'docs/work', 'docs/tasks', 'todo', 'wo
 
 export const FORGE_HOOK_MARKER = '# project-forge: githooks-pre-push'
 
-const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml', 'lefthook-local.yml', 'lefthook-local.yaml']
+const STANDARD_GIT_HOOK_NAMES = new Set([
+  'applypatch-msg', 'pre-applypatch', 'post-applypatch', 'pre-commit', 'pre-merge-commit',
+  'prepare-commit-msg', 'commit-msg', 'post-commit', 'pre-rebase', 'post-checkout', 'post-merge',
+  'pre-push', 'pre-receive', 'update', 'proc-receive', 'post-receive', 'post-update',
+  'reference-transaction', 'push-to-checkout', 'pre-auto-gc', 'post-rewrite', 'sendemail-validate',
+  'fsmonitor-watchman', 'post-index-change',
+])
+const NON_HOOK_HIDDEN_DIRS = new Set([
+  '.git', '.githooks', '.agents', '.worktrees', '.github', '.vscode', '.idea', '.fleet', '.cache',
+  '.next', '.nuxt', '.venv', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.changeset',
+  '.devcontainer', '.yarn', '.pnpm-store', '.turbo', '.vercel', '.gradle',
+])
+const ROOT_HOOK_CONFIG_RE = /^(?:\.?lefthook(?:-[a-z0-9_-]+)?\.ya?ml|\.pre-commit-config\.ya?ml|\.?simple-git-hooks(?:\.[a-z0-9]+)?|\.huskyrc(?:\.[a-z0-9]+)?)$/i
+const PKG_HOOK_FIELDS = ['simple-git-hooks', 'husky', 'yorkie']
+
+function isNonEmptyFile(p) { try { return statSync(p).size > 0 } catch { return false } }
+
+function scanStandardHookFilesInDir(dirAbs) {
+  if (!existsSync(dirAbs)) return []
+  const hits = new Set()
+  let entries = []
+  try { entries = readdirSync(dirAbs, { withFileTypes: true }) } catch { return [] }
+  for (const e of entries) {
+    if (isMacMetadataName(e.name) || e.name.endsWith('.sample')) continue
+    if (e.isFile() && STANDARD_GIT_HOOK_NAMES.has(e.name) && isNonEmptyFile(join(dirAbs, e.name))) {
+      hits.add(e.name)
+    } else if (e.isDirectory() && (e.name === '_' || STANDARD_GIT_HOOK_NAMES.has(e.name))) {
+      let sub = []
+      try { sub = readdirSync(join(dirAbs, e.name), { withFileTypes: true }) } catch { continue }
+      for (const s of sub) {
+        if (!s.isFile() || isMacMetadataName(s.name) || s.name.endsWith('.sample')) continue
+        if ((STANDARD_GIT_HOOK_NAMES.has(e.name) || STANDARD_GIT_HOOK_NAMES.has(s.name)) && isNonEmptyFile(join(dirAbs, e.name, s.name))) {
+          hits.add(`${e.name}/${s.name}`)
+        }
+      }
+    }
+  }
+  return [...hits].sort()
+}
 
 function normalizeHooksPath(raw) {
-  const s = String(raw ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
-  return s.replace(/^\.\//, '')
+  return String(raw ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '').replace(/^\.\//, '')
 }
 
 function readGitHooksPathSync(root) {
   if (!existsSync(join(root, '.git'))) return { value: undefined, scope: undefined }
   for (const args of [['config', '--local', '--get', 'core.hooksPath'], ['config', '--get', 'core.hooksPath']]) {
     const res = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true })
-    if (res.status === 0 && res.stdout && res.stdout.trim()) {
-      return {
-        value: res.stdout.trim(),
-        scope: args.includes('--local') ? 'local' : 'global',
-      }
+    if (res.status === 0 && res.stdout?.trim()) {
+      return { value: res.stdout.trim(), scope: args.includes('--local') ? 'local' : 'global' }
     }
   }
   return { value: undefined, scope: undefined }
 }
 
-/**
- * 只读探测本地 Git Hook 管理状况（`.husky/`、`lefthook*`、`core.hooksPath` 与 `.githooks/pre-push`）。
- */
+/** 只读探测本地 Git Hook 管理状况（4 条零工具名白名单的通用不变量）。 */
 export function detectGitHooksState(root, { coreHooksPath, hooksPathScope } = {}) {
   let rawHooksPath = coreHooksPath
   let scope = hooksPathScope
-  if (rawHooksPath === undefined) {
-    const probed = readGitHooksPathSync(root)
-    rawHooksPath = probed.value
-    scope = probed.scope
-  }
+  if (rawHooksPath === undefined) ({ value: rawHooksPath, scope } = readGitHooksPathSync(root))
   const normalizedHooksPath = rawHooksPath ? normalizeHooksPath(rawHooksPath) : ''
   const conflicts = []
 
-  if (existsSync(join(root, '.husky'))) {
-    conflicts.push({
-      kind: 'husky',
-      path: '.husky/',
-      detail: '仓库已存在 .husky/ 钩子目录，preserve 不覆盖，请将默认分支推送护栏并入既有钩子',
-    })
+  // 1) core.hooksPath 非空且非 .githooks
+  if (normalizedHooksPath && normalizedHooksPath !== '.githooks') {
+    conflicts.push({ kind: 'custom-hooks-path', path: rawHooksPath, detail: `仓库已配置自定义 core.hooksPath=${rawHooksPath}，preserve 不覆盖` })
   }
-  for (const rel of LEFTHOOK_FILES) {
-    if (existsSync(join(root, rel))) {
+
+  // 2) 仓根非保留隐藏目录与 .git/hooks/ 存在非 .sample 标准 Git 钩子文件
+  let rootEntries = []
+  try { rootEntries = readdirSync(root, { withFileTypes: true }).filter((d) => !isMacMetadataName(d.name)) } catch { rootEntries = [] }
+  for (const entry of rootEntries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('.') || NON_HOOK_HIDDEN_DIRS.has(entry.name)) continue
+    const foundHooks = scanStandardHookFilesInDir(join(root, entry.name))
+    if (foundHooks.length > 0) {
       conflicts.push({
-        kind: 'lefthook',
-        path: rel,
-        detail: `仓库已存在 ${rel}，preserve 不接管 core.hooksPath，请按需将保护脚本接入现有配置`,
+        kind: 'hidden-dir-hooks', path: `${entry.name}/`, files: foundHooks,
+        detail: `仓库隐藏目录 ${entry.name}/ 已存在标准 Git 钩子（${foundHooks.join('、')}），preserve 不接管 core.hooksPath`,
       })
     }
   }
-  if (existsSync(join(root, '.lefthook'))) {
-    conflicts.push({
-      kind: 'lefthook',
-      path: '.lefthook/',
-      detail: '仓库已存在 .lefthook/ 目录，preserve 不接管 core.hooksPath，请保持原有钩子管理入口',
-    })
-  }
-  if (normalizedHooksPath && normalizedHooksPath !== '.githooks') {
-    conflicts.push({
-      kind: 'custom-hooks-path',
-      path: rawHooksPath,
-      detail: `仓库已配置自定义 core.hooksPath=${rawHooksPath}，preserve 不覆盖`,
-    })
+  const dotGitHooksAbs = join(root, '.git', 'hooks')
+  if (existsSync(dotGitHooksAbs)) {
+    try {
+      const customDotHooks = readdirSync(dotGitHooksAbs, { withFileTypes: true })
+        .filter((e) => e.isFile() && !e.name.endsWith('.sample') && !isMacMetadataName(e.name) && isNonEmptyFile(join(dotGitHooksAbs, e.name)))
+        .map((e) => e.name).sort()
+      if (customDotHooks.length > 0) {
+        conflicts.push({
+          kind: 'custom-git-hooks', path: '.git/hooks/', files: customDotHooks,
+          detail: `仓库已存在自定义 .git/hooks/ 钩子（${customDotHooks.join('、')}），preserve 不覆写`,
+        })
+      }
+    } catch {}
   }
 
-  const prePushRel = '.githooks/pre-push'
+  // 3) .githooks/ 存在不含 FORGE_HOOK_MARKER 的用户自定义钩子文件
   const prePushAbs = join(root, '.githooks', 'pre-push')
   const hasPrePush = existsSync(prePushAbs)
   let managedPrePush = false
@@ -662,22 +675,13 @@ export function detectGitHooksState(root, { coreHooksPath, hooksPathScope } = {}
     const content = readTextSafe(prePushAbs) ?? ''
     managedPrePush = content.includes(FORGE_HOOK_MARKER)
     if (!managedPrePush) {
-      conflicts.push({
-        kind: 'custom-githooks-pre-push',
-        path: prePushRel,
-        detail: '仓库已存在非本工具创建的 .githooks/pre-push，preserve 不覆写',
-      })
+      conflicts.push({ kind: 'custom-githooks-pre-push', path: '.githooks/pre-push', detail: '仓库已存在非本工具创建的 .githooks/pre-push，preserve 不覆写' })
     }
     try {
       const mode = statSync(prePushAbs).mode
-      prePushExecutable = process.platform === 'win32'
-        ? managedPrePush || /^#!\/bin\/sh/.test(content)
-        : (mode & 0o111) !== 0
-    } catch {
-      prePushExecutable = false
-    }
+      prePushExecutable = process.platform === 'win32' ? (managedPrePush || /^#!\/bin\/sh/.test(content)) : (mode & 0o111) !== 0
+    } catch { prePushExecutable = false }
   }
-
   const hooksDirAbs = join(root, '.githooks')
   const hasGithooksDir = existsSync(hooksDirAbs)
   let githooksFiles = []
@@ -685,67 +689,35 @@ export function detectGitHooksState(root, { coreHooksPath, hooksPathScope } = {}
     try {
       githooksFiles = readdirSync(hooksDirAbs, { withFileTypes: true })
         .filter((e) => e.isFile() && !isMacMetadataName(e.name) && e.name !== '.gitkeep')
-        .map((e) => e.name)
-        .sort()
+        .map((e) => e.name).sort()
     } catch { githooksFiles = [] }
   }
-  const customHookFiles = githooksFiles.filter((name) => !(name === 'pre-push' && managedPrePush))
-  if (!managedPrePush && !hasPrePush && customHookFiles.length > 0) {
-    conflicts.push({
-      kind: 'custom-githooks',
-      path: '.githooks/',
-      detail: `仓库已存在既有 .githooks/ 钩子（${customHookFiles.join('、')}），preserve 不覆写`,
-    })
+  const customHookFiles = githooksFiles.filter((name) => name !== 'pre-push' && !(readTextSafe(join(hooksDirAbs, name)) ?? '').includes(FORGE_HOOK_MARKER))
+  if (customHookFiles.length > 0) {
+    conflicts.push({ kind: 'custom-githooks', path: '.githooks/', files: customHookFiles, detail: `仓库已存在既有 .githooks/ 钩子（${customHookFiles.join('、')}），preserve 不覆写` })
   }
 
+  // 4) 仓根钩子管理器配置文件或 package.json 钩子配置字段
+  for (const entry of rootEntries) {
+    if (entry.isFile() && ROOT_HOOK_CONFIG_RE.test(entry.name)) {
+      conflicts.push({ kind: 'root-hook-config', path: entry.name, detail: `仓库已存在根级钩子配置 ${entry.name}，preserve 不接管 core.hooksPath` })
+    }
+  }
   const pkg = readJsonSafe(join(root, 'package.json'))
-  const sghCfgFile = [
-    '.simple-git-hooks.json', '.simple-git-hooks.cjs', '.simple-git-hooks.mjs', '.simple-git-hooks.js',
-    'simple-git-hooks.json', 'simple-git-hooks.cjs', 'simple-git-hooks.mjs', 'simple-git-hooks.js', '.simple-git-hooks',
-  ].find((rel) => existsSync(join(root, rel)))
-  const hasPkgSgh = Boolean(pkg && typeof pkg['simple-git-hooks'] === 'object' && pkg['simple-git-hooks'] !== null
-    && Object.keys(pkg['simple-git-hooks']).length > 0)
-  if (hasPkgSgh || sghCfgFile) {
-    const sghPath = sghCfgFile ?? 'package.json#simple-git-hooks'
-    conflicts.push({
-      kind: 'simple-git-hooks',
-      path: sghPath,
-      detail: `仓库已配置 ${sghPath}，preserve 不接管 core.hooksPath`,
-    })
-  }
-
-  const dotGitHooksAbs = join(root, '.git', 'hooks')
-  if (existsSync(dotGitHooksAbs)) {
-    try {
-      const customDotHooks = readdirSync(dotGitHooksAbs, { withFileTypes: true })
-        .filter((e) => e.isFile() && !e.name.endsWith('.sample') && !isMacMetadataName(e.name))
-        .filter((e) => {
-          try { return statSync(join(dotGitHooksAbs, e.name)).size > 0 } catch { return false }
-        })
-        .map((e) => e.name)
-        .sort()
-      if (customDotHooks.length > 0) {
-        conflicts.push({
-          kind: 'custom-git-hooks',
-          path: '.git/hooks/',
-          files: customDotHooks,
-          detail: `仓库已存在自定义 .git/hooks/ 钩子（${customDotHooks.join('、')}），preserve 不覆写`,
-        })
+  if (pkg && typeof pkg === 'object') {
+    for (const field of PKG_HOOK_FIELDS) {
+      const val = pkg[field]
+      if ((typeof val === 'object' && val !== null && Object.keys(val).length > 0) || (typeof val === 'string' && val.trim().length > 0)) {
+        conflicts.push({ kind: 'root-hook-config', path: `package.json#${field}`, detail: `仓库已配置 package.json#${field}，preserve 不接管 core.hooksPath` })
       }
-    } catch { /* ignore */ }
+    }
   }
 
   return {
-    coreHooksPath: normalizedHooksPath || undefined,
-    coreHooksPathScope: scope || undefined,
-    hasGithooksDir,
-    githooksFiles,
-    hasPrePush,
-    managedPrePush,
-    prePushExecutable,
+    coreHooksPath: normalizedHooksPath || undefined, coreHooksPathScope: scope || undefined,
+    hasGithooksDir, githooksFiles, hasPrePush, managedPrePush, prePushExecutable,
     installed: Boolean(hasPrePush && managedPrePush && normalizedHooksPath === '.githooks'),
-    conflicts,
-    hasConflict: conflicts.length > 0,
+    conflicts, hasConflict: conflicts.length > 0,
   }
 }
 

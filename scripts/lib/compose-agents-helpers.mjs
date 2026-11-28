@@ -13,12 +13,12 @@ import { writeAtomic } from './fs-atomic.mjs'
 import * as protocol from './protocol.mjs'
 import { isMacMetadataName, readTextSafe } from './text.mjs'
 import {
+  analyzeContractSections,
   collectMissingSections,
-  missingRegionsOf,
   regionBodySha,
 } from './agents-sections.mjs'
 
-const { AGENTS_MAX_BYTES, LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers } = protocol
+const { AGENTS_MANAGED_MAX_BYTES, AGENTS_MAX_BYTES, LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers } = protocol
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -131,11 +131,12 @@ export async function maybePreWriteBackup(root, existingText, noBackup) {
 }
 
 export function formatOversizeBreakdown(sizeInfo) {
-  const canBypass = sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0
-  const bypassHint = canBypass
-    ? '；若需完整保留既有自定义长文，可加 `--allow-custom-oversize` 放行'
-    : ''
-  return `total=${sizeInfo.bytes}B（受管区 managed=${sizeInfo.managedBytes}B + 自定义/正文 custom=${sizeInfo.customBytes}B，上限 ${AGENTS_MAX_BYTES}B / 30KB）；建议将长篇子模块规范外置到 <subdir>/AGENTS.md 或 docs/TDD.md${bypassHint}`
+  const managedLimit = AGENTS_MANAGED_MAX_BYTES
+  const managedOversize = Boolean(sizeInfo.managedOversize ?? (sizeInfo.managedBytes > managedLimit))
+  const pointerHint = managedOversize
+    ? '请精简受管区或外置长篇架构细节到 docs/TDD.md'
+    : '超限源自项目自定义正文（不阻断交付）；可选紧凑指针模式：将长篇子模块规范外置到 <subdir>/AGENTS.md 或 docs/TDD.md 并在根文件保留指针（兼容 --allow-custom-oversize）'
+  return `total=${sizeInfo.bytes}B（受管区 managed=${sizeInfo.managedBytes}B / 上限 ${managedLimit}B (24KB) + 自定义/正文 custom=${sizeInfo.customBytes}B，总长参考线 ${AGENTS_MAX_BYTES}B / 30KB）；${pointerHint}`
 }
 
 export function readManifestSafe(root) {
@@ -208,21 +209,22 @@ export function inspectAgentsFile(agentsPath, rendered, removedRegions = null, f
   const text = readTextSafe(agentsPath)
   if (text === undefined) {
     return {
-      state: 'unreadable', fills: [], regions: [], broken: [], missingRegions: [], customized: [],
+      state: 'unreadable', fills: [], regions: [], broken: [], missingRegions: [], skippedByHeading: [], customized: [],
     }
   }
   const markers = parseMarkers(text, fileName)
   const fills = markers.filter((m) => m.kind === 'fill')
   const regions = markerRegions(text, fileName)
-  const present = new Set(regions.regions.map((r) => r.id))
   const customized = regions.regions.filter((r) => r.customized).map((r) => r.id)
+  const sectionAnalysis = analyzeContractSections(text, rendered, removedRegions)
   return {
     state: fills.length > 0 ? 'has-fills' : 'ok',
     fills,
     regions: regions.regions,
     broken: regions.broken,
     customized,
-    missingRegions: missingRegionsOf(present, rendered, text, removedRegions),
+    missingRegions: sectionAnalysis.missingRegions,
+    skippedByHeading: sectionAnalysis.skippedByHeading,
     text,
   }
 }
@@ -255,6 +257,10 @@ export function reportAgentsStatus(fileName, info, renderedCache, { verbose = fa
   if (info.missingRegions.length > 0) {
     process.stdout.write(`还有 ${info.missingRegions.length} 节该有却没有：${info.missingRegions.join('、')}\n`
       + '（模板里的条件现在为真，所以这一节该在。跑一次不带参数就会补上，已有内容不动。）\n')
+  }
+  if ((info.skippedByHeading?.length ?? 0) > 0) {
+    process.stdout.write(`[诊断 skippedByHeading] 因既有同名标题跳过自动注入 ${info.skippedByHeading.length} 节：`
+      + `${info.skippedByHeading.map((s) => `${s.id}<-"${s.heading}"`).join('、')}\n`)
   }
   if (info.fills.length > 0) {
     process.stdout.write(`还有 ${info.fills.length} 处要人填：\n`)

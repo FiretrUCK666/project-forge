@@ -178,3 +178,70 @@ export function truncateCommandForDisplay(command, maxBytes = COMMAND_DISPLAY_MA
   }
   return { text: `${cut}${suffix}`, total, truncated: true }
 }
+
+const CONTROL_FLOW_HEADS = new Set([
+  'if', 'then', 'elif', 'else', 'fi', 'for', 'while', 'until', 'do', 'done', 'case', 'esac', 'in', '{', '}', ';;',
+])
+const EXPLICIT_NONE_CMD_RE = /^(?:none|\(none\))$/i
+const UNFILLED_CMD_RE = /^(?:<[^>\n]+>|待填|待补充|未配置|tbd|fixme|todo)$/i
+const NATURAL_LANG_CJK_RE = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/
+const VALID_CMD_HEAD_RE = /^(?:[A-Za-z]:[\\/]|[./\\~])?[A-Za-z0-9_@.+:/\\-]+$/
+
+function stripQuotedAndComment(text) {
+  let out = ''
+  let quote = ''
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < text.length) { i += 1; continue }
+      if (ch === quote) quote = ''
+      continue
+    }
+    if (ch === '"' || ch === '\'') { quote = ch; out += ' '; continue }
+    if (ch === '#' && (i === 0 || /\s/.test(text[i - 1]))) break
+    out += ch
+  }
+  return out
+}
+
+/**
+ * 校验 Dev Profile 或 feature-map 中的命令文本是否符合可执行 CLI 形态：
+ * 拒绝自然语言句式（含未加引号的中文/全角标点）、占位符、GitHub 表达式与控制流残片，
+ * 仅放行合法可执行命令或显式 `none`（当 `allowNone` 为真时）。
+ */
+export function validateExecutableCommandShape(raw, { allowNone = true } = {}) {
+  const cleaned = String(raw ?? '').trim().replace(/^`+|`+$/g, '').trim()
+  if (!cleaned) return { ok: false, reason: '命令为空' }
+  if (EXPLICIT_NONE_CMD_RE.test(cleaned)) {
+    return allowNone ? { ok: true, isNone: true, segments: [], heads: [] } : { ok: false, reason: '显式 none 不可作为可执行命令' }
+  }
+  if (UNFILLED_CMD_RE.test(cleaned) || /<[^>\n]+>/.test(cleaned)) {
+    return { ok: false, reason: '包含未填占位符' }
+  }
+  if (/[\r\n]/.test(cleaned) || /(?:^|[^\\])\\\s*$/.test(cleaned)) {
+    return { ok: false, reason: '包含多行内容或未闭合续行符' }
+  }
+  if (cleaned.includes('${{')) {
+    return { ok: false, reason: '包含未展开模板表达式' }
+  }
+  const unquoted = stripQuotedAndComment(cleaned)
+  if (NATURAL_LANG_CJK_RE.test(unquoted)) {
+    return { ok: false, reason: '包含非可执行中文自然语言描述' }
+  }
+  if (/<<-?\s*['"]?[A-Za-z0-9_]+['"]?/.test(unquoted)) {
+    return { ok: false, reason: '包含 heredoc 多行脚本片段' }
+  }
+  const segments = splitCommandSegments(cleaned)
+  if (segments.length === 0) return { ok: false, reason: '缺少有效命令段' }
+  const heads = []
+  for (const seg of segments) {
+    const rawHead = commandHeadOf(seg)
+    if (!rawHead) return { ok: false, reason: '缺少可执行命令头' }
+    const head = rawHead.replace(/^['"]|['"]$/g, '')
+    if (!head || CONTROL_FLOW_HEADS.has(head.toLowerCase()) || !VALID_CMD_HEAD_RE.test(head)) {
+      return { ok: false, reason: `命令头 "${head || rawHead}" 不是合法可执行形态` }
+    }
+    heads.push(head)
+  }
+  return { ok: true, isNone: false, segments, heads }
+}

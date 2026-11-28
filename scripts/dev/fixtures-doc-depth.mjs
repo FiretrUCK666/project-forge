@@ -579,8 +579,12 @@ export function registerDocDepthCases(cases) {
       const covFull = checkMasterPrdCoverage(dir, { prdRel: 'docs/prd/261117-master-prd.md' })
       if (covFull.length !== 0) return `checkMasterPrdCoverage 全覆盖后仍误报：${JSON.stringify(covFull)}`
 
-      // 本仓真实总控 PRD 覆盖率（含已归档 #49/#55/#57/#58 切片）必须 0 漏项
-      const selfCov = checkMasterPrdCoverage(SKILL_ROOT)
+      // 本仓真实总控 PRD 覆盖率（含已归档切片）必须 0 漏项；分波次多切片且尚处 hold-staged 的总控 PRD 除外
+      const { evaluateMasterPrdClosureState } = await import('../../kit/skills/lib/doc-substantive.mjs')
+      const selfCov = checkMasterPrdCoverage(SKILL_ROOT).filter((item) => {
+        const closure = evaluateMasterPrdClosureState(SKILL_ROOT, item.file)
+        return !(closure.isMasterPrd && (closure.state === 'hold-staged' || closure.state === 'hold-manual-or-active'))
+      })
       if (selfCov.length !== 0) {
         return `checkMasterPrdCoverage 扫描已归档关联 SPEC：本仓真实总控 PRD 仍有漏项：${JSON.stringify(selfCov)}`
       }

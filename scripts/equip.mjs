@@ -13,9 +13,8 @@ import { fileURLToPath } from 'node:url'
 
 import { ensurePreWriteBackup } from './backup.mjs'
 import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
-import { detectIgnoredGovernancePaths } from './lib/survey-workspace.mjs'
+import { detectIgnoredGovernancePaths, GOVERNANCE_CHECK_PATHS } from './lib/survey-workspace.mjs'
 import { cleanStaleLocalModeMarker } from '../kit/skills/lib/platform.mjs'
-import { detectOptionalNativeCheckers } from '../kit/skills/lib/profile-sniffer.mjs'
 import {
   generateInitialBootstrappedAgents,
   installGitHooks,
@@ -195,11 +194,16 @@ export function equip(targetDir, {
 
   const skillsDir = join(root, '.agents', 'skills')
   if (existsSync(skillsDir)) clearStaleTemps(skillsDir, { dryRun, recursive: true })
-  const ignoredGovernancePaths = detectIgnoredGovernancePaths(root)
   const manifestPath = join(root, PF_MANIFEST_REL)
   const existing = readExistingManifest(manifestPath)
   const kitSkills = getKitSkills(kitDir)
   const kitFiles = walkKitFiles(kitDir)
+  const dynamicGovPaths = [...new Set([
+    ...GOVERNANCE_CHECK_PATHS,
+    PF_MANIFEST_REL,
+    ...[...kitFiles.keys()].map((rel) => `.agents/skills/${rel}`),
+  ])].sort()
+  const ignoredGovernancePaths = detectIgnoredGovernancePaths(root, dynamicGovPaths)
   const resolver = createBaselineResolver(root, { env })
   const conflictDir = resolver.conflictDir
 
@@ -723,14 +727,11 @@ async function main(argv) {
     if (doBootstrap && !dryRun) {
       agentsResult = await generateInitialBootstrappedAgents(target, { stack: stack ?? lang ?? 'universal', name, noBackup })
     }
-    const nativeCheckers = detectOptionalNativeCheckers(target)
-    const pendingIgnoreAdvice = (nativeCheckers.agentIgnoreAdvice ?? []).filter((a) => !a.alreadyIgnored)
     process.stdout.write(`${JSON.stringify({
       ...(bootstrapResult ? { bootstrap: bootstrapResult } : {}),
       equip: equipResult,
       ...(hooksResult ? { hooks: hooksResult } : {}),
       ...(agentsResult ? { agents: agentsResult } : {}),
-      ...(pendingIgnoreAdvice.length > 0 ? { agentIgnoreAdvice: pendingIgnoreAdvice } : {}),
     }, null, 2)}\n`)
     // 退出码只看逐文件判定：写入路径能解决的都解决了，结束状态里还有需要处置的，
     // 就和校验路径一样退 3。「本地改动被保留」在过去只进运行报告，写路径因此永远退 0，

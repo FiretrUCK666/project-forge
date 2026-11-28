@@ -280,11 +280,11 @@ export const INJECTIONS_CORE = [
   },
   {
     id: 'I24',
-    what: '关闭 compose-agents.mjs 30720 字节上限阻断门禁',
+    what: '关闭 compose-agents.mjs 24576 字节受管区上限阻断门禁',
     file: 'scripts/compose-agents.mjs',
-    from: '    oversize: bytes > AGENTS_MAX_BYTES,',
-    to: '    oversize: false,',
-    expect: '30720',
+    from: '  const managedOversize = managedBytes > AGENTS_MANAGED_MAX_BYTES',
+    to: '  const managedOversize = false',
+    expect: '24576',
   },
   {
     id: 'I25',

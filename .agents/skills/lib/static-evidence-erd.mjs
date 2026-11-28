@@ -100,6 +100,14 @@ export function extractErdEvidence(repoRoot, repoFiles) {
         }
         addEntity(tbl, rel, fields)
       }
+      for (const am of clean.matchAll(/\bALTER\s+TABLE\s+(?:ONLY\s+)?(?:[A-Za-z0-9_"`]+\.)?([A-Za-z0-9_"`]+)\s+ADD\s+(?:CONSTRAINT\s+[A-Za-z0-9_"`]+\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+(?:[A-Za-z0-9_"`]+\.)?([A-Za-z0-9_"`]+)/gi)) {
+        const fromTbl = am[1].replace(/["`]/g, '')
+        const fkCol = am[2].replace(/["`\s]/g, '')
+        const toTbl = am[3].replace(/["`]/g, '')
+        addEntity(fromTbl, rel, fkCol ? [fkCol] : [])
+        addEntity(toTbl, rel, [])
+        addRelation(fromTbl, toTbl, fkCol || 'fk')
+      }
       continue
     }
 
@@ -107,17 +115,17 @@ export function extractErdEvidence(repoRoot, repoFiles) {
       const cleaned = readCleanCode(repoRoot, rel)
       if (!cleaned) continue
       const text = cleaned.codeLines.join('\n')
-      if (/\.(?:ts|tsx|js|mjs)$/i.test(low) && /@Entity\s*\(/.test(text)) {
-        for (const m of text.matchAll(/@Entity\s*\([^)]*\)\s*(?:export\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)\n\}/g)) {
-          const cols = [...m[2].matchAll(/@(?:PrimaryGeneratedColumn|PrimaryColumn|Column)\s*\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)/g)].map((c) => c[1])
+      if (/\.(?:ts|tsx|js|mjs)$/i.test(low) && /@(?:Entity|Table)\b/.test(text)) {
+        for (const m of text.matchAll(/@(?:Entity|Table)(?:\s*\([^)]*\))?(?:\s*@[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?)*\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)[^{]*\{([\s\S]*?)\n\}/g)) {
+          const cols = [...m[2].matchAll(/@(?:PrimaryGeneratedColumn|PrimaryColumn|Column|ForeignKey|Field|Prop)\s*(?:\([^)]*\))?(?:\s*@[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?)*\s*(?:(?:public|private|protected|readonly|declare)\s+)*([A-Za-z_][A-Za-z0-9_]*)/g)].map((c) => c[1])
           addEntity(m[1], rel, cols)
-          for (const rm of m[2].matchAll(/@(?:ManyToOne|OneToMany|OneToOne|ManyToMany)\s*\(\s*\(\)\s*=>\s*([A-Za-z_][A-Za-z0-9_]*)/g)) {
+          for (const rm of m[2].matchAll(/@(?:ManyToOne|OneToMany|OneToOne|ManyToMany|BelongsTo|HasMany|HasOne|ForeignKey)\s*\(\s*\(\)\s*=>\s*([A-Za-z_][A-Za-z0-9_]*)/g)) {
             addRelation(m[1], rm[1], 'orm')
           }
         }
       }
-      if (/\.(?:java|kt|kts)$/i.test(low) && /@Entity\b/.test(text)) {
-        for (const m of text.matchAll(/@Entity(?:\s*\([^)]*\))?(?:\s*@[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?)*\s*(?:(?:public|internal|open|data|abstract|final)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*\(([\s\S]*?)\))?[^{;\n]*(?:\{([\s\S]*?)\n\})?/g)) {
+      if (/\.(?:java|kt|kts)$/i.test(low) && /@(?:Entity|Table)\b/.test(text)) {
+        for (const m of text.matchAll(/@(?:Entity|Table)(?:\s*\([^)]*\))?(?:\s*@[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?)*\s*(?:(?:public|internal|open|data|abstract|final)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*\(([\s\S]*?)\))?[^{;\n]*(?:\{([\s\S]*?)\n\})?/g)) {
           const entityName = m[1]
           const combined = `${m[2] || ''}\n${m[3] || ''}`
           const cols = []
@@ -145,9 +153,12 @@ export function extractErdEvidence(repoRoot, repoFiles) {
       if (low.endsWith('.py') && /__tablename__\s*=/.test(text)) {
         for (const m of text.matchAll(/class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*:([\s\S]*?)(?=\nclass\s|\n[^\s]|$)/g)) {
           if (!/__tablename__\s*=/.test(m[2])) continue
-          const cols = [...m[2].matchAll(/^\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:db\.)?(?:Column|mapped_column)\s*\(/gm)].map((c) => c[1])
+          const cols = [
+            ...[...m[2].matchAll(/^\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[^\n=]+)?\s*=\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:Column|mapped_column)\s*\(/gm)].map((c) => c[1]),
+            ...[...m[2].matchAll(/^\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*Mapped\s*\[/gm)].map((c) => c[1]),
+          ]
           addEntity(m[1], rel, cols)
-          for (const rm of m[2].matchAll(/ForeignKey\s*\(\s*['"]([A-Za-z0-9_]+)\./g)) addRelation(m[1], rm[1], 'fk')
+          for (const rm of m[2].matchAll(/ForeignKey\s*\(\s*['"](?:[A-Za-z0-9_]+\.)?([A-Za-z0-9_]+)\.[A-Za-z0-9_]+['"]/g)) addRelation(m[1], rm[1], 'fk')
         }
       }
       if (low.endsWith('.py') && /\bmodels\.Model\b/.test(text)) {

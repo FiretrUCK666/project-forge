@@ -9,7 +9,7 @@
  * 新缺口要先翻过十几屏才能找到该插在哪。
  */
 
-import { AGENTS_MAX_BYTES } from './protocol.mjs'
+import { AGENTS_MANAGED_MAX_BYTES } from './protocol.mjs'
 
 export const GAP_RULES = [
   {
@@ -76,8 +76,9 @@ export const GAP_RULES = [
   },
   {
     id: 'ignores.ignored-but-tracked',
-    when: (f) => (f.ignores.ignoredButTracked ?? []).length > 0,
-    text: (f) => `有 ${f.ignores.ignoredButTracked.length} 个已入库文件同时命中忽略规则 —— 忽略规则对已入库的文件无效`,
+    when: (f) => (f.ignores.ignoredButTracked ?? []).length > 0
+      && !(f.decisions && 'ignore-tracked-legacy' in f.decisions),
+    text: (f) => `有 ${f.ignores.ignoredButTracked.length} 个已入库文件同时命中忽略规则 —— 忽略规则对已入库的文件无效（若属历史遗留，可在「取舍」写 \`ignore-tracked-legacy\`）`,
     review: 'git.ignored-tracked',
   },
   {
@@ -145,8 +146,8 @@ export const GAP_RULES = [
   },
   {
     id: 'docs.agents-oversize',
-    when: (f) => (f.docs.agentsBytes ?? 0) > AGENTS_MAX_BYTES,
-    text: (f) => `AGENTS.md 体积超过 ${AGENTS_MAX_BYTES} 字节上限（当前 ${f.docs.agentsBytes} 字节）—— 请将长篇设计与实施细节外置到 docs/TDD.md`,
+    when: (f) => (f.docs.agentsManagedBytes ?? 0) > AGENTS_MANAGED_MAX_BYTES,
+    text: (f) => `AGENTS.md 受管区体积超过 ${AGENTS_MANAGED_MAX_BYTES} 字节上限（当前受管区 ${f.docs.agentsManagedBytes} 字节，总计 ${f.docs.agentsBytes ?? f.docs.agentsManagedBytes} 字节）—— 请将长篇设计与实施细节外置到 docs/TDD.md`,
     review: 'agents.oversize',
   },
   {

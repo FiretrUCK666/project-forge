@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-28T04:58:23.925Z",
+  "installedAt": "2026-11-28T05:59:28.665Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -130,10 +130,10 @@
       "sha256": "58ea6627e3c754ad792512e22f3ea64705d5f96629e96c91b884f98d4f876c0f"
     },
     "dev-iterate/scripts/iterate-plan.mjs": {
-      "sha256": "eab3c7494eb7b19a45275f2bcbc2ecd946ab72e0e71e5910888a4e19436dbd5d"
+      "sha256": "92e9b8fba820fde1d21f57787b81b4de56fd39bba02fd454b1ff073a6025acad"
     },
     "dev-iterate/scripts/iterate.mjs": {
-      "sha256": "dfabca27fc2b360bc434cddfa30850bf2ddc357be18c23898d72574569fc4c42"
+      "sha256": "8daa47b96f5f42c90325e99fd93eb82599df2da12ce94eb86017b48dadea4dcc"
     },
     "dev-plan/SKILL.md": {
       "sha256": "fcd2f61f5f8069306754014f1ed06c3645668dc496738ffe48341a18c133daf0"
@@ -205,7 +205,7 @@
       "sha256": "5fd3b4ac128c48240008979dabe004d08d3fa908a7eb6a6a4251aebc7eaa7907"
     },
     "lib/architecture-map.mjs": {
-      "sha256": "e8dacbae39ce2c02dac5320a6b1917ff5240ec42d6529cee3dcbb46355e736ca"
+      "sha256": "62e51aeed0d8ed5a9c327654867b14aefd9b45e97e3e92639d0bb7c43c407f1e"
     },
     "lib/cli.mjs": {
       "sha256": "755831fadb471f858647a5247f839796ef2a856f1c9742bbb93c61a4e4469c11"
@@ -229,7 +229,7 @@
       "sha256": "a6ebffbc7ec2d63fe24cec76cab5144c4fab51b5d44ace1ba6b1667ec45fbf38"
     },
     "lib/critique-store.mjs": {
-      "sha256": "a1912e4f29aa2fd2532c77bb1a87d3964995dcdaa4eeb3cf17c672036924be8e"
+      "sha256": "17dab7e73e92a5d2b0296f6e1e6f91b7fbcca6cd486bafe4ed0bbdfb7eb57c95"
     },
     "lib/diff-materiality.mjs": {
       "sha256": "2b9f16fa71c1e86d294cfc57e6b0552a713cd04e0b0055c693703e564f19a5e6"
@@ -262,25 +262,22 @@
       "sha256": "8da93fdb1a5c194218fc5520a063cb662debc3f971ec6bdac0ce02d1a467b068"
     },
     "lib/doc-requirements.mjs": {
-      "sha256": "8ee95fcef4d5f3b36dead20bc2daf195d110ce24aebfd58421f3e8561383f1c8"
+      "sha256": "cf0780e963f97c03d799d91424d9954ce5270b0f6aefc59d486e818c59414770"
     },
     "lib/doc-shape.mjs": {
       "sha256": "49a3176e6b693212912ec7c7b8a4f0f97eaceb82dc6dc61e06d41ae603e68dfe"
     },
     "lib/doc-slice-graph.mjs": {
-      "sha256": "3f9dc6894a3dc0aac51133066d035f8ea2168c792ef234864816c33b51ba30ca"
+      "sha256": "6f0216a4b5e452ddd707bd4b81ad56a58c7c619cc542195b64e496228fac4845"
     },
     "lib/doc-substantive.mjs": {
       "sha256": "5ff6d25a041c56b17fb5c666ea08ce567ff1a9e5986ade7a071663a80f18ee7e"
     },
     "lib/doc-template-render.mjs": {
-      "sha256": "c9f0223e803cf0bf06b2d7162ce484fef854c67eda9298b667a14dd47cc1b032"
+      "sha256": "6bac570945d32cfb9ba5c7d63695fa43ef27e7eacc69d6e0e5450ce6b9bbf00f"
     },
     "lib/doc-templates.mjs": {
-      "sha256": "2c2828e45d104a9d9649db0f22d6f9b790bb63339c6d8d702f108318fe597fe7"
-    },
-    "lib/doc-toc.mjs": {
-      "sha256": "6afd5bde1806e932a2e9e9c9ad96aee041942a79127618e9bf9de26b0e24edc3"
+      "sha256": "8642d81077e89e296e8e43fc350608ba3dcd8115a4b4a6e1e40a4ce0b861243d"
     },
     "lib/doc-verify.mjs": {
       "sha256": "ccc24dbcb61f76848f1c8ddcb133417185b3ff8adb32d148a9561aaa19d88266"
@@ -319,34 +316,34 @@
       "sha256": "74d27ffa223a6a675ee4fa1975a0a1669c04802e60cd33570bb62d7b7b54ee9b"
     },
     "lib/git-core.mjs": {
-      "sha256": "94a07108fc620c13ac8e071c22c781a9e4de0e4406995ceb68798379f352733c"
+      "sha256": "1b3fd98252196d457bbaed067a9b297bdb445e3aff2b33712e514f78781ec613"
     },
     "lib/git-fast-objects.mjs": {
       "sha256": "1e5226da98f023467b1eac33325fad6de4b4c2baf04b0c99b1811d04171b3a00"
     },
     "lib/git-fast.mjs": {
-      "sha256": "ec3bc4da3bdf084509fff4bbe6a30f4d0dcb81d2f1940bddfe3d06222dc49bc6"
+      "sha256": "e5637c4c927c09685f806ca2899df963cd3aa1129f0cee9fd1b215830b66a24a"
     },
     "lib/git-index-fast.mjs": {
-      "sha256": "74096de7f1aeec8ed6ee601f2f93d6915e830addd0c8525ad4ae805f95a765ec"
+      "sha256": "cb82da933c45c9861b2e2553a6bf08beed602d1398f1b6ad0d38bbbcecba965b"
     },
     "lib/git-status-fast.mjs": {
       "sha256": "cbc8eb828ddfa39b454bfbe5dc03851821783380b7c2a30a355cdb09202dc397"
     },
     "lib/git-worktree-env.mjs": {
-      "sha256": "59afac2eece0085e3ce1c1f1238481b9c8f8cbe879cbbb759564a88f82aab8ba"
+      "sha256": "156ecc538b4f289ba61f888259935686b313002ae94682f641610c45c86f5399"
     },
     "lib/git.mjs": {
-      "sha256": "b9a3f698fd0a4303376fac06e372e1413b2e0109ef123c90b870777d8ab8c76f"
+      "sha256": "dfe7b2341f118d87b6c3ae91db21713a68872497662a854c11403ef84256d3be"
     },
     "lib/github-client.mjs": {
-      "sha256": "7d2627f2250494e22bab09b2ecbd42ec4dd62206ec3ca2264677953e4c5166bf"
+      "sha256": "4a1a20b75617b993510eb6731057a6beac57245b23a382df3f99511c9f67d53d"
     },
     "lib/github-labels.mjs": {
-      "sha256": "112c95d13946dd17a3e7316cb96fbc607aa06ab31e45a13fac3e3935ebdddbf6"
+      "sha256": "9c45e684e112c1e82f91039d6e7364d7d88258e66583b3da6d9d67a0450e0b90"
     },
     "lib/github-parse.mjs": {
-      "sha256": "d60d87136e16c845d477cdc5eeaa75eb029a1bcf4bf0932829318f9498892a4d"
+      "sha256": "686b6dea937a5d768f9f8ba8b7ab675db588f2ab8aa71ecd5f12cee6e8168043"
     },
     "lib/handoff-package.mjs": {
       "sha256": "6bc9b5f68333dacb875bffcecafd9365cd6edba8d3327f8fa3c9ba1fc57a0f8f"
@@ -373,7 +370,7 @@
       "sha256": "7f55a4729534cf314796d4121ac98175e5ed5140c9fd9f52f4c382dbf335ca3e"
     },
     "lib/markdown-scan.mjs": {
-      "sha256": "aeaf05d9a32cb200eff0d81a71359fad4d8cdf28cdd28141b320a30b28c05188"
+      "sha256": "f81a7d19bb10eb22f8a254a08d4be6c3bf9102a966c8e1daa72c04a8cc8172d4"
     },
     "lib/master-criteria-sync.mjs": {
       "sha256": "9651300bf902e113c96c1dcee0287b4491a590eb4dbeab3f21f781792cb2984e"
@@ -418,34 +415,31 @@
       "sha256": "4b0eb3975193fe06e552b2ac057d5a52b97d4c1feb92e715506ffe0a2314e9e1"
     },
     "lib/pr-template-hydrate.mjs": {
-      "sha256": "acc8439e26f389715a2f5332372c40ff1a055f46fc9b894ae7ccdc1a0d0be86b"
+      "sha256": "e7d433d3eeebe06538f5cc7243fbcd584dcab29132e3e78a1fdf091a39b963fa"
     },
     "lib/proc-budget.mjs": {
       "sha256": "3d52ec707e5496f9970619e5719806e70e9298f862a336ee68723cb2b91c817b"
     },
     "lib/profile-sniffer-packages.mjs": {
-      "sha256": "575244d0cecdb0d5046bc418db4c6ba403262edde002178818dcba7b37c0a16c"
+      "sha256": "6a04faab98b4d78147a2bfe75cfb3c24586baaafa7429a171c5062a43a73011c"
     },
     "lib/profile-sniffer.mjs": {
-      "sha256": "dc58f16c70907351ce19d1502f7e9e3ecfbd85c3abb56bb293d0b269bf7b7b53"
+      "sha256": "1f18ddb16da4fc38c298c696969cc1458071488153c0f12ce0a4d0bb56791519"
     },
     "lib/profile.mjs": {
-      "sha256": "2a586a8c873e165345ad04de2325f6fef88db3ea1d2e81cc06cedf70535ace26"
+      "sha256": "09471461f06babd4d174ff86974a3efca86ca9724ca3c66df747db201b94792e"
     },
     "lib/review-comment-render.mjs": {
-      "sha256": "371f46668300842e06aa854eebbc5aabd4aca334a9cce3a5e088d2ba81b41f43"
+      "sha256": "c99f940b9c90020b57ac87a91e1565e5714fe83e26b350f7e4e33e7beb1d7ac6"
     },
     "lib/sandbox-scope.mjs": {
-      "sha256": "cfadecf89ecedbcb1a60c47b6c0bc55fb0edbc57a27840510ec53a7449684b6a"
+      "sha256": "3764dd761c074bf62fc619243daccc842c9d1de88f76dbd69ffed6630080fee7"
     },
     "lib/session-orient.mjs": {
       "sha256": "477ad72ff05044e790c0583785840bea3203d1a1e1bf429e28e5f2634d813674"
     },
     "lib/session-state.mjs": {
-      "sha256": "49c872b6a6252b9f4a990edc10a41adf5faa2a8e086aa26e68c25fe34eac7235"
-    },
-    "lib/shared.mjs": {
-      "sha256": "5eaea669c973ef1df3764d79ffdb75215059f509902a2e038eb189479e9581d9"
+      "sha256": "5080101c5c39c518bd68f1d85a27f2bece608a339a7e96395296666be29e62ad"
     },
     "lib/signals.mjs": {
       "sha256": "f6bd7185fcd76e6572d8f421dd4186c27fa8b832cec1893ff532ff3ff00b70a2"
@@ -454,7 +448,7 @@
       "sha256": "8f9f760c9d6a2a741a1f7b8c11da0d0217ac4820e4abf1ef9443fb7c6fce7fba"
     },
     "lib/static-analyzer.mjs": {
-      "sha256": "1d38d6d9c784cf084499116b4443bf0801b56690d72e725fab0f022aebc2b384"
+      "sha256": "e63e26ad9f8e63347d507dbcbeba18471a4329e37074bdcfd4b9c9dc6d4bbbb1"
     },
     "lib/static-evidence-erd.mjs": {
       "sha256": "4ae66f9d81c58a1cdfb8678c0e31e81f79bd8371b23e2e18a658e0e2a9f2ec0c"
@@ -462,17 +456,14 @@
     "lib/static-evidence.mjs": {
       "sha256": "9151e8d2d8268e672ce3dcadc8d14c44458a2d9a9cb5c57196a8ef575580c7be"
     },
-    "lib/static-gates-assertions.mjs": {
-      "sha256": "d027e24ad4141403179a9c839341e4da1014ad1c0c18af08d958d9fdf01e350d"
-    },
     "lib/static-gates-comment-hygiene.mjs": {
       "sha256": "189b011d757a42f5defab5c512d32e0bb07c6b1db05a53fcd65bbb7fa9f100b6"
     },
     "lib/static-gates-lexer.mjs": {
-      "sha256": "2299aff41e991902c485bebee7ad7839751d940e6fc8d10de65ef2683abdac5c"
+      "sha256": "605ae6aa8ef5e9aa5485f151bf8bc1c35e3425ab7b79776e23135a285a084aa7"
     },
     "lib/static-gates.mjs": {
-      "sha256": "bf2759ea2842c8800b4233d33fd1b6500d37ce9f3927c70013bb26bed296e90b"
+      "sha256": "5f200d8f55699b777dbad6d028247f94651d8fe57e3b7bb4e38f68bbd98a8948"
     },
     "lib/subcommand-meta.mjs": {
       "sha256": "38db28223d3557d6bfb5b3e9e3e9b26b6e37c38561dd943a45396f9ba500c826"
@@ -520,7 +511,7 @@
       "sha256": "719774e58844ec1d1d4d13fd2f46cedeffe79a1c3894ab0e2adf8f603e639dce"
     },
     "lib/visual-brief-store.mjs": {
-      "sha256": "0e507192582e8adf0c90a64f4b8577d45784a5b8aee9d9f7ebee8dc08d664651"
+      "sha256": "221f31600fdcd0f30dcd004e6f6f5d155135651961912ce0c09bbe7a889e2135"
     },
     "lib/visual-brief.mjs": {
       "sha256": "1550e5be59c29c6beec66d0a2dc20a03ca3d8b7d28fbc1f11a092c1595c1fa1f"
@@ -556,7 +547,7 @@
       "sha256": "48c0a98812457d2ae152e0188703bd2d96576373d4ad1bbe742d12d04d82b83a"
     },
     "lib/visual-router.mjs": {
-      "sha256": "bb56f3f850c60a3534f02d4984b18f2fc6259166f2de87f6838b6c95159b35b7"
+      "sha256": "125ca2323aa0abf42df82d9421cb624a82220186db5e2690cf76ad95d53387d0"
     },
     "lib/workflow-helpers.mjs": {
       "sha256": "3a13249912a9d650ae3ce2a6f6e85bf891514b146f1fbfb2e9c0b05d12fc50a2"
@@ -568,7 +559,7 @@
       "sha256": "35643af061a9c66a6061e70ba384794401053e1da3664d76e98ee817cfac0dd4"
     },
     "lib/worktree-dep-pool.mjs": {
-      "sha256": "6de6df2d873abae6869d4af0b650f99cbc0517d2b26492e060514c786fc27359"
+      "sha256": "3a533eb28d193883ed69ac634611432e4fd7f356b2a5c4b71c431aba750da240"
     },
     "templates/docs-prd.md": {
       "sha256": "a9fc3613c1c7716fddadd06a906e257b577574d9d6b9808a4d23622eec7fa0d9"

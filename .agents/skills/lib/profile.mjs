@@ -15,6 +15,7 @@ import {
   parseYamlWorkspaceGlobs,
   sniffLayeredCommands,
 } from './profile-sniffer.mjs'
+import { stripInlineYamlComment, stripWrapQuotes } from './profile-sniffer-packages.mjs'
 
 export { discoverWorkspacePackages, parseYamlWorkspaceGlobs, sniffLayeredCommands }
 
@@ -42,37 +43,6 @@ export const OPTIONAL_DEV_PROFILE_KEYS = Object.freeze([
 ])
 
 const EXPLICIT_NONE_RE = /^(?:none|\(none\)|null|n\/a|无|\(无\)|暂无|-)$/i
-
-function stripWrapQuotes(val) {
-  const s = String(val ?? '').trim()
-  if ((s.startsWith('`') && s.endsWith('`'))
-    || (s.startsWith('"') && s.endsWith('"'))
-    || (s.startsWith("'") && s.endsWith("'"))) {
-    return s.slice(1, -1).trim()
-  }
-  return s
-}
-
-function stripInlineYamlComment(val) {
-  const s = String(val ?? '')
-  let quote = ''
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i]
-    if (quote) {
-      if (ch === '\\' && quote === '"') { i += 1; continue }
-      if (ch === quote) quote = ''
-      continue
-    }
-    if (ch === '"' || ch === '\'' || ch === '`') {
-      quote = ch
-      continue
-    }
-    if (ch === '#' && (i === 0 || /\s/.test(s[i - 1]))) {
-      return s.slice(0, i).trim()
-    }
-  }
-  return s.trim()
-}
 
 export function isAnglePlaceholder(val) {
   const s = stripWrapQuotes(val)

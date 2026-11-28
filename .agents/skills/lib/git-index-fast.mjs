@@ -1,11 +1,11 @@
 /**
- * git-index-fast.mjs —— 零子进程解析 `.git/index` v2/v3、`.git` 路径探测与 porcelain-v2 解析。
+ * git-index-fast.mjs —— 零子进程解析 `.git/index` v2/v3、`.git`/commondir 路径探测与 porcelain-v2 解析。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 git-fast.mjs 重导出以保持向后兼容。
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from './git-core.mjs'
 
@@ -41,29 +41,39 @@ export function resolveGitDirFast(repoRoot) {
   return null
 }
 
-/** 零子进程解析 Git index v2/v3 全部已跟踪路径集合（reftable/v4/sha256/异常返回 null）。 */
-export function readGitIndexPathsFast(repoRoot) {
-  const wtGitDir = resolveGitDirFast(repoRoot)
-  if (!wtGitDir) return null
-  const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
-  const commonDir = cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir
-  if (existsSync(join(commonDir, 'reftable'))) return null
-  const cfgTxt = readTextSafe(join(commonDir, 'config')) ?? ''
-  if (/^\s*objectformat\s*=\s*sha256\b/im.test(cfgTxt)) return null
-  const idxPath = join(wtGitDir, 'index')
-  if (!existsSync(idxPath)) return new Set()
-  let buf
-  try { buf = readFileSync(idxPath) } catch { return null }
-  if (buf.length < 32 || buf.toString('ascii', 0, 4) !== 'DIRC') return null
+/**
+ * 零子进程解析 Git 公共目录（`.git` 主目录）：
+ * 默认接收仓库根目录（兼容普通 `.git/` 目录与 linked worktree `.git` 文件）；
+ * 传入 `{ treatAsGitDir: true }` 时直接把参数视作 gitDir 并解析其 `commondir`。
+ */
+export function resolveCommonGitDir(repoRootOrGitDir, { treatAsGitDir = false } = {}) {
+  if (!repoRootOrGitDir) return null
+  const target = resolve(String(repoRootOrGitDir))
+  if (!existsSync(target)) return null
+  const gitDir = treatAsGitDir ? target : resolveGitDirFast(target)
+  if (!gitDir || !existsSync(gitDir)) return null
+  const cdFile = join(gitDir, 'commondir')
+  if (existsSync(cdFile)) {
+    const raw = (readTextSafe(cdFile) ?? '').trim()
+    if (raw) {
+      const common = isAbsolute(raw) ? resolve(raw) : resolve(gitDir, raw)
+      if (existsSync(common)) return common
+    }
+  }
+  return gitDir
+}
+
+function parseDircIndexBuffer(buf, { checkUnmergedOnly = false } = {}) {
+  if (!buf || buf.length < 32 || buf.toString('ascii', 0, 4) !== 'DIRC') return null
   const ver = buf.readUInt32BE(4)
   if (ver !== 2 && ver !== 3) return null
   const count = buf.readUInt32BE(8)
-  const paths = new Set()
+  const paths = checkUnmergedOnly ? null : new Set()
   let off = 12
   for (let i = 0; i < count; i += 1) {
     if (off + 62 >= buf.length) return null
     const flags = buf.readUInt16BE(off + 60)
-    if ((flags & 0x3000) !== 0) return null
+    if ((flags & 0x3000) !== 0) return checkUnmergedOnly ? { unmerged: true } : null
     let nameOff = off + 62
     if (ver >= 3 && (flags & 0x4000) !== 0) {
       if (nameOff + 2 >= buf.length) return null
@@ -71,7 +81,7 @@ export function readGitIndexPathsFast(repoRoot) {
     }
     const nul = buf.indexOf(0, nameOff)
     if (nul < 0) return null
-    paths.add(buf.toString('utf8', nameOff, nul))
+    if (paths) paths.add(buf.toString('utf8', nameOff, nul))
     const len = nul - off + 1
     off += (len + 7) & ~7
   }
@@ -81,7 +91,24 @@ export function readGitIndexPathsFast(repoRoot) {
     if (!/^[A-Za-z]{4}$/.test(sig) || sig === 'link' || sig === 'sdir') return null
     off += 8 + buf.readUInt32BE(off + 4)
   }
-  return off === buf.length - 20 ? paths : null
+  if (off !== buf.length - 20) return null
+  return checkUnmergedOnly ? { unmerged: false } : { paths }
+}
+
+/** 零子进程解析 Git index v2/v3 全部已跟踪路径集合（reftable/v4/sha256/异常返回 null）。 */
+export function readGitIndexPathsFast(repoRootOrGitDir, { isGitDir = false, isSha256 = false } = {}) {
+  if (!repoRootOrGitDir || isSha256) return null
+  const wtGitDir = isGitDir ? resolve(String(repoRootOrGitDir)) : resolveGitDirFast(repoRootOrGitDir)
+  if (!wtGitDir) return null
+  const commonDir = resolveCommonGitDir(wtGitDir, { treatAsGitDir: true }) ?? wtGitDir
+  if (existsSync(join(commonDir, 'reftable'))) return null
+  const cfgTxt = readTextSafe(join(commonDir, 'config')) ?? ''
+  if (/^\s*objectformat\s*=\s*sha256\b/im.test(cfgTxt)) return null
+  const idxPath = join(wtGitDir, 'index')
+  if (!existsSync(idxPath)) return isGitDir ? null : new Set()
+  let buf
+  try { buf = readFileSync(idxPath) } catch { return null }
+  return parseDircIndexBuffer(buf, { checkUnmergedOnly: false })?.paths ?? null
 }
 
 /** 零子进程检查相对路径是否在 Git index v2/v3 中已跟踪（reftable/v4/异常返回 null 交由 CLI 回退）。 */
@@ -102,32 +129,8 @@ export function hasUnmergedIndexFast(wtGitDir) {
   if (!existsSync(idxPath)) return false
   let buf
   try { buf = readFileSync(idxPath) } catch { return null }
-  if (buf.length < 32 || buf.toString('ascii', 0, 4) !== 'DIRC') return null
-  const ver = buf.readUInt32BE(4)
-  if (ver !== 2 && ver !== 3) return null
-  const count = buf.readUInt32BE(8)
-  let off = 12
-  for (let i = 0; i < count; i += 1) {
-    if (off + 62 >= buf.length) return null
-    const flags = buf.readUInt16BE(off + 60)
-    if ((flags & 0x3000) !== 0) return true
-    let nameOff = off + 62
-    if (ver >= 3 && (flags & 0x4000) !== 0) {
-      if (nameOff + 2 >= buf.length) return null
-      nameOff += 2
-    }
-    const nul = buf.indexOf(0, nameOff)
-    if (nul < 0) return null
-    const len = nul - off + 1
-    off += (len + 7) & ~7
-  }
-  if (off > buf.length - 20) return null
-  while (off + 8 <= buf.length - 20) {
-    const sig = buf.toString('ascii', off, off + 4)
-    if (!/^[A-Za-z]{4}$/.test(sig) || sig === 'link' || sig === 'sdir') return null
-    off += 8 + buf.readUInt32BE(off + 4)
-  }
-  return off === buf.length - 20 ? false : null
+  const parsed = parseDircIndexBuffer(buf, { checkUnmergedOnly: true })
+  return parsed ? parsed.unmerged : null
 }
 
 /** 解析 `git status --porcelain=v2 --branch -z` 输出。 */

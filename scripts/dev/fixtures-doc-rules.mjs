@@ -219,7 +219,7 @@ cases.push(['文档兄弟集按 slug 认亲，不依赖同一天创建', async (
       '---', 'kind: spec', 'title: 兄弟集方案', 'status: draft', 'issue: null', 'owner: null', '---', '',
       '# 兄弟集方案', '',
     ].join('\n'))
-    const { syncDocsLifecycle } = await import('../../kit/skills/lib/shared.mjs')
+    const { syncDocsLifecycle } = await import('./test-shared.mjs')
     const res = await syncDocsLifecycle(dir, { slugOrPath: 'docs/prd/261117-sib-demo-prd.md', issue: 99, branch: 'feat/sib' })
     if (!res?.byKind?.spec) return `跨天的 SPEC 没被认成兄弟：byKind=${JSON.stringify(res?.byKind)}`
     const specText = readFileSync(join(dir, res.byKind.spec), 'utf8')

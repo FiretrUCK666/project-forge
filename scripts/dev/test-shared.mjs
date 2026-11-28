@@ -1,5 +1,5 @@
 /**
- * shared.mjs —— 研发工作流内置技能套件的统一向后兼容出口。
+ * test-shared.mjs —— 仅限开发期行为断言夹具复用的聚合重导出入口（不随产品包分发）。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），汇总重导出 cli、git、profile、
  * static-gates、ledger、docs、platform 等各正交内核模块的全部公开符号。
@@ -14,14 +14,14 @@ export {
   resolveAvailableSkills,
   resolveNextSteps,
   withNextSteps,
-} from './cli.mjs'
+} from '../../kit/skills/lib/cli.mjs'
 
 export {
   discoverCustomSkills,
   discoverKitSkills,
   discoverKitSkillsDetailed,
   parseSkillFrontmatter,
-} from './skill-discovery.mjs'
+} from '../../kit/skills/lib/skill-discovery.mjs'
 
 export {
   buildNonInteractiveEnv,
@@ -60,7 +60,7 @@ export {
   withFileLockSync,
   writeAtomic,
   writeJsonAtomic,
-} from './git.mjs'
+} from '../../kit/skills/lib/git.mjs'
 
 export {
   parsePorcelainV2BranchZ,
@@ -70,7 +70,7 @@ export {
   resolveDefaultBranchFromRefs,
   resolveGitDirFast,
   resolveRefShaFast,
-} from './git-fast.mjs'
+} from '../../kit/skills/lib/git-fast.mjs'
 
 export {
   detectEcosystemCommands,
@@ -86,7 +86,7 @@ export {
   readDecisions,
   resolveAuthoritativeTddPath,
   sniffLayeredCommands,
-} from './profile.mjs'
+} from '../../kit/skills/lib/profile.mjs'
 
 export {
   extractYamlRunBlocks,
@@ -94,7 +94,7 @@ export {
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
   VENDOR_OR_EXAMPLE_SKIP_DIRS,
-} from './profile-sniffer.mjs'
+} from '../../kit/skills/lib/profile-sniffer.mjs'
 
 export {
   ASSERTION_RE,
@@ -131,7 +131,7 @@ export {
   TEST_SKIP_RE,
   TOMBSTONE_COMMENT_RE,
   UI_VISUAL_EXT_RE,
-} from './static-gates.mjs'
+} from '../../kit/skills/lib/static-gates.mjs'
 
 export {
   consumeReviewToken,
@@ -148,7 +148,7 @@ export {
   taskLedgerPath,
   updateTaskLedger,
   writeTaskLedger,
-} from './ledger.mjs'
+} from '../../kit/skills/lib/ledger.mjs'
 
 export {
   archiveCompletedDocsGroup,
@@ -172,7 +172,7 @@ export {
   slugify,
   syncDocsLifecycle,
   updateDocFrontmatter,
-} from './docs.mjs'
+} from '../../kit/skills/lib/docs.mjs'
 
 export {
   DEFAULT_OPTIONAL_SECTIONS,
@@ -182,7 +182,7 @@ export {
   findMissingSections,
   resolveDocRequirements,
   sectionKeywordMap,
-} from './doc-requirements.mjs'
+} from '../../kit/skills/lib/doc-requirements.mjs'
 
 export {
   DOC_SHAPE_SIGNALS,
@@ -193,7 +193,7 @@ export {
   probeWorkspaceDocShape,
   resolveDocShapePolicy,
   validateSkippedSections,
-} from './doc-shape.mjs'
+} from '../../kit/skills/lib/doc-shape.mjs'
 
 export {
   checkCoreSubstantiveness,
@@ -206,7 +206,7 @@ export {
   readGitHeadFileSync,
   resolveBaselineSnapshotSync,
   VAGUE_FLUFF_RE,
-} from './doc-substantive.mjs'
+} from '../../kit/skills/lib/doc-substantive.mjs'
 
 export {
   buildInspectNextSteps,
@@ -225,7 +225,7 @@ export {
   validateVerificationEvidence,
   verificationEvidencePath,
   writeVerificationEvidence,
-} from './workflow-policy.mjs'
+} from '../../kit/skills/lib/workflow-policy.mjs'
 
 export {
   buildOneClickPrUrl,
@@ -269,7 +269,7 @@ export {
   resolveRemoteDescriptor,
   resolveWorkspaceIdentity,
   summarizeCommitChecks,
-} from './platform.mjs'
+} from '../../kit/skills/lib/platform.mjs'
 
 export {
   createTaskBackend,
@@ -277,7 +277,7 @@ export {
   GitHubBackend,
   LocalOnlyBackend,
   TASK_BACKEND_METHODS,
-} from './task-backend.mjs'
+} from '../../kit/skills/lib/task-backend.mjs'
 
 export {
   assertNoDuplicatePrForTask,
@@ -285,9 +285,9 @@ export {
   checkUnresolvedDependencies,
   checkUntrustedPrGate,
   resolveExternalCollaborationGraph,
-} from './task-graph.mjs'
+} from '../../kit/skills/lib/task-graph.mjs'
 
-export { checkTddSyncParity } from './tdd-parity.mjs'
+export { checkTddSyncParity } from '../../kit/skills/lib/tdd-parity.mjs'
 
 export {
   failedVerdict,
@@ -299,7 +299,7 @@ export {
   VERDICT_STATES,
   verdictFromError,
   verdictLabel,
-} from './verdict.mjs'
+} from '../../kit/skills/lib/verdict.mjs'
 
 export {
   AGENTS_COMPACT_RECOMMENDED_BYTES,
@@ -316,7 +316,7 @@ export {
   TOOL_OWNED_PREFIXES,
   TOOL_SKELETON_FILES,
   USER_EXTENSION_SLOTS,
-} from './tool-owned.mjs'
+} from '../../kit/skills/lib/tool-owned.mjs'
 
 export {
   FORGE_EXTENSIONS_REL,
@@ -332,7 +332,7 @@ export {
   resolveStageHookCommands,
   scanExtensionSlotHazards,
   validateForgeHooksConfig,
-} from './overlay.mjs'
+} from '../../kit/skills/lib/overlay.mjs'
 
 export {
   FEATURE_MAP_REL,
@@ -346,14 +346,14 @@ export {
   readFeatureMapSafe,
   resolveNativeTestDir,
   updateFeatureMapTestRefs,
-} from './suite-inventory.mjs'
+} from '../../kit/skills/lib/suite-inventory.mjs'
 
 export {
   appendGovernSignal,
   inferSignalModule,
   readSignalsJsonl,
   resolveGovernStateDir,
-} from './signals.mjs'
+} from '../../kit/skills/lib/signals.mjs'
 
 export {
   applyIssuesToBackend,
@@ -364,7 +364,7 @@ export {
   formatWorkTitle,
   resolveEscalationBackend,
   workTypePrefix,
-} from './escalation.mjs'
+} from '../../kit/skills/lib/escalation.mjs'
 
 export {
   extractHeadlessSummary,
@@ -374,7 +374,7 @@ export {
   markerPositions,
   scanLines,
   splitSections,
-} from './markdown-scan.mjs'
+} from '../../kit/skills/lib/markdown-scan.mjs'
 
 export {
   classifyFileKind,
@@ -385,16 +385,17 @@ export {
   locateTopSlicesForPaths,
   VALID_LOCATE_KINDS,
   VALID_LOCATE_SCOPES,
-} from './doc-locator.mjs'
+} from '../../kit/skills/lib/doc-locator.mjs'
+
+export { createLabel } from '../../kit/skills/lib/github-client.mjs'
 
 export {
   DEFAULT_GITHUB_CONCURRENCY,
   addLabelsWithEnsureAndReadback,
   closePrViaRest,
-  createLabel,
   mapWithConcurrency,
   normalizeLabelList,
-} from './github-labels.mjs'
+} from '../../kit/skills/lib/github-labels.mjs'
 
 export {
   INTAKE_BLOCKING_DECISIONS,
@@ -407,7 +408,7 @@ export {
   readIntakeRecord,
   resolveIntakeDir,
   writeIntakeRecord,
-} from './intake-triage.mjs'
+} from '../../kit/skills/lib/intake-triage.mjs'
 
 export {
   buildClaimComments,
@@ -417,30 +418,30 @@ export {
   buildReviewComments,
   buildSubmitComments,
   formatAttribution,
-} from './doc-comments.mjs'
+} from '../../kit/skills/lib/doc-comments.mjs'
 
 export {
   indentOf,
   parseYamlScalar,
   readYamlBlockScalar,
   splitInlineArrayItems,
-} from './doc-frontmatter.mjs'
+} from '../../kit/skills/lib/doc-frontmatter.mjs'
 
 export {
   buildContextBrief,
   extractDocBriefSeeds,
   extractDocPaths,
   formatContextBriefLines,
-} from './context-brief.mjs'
+} from '../../kit/skills/lib/context-brief.mjs'
 
 export {
   ISSUE_QUALITY_RULES,
   extractPlanDocContext,
   extractPlanDocRefsFromText,
   validateIssueBodyQuality,
-} from './issue-quality.mjs'
+} from '../../kit/skills/lib/issue-quality.mjs'
 
 export {
   MUTABILITY,
   evaluateMutability,
-} from './mutability.mjs'
+} from '../../kit/skills/lib/mutability.mjs'

@@ -8,7 +8,7 @@ import { basename, join } from 'node:path'
 import {
   TEMPLATE_CONDITIONS, TEMPLATE_VARS, conditionMarkers, templateVarsOf,
 } from '../lib/protocol.mjs'
-import { parseDocFrontmatter } from '../../kit/skills/lib/shared.mjs'
+import { parseDocFrontmatter } from '../../kit/skills/lib/doc-frontmatter.mjs'
 
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
 const OWN_INSTANCE_CHECKS = [

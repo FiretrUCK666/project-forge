@@ -13,21 +13,77 @@ export const VENDOR_OR_EXAMPLE_SKIP_DIRS = new Set([
   'vendor', 'third_party', 'examples', 'samples', 'fixtures', 'testdata', '__mocks__',
 ])
 
-const MANIFEST_BASENAMES = new Set([
-  'package.json', 'pnpm-workspace.yaml',
-  'deno.json', 'deno.jsonc', 'jsr.json', 'jsr.jsonc',
-  'pyproject.toml', 'setup.py', 'setup.cfg', 'pytest.ini', 'Pipfile',
-  'pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'mvnw', 'mvnw.cmd', 'gradlew', 'gradlew.bat',
-  'Cargo.toml', 'go.work', 'go.mod',
-  'Package.swift', 'CMakeLists.txt', 'meson.build',
-  'composer.json', 'Gemfile', 'pubspec.yaml', 'mix.exs',
+/** 跨引擎与套件单源共享的生态清单、工作区清单与锁文件定义表。 */
+export const ECOSYSTEM_MANIFEST_TABLE = Object.freeze([
+  { kind: 'node', bucketKind: 'node', manifests: ['package.json'], workspaceManifests: ['package.json'], extraFiles: ['pnpm-workspace.yaml'], lockfiles: ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb'] },
+  { kind: 'deno', bucketKind: 'deno', manifests: ['deno.json', 'deno.jsonc', 'jsr.json', 'jsr.jsonc'], workspaceManifests: ['deno.json', 'deno.jsonc', 'jsr.json', 'jsr.jsonc'], lockfiles: ['deno.lock'] },
+  { kind: 'python', bucketKind: 'python', manifests: ['pyproject.toml', 'requirements.txt', 'setup.py'], workspaceManifests: ['pyproject.toml'], extraFiles: ['setup.cfg', 'pytest.ini', 'Pipfile'], lockfiles: ['poetry.lock', 'uv.lock', 'Pipfile.lock'], filePattern: /^requirements.*\.txt$/i },
+  { kind: 'java', bucketKind: 'java', manifests: ['pom.xml', 'build.gradle', 'build.gradle.kts'], workspaceManifests: ['pom.xml', 'build.gradle', 'build.gradle.kts'], extraFiles: ['settings.gradle', 'settings.gradle.kts', 'mvnw', 'mvnw.cmd', 'gradlew', 'gradlew.bat'], lockfiles: ['gradle.lockfile'] },
+  { kind: 'rust', bucketKind: 'rust', manifests: ['Cargo.toml'], workspaceManifests: ['Cargo.toml'], lockfiles: ['Cargo.lock'] },
+  { kind: 'go', bucketKind: 'go', manifests: ['go.mod'], workspaceManifests: ['go.mod'], extraFiles: ['go.work'], lockfiles: ['go.sum'] },
+  { kind: 'dotnet', bucketKind: 'dotnet', manifests: [], workspaceManifests: [], lockfiles: ['packages.lock.json'], suffixPattern: /\.(?:sln|slnx|csproj|fsproj|vbproj)$/i, workspaceSuffixPattern: /\.(?:csproj|fsproj|vbproj|sln|slnx)$/i },
+  { kind: 'swift', bucketKind: 'apple', manifests: ['Package.swift'], workspaceManifests: [], lockfiles: ['Package.resolved'], suffixPattern: /\.(?:xcodeproj|xcworkspace)$/i },
+  { kind: 'cpp', bucketKind: 'cpp', manifests: ['CMakeLists.txt', 'meson.build'], workspaceManifests: [], lockfiles: [] },
+  { kind: 'php', bucketKind: 'php', manifests: ['composer.json'], workspaceManifests: ['composer.json'], lockfiles: ['composer.lock'] },
+  { kind: 'ruby', bucketKind: 'ruby', manifests: ['Gemfile'], workspaceManifests: ['Gemfile'], lockfiles: ['Gemfile.lock'], suffixPattern: /\.gemspec$/i },
+  { kind: 'dart', bucketKind: 'dart', manifests: ['pubspec.yaml'], workspaceManifests: [], lockfiles: [] },
+  { kind: 'elixir', bucketKind: 'elixir', manifests: ['mix.exs'], workspaceManifests: [], lockfiles: [] },
+])
+
+export const ECOSYSTEM_MANIFEST_BY_KIND = Object.freeze(
+  Object.fromEntries(ECOSYSTEM_MANIFEST_TABLE.map((e) => [e.kind, e])),
+)
+
+export const WORKSPACE_MANIFEST_NAMES = new Set(
+  ECOSYSTEM_MANIFEST_TABLE.flatMap((e) => e.workspaceManifests ?? []),
+)
+
+export function isWorkspaceManifestFile(name) {
+  return WORKSPACE_MANIFEST_NAMES.has(name) || Boolean(ECOSYSTEM_MANIFEST_BY_KIND.dotnet.workspaceSuffixPattern.test(name))
+}
+
+/** 按单源清单表将文件名归类到对应子包生态名（未命中返回 null）。 */
+export function classifyManifestEcosystem(base) {
+  for (const entry of ECOSYSTEM_MANIFEST_TABLE) {
+    if (entry.manifests?.includes(base) || entry.extraFiles?.includes(base) || entry.lockfiles?.includes(base)) {
+      return entry.bucketKind
+    }
+    if (entry.filePattern?.test(base) || entry.suffixPattern?.test(base)) {
+      return entry.bucketKind
+    }
+  }
+  return null
+}
+
+/** 判断 Python 目录是否具备 pytest 测试配置或测试文件证据（单源复用）。 */
+export function hasPytestEvidence(absDir) {
+  for (const rel of ['pytest.ini', 'tox.ini', 'conftest.py']) {
+    if (existsSync(join(absDir, rel))) return true
+  }
+  for (const rel of ['pyproject.toml', 'setup.cfg']) {
+    const text = readTextSafe(join(absDir, rel)) ?? ''
+    if (/\[tool\.pytest|\[tool:pytest\]/.test(text)) return true
+  }
+  if (existsSync(join(absDir, 'tests')) || existsSync(join(absDir, 'test'))) return true
+  try {
+    return readdirSync(absDir).some((n) => !isMacOsJunkPath(n) && (n.endsWith('_test.py') || (n.startsWith('test_') && n.endsWith('.py'))))
+  } catch {
+    return false
+  }
+}
+
+const TASK_RUNNER_BASENAMES = [
   'Makefile', 'GNUmakefile', 'makefile', 'justfile', 'Justfile', '.justfile', 'Taskfile.yml', 'Taskfile.yaml',
+]
+
+const MANIFEST_BASENAMES = new Set([
+  ...ECOSYSTEM_MANIFEST_TABLE.flatMap((e) => [...(e.manifests ?? []), ...(e.extraFiles ?? [])]),
+  ...TASK_RUNNER_BASENAMES,
 ])
 
 const LOCKFILE_ONLY_NAMES = new Set([
-  'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
-  'deno.lock', 'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum',
-  'gradle.lockfile', 'packages.lock.json', 'Gemfile.lock', 'composer.lock', 'flake.lock', 'Package.resolved',
+  ...ECOSYSTEM_MANIFEST_TABLE.flatMap((e) => e.lockfiles ?? []),
+  'flake.lock',
 ])
 
 export function shouldSkipSegment(name) {
@@ -305,21 +361,8 @@ export function groupPackageManifests(repoRoot, fileRelList = null) {
     if (LOCKFILE_ONLY_NAMES.has(base) || /^requirements.*\.txt$/i.test(base)) bucket.lockfiles.push(base)
     if (!LOCKFILE_ONLY_NAMES.has(base)) bucket.manifests.push(base)
 
-    if (base === 'package.json') bucket.ecosystems.add('node')
-    else if (['deno.json', 'deno.jsonc', 'jsr.json', 'jsr.jsonc'].includes(base)) bucket.ecosystems.add('deno')
-    else if (['pyproject.toml', 'setup.py', 'setup.cfg', 'pytest.ini', 'Pipfile', 'uv.lock', 'poetry.lock', 'Pipfile.lock'].includes(base) || /^requirements.*\.txt$/i.test(base)) {
-      bucket.ecosystems.add('python')
-    } else if (['pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'mvnw', 'mvnw.cmd', 'gradlew', 'gradlew.bat', 'gradle.lockfile'].includes(base)) {
-      bucket.ecosystems.add('java')
-    } else if (base === 'Cargo.toml' || base === 'Cargo.lock') bucket.ecosystems.add('rust')
-    else if (base === 'go.work' || base === 'go.mod' || base === 'go.sum') bucket.ecosystems.add('go')
-    else if (/\.(?:sln|slnx|csproj|fsproj|vbproj)$/i.test(base) || base === 'packages.lock.json') bucket.ecosystems.add('dotnet')
-    else if (base === 'Package.swift' || /\.(?:xcodeproj|xcworkspace)$/i.test(base)) bucket.ecosystems.add('apple')
-    else if (base === 'CMakeLists.txt' || base === 'meson.build') bucket.ecosystems.add('cpp')
-    else if (base === 'composer.json' || base === 'composer.lock') bucket.ecosystems.add('php')
-    else if (base === 'Gemfile' || base === 'Gemfile.lock') bucket.ecosystems.add('ruby')
-    else if (base === 'pubspec.yaml') bucket.ecosystems.add('dart')
-    else if (base === 'mix.exs') bucket.ecosystems.add('elixir')
+    const eco = classifyManifestEcosystem(base)
+    if (eco) bucket.ecosystems.add(eco)
   }
   return byDir
 }
@@ -357,15 +400,7 @@ export function detectNonNodePackageCommands(repoRoot, bucket) {
     }
   }
   if (bucket.ecosystems.has('python')) {
-    const pyProjText = readTextSafe(join(absDir, 'pyproject.toml')) ?? ''
-    const setupCfgText = readTextSafe(join(absDir, 'setup.cfg')) ?? ''
-    const hasPytestConfig = existsSync(join(absDir, 'pytest.ini'))
-      || existsSync(join(absDir, 'conftest.py'))
-      || existsSync(join(absDir, 'tox.ini'))
-      || /\[tool\.pytest\b/.test(pyProjText)
-      || /\[tool:pytest\]/.test(setupCfgText)
-    const hasTests = hasPytestConfig || existsSync(join(absDir, 'tests')) || existsSync(join(absDir, 'test'))
-    if (hasTests) {
+    if (hasPytestEvidence(absDir)) {
       const isUv = existsSync(join(absDir, 'uv.lock')) || existsSync(join(repoRoot, 'uv.lock'))
       const isPoetry = existsSync(join(absDir, 'poetry.lock')) || existsSync(join(repoRoot, 'poetry.lock'))
       const venvSub = process.platform === 'win32' ? ['.venv', 'Scripts', 'python.exe'] : ['.venv', 'bin', 'python']

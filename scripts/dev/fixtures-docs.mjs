@@ -135,7 +135,7 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
 }])
 
 cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非法枚举与 Mermaid 16/12 门禁', async () => {
-  const { checkMermaidLabelWidth } = await import('../../kit/skills/lib/shared.mjs')
+  const { checkMermaidLabelWidth } = await import('./test-shared.mjs')
   const { syncDocsLifecycle } = await import('../../kit/skills/lib/docs.mjs')
 
   // 1. 常驻 .gitkeep 与 Mermaid 宽度正反双向
@@ -214,7 +214,7 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
     // 成对归档之后，三份文档都搬进了 docs/archive/，`related_*` 由 archive 重算。
     // 这里直接解析重算后的 frontmatter 逐个验目标存在——「链接没断」只能这样验。
     // 用 `audit .` 验不出来：归档后范围内的受管文档已经是 0 份，零目标的结论与链接无关。
-    const { parseDocFrontmatter: readFm } = await import('../../kit/skills/lib/shared.mjs')
+    const { parseDocFrontmatter: readFm } = await import('./test-shared.mjs')
     for (const [kind, rel] of [['prd', archJson.byKind.prd], ['spec', archJson.byKind.spec], ['todo', archJson.byKind.todo]]) {
       const fm = readFm(readFileSync(join(dir, rel), 'utf8')).data ?? {}
       for (const rk of ['related_prd', 'related_spec', 'related_todo']) {
@@ -236,7 +236,7 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
 }])
 
 cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flow start 自动重命名、audit 拦截与旧格式兼容', async () => {
-  const { parseDocFrontmatter } = await import('../../kit/skills/lib/shared.mjs')
+  const { parseDocFrontmatter } = await import('./test-shared.mjs')
 
   const fillGeneratedDoc = (absPath) => {
     hydrateGeneratedDoc(absPath, {
@@ -378,7 +378,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
 }])
 
 cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触发告警、--strict-sync 阻断与全同步放行', async () => {
-  const { parseCoupledSyncRules, evaluateCoupledSync } = await import('../../kit/skills/lib/shared.mjs')
+  const { parseCoupledSyncRules, evaluateCoupledSync } = await import('./test-shared.mjs')
 
   const dir = tmpProject({
     'package.json': '{"name":"c29-demo","version":"1.0.0","scripts":{"test":"node --test"}}\n',
@@ -588,7 +588,7 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
 }])
 
 cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传入检查勾选、保原元信息并写入 archivedPrdFile 放行 do-not-edit', async () => {
-  const { parseDocFrontmatter, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+  const { parseDocFrontmatter, readTaskLedger, resolveRepoRoots } = await import('./test-shared.mjs')
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
   const { handleFinalize, handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')

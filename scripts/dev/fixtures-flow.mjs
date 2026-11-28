@@ -32,7 +32,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
 
   try {
     // 1. smoke --target 缺参 / 元字符阻断 / 正常替换
-    const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim, handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -88,7 +88,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
 }])
 
 cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联动改名、claim 互斥/--takeover、release 与 record 实时双写', async () => {
-  const { createGitHubClient } = await import('../../kit/skills/lib/shared.mjs')
+  const { createGitHubClient } = await import('./test-shared.mjs')
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleClaim, handleRelease } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
   const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
@@ -214,11 +214,11 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
       return `非停损 PR 评论不应含冗余噪音字段：\n${lastPrCom}`
     }
     const lastIssueCom = (commentsByNum.get(77) ?? []).at(-1)?.body ?? ''
-    for (const kw of ['### 审核不通过（退回） · Round 1', 'PR #88', '逐条状态与标签', '实证核验', 'src/app.mjs:1', '缺少空值守卫', 'Pre-existing 1 项']) {
-      if (!lastIssueCom.includes(kw)) return `Issue 摘要评论缺关键字段 ${kw}：\n${lastIssueCom}`
+    for (const kw of ['### 审核不通过（退回） · Round 1', 'PR #88', '逐条标准状态', '故障注入记录', '实证核验', '#### 验收标准逐条核对', '| C1 | FAIL |', '| C2 | PASS |', 'src/app.mjs:1', '缺少空值守卫', '#### Pre-existing', 'src/legacy.mjs:3 历史遗留告警']) {
+      if (!lastIssueCom.includes(kw)) return `Issue 审查评论缺关键字段 ${kw}：\n${lastIssueCom}`
     }
-    if (lastIssueCom.includes('#### 验收标准逐条核对')) {
-      return `Issue 摘要与 PR 全量审查表未区分详略：\n${lastIssueCom}`
+    if (lastIssueCom.includes('详见 PR #88') || lastIssueCom.includes('（待确认勾选）') || lastPrCom.includes('（待确认勾选）')) {
+      return `PR/Issue 全量审查评论不应含「详见 PR #N」指针或「（待确认勾选）」：\n${lastIssueCom}`
     }
 
     // 离线/无凭据 CLI 调用绝不阻塞，且必须输出完整 delegatedPayloads 供宿主 MCP 原样双写
@@ -289,7 +289,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
   symlinkSync(join(dir, 'frontend'), join(dir, 'node_modules/fe-ws'), linkType)
 
   try {
-    const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const roots = await resolveRepoRoots(dir)
     const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature', '--owner', 'planner', '--in-place'], { cwd: dir })
@@ -335,7 +335,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
   })
   gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
   try {
-    const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleFinalize, handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim, handleMerge, handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -416,7 +416,7 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
   })
   gitInit(ciDir, { branch: 'main', name: 't', email: 't@t.t', origin: 'https://github.com/acme/ci-demo.git' })
   try {
-    const { readTaskLedger, writeTaskLedger, resolveRepoRoots: resRoots, summarizeCommitChecks } = await import('../../kit/skills/lib/shared.mjs')
+    const { readTaskLedger, writeTaskLedger, resolveRepoRoots: resRoots, summarizeCommitChecks } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim, handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -585,7 +585,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     if (rpBad.status !== 2) return `review-pack --pr 未拒绝 Issue URL：status=${rpBad.status}`
 
     // finalize 实现说明：大写占位词阻断，合法 Todo / docs/todo/ 放行
-    const { resolveRepoRoots: resUrlRoots, readTaskLedger: readUrlLedger, updateTaskLedger: updUrlLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots: resUrlRoots, readTaskLedger: readUrlLedger, updateTaskLedger: updUrlLedger } = await import('./test-shared.mjs')
     const { handleStart: startUrl } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleFinalize: finUrl, handleVerify: verUrl, handleSubmit: subUrl } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim: claimUrl, handleCleanup: clUrl } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -684,7 +684,7 @@ cases.push(['doc-plan approve 移交 flow start 与静态回归（mergeAuthority
       return `doc-plan approve 缺少移交 flow start 提示：${apRes.stdout} ${apRes.stderr}`
     }
 
-    const { parseAgentsProfile, hasHumanMergeAuthority, detectGateWeakeningInEntry } = await import('../../kit/skills/lib/shared.mjs')
+    const { parseAgentsProfile, hasHumanMergeAuthority, detectGateWeakeningInEntry } = await import('./test-shared.mjs')
     const repoProf = parseAgentsProfile(SKILL_ROOT)
     if (repoProf.mergeAuthority !== 'reviewer') {
       return `AGENTS.md 协作说明正文误触发 mergeAuthority=${repoProf.mergeAuthority}`

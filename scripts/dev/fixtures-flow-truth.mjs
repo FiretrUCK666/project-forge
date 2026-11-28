@@ -685,7 +685,7 @@ export function registerFlowTruthCases(cases) {
     const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const { createDefaultLedger, ensureReviewToken, readTaskLedger, updateTaskLedger } = await import('../../kit/skills/lib/ledger.mjs')
-    const { createGitHubClient } = await import('../../kit/skills/lib/shared.mjs')
+    const { createGitHubClient } = await import('./test-shared.mjs')
     const { resolveRepoRoots } = await import('../../kit/skills/lib/git.mjs')
     const { EXIT, gitInit } = await import('./fixtures-helpers.mjs')
 

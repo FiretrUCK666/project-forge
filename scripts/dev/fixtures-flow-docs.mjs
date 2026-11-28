@@ -117,7 +117,7 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
   gitInit(localDir, { branch: 'main', name: 't', email: 't@t.t' })
 
   try {
-    const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleFinalize, handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const lRoots = await resolveRepoRoots(localDir)
@@ -248,7 +248,7 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     }
 
     // 3. review-pack record：自审拒绝（exit 2）与 2 次重复 / 第 3 轮停损熔断（exit 4）
-    const { resolveRepoRoots: resRevRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots: resRevRoots } = await import('./test-shared.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
     const revRoots = await resRevRoots(dir)
     const ledgerDir = join(dir, '.worktrees', '.state', 'tasks')

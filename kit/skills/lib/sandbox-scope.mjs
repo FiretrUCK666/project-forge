@@ -5,9 +5,8 @@
  */
 
 import { EXIT } from './exit-codes.mjs'
-import { posixPath } from './git-core.mjs'
+import { posixPath, scopePatternPairOverlaps } from './git-core.mjs'
 import { isNonImplRoleActor, isValidActorName } from './harness-context.mjs'
-import { matchGlob } from './static-gates.mjs'
 
 export const SANDBOX_STATUSES = Object.freeze([
   'sandbox-iterating',
@@ -16,7 +15,6 @@ export const SANDBOX_STATUSES = Object.freeze([
 ])
 
 const SANDBOX_STATUS_SET = new Set(SANDBOX_STATUSES)
-const WILDCARD_RE = /[*?[]/
 const FULL_REPO_PATTERNS = new Set(['.', '*', '**', './**', '**/*'])
 
 export function isSandboxStatus(status) {
@@ -52,58 +50,8 @@ function isFullRepoScope(scopeList) {
   return scopeList.some((p) => FULL_REPO_PATTERNS.has(p))
 }
 
-function staticPrefixOf(pattern) {
-  const segs = String(pattern ?? '').split('/')
-  const kept = []
-  for (const seg of segs) {
-    if (!seg || WILDCARD_RE.test(seg)) break
-    kept.push(seg)
-  }
-  return kept.join('/')
-}
-
-function concreteExtTail(pattern, prefix) {
-  const rest = prefix ? pattern.slice(prefix.length + 1) : pattern
-  const m = /^\*\.([a-z0-9]+)$/i.exec(rest)
-  return m ? m[1].toLowerCase() : null
-}
-
-function patternsOverlap(patA, patB) {
-  if (patA === patB) return true
-  if (FULL_REPO_PATTERNS.has(patA) || FULL_REPO_PATTERNS.has(patB)) return true
-
-  const wildA = WILDCARD_RE.test(patA)
-  const wildB = WILDCARD_RE.test(patB)
-  if (!wildA && !wildB) {
-    return patA.startsWith(`${patB}/`) || patB.startsWith(`${patA}/`)
-  }
-  if (matchGlob(patA, patB) || matchGlob(patB, patA)) return true
-
-  const preA = staticPrefixOf(patA)
-  const preB = staticPrefixOf(patB)
-  if (!preA || !preB) return true
-
-  if (!wildA && wildB) {
-    return patA === preB || patA.startsWith(`${preB}/`) || preB.startsWith(`${patA}/`)
-  }
-  if (wildA && !wildB) {
-    return patB === preA || patB.startsWith(`${preA}/`) || preA.startsWith(`${patB}/`)
-  }
-
-  if (preA === preB) {
-    const extA = concreteExtTail(patA, preA)
-    const extB = concreteExtTail(patB, preB)
-    if (extA && extB && extA !== extB) return false
-    return true
-  }
-  if (preA.startsWith(`${preB}/`) || preB.startsWith(`${preA}/`)) {
-    return true
-  }
-  return false
-}
-
-/** 判定两组写域是否存在目录前缀包含、通配交集或全仓写域碰撞。 */
-export function scopesOverlap(scopeA = [], scopeB = []) {
+/** 判定两组写域是否存在目录前缀包含、通配交集或全仓写域碰撞（单源复用 `scopePatternPairOverlaps`）。 */
+export function checkScopeListsOverlap(scopeA = [], scopeB = []) {
   const normA = normalizeWriteScope(scopeA)
   const normB = normalizeWriteScope(scopeB)
   if (isFullRepoScope(normA) || isFullRepoScope(normB)) {
@@ -115,13 +63,15 @@ export function scopesOverlap(scopeA = [], scopeB = []) {
   const conflicts = []
   for (const a of normA) {
     for (const b of normB) {
-      if (patternsOverlap(a, b)) {
+      if (scopePatternPairOverlaps(a, b)) {
         conflicts.push({ a, b, reason: 'path-or-glob-overlap' })
       }
     }
   }
   return { overlap: conflicts.length > 0, conflicts }
 }
+
+export { checkScopeListsOverlap as scopesOverlap }
 
 /** 校核新登记实施者与既有其他并行实施者的写域是否碰撞。 */
 export function checkWriteScopeOverlap(existingImplementers = [], { actor, writeScope = [] } = {}) {
@@ -136,7 +86,7 @@ export function checkWriteScopeOverlap(existingImplementers = [], { actor, write
     const entryKey = normActorKey(entryActor)
     if (!entryKey || entryKey === actorKey) continue
     const entryScope = typeof entry === 'string' ? [] : normalizeWriteScope(entry.writeScope)
-    const ov = scopesOverlap(entryScope, incomingScope)
+    const ov = checkScopeListsOverlap(entryScope, incomingScope)
     if (ov.overlap) {
       conflicts.push({
         existingActor: entryActor,

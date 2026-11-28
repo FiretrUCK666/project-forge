@@ -17,7 +17,7 @@ import { critiqueTextFingerprint } from '../../kit/skills/lib/critique-rounds.mj
 import {
   buildSliceGraph, compileScopePattern, DERIVED_MANIFEST_PATHS, evaluateSliceGraph, extractMasterCriteria, scopesOverlap,
 } from '../../kit/skills/lib/doc-slice-graph.mjs'
-import { resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { resolveRepoRoots } from './test-shared.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import { handleBatch } from '../../kit/skills/dev-flow/scripts/flow-batch.mjs'
 import { gitCommitFast, gitSync, rmTree } from './fixtures-helpers.mjs'
@@ -318,7 +318,7 @@ export function registerPlanWaveSliceCases(cases) {
     // 等于 `--artifact` 在端到端下完全没用，而所有断言都还是绿的。
     const { handleStart: startForArtifact } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify: verifyForArtifact } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-    const { resolveRepoRoots: resolveRootsForArtifact } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots: resolveRootsForArtifact } = await import('./test-shared.mjs')
     const { gitCommitFast: commitForArtifact, gitSync: gitForArtifact } = await import('./fixtures-helpers.mjs')
 
     const evDir = makeWaveRepo({})

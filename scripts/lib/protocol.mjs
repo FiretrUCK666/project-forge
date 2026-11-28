@@ -18,7 +18,7 @@ import {
   discoverKitSkillsDetailed,
   parseSkillFrontmatter,
 } from '../../kit/skills/lib/skill-discovery.mjs'
-import { scanLines } from './markdown.mjs'
+import { scanLines } from '../../kit/skills/lib/markdown-scan.mjs'
 
 export {
   COMMON_SKIP_DIRS,

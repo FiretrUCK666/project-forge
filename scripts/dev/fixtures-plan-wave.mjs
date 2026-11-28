@@ -18,7 +18,7 @@ import { critiqueTextFingerprint } from '../../kit/skills/lib/critique-rounds.mj
 import {
   buildSliceGraph, compileScopePattern, DERIVED_MANIFEST_PATHS, evaluateSliceGraph, extractMasterCriteria, scopesOverlap,
 } from '../../kit/skills/lib/doc-slice-graph.mjs'
-import { resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { resolveRepoRoots } from './test-shared.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import { handleBatch } from '../../kit/skills/dev-flow/scripts/flow-batch.mjs'
 import { gitCommitFast, gitSync, rmTree, tmpProject } from './fixtures-helpers.mjs'

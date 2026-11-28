@@ -37,7 +37,7 @@ import { resolveEffectiveBaseSha, resolveReadablePrTitle } from '../../kit/skill
 import { evaluateNextState } from '../../kit/skills/lib/workflow-policy.mjs'
 import { renderAgentsTemplate } from '../compose-agents.mjs'
 import { excludedSkillsFor } from '../lib/agents-defaults.mjs'
-import { extractHeadlessSummary as engineExtractSummary, indexMarkdownSections as engineIndexSections } from '../lib/markdown.mjs'
+import { extractHeadlessSummary as engineExtractSummary, indexMarkdownSections as engineIndexSections } from '../../kit/skills/lib/markdown-scan.mjs'
 import * as protocol from '../lib/protocol.mjs'
 import {
   gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runAbsAsync, runNode, SKILL_ROOT, tmpProject,
@@ -697,8 +697,41 @@ export function registerLocateIntakeCases(cases) {
       if (tableHeaderCount !== 1 || !body.includes('420ms') || !body.includes('doc-locate 实测 58ms')) {
         return `PR 正文缺少唯一实证验证表格或 E2E 观察（tableHeaders=${tableHeaderCount}）：\n${body}`
       }
-      if (!body.includes('Fixes #90') || !body.includes('- [x] 门禁全绿')) {
-        return `verifyPassed=true 时未填充关联 Issue 或未勾选实证自查项：\n${body}`
+      if (!body.includes('Fixes #90')
+        || !body.includes('- [x] 门禁全绿')
+        || !body.includes('已实证：merge-gate / quick-test 退出码 0 @ `abcdef1`')
+        || !body.includes('静态扫描未检出弱化门禁或跳过测试')) {
+        return `verifyPassed=true 时未填充关联 Issue 或实证自查事实标注异常：\n${body}`
+      }
+      // 反向：触及门禁规则但未补夹具、且存在疑似门禁弱化时，自查对应条目保持未勾选并标注原因
+      const bodyWeak = hydratePrTemplateBody({
+        repoRoot: dir,
+        taskId: ledger.taskId,
+        ledger: { ...ledger, caseType: 2, finalized: false },
+        policy: { riskTier: 'high', gateWeakened: true, highRiskHits: ['kit/skills/lib/static-gates.mjs'], oneWayBoundaryHits: [], independentReviewRequired: true },
+        evidence: { mode: 'gate', gates: { gate: { cmd: 'node scripts/dev/preflight.mjs', exitCode: EXIT.OK, durationMs: 100 } } },
+        actorDisplay: 'impl-c1',
+        currentHead: ledger.verifiedHead,
+        changedFiles: ['kit/skills/lib/static-gates.mjs'],
+      })
+      if (!bodyWeak.includes('- [ ] 没有弱化任何门禁或跳过测试（检出疑似弱化门禁或跳过测试项')
+        || !bodyWeak.includes('- [ ] 新增勘察/门禁判定已补正反双向夹具')
+        || !bodyWeak.includes('Case 2 无规划文档归档')) {
+        return `反向实证自查未保持未勾选或缺少 Case 2 归档标注：\n${bodyWeak}`
+      }
+      // 正向：同步了 docs/TDD.md 与 fixtures-*.mjs 时如实列出文件名
+      const bodyDocsAndFix = hydratePrTemplateBody({
+        repoRoot: dir,
+        taskId: ledger.taskId,
+        ledger,
+        policy: { riskTier: 'medium', highRiskHits: [], oneWayBoundaryHits: [], independentReviewRequired: true },
+        evidence: { mode: 'gate', gates: { gate: { cmd: 'node scripts/dev/merge-gate.mjs', exitCode: EXIT.OK, durationMs: 500 } } },
+        actorDisplay: 'impl-c1',
+        currentHead: ledger.verifiedHead,
+        changedFiles: ['docs/TDD.md', 'scripts/dev/fixtures-platform.mjs'],
+      })
+      if (!bodyDocsAndFix.includes('已同步：`docs/TDD.md`') || !bodyDocsAndFix.includes('已补/更新：`scripts/dev/fixtures-platform.mjs`')) {
+        return `正向实证自查未列出实际同步文档或夹具路径：\n${bodyDocsAndFix}`
       }
       if (body.includes('在合并之前写完')) {
         return `PR 正文未过滤「在合并之前写完」引导行：\n${body}`

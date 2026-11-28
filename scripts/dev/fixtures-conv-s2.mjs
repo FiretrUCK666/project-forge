@@ -15,7 +15,7 @@ import {
   TOPIC_MAX_BYTES, appendPreInitNote, readAllActiveTopics, readPreInitState, resolveSessionStatePath,
 } from '../../kit/skills/lib/session-state.mjs'
 import { evaluateNextState } from '../../kit/skills/lib/workflow-policy-next.mjs'
-import { resolveRepoRoots, writeJsonAtomic } from '../../kit/skills/lib/shared.mjs'
+import { resolveRepoRoots, writeJsonAtomic } from './test-shared.mjs'
 import { approveSpec, clarifyDoc, initDoc, sliceSpec } from '../../kit/skills/dev-plan/scripts/doc-plan-ops.mjs'
 import { auditDoc, checkOrphanSlices } from '../../kit/skills/dev-plan/scripts/doc-audit.mjs'
 import { handleBatch } from '../../kit/skills/dev-flow/scripts/flow-batch.mjs'

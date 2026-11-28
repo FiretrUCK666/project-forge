@@ -33,7 +33,7 @@ export const INJECTIONS_ADAPTIVE = [
   {
     id: 'I163',
     what: 'C4 buildSwitchABranchProtectionPayload 放行 required_approving_review_count >= 1',
-    file: 'scripts/lib/platform/github-client.mjs',
+    file: 'scripts/lib/platform/index.mjs',
     from: '  if (!Number.isFinite(reviewCount) || reviewCount < 0 || reviewCount >= 1) {',
     to: '  if (false && (!Number.isFinite(reviewCount) || reviewCount < 0 || reviewCount >= 1)) {',
     expect: 'StageB C4 双向',

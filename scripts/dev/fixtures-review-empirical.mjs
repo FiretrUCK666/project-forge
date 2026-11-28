@@ -120,7 +120,7 @@ export function registerReviewEmpiricalCases(cases) {
       // 4. --task (Tier 2 flow)
       const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
       const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-      const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+      const { resolveRepoRoots } = await import('./test-shared.mjs')
       const roots = await resolveRepoRoots(dir)
       await handleStart({ task: 'c1-t', case: '2', slug: 'c1-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 review-pack 实证阻断' }, roots)
       const implWt = join(dir, '.worktrees', 'impl-c1-t')
@@ -194,7 +194,7 @@ export function registerReviewEmpiricalCases(cases) {
     try {
       const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
       const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-      const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+      const { resolveRepoRoots } = await import('./test-shared.mjs')
       const roots = await resolveRepoRoots(dir)
 
       await handleStart({ task: 'c2-t', case: '2', slug: 'c2-t', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦故障注入解锁' }, roots)
@@ -334,7 +334,7 @@ export function registerReviewEmpiricalCases(cases) {
       const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
       const { handleSync } = await import('../../kit/skills/dev-flow/scripts/flow-sync.mjs')
       const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
-      const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+      const { resolveRepoRoots } = await import('./test-shared.mjs')
       const { issueTokenFor } = await import('./fixtures-helpers.mjs')
       const roots = await resolveRepoRoots(dir)
 
@@ -577,7 +577,7 @@ export function registerReviewEmpiricalCases(cases) {
       const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
       const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
       const { evaluateIncludeDiffGate } = await import('../../kit/skills/dev-review/scripts/review-empirical.mjs')
-      const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+      const { resolveRepoRoots } = await import('./test-shared.mjs')
       gitSync(dir, ['checkout', '--', 'src/App.tsx', 'src/app.mjs'])
       const roots = await resolveRepoRoots(dir)
       await handleStart({ task: 'ui-ev', case: '2', slug: 'ui-ev', implementer: 'alice', 'no-issue': true, reason: '回归夹具聚焦 UI 视觉证据校验' }, roots)
@@ -610,7 +610,7 @@ export function registerReviewEmpiricalCases(cases) {
   cases.push(['C5+C6：省略 smoke-verify 不死锁、纯单测免故障注入、全 none 纯文档过审、record 自动复用同 HEAD 实证且不三倍拼接', async () => {
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
-    const { readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { readTaskLedger, resolveRepoRoots } = await import('./test-shared.mjs')
     const { readLocalIssue } = await import('../../kit/skills/lib/local-issues.mjs')
 
     // 1. 省略 smoke-verify 键 + 只改纯单测（TEST_FILE_RE）：check-empirical 不再报 BLOCKED_SMOKE_VERIFY_UNCONFIGURED 且 faultRequired=false

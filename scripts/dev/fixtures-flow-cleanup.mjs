@@ -22,7 +22,7 @@ export function registerFlowCleanupCases(cases) {
     const { scanOutboundLinks, unmountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
     const { handleCleanup, handleAbort } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
-    const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger } = await import('./test-shared.mjs')
     const names = ['vendor', 'shared', 'data', 'packages', '中文名']
     const dir = tmpProject({
       '.gitignore': `.worktrees/\n${names.map((n) => `${n}/\n`).join('')}`,
@@ -132,7 +132,7 @@ export function registerFlowCleanupCases(cases) {
     const { handleFinalize, handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleSync } = await import('../../kit/skills/dev-flow/scripts/flow-sync.mjs')
-    const { resolveRepoRoots, readTaskLedger, writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger, writeTaskLedger } = await import('./test-shared.mjs')
 
     const dir = tmpProject({
       '.gitignore': '.worktrees/\nnode_modules/\npackages/app/node_modules/\n',
@@ -281,7 +281,7 @@ export function registerFlowCleanupCases(cases) {
     const { unmountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
     const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
-    const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger } = await import('./test-shared.mjs')
     const dir = tmpProject({ '.gitignore': '.worktrees/\ninner-junc\n', 'README.md': '# c3\n' })
     gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
@@ -332,7 +332,7 @@ export function registerFlowCleanupCases(cases) {
     const { scanOutboundLinks, unmountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
     const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
-    const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger } = await import('./test-shared.mjs')
     const dir = tmpProject({ '.gitignore': '.worktrees/\n', 'README.md': '# c4\n' })
     const outside = tmpProject({ 'SURVIVE.txt': 'DEEP_SENTINEL' })
     gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
@@ -381,7 +381,7 @@ export function registerFlowCleanupCases(cases) {
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { runTrialMerge } = await import('../../kit/skills/dev-flow/scripts/flow-trial-merge.mjs')
     const { syncTier2ReviewSlotIfNeeded } = await import('../../kit/skills/dev-review/scripts/review-diff.mjs')
-    const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots, readTaskLedger } = await import('./test-shared.mjs')
     const dir = tmpProject({
       '.gitignore': '.worktrees/\nnode_modules/\n',
       'AGENTS.md': '# c5\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nmerge-gate: exit 0\n```\n',

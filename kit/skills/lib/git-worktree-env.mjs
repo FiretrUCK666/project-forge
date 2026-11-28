@@ -189,7 +189,7 @@ export async function ensureWorktreesIgnored(mainRoot, gitDir) {
 }
 
 /** 同步或按需创建干净的 detached 审查隔离工作树至 targetSha，脏工作树直接阻断（支持 resetDirty）。 */
-export async function syncDetachedWorktree(mainRoot, wtAbs, targetSha, { resetDirty = false, checkStatusFn } = {}) {
+export async function syncDetachedWorktreeCore(mainRoot, wtAbs, targetSha, { resetDirty = false, checkStatusFn } = {}) {
   if (!targetSha || targetSha === 'UNBORN') {
     throw new Error('目标工作区尚无有效提交（UNBORN HEAD），无法同步审查隔离工作树')
   }

@@ -526,3 +526,28 @@ export function removeSectionIfPresent(md, headingCandidates) {
   }
   return { matched: false, text: md }
 }
+
+function isWideCodePoint(cp) {
+  return (cp >= 0x1100 && cp <= 0x115f)
+    || (cp >= 0x2013 && cp <= 0x2027)
+    || (cp >= 0x2e80 && cp <= 0x303f)
+    || (cp >= 0x3040 && cp <= 0x33ff)
+    || (cp >= 0x3400 && cp <= 0x4dbf)
+    || (cp >= 0x4e00 && cp <= 0x9fff)
+    || (cp >= 0xac00 && cp <= 0xd7af)
+    || (cp >= 0xf900 && cp <= 0xfaff)
+    || (cp >= 0xfe10 && cp <= 0xfe6f)
+    || (cp >= 0xff01 && cp <= 0xff60)
+    || (cp >= 0xffe0 && cp <= 0xffe6)
+    || cp > 0xffff
+}
+
+/** 计算单行字符显示宽度（单源原语：完整支持代理对/全角/汉字计 2 单位，半角 ASCII 计 1 单位）。 */
+export function displayWidth(str) {
+  let w = 0
+  for (const ch of String(str ?? '')) {
+    const cp = ch.codePointAt(0) ?? 0
+    w += isWideCodePoint(cp) ? 2 : 1
+  }
+  return w
+}

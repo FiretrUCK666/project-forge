@@ -12,26 +12,41 @@ import { basename, join } from 'node:path'
 
 import { isMacOsJunkPath, posixPath, readJsonSafe, readTextSafe } from './git.mjs'
 import {
+  ECOSYSTEM_MANIFEST_BY_KIND,
+  ECOSYSTEM_MANIFEST_TABLE,
   VENDOR_OR_EXAMPLE_SKIP_DIRS,
+  WORKSPACE_MANIFEST_NAMES,
   detectNonNodePackageCommands,
   groupPackageManifests,
   hasDotnetMinVer,
+  hasPytestEvidence,
   isDotnetTestProject,
+  isWorkspaceManifestFile,
   parseYamlWorkspaceGlobs,
   readDenoOrJsrManifest,
   readJsoncSafe,
+  resolveJavaWrapper,
   resolveNodePackageManager,
+  stripInlineYamlComment,
   stripWrapQuotes,
 } from './profile-sniffer-packages.mjs'
 
 export {
+  ECOSYSTEM_MANIFEST_BY_KIND,
+  ECOSYSTEM_MANIFEST_TABLE,
   VENDOR_OR_EXAMPLE_SKIP_DIRS,
+  WORKSPACE_MANIFEST_NAMES,
   hasDotnetMinVer,
+  hasPytestEvidence,
   isDotnetTestProject,
+  isWorkspaceManifestFile,
   parseYamlWorkspaceGlobs,
   readDenoOrJsrManifest,
   readJsoncSafe,
+  resolveJavaWrapper,
   resolveNodePackageManager,
+  stripInlineYamlComment,
+  stripWrapQuotes,
 }
 
 export const NEUTRAL_CI_CONFIGS = Object.freeze([

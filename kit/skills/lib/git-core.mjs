@@ -363,5 +363,86 @@ export function matchGlobList(filePath, patterns) {
   return true
 }
 
+const SCOPE_WILDCARD_RE = /[*?[]/
+const FULL_REPO_SCOPE_SET = new Set(['.', '*', '**', './**', '**/*'])
+
+/** 把 glob 与目录前缀统一编译为 `{ test, prefix, raw }` 判定器。 */
+export function compileScopePattern(pattern) {
+  const raw = posixPath(String(pattern ?? '')).replace(/^\.\//, '').trim()
+  if (!raw) return null
+  if (raw.endsWith('/**')) {
+    const base = raw.slice(0, -3)
+    return { test: (p) => p === base || p.startsWith(`${base}/`), prefix: base, raw }
+  }
+  if (raw.endsWith('/*')) {
+    const base = raw.slice(0, -2)
+    return { test: (p) => dirname(p) === base || (p.startsWith(`${base}/`) && !p.slice(base.length + 1).includes('/')), prefix: base, raw }
+  }
+  if (!raw.includes('*')) {
+    const trimmed = raw.replace(/\/+$/, '')
+    return { test: (p) => p === trimmed, prefix: trimmed, raw }
+  }
+  const escaped = raw
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*\//g, '\u0001')
+    .replace(/\*\*/g, '\u0002')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\u0001/g, '(?:.*/)?')
+    .replace(/\u0002/g, '.*')
+  const re = new RegExp(`^${escaped}$`)
+  return { test: (p) => re.test(p), prefix: null, raw }
+}
+
+function* scopeRangeProbe(prefix) {
+  yield prefix
+  yield `${prefix}/x`
+  yield `${prefix}/x/y.ext`
+  yield `${prefix}/x.ext`
+}
+
+function staticScopePrefixOf(pattern) {
+  const segs = String(pattern ?? '').split('/')
+  const kept = []
+  for (const seg of segs) {
+    if (!seg || SCOPE_WILDCARD_RE.test(seg)) break
+    kept.push(seg)
+  }
+  return kept.join('/')
+}
+
+function concreteExtTailOf(pattern, prefix) {
+  const rest = prefix ? pattern.slice(prefix.length + 1) : pattern
+  const m = /^\*\.([a-z0-9]+)$/i.exec(rest)
+  return m ? m[1].toLowerCase() : null
+}
+
+/**
+ * 单源保守判定两个路径/通配 scope 条目（支持已编译匹配器对象或原始模式串）是否可能覆盖同一路径。
+ */
+export function scopePatternPairOverlaps(aIn, bIn) {
+  const a = typeof aIn === 'string' ? compileScopePattern(aIn) : aIn
+  const b = typeof bIn === 'string' ? compileScopePattern(bIn) : bIn
+  if (!a || !b) return false
+  if (a.raw === b.raw) return true
+  if (FULL_REPO_SCOPE_SET.has(a.raw) || FULL_REPO_SCOPE_SET.has(b.raw)) return true
+  const pa = a.prefix
+  const pb = b.prefix
+  if (pa && !pb) return b.test(pa) || [...scopeRangeProbe(pa)].some((p) => b.test(p))
+  if (!pa && pb) return a.test(pb) || [...scopeRangeProbe(pb)].some((p) => a.test(p))
+  if (pa && pb) {
+    return pa === pb || pa.startsWith(`${pb}/`) || pb.startsWith(`${pa}/`)
+  }
+  const preA = staticScopePrefixOf(a.raw)
+  const preB = staticScopePrefixOf(b.raw)
+  if (!preA || !preB) return true
+  if (preA === preB) {
+    const extA = concreteExtTailOf(a.raw, preA)
+    const extB = concreteExtTailOf(b.raw, preB)
+    if (extA && extB && extA !== extB) return false
+    return true
+  }
+  return preA.startsWith(`${preB}/`) || preB.startsWith(`${preA}/`)
+}
+
 
 

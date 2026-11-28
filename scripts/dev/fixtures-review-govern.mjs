@@ -18,7 +18,7 @@ const FIXTURES_M4_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 
 
 export function registerReviewGovernCases(cases) {
   cases.push(['救活 zero-assertion/mock-tautology 死检查与纯 ASSERTION_RE 大小写敏感(I70)', async () => {
-    const { ASSERTION_RE, GATE_ASSERTION_RE } = await import('../../kit/skills/lib/shared.mjs')
+    const { ASSERTION_RE, GATE_ASSERTION_RE } = await import('./test-shared.mjs')
     if (ASSERTION_RE !== GATE_ASSERTION_RE) return 'GATE_ASSERTION_RE 未与 ASSERTION_RE 保持兼容导出'
 
     for (const nonAssert of [
@@ -77,7 +77,7 @@ export function registerReviewGovernCases(cases) {
   }])
 
   cases.push(['Python 三引号词法、deleted-ci-step(I72) 与整块删空 test 保留 deleted-assertion', async () => {
-    const { detectGateWeakeningInEntry, extractLineCommentInfo, stripCodeCommentsLines } = await import('../../kit/skills/lib/shared.mjs')
+    const { detectGateWeakeningInEntry, extractLineCommentInfo, stripCodeCommentsLines } = await import('./test-shared.mjs')
 
     // 1. Python triple quotes (single-line & multi-line + r""" + trailing # comment)
     const pyLines = [
@@ -155,7 +155,7 @@ export function registerReviewGovernCases(cases) {
     }
 
     // 4. flushAndExit re-exports & drains >128KB stdout JSON cleanly without waiting on live timer
-    const sharedMod = await import('../../kit/skills/lib/shared.mjs')
+    const sharedMod = await import('./test-shared.mjs')
     const cliMod = await import('../../kit/skills/lib/cli.mjs')
     const textMod = await import('../lib/text.mjs')
     if (sharedMod.flushAndExit !== cliMod.flushAndExit || textMod.flushAndExit !== cliMod.flushAndExit) {
@@ -232,7 +232,7 @@ export function registerReviewGovernCases(cases) {
   }])
 
   cases.push(['全图表 Mermaid 16/12 (sequenceDiagram(I71)/stateDiagram-v2/erDiagram) 零误伤', async () => {
-    const { checkMermaidLabelWidth } = await import('../../kit/skills/lib/shared.mjs')
+    const { checkMermaidLabelWidth } = await import('./test-shared.mjs')
 
     const validMd = [
       '```mermaid',
@@ -302,7 +302,7 @@ export function registerReviewGovernCases(cases) {
   }])
 
   cases.push(['tdd-parity.mjs 结构级模块/导出/CLI 漂移检测(I73)、排除 TEST_FILE_RE 与 no-tdd 豁免', async () => {
-    const { checkTddSyncParity } = await import('../../kit/skills/lib/shared.mjs')
+    const { checkTddSyncParity } = await import('./test-shared.mjs')
 
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
@@ -375,7 +375,7 @@ export function registerReviewGovernCases(cases) {
   }])
 
   cases.push(['tdd-parity.mjs：注释里的导出名不算定义，不能掩盖真实删掉的导出', async () => {
-    const { checkTddSyncParity } = await import('../../kit/skills/lib/shared.mjs')
+    const { checkTddSyncParity } = await import('./test-shared.mjs')
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       'AGENTS.md': '# parity\n\n```yaml\nquick-test: exit 0\n```\n',
@@ -424,7 +424,7 @@ export function registerReviewGovernCases(cases) {
   }])
 
   cases.push(['signals.jsonl 自动写回(I74)+retro --apply-patches、flow-batch CI 门禁与 zip CRC32 冒烟', async () => {
-    const { appendGovernSignal, readSignalsJsonl, resolveRepoRoots, writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+    const { appendGovernSignal, readSignalsJsonl, resolveRepoRoots, writeTaskLedger } = await import('./test-shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     const { handleVerify, handleRework } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')

@@ -39,8 +39,8 @@ export const INJECTIONS_W6A = [
     id: 'I428',
     what: 'C2 survey-ecosystem: hasDotnetMinVer 返回 false 导致 MinVer 版本源退回 *.csproj',
     file: 'scripts/lib/survey-ecosystem.mjs',
-    from: "      if (hasDotnetMinVer(root, s._repoRoot ?? root)) {",
-    to: "      if (false && hasDotnetMinVer(root, s._repoRoot ?? root)) {",
+    from: "      if (hasDotnetMinVer(root, s._repoRoot ?? root)) s.versionSource = 'MinVer (Git tag)'",
+    to: "      if (false && hasDotnetMinVer(root, s._repoRoot ?? root)) s.versionSource = 'MinVer (Git tag)'",
     expect: 'W6A C2：.slnx/MinVer/Benchmarks',
   },
   {

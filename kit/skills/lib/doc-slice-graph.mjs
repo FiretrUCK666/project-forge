@@ -23,9 +23,11 @@
 import { basename, dirname, relative, resolve } from 'node:path'
 
 import { isManagedPlanDoc, parseDocFilename } from './doc-frontmatter.mjs'
-import { posixPath } from './git.mjs'
+import { compileScopePattern, posixPath, scopePatternPairOverlaps } from './git-core.mjs'
 import { parseBodyRelations } from './github-parse.mjs'
 import { DONE_PLAN_STATUSES, INERT_PLAN_STATUSES, indexPlanDocs } from './plan-index.mjs'
+
+export { compileScopePattern, scopePatternPairOverlaps as scopesOverlap }
 
 /** 判定为「不参与当前规划」的文档状态。 */
 const INERT_STATUS = INERT_PLAN_STATUSES
@@ -100,83 +102,9 @@ export function sliceKeyOf(doc) {
   return fn?.slug ?? (basename(String(doc?.rel ?? ''), '.md') || null)
 }
 
-/** 把 glob 与目录前缀统一成「它覆盖了哪些路径」的判定器。 */
-export function compileScopePattern(pattern) {
-  return makePathMatcher(pattern)
-}
-
-function makePathMatcher(pattern) {
-  const raw = posixPath(String(pattern ?? '')).replace(/^\.\//, '').trim()
-  if (!raw) return null
-  if (raw.endsWith('/**')) {
-    const base = raw.slice(0, -3)
-    return { test: (p) => p === base || p.startsWith(`${base}/`), prefix: base, raw }
-  }
-  if (raw.endsWith('/*')) {
-    const base = raw.slice(0, -2)
-    return { test: (p) => dirname(p) === base || (p.startsWith(`${base}/`) && !p.slice(base.length + 1).includes('/')), prefix: base, raw }
-  }
-  if (!raw.includes('*')) {
-    // 末尾带斜杠或本身就是个目录前缀：按前缀算。
-    const trimmed = raw.replace(/\/+$/, '')
-    return { test: (p) => p === trimmed, prefix: trimmed, raw }
-  }
-  // 其余带 `*` 的写法走通用正则；`**` 跨层，`*` 不跨层。
-  const escaped = raw
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*\//g, '\u0001')
-    .replace(/\*\*/g, '\u0002')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\u0001/g, '(?:.*/)?')
-    .replace(/\u0002/g, '.*')
-  const re = new RegExp(`^${escaped}$`)
-  return { test: (p) => re.test(p), prefix: null, raw }
-}
-
-/**
- * 两个 scope 条目是否可能覆盖同一路径。
- *
- * 判据保守（宁报不放过）：目录前缀与 glob 一律按「可能重叠」算，除非一个有明确前缀、
- * 另一个的所有可能取值都不在它下面。**误报的代价是让人看一眼，漏报的代价是两个并行
- * 分支撞在一起后才被发现**——两者不对称，所以往保守一边倒。
- */
-export function scopesOverlap(a, b) {
-  if (!a || !b) return false
-  if (a.raw === b.raw) return true
-  const pa = a.prefix
-  const pb = b.prefix
-  // 一方是固定路径（无通配）：直接拿它去试另一方的匹配器，判得准又不用猜。
-  if (pa && !pb) return b.test(pa) || [...rangeProbe(pa)].some((p) => b.test(p))
-  if (!pa && pb) return a.test(pb) || [...rangeProbe(pb)].some((p) => a.test(p))
-  if (pa && pb) {
-    return pa === pb || pa.startsWith(`${pb}/`) || pb.startsWith(`${pa}/`)
-  }
-  // 双方都带通配：按字面前缀的包容关系判，这是能保住的**下界**。
-  // 更细的形状（`a/*.mjs` 与 `a/deep/x.mjs` 这类单星号不跨层的差异）交给调用方
-  // 用真实路径去试，不在前缀上做猜测——猜错了要么漏报、要么天天误报。
-  return globPrefixPairOverlaps(a.raw, b.raw)
-}
-
-/** 前缀目录下的探针路径：`a` 与 `a/x`、`a/x/y` 足够覆盖常见 glob 形状。 */
-function* rangeProbe(prefix) {
-  yield prefix
-  yield `${prefix}/x`
-  yield `${prefix}/x/y.ext`
-  yield `${prefix}/x.ext`
-}
-
-/** 两个 glob 都无固定前缀时的判定：字面前缀有包容关系即视为可能重叠。 */
-function globPrefixPairOverlaps(rawA, rawB) {
-  const litPrefix = (s) => s.split(/[*?]/)[0]
-  const la = litPrefix(rawA).replace(/\/+$/, '')
-  const lb = litPrefix(rawB).replace(/\/+$/, '')
-  if (!la || !lb) return true
-  return la === lb || la.startsWith(`${lb}/`) || lb.startsWith(`${la}/`)
-}
-
 /** 一组 scope 条目里，是否真正声明了东西。 */
 function scopeMatchers(scopeFiles) {
-  return scopeFiles.map(makePathMatcher).filter(Boolean)
+  return scopeFiles.map(compileScopePattern).filter(Boolean)
 }
 
 /**
@@ -441,7 +369,7 @@ export function checkWaveScopeOverlap(repoRoot, graph = null) {
         const hits = []
         for (const x of ma) {
           for (const y of mb) {
-            if (scopesOverlap(x, y)) hits.push([x.raw, y.raw])
+            if (scopePatternPairOverlaps(x, y)) hits.push([x.raw, y.raw])
           }
         }
         // 派生清单由脚本重新生成，谁「改了它」没有意义，不算碰撞。
@@ -512,7 +440,7 @@ function filesOverlapMatchers(matchersA, matchersB) {
     if (DERIVED_MANIFEST_PATHS.includes(ma.raw)) continue
     for (const mb of matchersB) {
       if (DERIVED_MANIFEST_PATHS.includes(mb.raw)) continue
-      if (scopesOverlap(ma, mb)) return true
+      if (scopePatternPairOverlaps(ma, mb)) return true
     }
   }
   return false
@@ -616,7 +544,7 @@ export function buildMultiTaskWavePlan(activeTasks = [], filesByTask = null) {
   const items = activeTasks.map((t) => {
     const rawFiles = filesByTask?.[t.taskId] ?? t.files ?? t.scopeFiles ?? []
     const files = [...new Set(rawFiles.map((f) => posixPath(String(f ?? '')).replace(/^\.\//, '').trim()).filter(Boolean))].sort()
-    const matchers = files.map(makePathMatcher).filter(Boolean)
+    const matchers = files.map(compileScopePattern).filter(Boolean)
     const rawDeps = [...new Set([
       ...(Array.isArray(t.dependsOn) ? t.dependsOn.map(String) : []),
       ...(t.parentTaskId ? [String(t.parentTaskId)] : []),

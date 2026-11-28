@@ -12,8 +12,11 @@ import { CUSTOM_DECL_REL } from './doc-frontmatter.mjs'
 import { resolveDocRequirements } from './doc-requirements.mjs'
 import { formatDocShapeSkippedBlock, resolveDocShapePolicy } from './doc-shape.mjs'
 import { renderDocTemplate } from './doc-template-render.mjs'
+import { displayWidth } from './markdown-scan.mjs'
 import { resolveDocPlanMode } from './pending-decisions.mjs'
 import { resolveAuthoritativeTddPath } from './profile.mjs'
+
+export { displayWidth }
 
 export const MERMAID_LIMITS = Object.freeze({
   rectMaxWidth: 16,
@@ -21,31 +24,6 @@ export const MERMAID_LIMITS = Object.freeze({
   diamondMaxWidth: 12,
   edgeMaxWidth: 12,
 })
-
-function isWideCharCode(cp) {
-  return (cp >= 0x1100 && cp <= 0x115f)
-    || (cp >= 0x2013 && cp <= 0x2027)
-    || (cp >= 0x2e80 && cp <= 0x303f)
-    || (cp >= 0x3040 && cp <= 0x33ff)
-    || (cp >= 0x3400 && cp <= 0x4dbf)
-    || (cp >= 0x4e00 && cp <= 0x9fff)
-    || (cp >= 0xac00 && cp <= 0xd7af)
-    || (cp >= 0xf900 && cp <= 0xfaff)
-    || (cp >= 0xfe10 && cp <= 0xfe6f)
-    || (cp >= 0xff01 && cp <= 0xff60)
-    || (cp >= 0xffe0 && cp <= 0xffe6)
-    || cp > 0xffff
-}
-
-/** 计算单行字符显示宽度：全角/汉字计 2 单位，半角 ASCII 计 1 单位。 */
-export function displayWidth(str) {
-  let w = 0
-  for (const ch of String(str ?? '')) {
-    const cp = ch.codePointAt(0) ?? 0
-    w += isWideCharCode(cp) ? 2 : 1
-  }
-  return w
-}
 
 const MERMAID_HTML_TAG_RE = /<\/?(?:br|p|div|span|b|i|strong|em|small|code|sub|sup|ul|ol|li|font|table|tr|td|th|hr)\b[^>]*>/i
 

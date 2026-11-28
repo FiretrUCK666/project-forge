@@ -30,8 +30,8 @@ import {
   buildSwitchABranchProtectionPayload,
   createGitHubClient,
   normalizeGitHubRepo,
-} from './lib/platform/github-client.mjs'
-import { probeGitHubEnv } from './lib/platform/github-probe.mjs'
+  probeGitHubEnv,
+} from './lib/platform/index.mjs'
 import { survey } from './survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))

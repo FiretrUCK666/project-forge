@@ -6,11 +6,15 @@ import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import {
+  ECOSYSTEM_MANIFEST_BY_KIND,
   discoverWorkspacePackages,
   hasDotnetMinVer,
+  hasPytestEvidence,
   isDotnetTestProject,
+  isWorkspaceManifestFile,
   parseYamlWorkspaceGlobs,
   readDenoOrJsrManifest,
+  resolveJavaWrapper,
   resolveNodePackageManager,
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
@@ -39,43 +43,20 @@ export const TEXT_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|vue|svelte|astro|py|rs|go|ja
 
 export const DOC_EXT = /\.(?:md|mdx|txt|rst)$/i
 
-function tomlString(text, key) {
-  return new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'm').exec(text)?.[1]
-}
-
-function cleanReaddir(dir) {
-  try {
-    return readdirSync(dir).filter((name) => !isMacMetadataName(name))
-  } catch {
-    return []
-  }
-}
-
-export function hasSuffix(root, suffix) {
-  return cleanReaddir(root).some((name) => name.endsWith(suffix))
-}
-
-export function findSuffix(root, suffix) {
-  return cleanReaddir(root).sort().find((name) => name.endsWith(suffix))
-}
-
-export function hasPrefix(root, prefix, suffix) {
-  return cleanReaddir(root).some((name) => name.startsWith(prefix) && name.endsWith(suffix))
-}
+function tomlString(text, key) { return new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'm').exec(text)?.[1] }
+function cleanReaddir(dir) { try { return readdirSync(dir).filter((n) => !isMacMetadataName(n)) } catch { return [] } }
+export function hasSuffix(root, suffix) { return cleanReaddir(root).some((n) => n.endsWith(suffix)) }
+export function findSuffix(root, suffix) { return cleanReaddir(root).sort().find((n) => n.endsWith(suffix)) }
+export function hasPrefix(root, prefix, suffix) { return cleanReaddir(root).some((n) => n.startsWith(prefix) && n.endsWith(suffix)) }
 
 function gradleTestEvidence(root) {
   if (existsSync(join(root, 'src', 'test'))) return true
-  for (const rel of ['build.gradle', 'build.gradle.kts']) {
-    const text = readTextSafe(join(root, rel)) ?? ''
-    if (/useJUnit|useTestNG|enableTest|tasks\.test|test\s*\{/.test(text)) return true
-  }
-  return false
+  return ['build.gradle', 'build.gradle.kts'].some((rel) => /useJUnit|useTestNG|enableTest|tasks\.test|test\s*\{/.test(readTextSafe(join(root, rel)) ?? ''))
 }
 
 function cmakeHasTests(root) {
-  const text = readTextSafe(join(root, 'CMakeLists.txt')) ?? ''
-  if (/enable_testing\s*\(|add_test\s*\(|include\s*\(\s*CTest/.test(text)) return true
-  return existsSync(join(root, 'tests')) || existsSync(join(root, 'test'))
+  return /enable_testing\s*\(|add_test\s*\(|include\s*\(\s*CTest/.test(readTextSafe(join(root, 'CMakeLists.txt')) ?? '')
+    || existsSync(join(root, 'tests')) || existsSync(join(root, 'test'))
 }
 
 function hasRakeTestTarget(root) {
@@ -83,33 +64,33 @@ function hasRakeTestTarget(root) {
   return /^\s*task\s+:test\b|^\s*desc\s+.{0,80}\btest\b/m.test(text) || /^\s*task\s+default:/m.test(text)
 }
 
-function hasPytestEvidence(root) {
-  for (const rel of ['pytest.ini', 'tox.ini', 'conftest.py']) {
-    if (existsSync(join(root, rel))) return true
-  }
-  for (const rel of ['pyproject.toml', 'setup.cfg']) {
-    const text = readTextSafe(join(root, rel)) ?? ''
-    if (/\[tool\.pytest|\[tool:pytest\]/.test(text)) return true
-  }
-  for (const dir of ['tests', 'test']) {
-    if (existsSync(join(root, dir))) return true
-  }
-  return hasSuffix(root, '_test.py') || hasPrefix(root, 'test_', '.py')
-}
-
 function listXcodeSchemes(containerPath) {
   const schemesDir = join(containerPath, 'xcshareddata', 'xcschemes')
-  if (!existsSync(schemesDir)) return []
-  return cleanReaddir(schemesDir)
-    .filter((f) => f.endsWith('.xcscheme'))
-    .map((f) => f.replace(/\.xcscheme$/, ''))
+  return existsSync(schemesDir) ? cleanReaddir(schemesDir).filter((f) => f.endsWith('.xcscheme')).map((f) => f.replace(/\.xcscheme$/, '')) : []
 }
 
-export const ECOSYSTEMS = [
+function detectByManifestEntry(root, kind) {
+  const entry = ECOSYSTEM_MANIFEST_BY_KIND[kind]
+  if (!entry) return false
+  if (entry.manifests?.some((m) => existsSync(join(root, m)))) return true
+  if (entry.suffixPattern && cleanReaddir(root).some((n) => entry.suffixPattern.test(n))) return true
+  return false
+}
+
+function primaryManifestOf(root, kind, fallback = null) {
+  const entry = ECOSYSTEM_MANIFEST_BY_KIND[kind]
+  const hit = entry?.manifests?.find((m) => existsSync(join(root, m)))
+  if (hit) return hit
+  if (entry?.suffixPattern) {
+    const suffixHit = cleanReaddir(root).sort().find((n) => entry.suffixPattern.test(n))
+    if (suffixHit) return suffixHit
+  }
+  return fallback ?? entry?.manifests?.[0] ?? null
+}
+
+const ECOSYSTEM_SPECS = [
   {
     kind: 'node',
-    manifest: () => 'package.json',
-    detect: (root) => existsSync(join(root, 'package.json')),
     read: (root, s) => {
       const pkg = readJsonSafe(join(root, 'package.json'))
       if (!pkg) return
@@ -119,11 +100,7 @@ export const ECOSYSTEMS = [
       const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
       if (repo) s.declaredRepo = normalizeDeclaredRepo(repo)
       s.packageManager = s._inheritedPackageManager
-        && !existsSync(join(root, 'pnpm-lock.yaml'))
-        && !existsSync(join(root, 'yarn.lock'))
-        && !existsSync(join(root, 'bun.lock'))
-        && !existsSync(join(root, 'bun.lockb'))
-        && !existsSync(join(root, 'package-lock.json'))
+        && !ECOSYSTEM_MANIFEST_BY_KIND.node.lockfiles.some((lf) => existsSync(join(root, lf)))
         ? s._inheritedPackageManager
         : resolveNodePackageManager(root, pkg)
       const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
@@ -145,10 +122,6 @@ export const ECOSYSTEMS = [
   },
   {
     kind: 'python',
-    manifest: (root) => (existsSync(join(root, 'pyproject.toml')) ? 'pyproject.toml'
-      : existsSync(join(root, 'requirements.txt')) ? 'requirements.txt' : 'setup.py'),
-    detect: (root) => existsSync(join(root, 'pyproject.toml'))
-      || existsSync(join(root, 'requirements.txt')) || existsSync(join(root, 'setup.py')),
     read: (root, s) => {
       const pyproject = join(root, 'pyproject.toml')
       if (existsSync(pyproject)) {
@@ -163,22 +136,17 @@ export const ECOSYSTEMS = [
         const urls = /\[project\.urls\]([\s\S]*?)(?:\n\[|$)/.exec(text)?.[1] ?? ''
         if (!s.declaredRepo) {
           for (const key of ['Repository', 'Source', 'Homepage', 'Home']) {
-            const value = new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'mi').exec(urls)?.[1]
-            const repo = normalizeDeclaredRepo(value)
+            const repo = normalizeDeclaredRepo(new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'mi').exec(urls)?.[1])
             if (repo) { s.declaredRepo = repo; break }
           }
         }
       }
       if (!s.declaredRepo && existsSync(join(root, 'setup.py'))) {
-        const text = readTextSafe(join(root, 'setup.py')) ?? ''
-        s.declaredRepo = normalizeDeclaredRepo(/url\s*=\s*["']([^"']+)["']/.exec(text)?.[1])
+        s.declaredRepo = normalizeDeclaredRepo(/url\s*=\s*["']([^"']+)["']/.exec(readTextSafe(join(root, 'setup.py')) ?? '')?.[1])
       }
       if (existsSync(join(root, 'uv.lock'))) s.commands.install ??= 'uv sync'
-      else if (existsSync(join(root, 'pyproject.toml')) || existsSync(join(root, 'setup.py'))) {
-        s.commands.install ??= 'pip install -e .'
-      } else if (existsSync(join(root, 'requirements.txt'))) {
-        s.commands.install ??= 'pip install -r requirements.txt'
-      }
+      else if (existsSync(join(root, 'pyproject.toml')) || existsSync(join(root, 'setup.py'))) s.commands.install ??= 'pip install -e .'
+      else if (existsSync(join(root, 'requirements.txt'))) s.commands.install ??= 'pip install -r requirements.txt'
       if (hasPytestEvidence(root)) {
         const venvSub = process.platform === 'win32' ? ['.venv', 'Scripts', 'python.exe'] : ['.venv', 'bin', 'python']
         const venvPy = existsSync(join(root, ...venvSub)) ? venvSub.join(process.platform === 'win32' ? '\\' : '/') : null
@@ -188,8 +156,6 @@ export const ECOSYSTEMS = [
   },
   {
     kind: 'rust',
-    manifest: () => 'Cargo.toml',
-    detect: (root) => existsSync(join(root, 'Cargo.toml')),
     read: (root, s) => {
       const text = readTextSafe(join(root, 'Cargo.toml')) ?? ''
       const name = tomlString(text, 'name')
@@ -208,8 +174,6 @@ export const ECOSYSTEMS = [
   },
   {
     kind: 'go',
-    manifest: () => 'go.mod',
-    detect: (root) => existsSync(join(root, 'go.mod')),
     read: (root, s) => {
       const text = readTextSafe(join(root, 'go.mod')) ?? ''
       const mod = /^module\s+(\S+)/m.exec(text)?.[1]
@@ -227,22 +191,15 @@ export const ECOSYSTEMS = [
   {
     kind: 'java',
     manifest: (root) => (existsSync(join(root, 'pom.xml')) ? 'pom.xml' : 'build.gradle'),
-    detect: (root) => existsSync(join(root, 'pom.xml')) || existsSync(join(root, 'build.gradle'))
-      || existsSync(join(root, 'build.gradle.kts')),
     read: (root, s) => {
       if (existsSync(join(root, 'pom.xml'))) {
-        const hasMvnw = existsSync(join(root, 'mvnw')) || existsSync(join(root, 'mvnw.cmd'))
-        const mvn = hasMvnw ? (process.platform === 'win32' && existsSync(join(root, 'mvnw.cmd')) && !existsSync(join(root, 'mvnw')) ? 'mvnw.cmd' : './mvnw') : 'mvn'
+        const mvn = resolveJavaWrapper(root, root, '', 'mvnw', 'mvnw.cmd', 'mvn')
         s.commands.build ??= `${mvn} -B package`
         if (existsSync(join(root, 'src', 'test')) || hasSuffix(root, '.java')) s.commands.test ??= `${mvn} -B test`
         s.publishable = true
         return
       }
-      const hasUnixW = existsSync(join(root, 'gradlew'))
-      const hasWinW = existsSync(join(root, 'gradlew.bat'))
-      const gradle = hasUnixW || hasWinW
-        ? (process.platform === 'win32' && hasWinW && !hasUnixW ? 'gradlew.bat' : './gradlew')
-        : 'gradle'
+      const gradle = resolveJavaWrapper(root, root, '', 'gradlew', 'gradlew.bat', 'gradle')
       s.commands.build ??= `${gradle} build`
       if (gradleTestEvidence(root)) s.commands.test ??= `${gradle} test`
     },
@@ -250,32 +207,21 @@ export const ECOSYSTEMS = [
   {
     kind: 'ruby',
     manifest: () => 'Gemfile',
-    detect: (root) => existsSync(join(root, 'Gemfile')) || hasSuffix(root, '.gemspec'),
     read: (root, s) => {
       s.commands.install ??= 'bundle install'
-      if (existsSync(join(root, 'Rakefile')) && hasRakeTestTarget(root)) {
-        s.commands.test ??= 'bundle exec rake test'
-      } else if (existsSync(join(root, 'spec')) || hasSuffix(root, '_spec.rb')) {
-        s.commands.test ??= 'bundle exec rspec'
-      }
+      if (existsSync(join(root, 'Rakefile')) && hasRakeTestTarget(root)) s.commands.test ??= 'bundle exec rake test'
+      else if (existsSync(join(root, 'spec')) || hasSuffix(root, '_spec.rb')) s.commands.test ??= 'bundle exec rspec'
       if (hasSuffix(root, '.gemspec')) s.publishable = true
     },
   },
   {
     kind: 'php',
-    manifest: () => 'composer.json',
-    detect: (root) => existsSync(join(root, 'composer.json')),
     read: (root, s) => {
       const c = readJsonSafe(join(root, 'composer.json'))
-      if (c?.name) s.projectName = c.name
+      if (c?.name) { s.projectName = c.name; s.publishable = true }
       s.commands.install ??= 'composer install'
-      if (c?.name) s.publishable = true
-      const candidates = [
-        typeof c?.repository === 'string' ? c.repository : c?.repository?.url,
-        typeof c?.homepage === 'string' ? c.homepage : undefined,
-      ]
       if (!s.declaredRepo) {
-        for (const candidate of candidates) {
+        for (const candidate of [typeof c?.repository === 'string' ? c.repository : c?.repository?.url, typeof c?.homepage === 'string' ? c.homepage : undefined]) {
           const repo = normalizeDeclaredRepo(candidate)
           if (repo) { s.declaredRepo = repo; break }
         }
@@ -284,8 +230,8 @@ export const ECOSYSTEMS = [
   },
   {
     kind: 'deno',
-    manifest: (root) => readDenoOrJsrManifest(root)?.primaryManifest ?? 'deno.json',
     detect: (root) => Boolean(readDenoOrJsrManifest(root)),
+    manifest: (root) => readDenoOrJsrManifest(root)?.primaryManifest ?? 'deno.json',
     read: (root, s) => {
       const info = readDenoOrJsrManifest(root)
       if (!info) return
@@ -305,38 +251,26 @@ export const ECOSYSTEMS = [
   {
     kind: 'dotnet',
     manifest: (root) => findSuffix(root, '.slnx') || findSuffix(root, '.sln') || '*.csproj',
-    detect: (root) => hasSuffix(root, '.csproj') || hasSuffix(root, '.fsproj') || hasSuffix(root, '.vbproj')
-      || hasSuffix(root, '.sln') || hasSuffix(root, '.slnx'),
     read: (root, s) => {
       s.commands.build ??= 'dotnet build'
-      if (isDotnetTestProject(root, s._dirRel ?? '')) {
-        s.commands.test ??= 'dotnet test'
-      }
-      if (hasDotnetMinVer(root, s._repoRoot ?? root)) {
-        s.versionSource = 'MinVer (Git tag)'
-      }
+      if (isDotnetTestProject(root, s._dirRel ?? '')) s.commands.test ??= 'dotnet test'
+      if (hasDotnetMinVer(root, s._repoRoot ?? root)) s.versionSource = 'MinVer (Git tag)'
     },
   },
   {
     kind: 'cpp',
-    manifest: (root) => (existsSync(join(root, 'CMakeLists.txt')) ? 'CMakeLists.txt' : 'meson.build'),
-    detect: (root) => existsSync(join(root, 'CMakeLists.txt')) || existsSync(join(root, 'meson.build')),
     read: (root, s) => {
       if (existsSync(join(root, 'CMakeLists.txt'))) {
         s.commands.build ??= 'cmake -B build && cmake --build build'
         if (cmakeHasTests(root)) s.commands.test ??= 'ctest --test-dir build --output-on-failure'
       } else {
         s.commands.build ??= 'meson compile -C build'
-        if (existsSync(join(root, 'test')) || existsSync(join(root, 'tests'))) {
-          s.commands.test ??= 'meson test -C build'
-        }
+        if (existsSync(join(root, 'test')) || existsSync(join(root, 'tests'))) s.commands.test ??= 'meson test -C build'
       }
     },
   },
   {
     kind: 'dart',
-    manifest: () => 'pubspec.yaml',
-    detect: (root) => existsSync(join(root, 'pubspec.yaml')),
     read: (root, s) => {
       s.commands.install ??= 'dart pub get'
       if (existsSync(join(root, 'test'))) s.commands.test ??= 'dart test'
@@ -345,20 +279,13 @@ export const ECOSYSTEMS = [
   },
   {
     kind: 'swift',
-    manifest: (root) => {
-      if (existsSync(join(root, 'Package.swift'))) return 'Package.swift'
-      return findSuffix(root, '.xcworkspace') || findSuffix(root, '.xcodeproj') || 'Package.swift'
-    },
-    detect: (root) => existsSync(join(root, 'Package.swift'))
-      || hasSuffix(root, '.xcodeproj')
-      || hasSuffix(root, '.xcworkspace'),
+    manifest: (root) => (existsSync(join(root, 'Package.swift')) ? 'Package.swift' : (findSuffix(root, '.xcworkspace') || findSuffix(root, '.xcodeproj') || 'Package.swift')),
     read: (root, s) => {
       const hasPkg = existsSync(join(root, 'Package.swift'))
       const xcws = findSuffix(root, '.xcworkspace')
       const xcp = findSuffix(root, '.xcodeproj')
       if (xcws && !s.manifests.includes(xcws)) s.manifests.push(xcws)
       if (xcp && !s.manifests.includes(xcp)) s.manifests.push(xcp)
-
       if (hasPkg) {
         const text = readTextSafe(join(root, 'Package.swift')) ?? ''
         const ver = /swift-tools-version:\s*([0-9]+(?:\.[0-9]+)*)/i.exec(text)?.[1]
@@ -366,32 +293,33 @@ export const ECOSYSTEMS = [
         const pkgName = /name:\s*["']([^"']+)["']/.exec(text)?.[1]
         if (pkgName && !s.projectName) s.projectName = pkgName
         s.commands.build ??= 'swift build'
-        if (existsSync(join(root, 'Tests')) || existsSync(join(root, 'Tests.swift'))) {
-          s.commands.test ??= 'swift test'
-        }
+        if (existsSync(join(root, 'Tests')) || existsSync(join(root, 'Tests.swift'))) s.commands.test ??= 'swift test'
         return
       }
-
       const container = xcws || xcp
       if (container) {
         const schemes = listXcodeSchemes(join(root, container))
         if (schemes.length === 1) {
-          const flag = xcws ? `-workspace "${xcws}"` : `-project "${xcp}"`
-          s.commands.build ??= `xcodebuild ${flag} -scheme "${schemes[0]}" build`
+          s.commands.build ??= `xcodebuild ${xcws ? `-workspace "${xcws}"` : `-project "${xcp}"`} -scheme "${schemes[0]}" build`
         }
       }
     },
   },
   {
     kind: 'elixir',
-    manifest: () => 'mix.exs',
-    detect: (root) => existsSync(join(root, 'mix.exs')),
     read: (root, s) => {
       s.commands.install ??= 'mix deps.get'
       if (existsSync(join(root, 'test'))) s.commands.test ??= 'mix test'
     },
   },
 ]
+
+export const ECOSYSTEMS = ECOSYSTEM_SPECS.map((spec) => ({
+  kind: spec.kind,
+  detect: spec.detect ?? ((root) => detectByManifestEntry(root, spec.kind)),
+  manifest: spec.manifest ?? ((root) => primaryManifestOf(root, spec.kind)),
+  read: spec.read,
+}))
 
 export function isJunkFile(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
@@ -573,10 +501,6 @@ const COMMAND_KINDS = [
   { key: 'install', re: /\b(?:install|deps|dependencies|setup|bootstrap|restore)\b/i },
 ]
 
-function classifyCommand(cmd) {
-  return classifyCommandText(cmd, COMMAND_KINDS)
-}
-
 export function detectCiCommands(root, neutralCi = null) {
   const commands = {}
   const sources = {}
@@ -585,8 +509,7 @@ export function detectCiCommands(root, neutralCi = null) {
   const { steps } = neutralCi ?? scanNeutralCiSteps(root)
   for (const step of steps) {
     const cleanCmd = String(step.cmd ?? '').trim().replace(/\s+/g, ' ')
-    if (!cleanCmd) continue
-    const kind = classifyCommand(cleanCmd)
+    const kind = cleanCmd ? classifyCommandText(cleanCmd, COMMAND_KINDS) : null
     if (!kind) continue
     if (kind === 'test') {
       if (!testCmds.includes(cleanCmd)) {
@@ -604,15 +527,12 @@ export function detectCiCommands(root, neutralCi = null) {
   return { commands, sources, evidence }
 }
 
-/** 从 Makefile / justfile / Taskfile 里读已经定义好的 target，作为无 CI 时的第二道兜底。 */
 export function detectDeclaredTaskCommands(root, preRunners = null) {
-  const runners = preRunners ?? scanDeclaredTaskRunners(root)
-  return { commands: runners.commands, sources: runners.sources, evidence: runners.evidence }
+  const { commands, sources, evidence } = preRunners ?? scanDeclaredTaskRunners(root)
+  return { commands, sources, evidence }
 }
 
-/**
- * 语言无关的命令兜底：CI 优先，其次 Makefile / justfile / Taskfile。
- */
+/** 语言无关的命令兜底：CI 优先，其次 Makefile / justfile / Taskfile。 */
 export function detectUniversalCommands(root, opts = {}) {
   const ci = detectCiCommands(root, opts.neutralCi ?? null)
   const declared = detectDeclaredTaskCommands(root, opts.runners ?? null)
@@ -633,53 +553,23 @@ export function detectUniversalCommands(root, opts = {}) {
 export function detectTaskEntriesDetailed(root, preRunners = null) {
   const runners = preRunners ?? scanDeclaredTaskRunners(root)
   const commands = {}
-  if (runners.makeTargets.has('test')) commands.test ??= 'make test'
-  if (runners.makeTargets.has('build')) commands.build ??= 'make build'
-  if (runners.makeTargets.has('lint')) commands.lint ??= 'make lint'
-  if (runners.justRecipes.has('test')) commands.test ??= 'just test'
-  if (runners.justRecipes.has('build')) commands.build ??= 'just build'
-  if (runners.taskNames.has('test')) commands.test ??= 'task test'
-  if (runners.taskNames.has('build')) commands.build ??= 'task build'
+  for (const [set, bin, keys] of [[runners.makeTargets, 'make', ['test', 'build', 'lint']], [runners.justRecipes, 'just', ['test', 'build']], [runners.taskNames, 'task', ['test', 'build']]]) {
+    for (const k of keys) if (set.has(k)) commands[k] ??= `${bin} ${k}`
+  }
   return { commands, makeTargets: runners.makeTargets, justRecipes: runners.justRecipes, taskNames: runners.taskNames, runners }
 }
 
-const WORKSPACE_MANIFEST_NAMES = new Set([
-  'package.json', 'deno.json', 'deno.jsonc', 'jsr.json', 'jsr.jsonc',
-  'Cargo.toml', 'pyproject.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'composer.json', 'Gemfile',
-])
-
-function isWorkspaceManifestFile(name) {
-  return WORKSPACE_MANIFEST_NAMES.has(name) || /\.(?:csproj|fsproj|vbproj|sln|slnx)$/i.test(name)
-}
-
 function collectWorkspaceDeclaredGlobs(root) {
+  const normGlob = (v) => String(v ?? '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+  const pushClean = (out, v, skipDot = false) => { const c = normGlob(v); if (c && (!skipDot || c !== '.')) out.push(c) }
   const globs = [...parseYamlWorkspaceGlobs(root)]
-  const lerna = readJsonSafe(join(root, 'lerna.json'))
-  if (Array.isArray(lerna?.packages)) {
-    for (const p of lerna.packages) {
-      const clean = String(p ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
-      if (clean) globs.push(clean)
-    }
-  }
-  const cargo = readTextSafe(join(root, 'Cargo.toml')) ?? ''
-  const wsSec = /\[workspace\]([\s\S]*?)(?:\n\[|$)/.exec(cargo)?.[1] ?? ''
-  const memMatch = /\bmembers\s*=\s*\[([\s\S]*?)\]/.exec(wsSec)
-  if (memMatch) {
-    for (const m of memMatch[1].matchAll(/["']([^"']+)["']/g)) {
-      const clean = m[1].trim().replace(/\\/g, '/').replace(/\/+$/, '')
-      if (clean) globs.push(clean)
-    }
-  }
+  for (const p of (readJsonSafe(join(root, 'lerna.json'))?.packages ?? [])) pushClean(globs, p)
+  const cargoWs = /\[workspace\]([\s\S]*?)(?:\n\[|$)/.exec(readTextSafe(join(root, 'Cargo.toml')) ?? '')?.[1] ?? ''
+  const memMatch = /\bmembers\s*=\s*\[([\s\S]*?)\]/.exec(cargoWs)
+  if (memMatch) for (const m of memMatch[1].matchAll(/["']([^"']+)["']/g)) pushClean(globs, m[1])
   const goWork = readTextSafe(join(root, 'go.work')) ?? ''
-  for (const m of goWork.matchAll(/^\s*use\s+([^\s()]+)\s*$/gm)) {
-    const clean = m[1].trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
-    if (clean && clean !== '.') globs.push(clean)
-  }
-  const useBlock = /\buse\s*\(([\s\S]*?)\)/.exec(goWork)?.[1] ?? ''
-  for (const rawLine of useBlock.split('\n')) {
-    const clean = rawLine.replace(/\/\/.*$/, '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
-    if (clean && clean !== '.') globs.push(clean)
-  }
+  for (const m of goWork.matchAll(/^\s*use\s+([^\s()]+)\s*$/gm)) pushClean(globs, m[1], true)
+  for (const rawLine of (/\buse\s*\(([\s\S]*?)\)/.exec(goWork)?.[1] ?? '').split('\n')) pushClean(globs, rawLine.replace(/\/\/.*$/, ''), true)
   return [...new Set(globs)]
 }
 

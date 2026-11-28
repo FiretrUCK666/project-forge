@@ -679,7 +679,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
 }
 
 export const GOVERNANCE_CHECK_PATHS = Object.freeze([
-  '.agents/skills/lib/shared.mjs',
+  '.agents/skills/lib/git.mjs',
   '.agents/skills/templates/docs-todo.md',
   '.agents/skills/dev-flow/scripts/flow.mjs',
   'docs/TDD.md',

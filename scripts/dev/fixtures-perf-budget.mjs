@@ -261,7 +261,7 @@ export function registerPerfBudgetCases(cases) {
         return 'scripts/lib/survey-workspace.mjs 未导出 detectIgnoredGovernancePathsAsync'
       }
       const hits = await wsMod.detectIgnoredGovernancePathsAsync(dir)
-      if (!hits.some((h) => h.path === '.agents/skills/lib/shared.mjs')) {
+      if (!hits.some((h) => h.path === '.agents/skills/lib/git.mjs')) {
         return `detectIgnoredGovernancePathsAsync 漏报未锚定 lib 规则：${JSON.stringify(hits)}`
       }
       const emptyShort = await wsMod.detectIgnoredGovernancePathsAsync(dir, [])

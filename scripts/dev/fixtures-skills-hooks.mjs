@@ -20,9 +20,13 @@ import { renderAgentsTemplate } from '../compose-agents.mjs'
 import { protectBranch } from '../equip-ci.mjs'
 import { checkEquip, equip } from '../equip.mjs'
 import { renderKitRoutingRows } from '../lib/agents-defaults.mjs'
-import { buildSwitchABranchProtectionPayload, createGitHubClient } from '../lib/platform/github-client.mjs'
-import { GITHUB_PROVIDER } from '../lib/platform/github.mjs'
-import { GENERIC_GIT_PROVIDER as ENGINE_GENERIC_GIT_PROVIDER, getHostingProvider as getEngineHostingProvider } from '../lib/platform/registry.mjs'
+import {
+  GENERIC_GIT_PROVIDER as ENGINE_GENERIC_GIT_PROVIDER,
+  GITHUB_PROVIDER,
+  buildSwitchABranchProtectionPayload,
+  createGitHubClient,
+  getHostingProvider as getEngineHostingProvider,
+} from '../lib/platform/index.mjs'
 import { FORBIDDEN_PLATFORM_RE, getKitSkills } from '../lib/protocol.mjs'
 import { toMarkdown } from '../lib/render.mjs'
 import { detectKit } from '../lib/survey-reentry.mjs'

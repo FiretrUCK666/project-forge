@@ -32,7 +32,7 @@ import {
   ensureWorktreesIgnored,
   parseWorktreeListPorcelain,
   resolveRepoRoots,
-  syncDetachedWorktree as syncDetachedWorktreeRaw,
+  syncDetachedWorktreeCore as syncDetachedWorktreeRaw,
 } from './git-worktree-env.mjs'
 
 export {

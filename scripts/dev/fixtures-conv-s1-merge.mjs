@@ -9,7 +9,7 @@ import { critiqueTextFingerprint } from '../../kit/skills/lib/critique-rounds.mj
 import { escalateToBackend } from '../../kit/skills/lib/escalation.mjs'
 import { readTaskLedger, writeTaskLedger } from '../../kit/skills/lib/ledger.mjs'
 import { hydratePrTemplateBody } from '../../kit/skills/lib/pr-template-hydrate.mjs'
-import { resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
+import { resolveRepoRoots } from './test-shared.mjs'
 import { createTaskBackend } from '../../kit/skills/lib/task-backend.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import { handleFinalize, handleVerify } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'

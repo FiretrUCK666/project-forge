@@ -40,7 +40,7 @@ import {
   resolveConflictDir,
 } from './lib/equip-upgrade.mjs'
 import { computeFileStates, EQUIP_FILE_STATES, formatEquipCheckReport, isCodeLikePath, judgeManagedFile, resolveThreeWayEquipFile } from './lib/merge3.mjs'
-import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
+import { bootstrapEmpty, starterTemplates } from './lib/equip-bootstrap.mjs'
 import { DEFAULT_KIT_SKILLS_DIR } from '../kit/skills/lib/skill-discovery.mjs'
 import { recordStepStateSafe } from '../kit/skills/lib/session-state.mjs'
 import {

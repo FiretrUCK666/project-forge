@@ -62,7 +62,14 @@ export function parseRemoteUrls(remoteOutput) {
 }
 
 /** 解析多远端拓扑模型（remotes[]，同时保留 fetchUrl 与 pushUrl）。 */
-export function parseRemotesTopology(remoteOutput, sshHostMap = parseSshConfigHostMap()) {
+export function parseRemotesTopology(remoteOutput, sshHostMapOrOpts = parseSshConfigHostMap(), extraOpts = {}) {
+  const isOptsObj = Boolean(
+    sshHostMapOrOpts && typeof sshHostMapOrOpts === 'object' && !(sshHostMapOrOpts instanceof Map)
+    && ('sshHostMap' in sshHostMapOrOpts || 'providerHint' in sshHostMapOrOpts || 'sshConfig' in sshHostMapOrOpts),
+  )
+  const descOpts = isOptsObj
+    ? { ...sshHostMapOrOpts, ...(extraOpts?.providerHint ? { providerHint: extraOpts.providerHint } : {}) }
+    : { sshHostMap: sshHostMapOrOpts, ...(extraOpts?.providerHint ? { providerHint: extraOpts.providerHint } : {}) }
   const map = new Map()
   for (const line of String(remoteOutput ?? '').split('\n')) {
     const m = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/.exec(line.trim())
@@ -76,7 +83,7 @@ export function parseRemotesTopology(remoteOutput, sshHostMap = parseSshConfigHo
   const remotes = []
   for (const item of map.values()) {
     const effectiveUrl = item.pushUrl || item.fetchUrl || ''
-    const desc = resolveRemoteDescriptor(effectiveUrl, sshHostMap)
+    const desc = resolveRemoteDescriptor(effectiveUrl, descOpts)
     remotes.push({
       name: item.name,
       fetchUrl: item.fetchUrl ?? item.pushUrl,
@@ -540,6 +547,8 @@ export function classifyWorkspaceIdentity(opts = {}) {
  */
 export function resolveWorkspaceIdentity({
   gitDir,
+  cwd = null,
+  repoRoot = null,
   remoteUrls = {},
   declaredRepo,
   gitIdentity = {},
@@ -554,8 +563,9 @@ export function resolveWorkspaceIdentity({
   agentsText = null,
 } = {}) {
   const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
+  const effectiveCwd = cwd ?? repoRoot ?? (gitDir && /[\\/]\.git$/i.test(String(gitDir)) ? resolve(gitDir, '..') : null)
   const resolvedTarget = originRaw
-    ? resolveRemoteTarget(remoteUrls, { declaredRepo, sshHostMap, providerHint, apiBaseHint, env, agentsText })
+    ? resolveRemoteTarget(remoteUrls, { declaredRepo, sshHostMap, providerHint, apiBaseHint, env, agentsText, cwd: effectiveCwd })
     : null
   if (externalPr) {
     const extProvider = resolvedTarget?.providerId && resolvedTarget.providerId !== 'none' ? resolvedTarget.providerId : 'github'
@@ -654,7 +664,7 @@ export async function probePlatformEnv(options = {}) {
     providerHint = null, apiBaseHint = null, env = process.env, agentsText = null,
     probeNetwork = false, verifyToken = false, offline, runner, httpRequest,
   } = options
-  const target = resolveRemoteTarget(remoteUrls, { sshHostMap, providerHint, apiBaseHint, env, agentsText })
+  const target = resolveRemoteTarget(remoteUrls, { sshHostMap, providerHint, apiBaseHint, env, agentsText, cwd })
   if (target.providerId === 'none' || target.providerId === 'github' || target.providerId === 'generic-git') {
     return probeGitHubEnv({ ...options, sshHostMap })
   }

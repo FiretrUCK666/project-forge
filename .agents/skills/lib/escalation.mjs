@@ -12,7 +12,7 @@ import { validateIssueBodyQuality } from './issue-quality.mjs'
 import { hydrateIssueBody } from './issue-template-hydrate.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { readTaskLedger, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
-import { detectGitModeMarkers, isVerifiedTier, parseRemoteUrls, parseRemotesTopology, probeForWrite, resolveRemoteTarget } from './platform.mjs'
+import { detectGitModeMarkers, isVerifiedTier, parseRemoteUrls, probeForWrite, resolveRemoteTarget } from './platform.mjs'
 import { createTaskBackend } from './task-backend.mjs'
 
 const EXPLICIT_WORK_PREFIX_RE = /^(?:(?:docs|fix|feat|refactor|chore|test|ci|build|perf|style|revert)(?:\([^)]+\))?:\s+|\[[^\]]+\]\s*)/i
@@ -400,8 +400,7 @@ export async function resolveEscalationBackend(repoRoot, opts = {}) {
   const fastCfg = readGitConfigFast(fastGitDir)
   const remotes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(repoRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remotes.stdout)
-  const topology = parseRemotesTopology(remotes.stdout)
-  const remoteTarget = resolveRemoteTarget(remoteUrls)
+  const remoteTarget = resolveRemoteTarget(remoteUrls, { cwd: repoRoot })
   const targetRepo = remoteTarget.repoSlug ?? null
   const hasRemote = Boolean(remotes.ok && Object.keys(remoteUrls).length > 0)
   const markers = fastGitDir ? detectGitModeMarkers(fastGitDir, { hasRemote }) : { localMode: false }

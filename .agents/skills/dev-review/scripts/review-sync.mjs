@@ -361,7 +361,7 @@ export async function syncReviewToGitHub({
     const remoteUrls = hasRemote ? parseRemoteUrls(remoteRes.stdout) : {}
     const declaredRepo = detectDeclaredRepo(mainRoot)
     const remoteTarget = hasRemote
-      ? resolveRemoteTarget(remoteUrls, { role: ledger.role, declaredRepo, providerHint: ledger.providerId })
+      ? resolveRemoteTarget(remoteUrls, { role: ledger.role, declaredRepo, providerHint: ledger.providerId, cwd: mainRoot })
       : { providerId: 'none', repoSlug: null, capabilities: { api: false, mention: false } }
     const targetRepo = remoteTarget.repoSlug ?? declaredRepo ?? null
 
@@ -458,16 +458,17 @@ export async function syncReviewToGitHub({
     const results = []
     const syncFailures = []
     for (const t of targets) {
-      const targetBody = t.kind === 'pr' ? prCommentBody : issueCommentBody
+      const isPrTarget = t.kind === 'pr'
+      const targetBody = isPrTarget ? prCommentBody : issueCommentBody
       try {
         const commentRes = await backend.postComment({
-          repo: targetRepo, number: t.number, body: targetBody, statePayload,
+          repo: targetRepo, number: t.number, isPr: isPrTarget, body: targetBody, statePayload,
         })
         const labelRes = typeof backend.syncStateLabel === 'function'
-          ? await backend.syncStateLabel({ repo: targetRepo, number: t.number, state: labelName })
+          ? await backend.syncStateLabel({ repo: targetRepo, number: t.number, state: labelName, isPr: isPrTarget })
           : await (async () => {
-              const addR = await backend.addLabels({ repo: targetRepo, number: t.number, labels: [labelName] })
-              await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
+              const addR = await backend.addLabels({ repo: targetRepo, number: t.number, labels: [labelName], isPr: isPrTarget })
+              await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel, isPr: isPrTarget })
               return addR
             })()
         results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })

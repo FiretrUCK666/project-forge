@@ -352,7 +352,7 @@ async function handleMergeQueue(opts, roots) {
       const ledger = readTaskLedger(roots.mainRoot, taskId)
       if (!ledger) throw new Error(`合并队列找不到任务账本：${taskId}`)
 
-      const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+      const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology, { cwd: roots.mainRoot, providerHint: ledger.providerId })
       const originFull = targetCtx.targetRepo ?? targetCtx.originFull
       const pushRemote = targetCtx.pushRemote
       const canUseGhApi = Boolean(ledger.role === 'maintainer' && targetCtx.capabilities?.api === true && originFull)

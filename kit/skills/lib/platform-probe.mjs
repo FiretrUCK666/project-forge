@@ -306,19 +306,19 @@ function parseSshAuthOutput(combined) {
 
 function evaluateSshAttempt(res, { port, host, isFallback, keyStatus }) {
   if (!isFallback && res.errorCode === 'ENOENT') {
-    return { state: 'unavailable', available: false, port: 22, host, ...keyStatus, reason: '系统未安装 ssh 客户端' }
+    return { state: 'unavailable', available: false, port, host, ...keyStatus, reason: '系统未安装 ssh 客户端' }
   }
   const parsed = parseSshAuthOutput(`${res.stdout}\n${res.stderr}`)
   if (parsed.ok) {
     return {
       state: isFallback ? 'port443-only' : 'available', available: true, port, host, login: parsed.login, ...keyStatus,
-      reason: isFallback ? `SSH 端口 22 不通，已自动探通 ${host}（${parsed.login}）` : `SSH 端口 22 已就绪（${parsed.login}）`,
+      reason: isFallback ? `SSH 端口 22 不通，已自动探通 ${host}（${parsed.login}）` : `SSH 端口 ${port} 已就绪（${parsed.login}）`,
     }
   }
   if (parsed.kind === 'host-key-unverified') {
     return {
       state: 'host-key-unverified', available: false, port, host, ...keyStatus,
-      fingerprintCmd: isFallback ? 'ssh -T -p 443 git@ssh.github.com' : `ssh -T git@${host}`,
+      fingerprintCmd: isFallback ? 'ssh -T -p 443 git@ssh.github.com' : (port !== 22 ? `ssh -T -p ${port} git@${host}` : `ssh -T git@${host}`),
       reason: `~/.ssh/known_hosts 尚未收录 ${isFallback ? 'ssh.github.com' : host} 指纹（只读模式不自动写盘）` + (isFallback ? '' : '；请人工核对指纹后确认连接'),
     }
   }
@@ -334,24 +334,27 @@ function evaluateSshAttempt(res, { port, host, isFallback, keyStatus }) {
 /** 只读探测 SSH 传输通道（强制 `StrictHostKeyChecking=yes`；无本机密钥/agent 且非自定义 runner 时跳过外网连接）。 */
 export async function probeSshTransport({
   cwd, env, timeoutMs = SSH_PROBE_TIMEOUT_MS, runner = defaultCommandRunner,
-  sshTargetHost = 'github.com', identityFiles = [], allowPort443Fallback = true,
+  sshTargetHost = 'github.com', sshPort = null, identityFiles = [], allowPort443Fallback = true,
 } = {}) {
   const effectiveTimeout = Math.min(Number(timeoutMs) || SSH_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TIMEOUT_MS)
   const connectSec = Math.max(1, Math.min(3, Math.ceil(effectiveTimeout / 1000)))
   const targetHost = sshTargetHost || 'github.com'
+  const rawPort = sshPort != null && String(sshPort).trim() ? Number(sshPort) : 22
+  const effectivePort = Number.isInteger(rawPort) && rawPort > 0 && rawPort <= 65535 ? rawPort : 22
+  const portArgs = effectivePort !== 22 ? ['-p', String(effectivePort)] : []
   const isCustomRunner = runner !== defaultCommandRunner
 
   const keyStatus = await probeSshKeyReadiness({ cwd, env, timeoutMs: effectiveTimeout, runner, identityFiles })
   if (!isCustomRunner && !keyStatus.keyReady) {
     return {
-      state: 'no-key', available: false, port: 22, host: targetHost, ...keyStatus,
+      state: 'no-key', available: false, port: effectivePort, host: targetHost, ...keyStatus,
       reason: '未检测到本地 SSH 密钥、IdentityFile 或 ssh-agent 身份（跳过联网握手）',
     }
   }
 
   const baseArgs = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', `ConnectTimeout=${connectSec}`, '-T']
-  const res22 = await runner('ssh', [...baseArgs, `git@${targetHost}`], { cwd, env, timeoutMs: effectiveTimeout })
-  const ev22 = evaluateSshAttempt(res22, { port: 22, host: targetHost, isFallback: false, keyStatus })
+  const res22 = await runner('ssh', [...baseArgs, ...portArgs, `git@${targetHost}`], { cwd, env, timeoutMs: effectiveTimeout })
+  const ev22 = evaluateSshAttempt(res22, { port: effectivePort, host: targetHost, isFallback: false, keyStatus })
   if (!ev22.parsed) return ev22
 
   const isGitHubTarget = GITHUB_HOST_RE.test(targetHost) || allowPort443Fallback === 'force'
@@ -360,13 +363,13 @@ export async function probeSshTransport({
     const ev443 = evaluateSshAttempt(res443, { port: 443, host: 'ssh.github.com:443', isFallback: true, keyStatus })
     if (!ev443.parsed) return ev443
     if (res22.timedOut || res443.timedOut || ev22.parsed.kind === 'unreachable' || ev443.parsed.kind === 'unreachable') {
-      return { state: 'unreachable', available: false, port: 22, host: targetHost, ...keyStatus, reason: 'SSH 端口 22 与 443 均不可达或超时' }
+      return { state: 'unreachable', available: false, port: effectivePort, host: targetHost, ...keyStatus, reason: 'SSH 端口 22 与 443 均不可达或超时' }
     }
   } else if (res22.timedOut || ev22.parsed.kind === 'unreachable') {
-    return { state: 'unreachable', available: false, port: 22, host: targetHost, ...keyStatus, reason: `SSH 主机 ${targetHost} 不可达或超时` }
+    return { state: 'unreachable', available: false, port: effectivePort, host: targetHost, ...keyStatus, reason: `SSH 主机 ${targetHost} 不可达或超时` }
   }
 
-  return { state: 'undetermined', available: false, port: 22, host: targetHost, ...keyStatus, reason: '未能确认 SSH 认证状态' }
+  return { state: 'undetermined', available: false, port: effectivePort, host: targetHost, ...keyStatus, reason: '未能确认 SSH 认证状态' }
 }
 
 async function probeHttpsCredential({ cwd, env, host = 'github.com', repo, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, runner = defaultCommandRunner }) {
@@ -619,6 +622,8 @@ export async function probePlatformEnvCore(opts = {}) {
   const safeEnv = buildNonInteractiveEnv(env)
   const originUrl = typeof remoteUrls === 'string' ? remoteUrls : (remoteUrls?.origin ?? Object.values(remoteUrls ?? {}).find(Boolean))
   const parsedOrigin = originUrl ? parseRemoteUrlHost(originUrl) : { protocol: 'unknown', host: undefined }
+  const originExt = originUrl ? extractHostAndPath(originUrl) : null
+  const sshPort = parsedOrigin.protocol === 'ssh' && originExt?.port ? originExt.port : null
   const targetHost = host || parsedOrigin.host || ''
 
   if (providerId === 'generic-git' || providerId === 'none') {
@@ -641,7 +646,7 @@ export async function probePlatformEnvCore(opts = {}) {
 
   if (shouldProbeExternal) {
     const sshP = parsedOrigin.protocol === 'ssh' && targetHost
-      ? probeSshTransport({ cwd, env: safeEnv, timeoutMs: Math.min(timeoutMs, SSH_PROBE_TIMEOUT_MS), runner: effectiveRunner, sshTargetHost: targetHost, allowPort443Fallback: false })
+      ? probeSshTransport({ cwd, env: safeEnv, timeoutMs: Math.min(timeoutMs, SSH_PROBE_TIMEOUT_MS), runner: effectiveRunner, sshTargetHost: targetHost, sshPort, allowPort443Fallback: false })
       : Promise.resolve(ssh)
     ;[ssh, httpsRaw] = await Promise.all([
       sshP,

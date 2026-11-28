@@ -114,7 +114,8 @@ const normLabels = (arr) => (Array.isArray(arr) ? arr : []).map((l) => (typeof l
 
 function normalizeGitLabMilestone(m) {
   return {
-    number: m.iid ?? m.id ?? null,
+    number: m.id ?? m.iid ?? null,
+    iid: m.iid ?? null,
     title: m.title ?? '',
     state: String(m.state ?? 'active').toLowerCase() === 'closed' ? 'closed' : 'open',
     description: m.description ?? '',
@@ -470,7 +471,7 @@ export function createProviderClient({
     const finalState = hasState ? { ...statePayload, writeBackFingerprint: statePayload.writeBackFingerprint ?? fp } : {}
     const fullBody = hasState ? `${normBody}\n\n<!-- pf-state:${JSON.stringify(finalState)} -->` : normBody
     if (deduplicate && fp) {
-      const cacheKey = `${pid}:${slug}#${num}#${fp}`
+      const cacheKey = `${pid}:${slug}:${isPr ? 'pr' : 'issue'}#${num}#${fp}`
       if (seenFingerprints.has(cacheKey)) return { ok: true, deduplicated: true, skipped: true, writeBackFingerprint: fp }
       const candidate = Array.isArray(existingComments) ? { ok: true, comments: existingComments } : await listCommentsImpl({ repo: slug, number: num, isPr })
       const hit = candidate?.ok ? candidate.comments.find((c) => commentMatchesFp(c, fp)) : null
@@ -482,7 +483,7 @@ export function createProviderClient({
     const path = isGitLabLike ? `${basePathOf(slug)}/${isPr ? 'merge_requests' : 'issues'}/${num}/notes` : `${basePathOf(slug)}/issues/${num}/comments`
     const res = await apiCall('POST', path, { body: { body: fullBody } })
     if (!res.ok) return { ok: false, status: res.status, error: errOf(res, 'post-comment-failed') }
-    if (fp) seenFingerprints.add(`${pid}:${slug}#${num}#${fp}`)
+    if (fp) seenFingerprints.add(`${pid}:${slug}:${isPr ? 'pr' : 'issue'}#${num}#${fp}`)
     return {
       ok: true,
       id: res.data?.id ?? null,
@@ -504,9 +505,17 @@ export function createProviderClient({
     const num = Number(number)
     const list = (Array.isArray(labels) ? labels : [labels]).map((l) => String(l ?? '').trim()).filter(Boolean)
     if (!slug || !Number.isInteger(num) || num <= 0 || list.length === 0) return { ok: true, skipped: true, labels: [] }
-    const res = isGitLabLike
-      ? await apiCall('PUT', `${basePathOf(slug)}/${isPr ? 'merge_requests' : 'issues'}/${num}`, { body: { add_labels: list.join(',') } })
+    const itemPath = isGitLabLike ? `${basePathOf(slug)}/${isPr ? 'merge_requests' : 'issues'}/${num}` : null
+    let res = isGitLabLike
+      ? await apiCall('PUT', itemPath, { body: { add_labels: list.join(',') } })
       : await apiCall('POST', `${basePathOf(slug)}/issues/${num}/labels`, { body: isGitee ? list : { labels: list } })
+    if (isGitLabLike && !res.ok && res.status === 400) {
+      const cur = await apiCall('GET', itemPath)
+      if (cur.ok) {
+        const merged = [...new Set([...normLabels(cur.data?.labels), ...list])]
+        res = await apiCall('PUT', itemPath, { body: { labels: merged.join(',') } })
+      }
+    }
     return res.ok ? { ok: true, number: num, labels: normLabels(res.data?.labels ?? list), verifiedReadback: true } : { ok: false, status: res.status, error: errOf(res, 'add-labels-failed') }
   }
 
@@ -515,9 +524,18 @@ export function createProviderClient({
     const num = Number(number)
     const clean = String(label ?? '').trim()
     if (!slug || !Number.isInteger(num) || num <= 0 || !clean) return { ok: true, skipped: true }
-    const res = isGitLabLike
-      ? await apiCall('PUT', `${basePathOf(slug)}/${isPr ? 'merge_requests' : 'issues'}/${num}`, { body: { remove_labels: clean } })
+    const itemPath = isGitLabLike ? `${basePathOf(slug)}/${isPr ? 'merge_requests' : 'issues'}/${num}` : null
+    let res = isGitLabLike
+      ? await apiCall('PUT', itemPath, { body: { remove_labels: clean } })
       : await apiCall('DELETE', `${basePathOf(slug)}/issues/${num}/labels/${encodeURIComponent(clean)}`)
+    if (isGitLabLike && !res.ok && res.status === 400) {
+      const cur = await apiCall('GET', itemPath)
+      if (cur.ok) {
+        const cleanLow = clean.toLowerCase()
+        const nextLabels = normLabels(cur.data?.labels).filter((l) => l.toLowerCase() !== cleanLow)
+        res = await apiCall('PUT', itemPath, { body: { labels: nextLabels.join(',') } })
+      }
+    }
     if (res.status === 404) return { ok: true, skipped: true, reason: 'label-absent' }
     return res.ok ? { ok: true } : { ok: false, status: res.status, error: errOf(res, 'remove-label-failed') }
   }
@@ -582,7 +600,13 @@ export function createProviderClient({
     const payload = { title: cleanTitle, ...(description ? { description } : {}), ...(dueOn ? { [dueKey]: dueOn } : {}) }
     const res = await apiCall('POST', `${basePathOf(slug)}/milestones`, { body: payload })
     if (!res.ok) return { ok: false, status: res.status, error: errOf(res, 'create-milestone-failed') }
-    return { ok: true, number: res.data?.iid ?? res.data?.id ?? res.data?.number ?? null, title: res.data?.title ?? cleanTitle, url: res.data?.web_url ?? res.data?.html_url ?? null }
+    return {
+      ok: true,
+      number: isGitLabLike ? (res.data?.id ?? res.data?.iid ?? res.data?.number ?? null) : (res.data?.number ?? res.data?.id ?? null),
+      ...(isGitLabLike && res.data?.iid != null ? { iid: res.data.iid } : {}),
+      title: res.data?.title ?? cleanTitle,
+      url: res.data?.web_url ?? res.data?.html_url ?? null,
+    }
   }
 
   const closeMilestoneImpl = async ({ repo, number } = {}) => {
@@ -595,7 +619,7 @@ export function createProviderClient({
     return res.ok ? { ok: true, number: num, state: 'closed' } : { ok: false, status: res.status, error: errOf(res, 'close-milestone-failed') }
   }
 
-  const assignMilestoneImpl = async ({ repo, number, milestone } = {}) => {
+  const assignMilestoneImpl = async ({ repo, number, milestone, isPr = false } = {}) => {
     const slug = slugOf(repo)
     const num = Number(number)
     const msNum = Number(milestone?.number ?? milestone)
@@ -603,7 +627,7 @@ export function createProviderClient({
       return { ok: false, error: 'missing-repo-number-or-milestone' }
     }
     const res = isGitLabLike
-      ? await apiCall('PUT', `${basePathOf(slug)}/issues/${num}`, { body: { milestone_id: msNum } })
+      ? await apiCall('PUT', `${basePathOf(slug)}/${isPr ? 'merge_requests' : 'issues'}/${num}`, { body: { milestone_id: msNum } })
       : await apiCall('PATCH', `${basePathOf(slug)}/issues/${num}`, { body: { milestone: msNum } })
     return res.ok ? { ok: true, number: num, milestone: msNum } : { ok: false, status: res.status, error: errOf(res, 'assign-milestone-failed') }
   }

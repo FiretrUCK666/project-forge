@@ -138,7 +138,7 @@ async function hydrateTargetMetadata({
     if (!platform.branch) platform.branch = String(local.headBranch ?? local.branch ?? '').trim()
   }
 
-  const targetCtx = buildTargetRepoContext(state.identity?.role ?? 'local-only', state.remoteUrls ?? {}, state.declaredRepo)
+  const targetCtx = buildTargetRepoContext(state.identity?.role ?? 'local-only', state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: mainRoot })
   const shouldTryRemoteRead = Boolean(
     targetRepo
     && (targetCtx.capabilities?.api === true || opts._ghClient || opts._ghProbe)
@@ -170,7 +170,7 @@ async function hydrateTargetMetadata({
           failures.push(`远端读取 ${targetType === 'pr' ? 'PR' : 'Issue'} #${targetNumber} 未返回可用元数据`)
         }
         if (typeof readClient.listComments === 'function') {
-          const cmRes = await readClient.listComments(targetRepo, targetNumber)
+          const cmRes = await readClient.listComments({ repo: targetRepo, number: targetNumber, isPr: targetType === 'pr' })
           if (cmRes?.ok && Array.isArray(cmRes.comments) && cmRes.comments.length > 0) {
             platform.commentsDigest = sha256Text(JSON.stringify(cmRes.comments.map((c) => ({
               id: c?.id ?? null,
@@ -282,7 +282,7 @@ export async function handleIntake(opts = {}, rootsArg = null) {
   const state = await inspectWorkspace(mainRoot, { roots, probeAuth: false })
   const role = state.identity?.role ?? 'local-only'
   const providerId = state.github?.providerId ?? 'none'
-  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: mainRoot })
   const { targetRepo, pushRemote } = targetCtx
 
   // 引用里带了别的仓就是跨仓引用：写操作会落到那张单上，不是本地这一条。
@@ -419,6 +419,7 @@ export async function handleIntake(opts = {}, rootsArg = null) {
         actions.comment = await backend.postComment({
           repo: targetRepo,
           number: targetNumber,
+          isPr: targetType === 'pr',
           body: cleanComment,
           statePayload: evaluation.statePayload,
         })

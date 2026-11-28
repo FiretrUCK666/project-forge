@@ -47,7 +47,7 @@ export async function handleSync(opts = {}, roots) {
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+  const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology, { cwd: roots.mainRoot, providerHint: ledger.providerId })
 
   const canQueryGh = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull
   const ghProbe = canQueryGh && (opts._ghProbe || opts._ghClient || opts['probe-auth'] || ledger.prNumber || ledger.parentPrNumber)

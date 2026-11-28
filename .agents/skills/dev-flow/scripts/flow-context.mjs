@@ -60,7 +60,8 @@ export async function resolveReadClient({ mainRoot, remoteUrls, providerId, targ
     if (probeTier && NON_API_CLIENT_TIERS.has(probeTier)) return null
     return opts._ghProbe.client ?? null
   }
-  const target = resolveRemoteTarget(remoteUrls ?? {}, { providerHint: providerId })
+  const effectiveHint = providerId && providerId !== 'none' && providerId !== 'generic-git' ? providerId : null
+  const target = resolveRemoteTarget(remoteUrls ?? {}, { providerHint: effectiveHint, cwd: mainRoot })
   const effectiveRepo = targetRepo || target.repoSlug
   if (!effectiveRepo || target.capabilities?.api !== true) return null
   try {
@@ -386,8 +387,11 @@ export function buildTargetRepoContext(role, remoteUrls = {}, declaredRepo, topo
   const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
   const upstreamRaw = remoteUrls.upstream
   const target = resolveRemoteTarget(remoteUrls, { role, declaredRepo, ...extra })
-  const originDesc = originRaw ? resolveRemoteDescriptor(originRaw) : null
-  const upstreamDesc = upstreamRaw ? resolveRemoteDescriptor(upstreamRaw) : null
+  const descOpts = target.providerId && target.providerId !== 'none' && target.providerId !== 'generic-git'
+    ? { providerHint: target.providerId }
+    : undefined
+  const originDesc = originRaw ? resolveRemoteDescriptor(originRaw, descOpts) : null
+  const upstreamDesc = upstreamRaw ? resolveRemoteDescriptor(upstreamRaw, descOpts) : null
   const originFull = originDesc?.repoSlug ?? null
   const upstreamFull = upstreamDesc?.repoSlug ?? null
   const originLower = originFull ? originFull.toLowerCase() : null

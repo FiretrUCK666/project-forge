@@ -48,13 +48,14 @@ export const MERGE_STALE_LABELS = Object.freeze([
   'planning', 'in-progress', 'in-review', 'changes-requested', 'needs-human-decision',
 ])
 
-async function removeLabelsBestEffort(backend, { repo = null, taskId = null, number, labels }) {
+async function removeLabelsBestEffort(backend, { repo = null, taskId = null, number, labels, isPr = false }) {
   for (const label of labels) {
     await Promise.resolve(backend.removeLabel({
       ...(repo ? { repo } : {}),
       ...(taskId ? { taskId } : {}),
       number,
       label,
+      ...(isPr ? { isPr: true } : {}),
     })).catch(() => ({ ok: false }))
   }
 }
@@ -273,12 +274,13 @@ export async function syncPostMergeTargets({
       const prCmt = judgeCommentOutcome(await backend.postComment({
         repo,
         number: ledger.prNumber,
+        isPr: true,
         body: prCommentBody,
         statePayload: baseStatePayload,
       }))
       mergeComments.push({ target: `PR #${ledger.prNumber}`, ...prCmt })
       if (!prCmt.ok) syncFailures.push({ target: `PR #${ledger.prNumber}`, phase: 'merge', error: prCmt.reason || prCmt.error || 'comment_failed' })
-      await removeLabelsBestEffort(backend, { repo, number: ledger.prNumber, labels: MERGE_STALE_LABELS })
+      await removeLabelsBestEffort(backend, { repo, number: ledger.prNumber, labels: MERGE_STALE_LABELS, isPr: true })
     } catch (err) {
       const msg = err?.message ?? String(err)
       mergeComments.push({ target: `PR #${ledger.prNumber}`, ok: false, reason: msg })
@@ -559,7 +561,7 @@ export async function handleMerge(opts, roots) {
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology, { cwd: roots.mainRoot, providerHint: ledger.providerId })
   const originFull = targetCtx.targetRepo ?? targetCtx.originFull
   const pushRemote = targetCtx.pushRemote
   const effectiveProviderId = ledger.providerId && ledger.providerId !== 'none' ? ledger.providerId : targetCtx.providerId

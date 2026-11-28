@@ -425,7 +425,7 @@ async function syncLabelsForTarget(backend, { taskId = null, repo, number, targe
   const stale = ALL_PLAN_LABELS.filter((l) => l !== targetLabel)
   if (typeof backend?.removeLabel === 'function') {
     for (const label of stale) {
-      await Promise.resolve(backend.removeLabel({ ...(taskId ? { taskId } : {}), repo, number, label })).catch(() => ({ ok: false }))
+      await Promise.resolve(backend.removeLabel({ ...(taskId ? { taskId } : {}), repo, number, label, isPr })).catch(() => ({ ok: false }))
     }
   }
   return addRes
@@ -533,6 +533,7 @@ export async function syncPlanPhaseToBackend(opts = {}) {
       declaredRepo,
       providerHint: opts.providerId ?? ledger?.providerId ?? null,
       agentsText,
+      cwd: mainRoot,
     })
     resolvedProviderId = opts.providerId ?? ledger?.providerId ?? target.providerId
     targetRepo = targetRepo ?? target.repoSlug ?? null
@@ -662,7 +663,7 @@ export async function syncPlanPhaseToBackend(opts = {}) {
   if (prNumber != null) {
     try {
       const comment = await backend.postComment({
-        repo: targetRepo, number: prNumber, body, statePayload: { phase, round, files, syncKey },
+        repo: targetRepo, number: prNumber, isPr: true, body, statePayload: { phase, round, files, syncKey },
       })
       const labelRes = await syncLabelsForTarget(backend, { repo: targetRepo, number: prNumber, targetLabel: planMeta.effectiveLabel, isPr: true })
       if (comment?.ok === false) throw new Error(comment.reason || comment.error || 'postComment failed')

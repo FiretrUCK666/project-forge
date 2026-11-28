@@ -213,7 +213,7 @@ export async function handleSandboxStart({
 
   let hydrated = { issueContext: [], issueContextUnavailable: [], prContext: null, prContextUnavailable: null, prPatch: {} }
   if (linkedIssues.length > 0) {
-    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: roots.mainRoot, providerHint: providerId })
     hydrated = await resolveAndHydrateTaskContexts({
       mainRoot: roots.mainRoot, gitDir: roots.gitDir, remoteUrls: state.remoteUrls ?? {},
       providerId, role, targetRepo, issueNumbers: linkedIssues, prNumber: null, opts,

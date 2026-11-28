@@ -33,7 +33,7 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, null, { cwd: roots.mainRoot, providerHint: ledger.providerId })
   const { targetRepo } = targetCtx
   if (!targetRepo || ledger.role === 'local-only' || ledger.role === 'generic-git' || targetCtx.capabilities?.api !== true) {
     return { rehydrated: false, reason: 'no-api-target' }
@@ -56,10 +56,17 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
     }
   }
 
-  const numbers = [
-    ...(ledger.prNumber ? [Number(ledger.prNumber)] : []),
-    ...(Array.isArray(ledger.linkedIssues) ? ledger.linkedIssues.map(Number) : []),
-  ].filter((n, idx, arr) => Number.isInteger(n) && n > 0 && arr.indexOf(n) === idx)
+  const commentTargets = []
+  const prNumVal = Number(ledger.prNumber)
+  if (Number.isInteger(prNumVal) && prNumVal > 0) commentTargets.push({ number: prNumVal, isPr: true })
+  const seenIssueNums = new Set()
+  for (const rawNum of Array.isArray(ledger.linkedIssues) ? ledger.linkedIssues : []) {
+    const n = Number(rawNum)
+    if (Number.isInteger(n) && n > 0 && !seenIssueNums.has(n)) {
+      seenIssueNums.add(n)
+      commentTargets.push({ number: n, isPr: false })
+    }
+  }
 
   let changed = false
   if (ledger.prNumber && typeof ghClient.getPr === 'function') {
@@ -72,8 +79,8 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
   }
 
   const remoteRounds = []
-  for (const num of numbers) {
-    const cRes = await ghClient.listComments({ repo: targetRepo, number: num })
+  for (const target of commentTargets) {
+    const cRes = await ghClient.listComments({ repo: targetRepo, number: target.number, ...(target.isPr ? { isPr: true } : {}) })
     if (!cRes?.ok || !Array.isArray(cRes.comments)) continue
     for (const c of cRes.comments) {
       const states = Array.isArray(c.pfStates) && c.pfStates.length > 0 ? c.pfStates : parsePfStateTags(c.body)

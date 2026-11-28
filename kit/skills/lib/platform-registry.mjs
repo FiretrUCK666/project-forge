@@ -5,6 +5,9 @@
  * 供 `kit/skills/lib/platform.mjs` 与 `scripts/lib/platform/` 共同单源复用，严守 `arch-rules` 单向依赖边界。
  */
 
+import { join } from 'node:path'
+
+import { readTextSafe } from './git-core.mjs'
 import { parseBodyRelations } from './github-parse.mjs'
 import { isLanHost } from './platform-http.mjs'
 import {
@@ -483,7 +486,8 @@ function computeDialectApiBase(providerId, { targetUrl, host, port, isLan, apiBa
   if (!providerId || providerId === 'none' || providerId === 'generic-git') return null
   const provider = getHostingProvider(providerId)
   const cleanHost = String(host ?? '').trim().toLowerCase()
-  const hostWithPort = port ? `${cleanHost}:${port}` : cleanHost
+  const isHttpRemote = /^https?:\/\//i.test(String(targetUrl ?? ''))
+  const hostWithPort = isHttpRemote && port ? `${cleanHost}:${port}` : cleanHost
   const scheme = isLan && /^http:\/\//i.test(String(targetUrl ?? '')) ? 'http' : 'https'
   if (providerId === 'github') {
     return !cleanHost || /^(?:www\.|ssh\.)?github\.com$/.test(cleanHost)
@@ -510,15 +514,21 @@ export function resolveRemoteTarget(remoteUrls = {}, {
   apiBaseHint = null,
   env = process.env,
   agentsText = null,
+  cwd = null,
+  repoRoot = null,
 } = {}) {
   const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
-  const effectiveProviderHint = providerHint
+  const effectiveAgentsRoot = cwd || repoRoot || null
+  const effectiveAgentsText = agentsText ?? (effectiveAgentsRoot ? (readTextSafe(join(effectiveAgentsRoot, 'AGENTS.md')) ?? null) : null)
+  const rawProviderHint = typeof providerHint === 'string' ? providerHint.trim().toLowerCase() : ''
+  const normalizedProviderHint = rawProviderHint && rawProviderHint !== 'none' && rawProviderHint !== 'generic-git' ? rawProviderHint : null
+  const effectiveProviderHint = normalizedProviderHint
     ?? env?.PF_PLATFORM_PROVIDER
-    ?? extractAgentsHint(agentsText, 'platform-provider')
+    ?? extractAgentsHint(effectiveAgentsText, 'platform-provider')
     ?? null
-  const effectiveApiBaseHint = apiBaseHint
+  const effectiveApiBaseHint = (apiBaseHint || null)
     ?? env?.PF_PLATFORM_API_BASE
-    ?? extractAgentsHint(agentsText, 'platform-api-base')
+    ?? extractAgentsHint(effectiveAgentsText, 'platform-api-base')
     ?? null
 
   let originUrl = null

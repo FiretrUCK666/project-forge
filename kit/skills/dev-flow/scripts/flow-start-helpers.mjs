@@ -478,7 +478,7 @@ export function runStartPlanGate(gateRoot, { caseType, slug, taskId, issue, docs
 }
 
 export async function ackInboundExternalPr(roots, state, prNumber, opts = {}) {
-  const target = resolveRemoteTarget(state.remoteUrls ?? {}, { role: 'contributor-fork', declaredRepo: state.declaredRepo })
+  const target = resolveRemoteTarget(state.remoteUrls ?? {}, { role: 'contributor-fork', declaredRepo: state.declaredRepo, cwd: roots.mainRoot })
   const targetRepo = target.repoSlug ?? state.declaredRepo ?? null
   let client = opts._ghClient ?? opts._ghProbe?.client ?? null
   if (!client && !opts._backend && targetRepo && target.capabilities?.api === true) {
@@ -493,7 +493,7 @@ export async function ackInboundExternalPr(roots, state, prNumber, opts = {}) {
   }
   const body = `<!-- pf:inbound-external-pr pr=${prNumber} -->\n已受理外部贡献 PR #${prNumber}，正在隔离审查工作树执行不可信安全扫描与规范评审。`
   try {
-    const commentRes = await backend.postComment({ repo: targetRepo, number: prNumber, body, deduplicate: true })
+    const commentRes = await backend.postComment({ repo: targetRepo, number: prNumber, isPr: true, body, deduplicate: true })
     const labelRes = await backend.addLabels({ repo: targetRepo, number: prNumber, labels: ['external-contribution'], isPr: true })
     return { synced: commentRes?.ok !== false, labelSynced: labelRes?.ok !== false, error: null }
   } catch (err) {

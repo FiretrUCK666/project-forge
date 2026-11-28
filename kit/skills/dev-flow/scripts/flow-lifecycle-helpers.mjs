@@ -250,7 +250,7 @@ export function evaluateFlowMasterPrdGate(implRoot, {
 
 export async function applySubmitPostActions({ backend, targetRepo, prNumber, linkedIssues = [], ledger, roots, isRework = false }) {
   if (backend && typeof backend.syncStateLabel === 'function') {
-    if (prNumber) await Promise.resolve(backend.syncStateLabel({ repo: targetRepo, number: prNumber, state: 'in-review' })).catch(() => null)
+    if (prNumber) await Promise.resolve(backend.syncStateLabel({ repo: targetRepo, number: prNumber, state: 'in-review', isPr: true })).catch(() => null)
     for (const iss of linkedIssues) {
       await Promise.resolve(backend.syncStateLabel({ repo: targetRepo, number: iss, state: 'in-review' })).catch(() => null)
     }
@@ -272,7 +272,7 @@ export async function applySubmitPostActions({ backend, targetRepo, prNumber, li
   }
   const msId = parseMilestoneNumber(ms?.number ?? ms) ?? (ms?.title ?? (typeof ms === 'string' ? ms : null))
   if (msId && !isRework && prNumber && backend && typeof backend.assignMilestone === 'function') {
-    return Promise.resolve(backend.assignMilestone({ repo: targetRepo, number: prNumber, milestone: msId })).catch(() => null)
+    return Promise.resolve(backend.assignMilestone({ repo: targetRepo, number: prNumber, milestone: msId, isPr: true })).catch(() => null)
   }
   return null
 }

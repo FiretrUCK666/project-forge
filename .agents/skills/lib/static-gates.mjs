@@ -5,13 +5,13 @@
  * 彻底消除各技能脚本间多套判据分叉。
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
+import { verifyArchitectureMapHeader } from './feature-map-graph.mjs'
 import { CODE_EXT_RE, matchGlob } from './git-core.mjs'
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
 import { extractImportsForArch, resolveGoModules } from './import-graph.mjs'
-import { isUiVisualFileCandidate } from './empirical-artifacts.mjs'
 import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
 import {
   classifyDeclarativeDataFile, classifyOversizedFile, isGeneratedSourceHeader, isGitAttributesGenerated,
@@ -81,6 +81,41 @@ export function isLegalArchiveMove(entry, deletedFiles = new Set(), ownArchived 
     if (deletedFiles.has(origRel)) return true
   }
   return false
+}
+
+const APP_UI_DIR_PREFIX_RE = /^(?:src|app|pages|views|components|ui|frontend|web|client|public)\//i
+const NON_UI_TEMPLATE_PATH_RE = /^(?:templates\/|kit\/[^/]+\/templates\/|docs\/templates\/|\.github\/|\.agents\/)/i
+const NON_UI_SVG_DIR_RE = /^(?:docs|assets|images|img|media|badges|svg|static\/docs)\//i
+const NON_UI_SVG_NAME_RE = /(?:^|\/)(?:readme|hero|banner|badge|diagram|architecture|flowchart|logo|shield)[^/]*\.svg$/i
+
+/** 判断 `.svg` 或工程模板路径是否属于非界面文档/工程模板资产，避免误触发 `BLOCKED_UI_ARTIFACT_REQUIRED`。 */
+export function isNonUiVisualAsset(fileRel, { repoRoot = null } = {}) {
+  const p = posixPath(String(fileRel ?? '')).trim().replace(/^\.\//, '').replace(/^\/+/, '')
+  if (!p) return true
+  if (NON_UI_TEMPLATE_PATH_RE.test(p)) return true
+  if (p === 'docs/architecture-map.html' && repoRoot && verifyArchitectureMapHeader(repoRoot, p).ok) return true
+  if (/\.svg$/i.test(p)) {
+    if (/^docs\//i.test(p)) return true
+    if (!APP_UI_DIR_PREFIX_RE.test(p)) {
+      if (NON_UI_SVG_DIR_RE.test(p) || NON_UI_SVG_NAME_RE.test(p)) return true
+      if (repoRoot && existsSync(repoRoot)) {
+        try {
+          for (const name of readdirSync(repoRoot)) {
+            if (!/^readme(?:\.[^/]+)?\.md$/i.test(name)) continue
+            const txt = readTextSafe(join(repoRoot, name), 256 * 1024) ?? ''
+            if (txt.includes(p) || txt.includes(encodeURI(p))) return true
+          }
+        } catch { /* ignore */ }
+      }
+    }
+  }
+  return false
+}
+
+/** 统一界面/视觉资产判定入口。 */
+export function isUiVisualFileCandidate(fileRel, { repoRoot = null, uiExtMatch = true } = {}) {
+  if (!uiExtMatch) return false
+  return !isNonUiVisualAsset(fileRel, { repoRoot })
 }
 
 export function isUiVisualFile(fileRel, { repoRoot = null } = {}) {

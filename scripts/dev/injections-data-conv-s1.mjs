@@ -30,9 +30,10 @@ export const INJECTIONS_CONV_S1 = [
   {
     id: 'I904',
     what: 'assertWellFormedMarkdownBody 绕过单行折叠多节标题检测',
-    file: 'kit/skills/lib/pr-template-hydrate.mjs',
-    from: '  if (!text) return',
-    to: '  if (true || !text) return',
+    file: 'kit/skills/lib/markdown-scan.mjs',
+    alsoDropIn: ['.agents/skills/lib/markdown-scan.mjs'],
+    from: '  const text = String(body ?? \'\').replace(/\\r\\n/g, \'\\n\').trim()\n  if (!text) return',
+    to: '  const text = String(body ?? \'\').replace(/\\r\\n/g, \'\\n\').trim()\n  if (true || !text) return',
     expect: 'Conv-S1 C2b',
   },
   {

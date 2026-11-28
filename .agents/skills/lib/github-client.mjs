@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 import { execSafe } from './git.mjs'
 import { platformHttpRequest } from './platform-http.mjs'
-import { assertWellFormedMarkdownBody } from './pr-template-hydrate.mjs'
+import { assertWellFormedMarkdownBody } from './markdown-scan.mjs'
 import {
   DEFAULT_GITHUB_CONCURRENCY, addLabelsWithEnsureAndReadback, closePrViaRest,
   createLabelViaApi, mapWithConcurrency, normalizeLabelList,

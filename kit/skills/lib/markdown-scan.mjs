@@ -5,6 +5,8 @@
  * 共同复用，严守单一真相源与 `arch-rules` 单向隔离边界。
  */
 
+import { EXIT } from './exit-codes.mjs'
+
 /**
  * 逐行扫描，同时给出偏移量、围栏状态与标题。所有结构判据都从这里取。
  *
@@ -389,4 +391,138 @@ export function extractHeadingSlugs(text) {
     }
   }
   return slugs
+}
+
+/**
+ * 校验待发送到远端平台的多节 Markdown 正文未被折叠成单行/双行。
+ * 若发现同一行内出现段中标题或总行数过少的多节标题，抛出 `BLOCKED_MALFORMED_MARKDOWN_BODY`。
+ */
+export function assertWellFormedMarkdownBody(body, label = 'markdown正文') {
+  const text = String(body ?? '').replace(/\r\n/g, '\n').trim()
+  if (!text) return
+  const lines = text.split('\n')
+  const nonEmptyLines = lines.filter((l) => l.trim().length > 0)
+  let inFence = false
+  let headingCount = 0
+  for (const rawLine of lines) {
+    if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const lineNoCode = rawLine.replace(/`[^`\n]*`/g, '')
+    const hMatches = lineNoCode.match(/(?:^|\s)#{2,6}\s+\S/g)
+    if (hMatches) {
+      headingCount += hMatches.length
+      if (hMatches.length >= 2) {
+        const err = new Error(`BLOCKED_MALFORMED_MARKDOWN_BODY: ${label} 出现同多行标题折叠到单行，请保留正常换行。`)
+        err.code = 'BLOCKED_MALFORMED_MARKDOWN_BODY'
+        err.exitCode = EXIT.FACT
+        throw err
+      }
+    }
+  }
+  if (headingCount >= 2 && nonEmptyLines.length <= 2) {
+    const err = new Error(`BLOCKED_MALFORMED_MARKDOWN_BODY: ${label} 存在 ${headingCount} 个章节标题但有效行数仅 ${nonEmptyLines.length} 行，疑似换行丢失。`)
+    err.code = 'BLOCKED_MALFORMED_MARKDOWN_BODY'
+    err.exitCode = EXIT.FACT
+    throw err
+  }
+}
+
+export function stripHtmlCommentsOutsideFences(md) {
+  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  let inFence = false
+  let inComment = false
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      out.push(line)
+      continue
+    }
+    if (inFence) { out.push(line); continue }
+    let cur = line
+    if (inComment) {
+      const endIdx = cur.indexOf('-->')
+      if (endIdx < 0) continue
+      cur = cur.slice(endIdx + 3)
+      inComment = false
+    }
+    while (cur.includes('<!--')) {
+      const start = cur.indexOf('<!--')
+      const end = cur.indexOf('-->', start + 4)
+      if (end >= 0) {
+        cur = `${cur.slice(0, start)}${cur.slice(end + 3)}`
+      } else {
+        cur = cur.slice(0, start)
+        inComment = true
+        break
+      }
+    }
+    out.push(cur.trimEnd())
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
+function parseSectionHeaderLine(line) {
+  const s = String(line ?? '')
+  const h = /^(#{2,3})\s+(.+?)\s*$/.exec(s)
+  if (h) return { kind: 'heading', level: h[1].length, title: h[2] }
+  const b = /^\*\*([^*]+?)\*\*\s*(?:[:：]\s*)?$/.exec(s.trim())
+  if (b) return { kind: 'bold', level: 4, title: b[1] }
+  return null
+}
+
+function endsCurrentSection(outerHdr, nextHdr) {
+  if (!nextHdr) return false
+  if (outerHdr.kind === 'bold') return true
+  return nextHdr.kind === 'heading' && nextHdr.level <= outerHdr.level
+}
+
+function matchHeadingCandidates(rawTitle, headingCandidates) {
+  const clean = String(rawTitle ?? '')
+    .replace(/^(?:\d+[.)、]\s*|[一二三四五六七八九十]+[、.)]\s*)/, '')
+    .replace(/[:：]\s*$/, '')
+    .trim()
+  const low = clean.toLowerCase()
+  return headingCandidates.some((cand) => (cand instanceof RegExp ? cand.test(clean) : String(cand).trim().toLowerCase() === low))
+}
+
+export function replaceSectionIfPresent(md, headingCandidates, newBody) {
+  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
+  let inFence = false
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
+    if (inFence) continue
+    const hdr = parseSectionHeaderLine(lines[i])
+    if (!hdr || !matchHeadingCandidates(hdr.title, headingCandidates)) continue
+    let end = lines.length
+    let innerFence = false
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
+      if (!innerFence && endsCurrentSection(hdr, parseSectionHeaderLine(lines[j]))) { end = j; break }
+    }
+    const replacement = [lines[i], '', ...String(newBody ?? '').split('\n'), '']
+    const nextLines = [...lines.slice(0, i), ...replacement, ...lines.slice(end)]
+    return { matched: true, text: nextLines.join('\n') }
+  }
+  return { matched: false, text: md }
+}
+
+export function removeSectionIfPresent(md, headingCandidates) {
+  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
+  let inFence = false
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
+    if (inFence) continue
+    const hdr = parseSectionHeaderLine(lines[i])
+    if (!hdr || !matchHeadingCandidates(hdr.title, headingCandidates)) continue
+    let end = lines.length
+    let innerFence = false
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
+      if (!innerFence && endsCurrentSection(hdr, parseSectionHeaderLine(lines[j]))) { end = j; break }
+    }
+    const nextLines = [...lines.slice(0, i), ...lines.slice(end)]
+    return { matched: true, text: nextLines.join('\n') }
+  }
+  return { matched: false, text: md }
 }

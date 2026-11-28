@@ -1,7 +1,7 @@
 /**
  * issue-template-hydrate.mjs —— Issue 模板水合与本地/通用远端结构化降级（零模板占位、零空洞套话与零字面量 `\n` 泄漏）。
  *
- * 复用 `pr-template-hydrate.mjs` 的围栏外 HTML 注释剥离与节替换逻辑，尊重宿主仓库自定义
+ * 复用 `markdown-scan.mjs` 的围栏外 HTML 注释剥离与节替换逻辑，尊重宿主仓库自定义
  * `.github/ISSUE_TEMPLATE/`，在无模板、local-only 或 generic-git 下安全水合；缺项留给下游 `issue-quality.mjs` 统一拦截。
  */
 
@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 import { assertNoAsciiControlChars } from './cli.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
-import { removeSectionIfPresent, replaceSectionIfPresent, stripHtmlCommentsOutsideFences } from './pr-template-hydrate.mjs'
+import { removeSectionIfPresent, replaceSectionIfPresent, stripHtmlCommentsOutsideFences } from './markdown-scan.mjs'
 
 export function normalizeEscapedNewlines(text) {
   const s = String(text ?? '').replace(/\r\n/g, '\n')

@@ -9,53 +9,18 @@
  */
 
 import { EXIT } from './exit-codes.mjs'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import { verifyArchitectureMapHeader } from './feature-map-graph.mjs'
 import { posixPath, readJsonSafe, readTextSafe, sha256File, writeJsonAtomic } from './git.mjs'
 import { SYNTHETIC_OBSERVATION_TEXTS, evaluateTextSubstance, isSyntheticObservationText } from './evidence-substance.mjs'
+import { isNonUiVisualAsset, isUiVisualFileCandidate } from './static-gates.mjs'
 import { stageTaskArtifact } from './verify-state.mjs'
 
-export { SYNTHETIC_OBSERVATION_TEXTS }
+export { SYNTHETIC_OBSERVATION_TEXTS, isNonUiVisualAsset, isUiVisualFileCandidate }
 
 /** 单个附件体积上限：超过它就不再是「实证产物」，而是留下来的临时大二进制。 */
 export const ARTIFACT_MAX_BYTES = 50 * 1024 * 1024
-
-const APP_UI_DIR_PREFIX_RE = /^(?:src|app|pages|views|components|ui|frontend|web|client|public)\//i
-const NON_UI_TEMPLATE_PATH_RE = /^(?:templates\/|kit\/[^/]+\/templates\/|docs\/templates\/|\.github\/|\.agents\/)/i
-const NON_UI_SVG_DIR_RE = /^(?:docs|assets|images|img|media|badges|svg|static\/docs)\//i
-const NON_UI_SVG_NAME_RE = /(?:^|\/)(?:readme|hero|banner|badge|diagram|architecture|flowchart|logo|shield)[^/]*\.svg$/i
-
-/** 判断 `.svg` 或工程模板路径是否属于非界面文档/工程模板资产，避免误触发 `BLOCKED_UI_ARTIFACT_REQUIRED`。 */
-export function isNonUiVisualAsset(fileRel, { repoRoot = null } = {}) {
-  const p = normRel(fileRel)
-  if (!p) return true
-  if (NON_UI_TEMPLATE_PATH_RE.test(p)) return true
-  if (p === 'docs/architecture-map.html' && repoRoot && verifyArchitectureMapHeader(repoRoot, p).ok) return true
-  if (/\.svg$/i.test(p)) {
-    if (/^docs\//i.test(p)) return true
-    if (!APP_UI_DIR_PREFIX_RE.test(p)) {
-      if (NON_UI_SVG_DIR_RE.test(p) || NON_UI_SVG_NAME_RE.test(p)) return true
-      if (repoRoot && existsSync(repoRoot)) {
-        try {
-          for (const name of readdirSync(repoRoot)) {
-            if (!/^readme(?:\.[^/]+)?\.md$/i.test(name)) continue
-            const txt = readTextSafe(join(repoRoot, name), 256 * 1024) ?? ''
-            if (txt.includes(p) || txt.includes(encodeURI(p))) return true
-          }
-        } catch { /* ignore */ }
-      }
-    }
-  }
-  return false
-}
-
-/** 统一界面/视觉资产判定入口（供 `static-gates.mjs` 薄委托复用）。 */
-export function isUiVisualFileCandidate(fileRel, { repoRoot = null, uiExtMatch = true } = {}) {
-  if (!uiExtMatch) return false
-  return !isNonUiVisualAsset(fileRel, { repoRoot })
-}
 
 function normRel(p) {
   return posixPath(String(p ?? '')).trim().replace(/^\.\//, '').replace(/^\/+/, '')

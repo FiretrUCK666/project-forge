@@ -347,7 +347,7 @@ export function buildIndexedVisualPayload(model, {
   siblingBriefLinks = [],
 } = {}) {
   const tree = model?.tree || { width: 680, height: 400, domains: [], nodes: [], edges: [] }
-  const activeTabs = Array.isArray(model?.activeTabs) && model.activeTabs.length > 0
+  const activeTabs = Array.isArray(model?.activeTabs)
     ? model.activeTabs.map((t) => ({ id: t.id, tier: Number(t.tier) || 1, title: t.title || t.id }))
     : [{ id: 'architecture', tier: 1, title: '架构全景' }, { id: 'workflow', tier: 1, title: '主流程' }]
 

@@ -1,0 +1,550 @@
+/**
+ * preflight-contracts.mjs —— 入口、引用、锚点、缺口覆盖、推送分档、同构、审查栏、收尾七步与 Mermaid 契约校验。
+ */
+
+import { existsSync, readdirSync } from 'node:fs'
+import { basename, join } from 'node:path'
+
+import {
+  FULL_READ_MAX_LINES, FULL_READ_REFS, REFS_MAX_LINES,
+  SKILL_MAX_BYTES, SKILL_MAX_LINES,
+} from '../lib/protocol.mjs'
+import { VERIFY_EXIT } from '../handoff.mjs'
+import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
+import {
+  ACCEPTANCE_ID_SITES,
+  FORBIDDEN_IN_RELEASE_NOTES,
+  FINISH_SITES,
+  FINISH_STEPS,
+  GATE_COMMANDS,
+  MERGE_AUTHORITY_DOCS,
+  PUSH_TIER_DOCS,
+  PR_TEMPLATE_TITLE_SITES,
+  PUSH_TIER_RULE,
+  REVIEW_FIELDS,
+  SINGLE_SOURCE_RULES,
+  STALE_DAILY_END,
+  acceptanceIdMissing,
+  checkDualLoopContracts,
+  checkGenericE2eContracts,
+  checkProcessArtifactFilenames,
+  completionRecordBeforeMerge,
+  evaluatePushTierContract,
+  finishCommandsOf,
+  finishRequiredMissing,
+  finishSectionRange,
+  finishSiteRolesMissing,
+  finishStepBodies,
+  finishStepsState,
+  matchHeadings,
+  readBlockScalar,
+  reviewBlockMissing,
+  validateDocTocAnchors,
+} from './preflight-contract-rules.mjs'
+
+export {
+  acceptanceIdMissing,
+  completionRecordBeforeMerge,
+  finishCommandsOf,
+  finishRequiredMissing,
+  finishSectionRange,
+  finishSiteRolesMissing,
+  finishStepBodies,
+  finishStepsState,
+  matchHeadings,
+  reviewBlockMissing,
+  validateDocTocAnchors,
+}
+
+const PATH_RE = /(?<![A-Za-z0-9_./-])((?:references|templates|scripts)\/[A-Za-z0-9_./-]+\.(?:md|mjs|ya?ml|txt|json|sh))\b/g
+const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
+
+function checkEntry({ ROOT, readText, countLines, isWorktreeCheckout, fail, note }) {
+  const skillPath = join(ROOT, 'SKILL.md')
+  if (!existsSync(skillPath)) { fail('缺少 SKILL.md'); return }
+  const text = readText(skillPath)
+  const bytes = Buffer.byteLength(text, 'utf8')
+  const lines = countLines(text)
+
+  if (lines > SKILL_MAX_LINES) {
+    fail(`SKILL.md 有 ${lines} 行，超过预算 ${SKILL_MAX_LINES} 行——入口每多一行，每一次任务都要多付一次`)
+  }
+  if (bytes > SKILL_MAX_BYTES) fail(`SKILL.md 有 ${bytes} 字节，超过预算 ${SKILL_MAX_BYTES} 字节`)
+
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text.replace(/\r\n/g, '\n'))
+  if (!fm) { fail('SKILL.md 缺少 frontmatter（首行的 ---）'); return }
+  const name = /^name:\s*(.+)$/m.exec(fm[1])?.[1]?.trim()
+  const desc = readBlockScalar(fm[1], 'description')
+  if (!name) fail('frontmatter 缺 name')
+  else {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+      fail(`frontmatter 的 name「${name}」不合法：只能小写字母、数字、连字符`)
+    }
+    if (name !== basename(ROOT)) {
+      if (isWorktreeCheckout(ROOT)) {
+        note(`入口：name「${name}」与目录名「${basename(ROOT)}」不同——这是 worktree 检出，`
+          + '目录名是隔离用的临时名字，不是安装位置，这一条在这里不适用')
+      } else {
+        fail(`frontmatter 的 name「${name}」与目录名「${basename(ROOT)}」不一致——宿主按目录名发现它`)
+      }
+    }
+  }
+  if (!desc || desc.length < 20) fail('frontmatter 缺 description，或它太短（宿主靠它决定要不要加载）')
+
+  const camel = fm[1].match(/^[a-zA-Z]*[a-z][A-Z][a-zA-Z]*:/m)
+  if (camel) fail(`frontmatter 里有驼峰键「${camel[0].replace(':', '')}」——扩展键一律用连字符形式，驼峰会让整份被丢弃`)
+  note(`入口：${lines} 行 / ${bytes} 字节（预算 ${SKILL_MAX_LINES} 行 / ${SKILL_MAX_BYTES} 字节）`)
+}
+
+function checkLinks(ctx) {
+  const { ROOT, rel, readText, countLines, walk, fail, note, isRepoOnlyPath, isProductLayerPath } = ctx
+  const refDir = join(ROOT, 'references')
+  const refs = walk(refDir, (f) => f.endsWith('.md'))
+  if (refs.length === 0) fail('references/ 下没有任何 Markdown 文件')
+
+  for (const file of refs) {
+    const name = rel(file)
+    const text = readText(file)
+    if (!text.startsWith('# ')) fail(`${name} 的首行必须是一级标题`)
+    if (!/^##\s+何时读本文件/m.test(text)) {
+      fail(`${name} 缺「## 何时读本文件」——没有它，AI 不知道什么时候该读这一份`)
+    }
+  }
+
+  const docsToScan = [join(ROOT, 'SKILL.md'), ...refs]
+  const seen = new Set()
+  for (const doc of docsToScan) {
+    if (!existsSync(doc)) continue
+    const name = rel(doc)
+    const text = readText(doc)
+    if (/\bexplorationStrategy\.mode\b/.test(text)) {
+      fail(`${name} 仍使用过期字段 explorationStrategy.mode，必须改为 explorationStrategy.tier`)
+    }
+    for (const m of text.matchAll(PATH_RE)) {
+      const target = m[1]
+      if (target.includes('*')) continue
+      seen.add(target)
+      if (!existsSync(join(ROOT, target))) fail(`${name} 引用了不存在的路径：${target}`)
+    }
+  }
+
+  for (const readmeName of ['README.md', 'README.en.md']) {
+    const p = join(ROOT, readmeName)
+    if (!existsSync(p)) continue
+    const text = readText(p)
+    for (const m of text.matchAll(/\b(assets\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b/g)) {
+      const target = m[1]
+      if (!existsSync(join(ROOT, target))) { fail(`${readmeName} 引用的视觉资源不存在：${target}`); continue }
+      if (isRepoOnlyPath(target) || !isProductLayerPath(target)) {
+        fail(`${readmeName} 引用的视觉资源未纳入产品层用户包：${target}`)
+      }
+    }
+  }
+
+  const licenseFamily = /templates\/license-<[^>]+>\.txt/
+  const licenseMentioned = docsToScan.some((doc) => existsSync(doc) && licenseFamily.test(readText(doc)))
+  for (const file of walk(join(ROOT, 'templates'), () => true)) {
+    const target = rel(file)
+    if (seen.has(target)) continue
+    if (/^templates\/license-.+\.txt$/.test(target) && licenseMentioned) continue
+    fail(`${target} 没有被任何文档提到——写了却没人指得到，等于没写`)
+  }
+
+  const refLines = refs.reduce((sum, f) => sum + countLines(readText(f)), 0)
+  if (refLines > REFS_MAX_LINES) fail(`references/ 合计 ${refLines} 行，超过预算 ${REFS_MAX_LINES} 行`)
+  note(`参考文档：${refs.length} 篇 / ${refLines} 行`)
+
+  let fullRead = countLines(readText(join(ROOT, 'SKILL.md')))
+  for (const refPath of FULL_READ_REFS) {
+    const p = join(ROOT, refPath)
+    if (!existsSync(p)) { fail(`预算表里列的 ${refPath} 不存在`); continue }
+    fullRead += countLines(readText(p))
+  }
+  if (fullRead > FULL_READ_MAX_LINES) {
+    fail(`一次全量任务要读 ${fullRead} 行，超过预算 ${FULL_READ_MAX_LINES} 行——注意力被稀释的直接来源`)
+  }
+  note(`全量必读：${fullRead} 行（预算 ${FULL_READ_MAX_LINES}）`)
+}
+
+function checkReferenceTargets({ ROOT, readText, fail, note }) {
+  const reviewPath = join(ROOT, 'scripts', 'review.mjs')
+  if (!existsSync(reviewPath)) { fail('缺 scripts/review.mjs'); return }
+  const src = readText(reviewPath)
+  const pairs = [...src.matchAll(/file:\s*'([^']+)',\s*section:\s*'([^']+)'/g)]
+  const headingsCache = new Map()
+  let checked = 0
+
+  for (const [, file, section] of pairs) {
+    const full = join(ROOT, file)
+    if (!existsSync(full)) { fail(`review.mjs 指路指向不存在的文件：${file}`); continue }
+    if (!headingsCache.has(file)) {
+      headingsCache.set(file, new Set(
+        readText(full).replace(/\r\n/g, '\n').split('\n')
+          .map((line) => /^##\s+(.+?)\s*$/.exec(line)?.[1])
+          .filter(Boolean),
+      ))
+    }
+    checked += 1
+    const hits = matchHeadings(headingsCache.get(file), section)
+    if (hits.length === 0) {
+      fail(`review.mjs 指向 ${file} 的「${section}」，但那份文件里没有以它开头的二级标题——指路会落空`)
+    } else if (hits.length > 1) {
+      fail(`review.mjs 指向 ${file} 的「${section}」，对上了 ${hits.length} 个标题（${hits.join(' ／ ')}）——指路要多写几个字让它唯一`)
+    }
+  }
+  note(`指路核对：${checked} 处都指在真实标题上`)
+}
+
+function checkAnchors({ ROOT, rel, readText, walk, fail, note }) {
+  const scanned = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml)$/i.test(f))
+  const SECTION_PTR = /第[一二三四五六七八九十]+节/
+  let sectionHits = 0
+  let scannedFiles = 0
+  for (const file of scanned) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    scannedFiles += 1
+    const lines = readText(file).replace(/\r\n/g, '\n').split('\n')
+    for (const [i, line] of lines.entries()) {
+      if (!SECTION_PTR.test(line)) continue
+      sectionHits += 1
+      fail(`${name} 第 ${i + 1} 行用了节号指针——重排一次就全部指错，而它不会报错；改写成「标题名」`)
+    }
+  }
+  if (sectionHits === 0) note(`指路形状：${scannedFiles} 份文件里没有节号指针，指路一律用标题名`)
+
+  const headingsCache = new Map()
+  const headingsOfFile = (file) => {
+    if (!headingsCache.has(file)) {
+      const full = join(ROOT, file)
+      headingsCache.set(file, existsSync(full)
+        ? new Set(readText(full).replace(/\r\n/g, '\n').split('\n')
+          .map((l) => /^##\s+(.+?)\s*$/.exec(l)?.[1]).filter(Boolean))
+        : null)
+    }
+    return headingsCache.get(file)
+  }
+
+  let checked = 0
+  for (const file of scanned) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    const text = readText(file).replace(/\r\n/g, '\n')
+    for (const m of text.matchAll(/`(references\/[A-Za-z0-9_.-]+\.md)`\s*的?\s*「([^」]+)」/g)) {
+      const [, refFile, section] = m
+      const have = headingsOfFile(refFile)
+      if (have === null) { fail(`${name} 指向不存在的文件 ${refFile}`); continue }
+      checked += 1
+      const hits = matchHeadings(have, section)
+      if (hits.length === 0) {
+        fail(`${name} 指向 ${refFile} 的「${section}」，但那份文件里没有以它开头的二级标题——指路落空`)
+      } else if (hits.length > 1) {
+        fail(`${name} 指向 ${refFile} 的「${section}」，对上了 ${hits.length} 个标题（${hits.join(' ／ ')}）——指路要多写几个字让它唯一`)
+      }
+    }
+  }
+  note(`指路核对：review.mjs 与正文共 ${checked} 处命名锚点都落在真实标题上`)
+}
+
+async function checkGapCoverage({ ROOT, fail, note }) {
+  let state
+  try {
+    state = await gapCoverage(ROOT)
+  } catch (error) {
+    fail(`缺口覆盖：这条判据没跑成——${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
+  for (const one of state.duplicated) fail(`缺口覆盖：${one}——一条缺口只能落一档，写两档会让结论出现两个版本`)
+  for (const one of state.dangling) fail(`缺口覆盖：${one} 在体检里没有这个 id——映射看着配好，实际指向一条永远不会出现的结论`)
+  for (const id of state.unknown) fail(`缺口覆盖：${id} 出现在源码里却不在登记名单里——源码与导出名单对不上`)
+  for (const id of state.missing) fail(`缺口覆盖：${id} 登记了却没能从源码里读出来——词法切块失灵，这一条从此没人查`)
+  for (const id of state.unclaimed) {
+    fail(`缺口覆盖：${id} 体检那边没人接——勘察报了、没人管；给 survey.mjs 那条规则补 review / decision / surveyOnly 三选一`)
+  }
+  if (state.ok.length > 0) note(`缺口覆盖：${state.ok.length} 条各有处置（体检 / 表态 / 仅勘察）`)
+}
+
+function checkPushSemantics({ ROOT, readText, fail, note }) {
+  const allDocs = [...PUSH_TIER_DOCS, ...MERGE_AUTHORITY_DOCS]
+  const filesMap = {}
+  for (const name of allDocs) {
+    const p = join(ROOT, name)
+    if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
+    filesMap[name] = readText(p)
+  }
+  const res = evaluatePushTierContract(filesMap)
+  for (const msg of res.failures) fail(msg)
+  if (res.ok) {
+    note(`推送分档：权威源 ${PUSH_TIER_DOCS.includes('references/collaboration.md') ? 'references/collaboration.md' : ''} 判据完整，${allDocs.length} 份入口与模板指针齐备且无矛盾表述`)
+  }
+}
+
+function checkSingleSources({ ROOT, readText, fail, note }) {
+  for (const rule of SINGLE_SOURCE_RULES) {
+    if (rule.releaseNotes === true) continue
+    for (const test of rule.tests) {
+      const p = join(ROOT, test.file)
+      if (!existsSync(p)) { fail(`单一真相源核对：缺 ${test.file}`); continue }
+      const hit = test.re.exec(readText(p))
+      if (hit === null) {
+        fail(`${test.file} 里对不上「${rule.what}」——同一件事在两份文件里说了两样，读的人会按错的那一份做`)
+        continue
+      }
+      if (test.exitCodes === true) {
+        const nums = [...new Set((hit[0].replace(/`/g, ' ').match(/(?<![\w.])\d(?![\w.])/g) ?? []))]
+          .map(Number).sort((a, b) => a - b)
+        const expect = Object.values(VERIFY_EXIT).sort((a, b) => a - b)
+        if (nums.join(',') !== expect.join(',')) {
+          fail(`${test.file} 里写的退出码是 ${nums.join('/')}，而 handoff.mjs 实际返回 ${expect.join('/')}——文档承诺了一个不会出现的码，还漏掉了真的会出现的那个`)
+        }
+      }
+    }
+  }
+
+  const notesDir = join(ROOT, 'docs', 'release-notes')
+  if (existsSync(notesDir)) {
+    for (const n of readdirSync(notesDir).filter((f) => /\.md$/i.test(f)).sort()) {
+      const file = `docs/release-notes/${n}`
+      if (FORBIDDEN_IN_RELEASE_NOTES.test(readText(join(ROOT, file)))) {
+        fail(`${file} 提到了 scripts/dev/——那几处不进用户包，照着跑的人会得到「找不到模块」`)
+      }
+    }
+  }
+
+  for (const file of ['AGENTS.md', 'CONTRIBUTING.md']) {
+    const p = join(ROOT, file)
+    if (!existsSync(p)) { fail(`门禁清单核对：缺 ${file}`); continue }
+    const text = readText(p)
+    for (const cmd of GATE_COMMANDS) {
+      if (!text.includes(cmd)) fail(`${file} 的门禁清单里少一条：${cmd}——两份文档列的不是同一批命令，照少的那份跑会漏掉它`)
+    }
+  }
+
+  const mustHave = [
+    { what: '一级标题校验', re: /grep -qE '\^# \+\[\^ \]'/ },
+    { what: '正文行数校验', re: /BODY_LINES/ },
+    { what: '未填占位判据（独立注释行）', re: /<!--\[\[:space:\]\]\*project-forge/ },
+  ]
+  for (const pair of [{ file: 'templates/ci-release.yml', label: '模板' }, { file: '.github/workflows/release.yml', label: '本仓库实例' }]) {
+    const p = join(ROOT, pair.file)
+    if (!existsSync(p)) { fail(`工作流对拍：缺 ${pair.file}`); continue }
+    const text = readText(p)
+    for (const rule of mustHave) {
+      if (!rule.re.test(text)) fail(`${pair.file}（${pair.label}）缺${rule.what}——两份工作流检查的东西不一样，CI 会放过模板能拦下的那种说明`)
+    }
+    if (pair.file === 'templates/ci-release.yml') {
+      if (!/gh release upload/.test(text) || !/gh release view/.test(text) || !/gh release download/.test(text) || !/(?:unzip -tq|tar -tzf)/.test(text)) {
+        fail('templates/ci-release.yml TODO(3) 缺少通用附件上传/回读/归档校验指引')
+      }
+      if (/scripts\/zip\.mjs/.test(text)) fail('templates/ci-release.yml 不得引用本仓独有的 scripts/zip.mjs')
+    } else if (!/gh release download[^\n]*-p/.test(text) || !/readZip/.test(text) || !/sha256/.test(text)) {
+      fail('.github/workflows/release.yml 缺少发布附件回读校验（gh release download + SHA256 + readZip CRC32）')
+    }
+  }
+
+  for (const c of [
+    { file: 'templates/ci-check.yml', re: /permissions:\s*\n\s*contents:\s*read/ },
+    { file: '.github/workflows/check.yml', re: /permissions:\s*\n\s*contents:\s*read/ },
+  ]) {
+    const p = join(ROOT, c.file)
+    if (existsSync(p) && !c.re.test(readText(p))) {
+      fail(`${c.file} 没有声明 permissions: contents: read——检查类工作流不该带写权限`)
+    }
+  }
+  const ownCheckPath = join(ROOT, '.github/workflows/check.yml')
+  if (existsSync(ownCheckPath)) {
+    const wfText = readText(ownCheckPath)
+    const aggMatch = /\n {2}check:\s*\n([\s\S]*?)(?=\n {2}[A-Za-z0-9_-]+:|\n*$)/.exec(wfText)
+    if (aggMatch && /\bneeds:\s*gates\b/.test(aggMatch[1])) {
+      if (!/^\s*if:\s*always\(\)/m.test(aggMatch[1]) || !/needs\.gates\.result/.test(aggMatch[1])) {
+        fail('.github/workflows/check.yml 的汇总 job `check` 缺少 `if: always()` 或 `needs.gates.result` 校验——上游 gates 失败时汇总 job 会变成 skipped 被分支保护假绿放行')
+      }
+    }
+  }
+  note(`单一真相源：${SINGLE_SOURCE_RULES.length} 组跨文件判据 + 工作流对拍 + 权限声明，全部一致`)
+}
+
+/**
+ * 兜底正文的分节标题与真实模板必须同名。
+ *
+ * 模板缺段时，派生正文用 `pr-template-hydrate.mjs` 的 `PR_SECTION_TITLES` 兜底。
+ * 两份各写一套，模板换了说法兜底不知道，同一个 PR 里就会有两种标题——读的人分不清哪份准。
+ *
+ * 判据：常量里的每个标题，都必须在模板里作为二级标题真实存在。模板改名而常量没跟上，
+ * 这一条就会红——而「模板改名」恰恰是不跑这个 PR、只看代码时发现不了的那类改动。
+ */
+function checkPrTemplateTitles({ ROOT, readText, fail, note }) {
+  const constPath = join(ROOT, 'kit/skills/lib/pr-template-hydrate.mjs')
+  if (!existsSync(constPath)) { fail('兜底分节标题对拍：缺 kit/skills/lib/pr-template-hydrate.mjs'); return }
+  const src = readText(constPath)
+  const block = /PR_SECTION_TITLES\s*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/.exec(src)?.[1] ?? ''
+  const titles = [...block.matchAll(/:\s*'([^']+)'/g)].map((m) => m[1])
+  if (titles.length === 0) { fail('兜底分节标题对拍：PR_SECTION_TITLES 里读不出一条标题'); return }
+
+  const allHeadings = new Map()
+  for (const site of PR_TEMPLATE_TITLE_SITES) {
+    const abs = join(ROOT, site)
+    if (!existsSync(abs)) { fail(`兜底分节标题对拍：缺 ${site}`); continue }
+    const set = new Set()
+    for (const line of readText(abs).replace(/\r\n/g, '\n').split('\n')) {
+      const h = /^##\s+(.+?)\s*$/.exec(line)?.[1]
+      if (h) set.add(h)
+    }
+    allHeadings.set(site, set)
+  }
+  // 逐份核，不取并集：两份模板里只要有一份改了名，并集会被另一份盖住，检查就成了摆设。
+  for (const [site, headings] of allHeadings) {
+    const missing = titles.filter((t) => !headings.has(t))
+    if (missing.length > 0) {
+      fail(`${site} 里找不到与常量同名的二级标题「${missing.join('、')}」——`
+        + '模板改过名而 PR_SECTION_TITLES 没跟上，派生正文会与模板出现两种说法')
+    }
+  }
+  note(`兜底分节标题对拍：${titles.length} 个标题在 ${allHeadings.size} 处模板里逐份都能找到同名二级标题`)
+}
+
+function checkReviewContract({ ROOT, readText, fail, note }) {
+  for (const site of ['templates/pull-request-template.md', '.github/pull_request_template.md', 'references/collaboration.md']) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`审查栏对拍：缺 ${site}`); continue }
+    const missing = reviewBlockMissing(readText(path))
+    if (missing.length === REVIEW_FIELDS.length) {
+      fail(`${site} 里没有一块同时排着审查栏的这 ${REVIEW_FIELDS.length} 个字段——模板、实例、判据三处必须是同一批词，`
+        + `否则填了也没人按它判。字段表在 scripts/dev/preflight-contract-rules.mjs 的 REVIEW_FIELDS`)
+    } else if (missing.length > 0 && missing.length < REVIEW_FIELDS.length) {
+      fail(`${site} 的审查栏字段块不完整，缺「${missing.join('、')}」——这 ${REVIEW_FIELDS.length} 个字段要排在同一段里；分散在正文各处的同名文字不算`)
+    }
+  }
+  note(`审查栏对拍：${REVIEW_FIELDS.length} 个字段在三处各排成一块`)
+
+  for (const site of ACCEPTANCE_ID_SITES) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`验收标准编号：缺 ${site}`); continue }
+    if (acceptanceIdMissing(readText(path))) {
+      fail(`${site} 里没有 \`C1\`/\`C2\` 形状的验收标准编号——审查栏写的是 \`fail: C4\`，编号形状一变，两处就永远对不起来，而人只会以为审查漏看了那一条`)
+    }
+  }
+  note(`验收标准编号：${ACCEPTANCE_ID_SITES.length} 处都是 \`C<数字>\` 形状`)
+
+  const todoTplPath = join(ROOT, 'kit/skills/templates/docs-todo.md')
+  if (!existsSync(todoTplPath)) fail('完成后记录：缺 kit/skills/templates/docs-todo.md')
+  else {
+    const { ok, why } = completionRecordBeforeMerge(readText(todoTplPath))
+    if (!ok) fail(`kit/skills/templates/docs-todo.md：${why}——这句一改，合并之后就得再开一个只改记录的提案，而那个提案没人审、也没和这件事绑在一起`)
+  }
+  note('完成后记录：模板要求「在合并之前写完」')
+
+  let siteCount = 0
+  let baseline = null
+  for (const site of FINISH_SITES) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`收尾步骤对拍：缺 ${site}`); continue }
+    siteCount += 1
+    const text = readText(path)
+    const state = finishStepsState(text)
+    if (state.missing.length > 0) {
+      fail(`${site} 的合并收尾缺这几步：${state.missing.join('、')}——七步固定，少一步就会有人漏做`)
+    } else if (state.outOfOrder) {
+      fail(`${site} 的合并收尾步骤顺序不对——顺序是判据不是排版，worktree 没卸就删分支会失败，而报错说的是「未合并」`)
+    }
+    for (const label of finishRequiredMissing(text)) {
+      fail(`${site} 的合并收尾没有交代「${label}」——三处一起漏掉时，互相比对永远说「一致」；只有拿内容去对，才看得见集体遗忘`)
+    }
+    const commands = finishCommandsOf(text)
+    if (commands === undefined) {
+      fail(`${site} 的合并收尾读不出命令集——七步要写成编号行（数字加点开头），叙述体里「第一步，…」这种写法读不到，对拍就静默通过`)
+      continue
+    }
+    if (baseline === null) { baseline = { site, commands }; continue }
+    const extra = commands.filter((c) => !baseline.commands.includes(c))
+    const absent = baseline.commands.filter((c) => !commands.includes(c))
+    if (extra.length > 0 || absent.length > 0) {
+      const parts = []
+      if (absent.length > 0) parts.push(`${site} 少了 ${absent.join('、')}`)
+      if (extra.length > 0) parts.push(`${site} 多了 ${extra.join('、')}`)
+      fail(`收尾步骤对拍：${baseline.site} 与 ${site} 教人敲的命令不一致——${parts.join('；')}。措辞可以各写各的，命令不行：同一件事在三处教人敲不同的东西，照着做会漏一半`)
+    }
+  }
+  for (const role of finishSiteRolesMissing(FINISH_SITES)) {
+    fail(`收尾步骤对拍：${role}这一处不在核对清单里——它改了不会有任何东西报错，而其余几处都跟着它走`)
+  }
+  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在 ${siteCount} 处（模板 / 实例 / 判据源头）顺序与命令一致`)
+}
+
+/**
+ * 两张语言清单必须一张包住另一张。
+ *
+ * 「能识别」和「能生成起步骨架」是两件不同的事：前者靠 `survey-ecosystem.mjs` 的清单探测，
+ * 后者靠 `starter-templates.mjs` 的分支生成。两份清单各写各的时候，骨架里多加一种语言、
+ * 识别里却忘了登记（或反过来），不会有任何东西报错——用户拿到的那份 README 于是一边
+ * 说支持、一边静默走兜底分支。这里把包含关系钉成判据。
+ */
+function checkStarterLanguageCoverage(ctx) {
+  const ecosystemPath = join(ctx.ROOT, 'scripts/lib/survey-ecosystem.mjs')
+  const starterPath = join(ctx.ROOT, 'scripts/lib/equip-bootstrap.mjs')
+  const ecosystemText = ctx.readText(ecosystemPath)
+  const starterText = ctx.readText(starterPath)
+
+  const declared = /export const BOOTSTRAP_STACKS = new Set\(\[([\s\S]*?)\]\)/.exec(starterText)?.[1]
+  if (declared === undefined) {
+    ctx.fail('起步基线技术栈清单读不出来（`BOOTSTRAP_STACKS` 的形状变了）——清单读不到时，下面这条包含关系会被静默跳过')
+    return
+  }
+  const bootstrap = [...declared.matchAll(/'([^']+)'/g)].map((m) => m[1])
+  if (bootstrap.length === 0) {
+    ctx.fail('起步基线技术栈清单是空的——空清单会让包含关系恒真，那是一条永远绿着的判据')
+    return
+  }
+
+  const detected = [...ecosystemText.matchAll(/^\s{4}kind:\s*'([^']+)'/gm)].map((m) => m[1])
+  if (detected.length === 0) {
+    ctx.fail('可识别语言清单读不出来（`ECOSYSTEMS` 的 `kind:` 形状变了）——两张清单的对账从此失效')
+    return
+  }
+
+  const orphans = bootstrap.filter((stack) => stack !== 'docs' && stack !== 'universal' && !detected.includes(stack))
+  if (orphans.length > 0) {
+    ctx.fail(`起步基线支持 ${orphans.join('、')}，但勘察的生态清单里没有对应识别项——生成得出来却认不出来，用户拿到的项目会被判成「无生态」`)
+    return
+  }
+
+  ctx.note(`语言清单：可识别 ${detected.length} 种，能生成起步基线 ${bootstrap.length} 种（${bootstrap.join('/')}），包含关系成立`)
+}
+
+function checkWorkflowLifecycleContracts({ ROOT, readText, fail, note }) {
+  const checks = [
+    ['SKILL.md', ['需求', '澄清', '设计', '实现', '评审', '实证测试-形式验证', '验收', '合入', 'dev-explore', 'dev-plan', 'dev-flow', 'dev-review', 'dev-govern', 'Critique', 'Worktree', 'retro']],
+    ['kit/skills/dev-explore/SKILL.md', ['只读', 'Feature Map', 'reusableModules', 'dev-plan', 'dev-flow']],
+    ['kit/skills/dev-plan/SKILL.md', ['澄清', 'PRD', 'Critique', 'SELF_CRITIQUE_REJECTED', 'dev-explore', 'dev-flow']],
+    ['kit/skills/dev-flow/SKILL.md', ['Worktree', 'next', 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', '--include-master-prd', 'dev-plan', 'dev-review']],
+    ['kit/skills/dev-review/SKILL.md', ['--untrusted-scan', 'Behavioral', 'Structural', '六锁', 'flow.mjs merge', 'dev-flow', 'dev-govern']],
+    ['kit/skills/dev-govern/SKILL.md', ['audit', 'reconcile', 'retro', 'signals.jsonl', 'dev-explore', 'dev-plan', 'dev-flow', 'dev-review']],
+  ]
+  for (const [file, tokens] of checks) {
+    const p = join(ROOT, file)
+    if (!existsSync(p)) { fail(`工作流生命周期契约缺失（${file}）：文件不存在`); continue }
+    const text = readText(p)
+    const missing = tokens.filter((t) => !text.includes(t))
+    if (missing.length > 0) fail(`工作流生命周期契约缺失（${file}）：缺少「${missing.join('、')}」——8 阶段全链路与内置研发技能衔接必须显式对齐`)
+  }
+  note(`工作流生命周期契约：根 SKILL.md 与 ${checks.length - 1} 套研发技能全量覆盖 8 阶段核心门控与双向衔接`)
+}
+
+export async function runContractChecks(ctx) {
+  checkEntry(ctx)
+  checkLinks(ctx)
+  checkReferenceTargets(ctx)
+  checkAnchors(ctx)
+  await checkGapCoverage(ctx)
+  checkPushSemantics(ctx)
+  checkSingleSources(ctx)
+  checkPrTemplateTitles(ctx)
+  checkReviewContract(ctx)
+  checkStarterLanguageCoverage(ctx)
+  checkWorkflowLifecycleContracts(ctx)
+  checkDualLoopContracts(ctx)
+  checkGenericE2eContracts(ctx)
+  checkProcessArtifactFilenames(ctx)
+}

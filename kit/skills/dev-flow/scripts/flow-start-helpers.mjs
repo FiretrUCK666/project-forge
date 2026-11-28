@@ -25,6 +25,7 @@ import { probeForWrite, resolveIdentityLayers, resolveRemoteTarget } from '../..
 import { readDecisions } from '../../lib/profile.mjs'
 import { findBlockingTriageDowngrade, markTriageConsumed, readSessionState } from '../../lib/session-state.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { createIssueForStart } from './flow-issue-core.mjs'
 import { validateStartProvenanceAndRole } from './flow-start-provenance.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
 
@@ -423,7 +424,6 @@ export async function resolveOrBindStartIssue({
     }
   }
 
-  const { createIssueForStart } = await import('./flow-issues.mjs')
   const cr = await createIssueForStart({
     roots,
     state,

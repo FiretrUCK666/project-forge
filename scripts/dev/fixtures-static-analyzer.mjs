@@ -11,6 +11,10 @@ import { EXIT, gitCommitFast, gitInit, gitSync, rmTree, tmpProject } from './fix
 import { renderArchitectureMapFromRepo, verifyArchitectureMapSync } from '../../kit/skills/lib/architecture-map.mjs'
 import { findSccs } from '../../kit/skills/lib/doc-graph.mjs'
 import { extractImportsForArch, resolveGoModules, resolveLocalImportTarget } from '../../kit/skills/lib/import-graph.mjs'
+import { projectVisualBriefViewModel, upsertVisualBrief } from '../../kit/skills/lib/visual-brief.mjs'
+import { buildVisualModel } from '../../kit/skills/lib/visual-layout.mjs'
+import { renderVisualHtml } from '../../kit/skills/lib/visual-render.mjs'
+import { scanCircularImports, scanDuplicateExportDefs } from './preflight-kernel-parity.mjs'
 
 async function loadAnalyzerMods() {
   const analyzer = await import('../../kit/skills/lib/static-analyzer.mjs')
@@ -51,7 +55,7 @@ export function registerStaticAnalyzerCases(cases) {
     }
   }])
 
-  cases.push(['[StaticAnalyzer-C1] 栈1空仓与非Git降级：0文件不崩溃且仅激活Tier1零空Tab', async () => {
+  cases.push(['[StaticAnalyzer-C1] 栈1空仓与非Git降级：0文件不崩溃且严守零空Tab（0 active / 10 skipped）', async () => {
     const dir = tmpProject({})
     try {
       const { analyzer, evidence } = await loadAnalyzerMods()
@@ -61,10 +65,13 @@ export function registerStaticAnalyzerCases(cases) {
       }
       if (!res.degradedReason) return '非 Git 空仓应给出显式 degradedReason'
       const ev = await evidence.extractMultiDiagramEvidence(dir, { analysis: res })
-      const activeIds = ev.activeTabs.map((t) => t.id).sort().join(',')
-      if (activeIds !== 'architecture,tree,workflow') return `空仓 Tier 1 激活集异常: ${activeIds}`
-      if (ev.skippedTabs.length !== 7) return `空仓应跳过全部 7 个 Tier2/3 图表，实际 ${ev.skippedTabs.length}`
+      if (ev.activeTabs.length !== 0) return `空仓应严守零空 Tab（0 activeTabs），实际: ${JSON.stringify(ev.activeTabs)}`
+      if (ev.skippedTabs.length !== 10) return `空仓应跳过全部 10 类图表，实际 ${ev.skippedTabs.length}`
       if (ev.skippedTabs.some((t) => !t.reason)) return 'skippedTabs 必须附带 reason'
+      const model = buildVisualModel({ featureMap: {}, evidence: ev, analysis: res })
+      if (model.activeTabs.length !== 0) return `buildVisualModel 对空仓不应注入空 Tab: ${JSON.stringify(model.activeTabs)}`
+      const rendered = renderVisualHtml({ visualModel: model, featureMapSha256: '0'.repeat(64) })
+      if (rendered.html.includes('data-diagram-tab=')) return '空仓渲染 HTML 不应包含任何空图 Tab 按钮'
       return true
     } finally {
       rmTree(dir)
@@ -425,6 +432,177 @@ export function registerStaticAnalyzerCases(cases) {
         if (r3.cacheStats.misses !== 1) return `非 Git 仓 mtime 变化未失效缓存: ${JSON.stringify(r3.cacheStats)}`
       } finally {
         rmTree(nonGit)
+      }
+      return true
+    } finally {
+      rmTree(dir)
+    }
+  }])
+
+  cases.push(['[StaticAnalyzer-C4] 无 feature-map 仓库静态回退：architecture-map 与 Living Visual Brief 双端渲染非空多图', async () => {
+    const dir = tmpProject({
+      'src/entry.ts': 'import { runService } from "./service.js"\nexport const main = () => runService()\n',
+      'src/service.ts': 'import { loadStore } from "./store.js"\nexport const runService = () => loadStore()\n',
+      'src/store.ts': 'export const loadStore = () => ({ ok: true })\n',
+    })
+    try {
+      gitInit(dir, { branch: 'main', message: 'chore: no feature map repo' })
+      const { analyzer, evidence } = await loadAnalyzerMods()
+      const analysis = await analyzer.analyzeRepoStatic(dir)
+      const ev = await evidence.extractMultiDiagramEvidence(dir, { analysis })
+      const tabIds = ev.activeTabs.map((t) => t.id)
+      for (const req of ['architecture', 'workflow', 'tree']) {
+        if (!tabIds.includes(req)) return `无 feature-map 仓应激活 ${req}，实际: ${JSON.stringify(tabIds)}`
+      }
+      const model = buildVisualModel({ featureMap: {}, evidence: ev, analysis })
+      if ((model.diagrams.architecture?.nodes?.length ?? 0) < 3) {
+        return `architecture 未消费 static-imports 静态回退节点: ${JSON.stringify(model.diagrams.architecture?.nodes)}`
+      }
+      if ((model.diagrams.workflow?.nodes?.length ?? 0) < 1) {
+        return `workflow 未消费 entry-chains 静态回退节点: ${JSON.stringify(model.diagrams.workflow?.nodes)}`
+      }
+      if (!model.geometryReport?.ok) return `静态回退多图 geometryReport 失败: ${JSON.stringify(model.geometryReport)}`
+      const rendered = renderVisualHtml({ visualModel: model, featureMapSha256: '1'.repeat(64) })
+      if (!rendered.html.includes('data-node-id="src/entry.ts"')) {
+        return 'architecture-map 渲染 HTML 缺失静态回退节点 src/entry.ts'
+      }
+
+      const brief = upsertVisualBrief(dir, {
+        briefKey: 'no-fm-brief',
+        kind: 'task',
+        taskId: 'no-fm-brief',
+        title: '无 feature-map 简报实证',
+      })
+      const proj = projectVisualBriefViewModel({ mainRoot: dir, workRoot: dir, sidecar: brief.sidecar })
+      if ((proj.visualModel.diagrams.architecture?.nodes?.length ?? 0) < 3) {
+        return `Living Visual Brief 在 featureMapSource=none 时未消费静态架构图: ${JSON.stringify(proj.visualModel.diagrams.architecture?.nodes)}`
+      }
+      if ((proj.visualModel.diagrams.workflow?.nodes?.length ?? 0) < 1) {
+        return `Living Visual Brief 在 featureMapSource=none 时未消费静态流程图: ${JSON.stringify(proj.visualModel.diagrams.workflow?.nodes)}`
+      }
+      if (!proj.visualModel.activeTabs.some((t) => t.id === 'tree')) {
+        return `Living Visual Brief 在 featureMapSource=none 时未采集多图静态证据: ${JSON.stringify(proj.visualModel.activeTabs)}`
+      }
+      return true
+    } finally {
+      rmTree(dir)
+    }
+  }])
+
+  cases.push(['[StaticAnalyzer-C4] 多语言 ERD（Java/Kotlin/Django/Ruby）、多阶段 Dockerfile 归属与通用测试路径排除（正反双向）', async () => {
+    const dir = tmpProject({
+      'src/main/java/com/acme/User.java': [
+        'package com.acme;',
+        'import jakarta.persistence.*;',
+        '@Entity',
+        '@Table(name = "users")',
+        'public class User {',
+        '  @Id',
+        '  private Long id;',
+        '  private String email;',
+        '}',
+      ].join('\n'),
+      'src/main/java/com/acme/Order.java': [
+        'package com.acme;',
+        '@Entity',
+        'public class Order {',
+        '  private Long id;',
+        '  @ManyToOne',
+        '  private User buyer;',
+        '}',
+      ].join('\n'),
+      'src/main/kotlin/com/acme/Invoice.kt': [
+        'package com.acme',
+        '@Entity',
+        'data class Invoice(val id: Long, val amount: Int)',
+      ].join('\n'),
+      'pyapp/models.py': [
+        'from django.db import models',
+        'class Account(models.Model):',
+        '    name = models.CharField(max_length=64)',
+        'class Payment(models.Model):',
+        '    account = models.ForeignKey(Account, on_delete=models.CASCADE)',
+        '    cents = models.IntegerField()',
+      ].join('\n'),
+      'db/schema.rb': [
+        'ActiveRecord::Schema.define do',
+        '  create_table "products" do |t|',
+        '    t.string "sku"',
+        '    t.references :category',
+        '  end',
+        '  add_foreign_key "products", "categories"',
+        'end',
+      ].join('\n'),
+      'Dockerfile': [
+        'FROM node:20 AS builder',
+        'RUN npm run build',
+        'FROM node:20-slim AS runtime',
+        'COPY --from=builder /app/dist /app/dist',
+        'FROM alpine:3.19 AS debug',
+        'RUN apk add --no-cache curl',
+      ].join('\n'),
+      'tests/fake_hierarchy.ts': [
+        'export class FakeBase {}',
+        'export class FakeA extends FakeBase {}',
+        'export class FakeB extends FakeBase {}',
+        'export class FakeC extends FakeBase {}',
+        'export type FakeStatus = "open" | "closed"',
+        'export const FAKE_TRANSITIONS = { open: ["closed"] }',
+      ].join('\n'),
+      '__tests__/more.spec.ts': 'export class SpecSub extends FakeBase {}\n',
+      'pkg/fake_test.go': 'package pkg\ntype Base struct{}\ntype Sub struct{\n  Base\n}\n',
+    })
+    try {
+      const { evidence } = await loadAnalyzerMods()
+      const ev = await evidence.extractMultiDiagramEvidence(dir)
+
+      const entNames = (ev.diagrams.erd?.entities ?? []).map((e) => e.name)
+      for (const expected of ['User', 'Order', 'Invoice', 'Account', 'Payment', 'products']) {
+        if (!entNames.includes(expected)) return `多语言 ERD 缺失实体 ${expected}: ${JSON.stringify(entNames)}`
+      }
+      const relKeys = (ev.diagrams.erd?.relations ?? []).map((r) => `${r.from}->${r.to}`)
+      for (const expectedRel of ['Order->User', 'Payment->Account', 'products->categories']) {
+        if (!relKeys.includes(expectedRel)) return `多语言 ERD 缺失关系 ${expectedRel}: ${JSON.stringify(relKeys)}`
+      }
+
+      const dfEdges = (ev.diagrams.dataflow?.edges ?? []).map((e) => `${e.from}->${e.to}`)
+      if (!dfEdges.includes('Dockerfile:builder->Dockerfile:runtime')) {
+        return `Dockerfile COPY --from=builder 未连到所属 runtime 阶段: ${JSON.stringify(dfEdges)}`
+      }
+      if (dfEdges.includes('Dockerfile:builder->Dockerfile:debug')) {
+        return `Dockerfile COPY --from=builder 误连到了后续无关 debug 阶段: ${JSON.stringify(dfEdges)}`
+      }
+
+      if (ev.diagrams.class || ev.activeTabs.some((t) => t.id === 'class')) {
+        return `tests/__tests__/*_test.go 假继承未被排除出 class 图: ${JSON.stringify(ev.diagrams.class)}`
+      }
+      if (ev.diagrams.lifecycle || ev.activeTabs.some((t) => t.id === 'lifecycle')) {
+        return `tests/ 假状态机未被排除出 lifecycle 图: ${JSON.stringify(ev.diagrams.lifecycle)}`
+      }
+
+      // 门禁正反自证：SCC 循环导入检测 + 跨模块重复导出检测
+      const staticSccs = scanCircularImports([
+        { rel: 'kit/skills/lib/a.mjs', codeText: 'import { b } from "./b.mjs"\n' },
+        { rel: 'kit/skills/lib/b.mjs', codeText: 'import { a } from "./a.mjs"\n' },
+      ])
+      if (staticSccs.length !== 1) return `scanCircularImports 未检出静态环: ${JSON.stringify(staticSccs)}`
+      const dynSccs = scanCircularImports([
+        { rel: 'kit/skills/lib/x.mjs', codeText: 'const m = await import("./y.mjs")\n' },
+        { rel: 'kit/skills/lib/y.mjs', codeText: 'import { x } from "./x.mjs"\n' },
+      ])
+      if (dynSccs.length !== 1) return `scanCircularImports 未检出动态 import 环: ${JSON.stringify(dynSccs)}`
+      const acyclicSccs = scanCircularImports([
+        { rel: 'kit/skills/lib/p.mjs', codeText: 'import { q } from "./q.mjs"\n' },
+        { rel: 'kit/skills/lib/q.mjs', codeText: 'export const q = 1\n' },
+      ])
+      if (acyclicSccs.length !== 0) return `scanCircularImports 对无环图误报: ${JSON.stringify(acyclicSccs)}`
+
+      const dupV = scanDuplicateExportDefs([
+        { rel: 'kit/skills/lib/m1.mjs', codeText: 'export function dupFn() {}\nexport function runCli() {}\nexport function handleFoo() {}\n' },
+        { rel: 'kit/skills/lib/m2.mjs', codeText: 'export function dupFn() {}\nexport function runCli() {}\nexport function handleFoo() {}\nexport { reexp } from "./m1.mjs"\n' },
+      ], {})
+      if (dupV.length !== 1 || dupV[0].name !== 'dupFn') {
+        return `scanDuplicateExportDefs 判定异常: ${JSON.stringify(dupV)}`
       }
       return true
     } finally {

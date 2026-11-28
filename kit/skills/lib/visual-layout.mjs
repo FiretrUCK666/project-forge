@@ -464,6 +464,99 @@ const DIAGRAM_LAYOUTERS = Object.freeze({
   lifecycle: layoutLifecycleDiagram, dataflow: layoutDataflowDiagram, timeline: layoutTimelineDiagram, waterfall: layoutWaterfallDiagram,
 })
 
+function domainGroupOfNodeId(id) {
+  const segs = String(id || '').split('/').filter(Boolean)
+  return segs.length > 1 ? segs.slice(0, Math.min(2, segs.length - 1)).join('/') : '.'
+}
+
+function synthesizeFeatureMapFromEvidence(featureMap, evidence) {
+  const base = featureMap && typeof featureMap === 'object' ? featureMap : {}
+  const evArch = evidence?.diagrams?.architecture
+  const evWf = evidence?.diagrams?.workflow
+  const hasFeatures = Array.isArray(base.features) && base.features.length > 0
+  const hasFlows = Array.isArray(base.flows) && base.flows.length > 0
+
+  let domains = Array.isArray(base.domains) ? base.domains : []
+  let features = hasFeatures ? base.features : []
+  let flows = hasFlows ? base.flows : []
+
+  if (!hasFeatures && evArch && !evArch.empty && Array.isArray(evArch.nodes) && evArch.nodes.length > 0) {
+    const picked = [...evArch.nodes]
+      .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))
+      .slice(0, 60)
+    const pickedIds = new Set(picked.map((n) => n.id))
+    const depsByNode = new Map(picked.map((n) => [n.id, []]))
+    for (const e of Array.isArray(evArch.edges) ? evArch.edges : []) {
+      if (pickedIds.has(e.from) && pickedIds.has(e.to) && e.from !== e.to) {
+        const list = depsByNode.get(e.from)
+        if (!list.includes(e.to)) list.push(e.to)
+      }
+    }
+    const usedDomains = new Set()
+    features = picked.map((n) => {
+      const dom = n.domain || domainGroupOfNodeId(n.id)
+      usedDomains.add(dom)
+      return {
+        id: n.id,
+        title: n.label || n.id,
+        domain: dom,
+        entrypoints: Number(n.fanIn) === 0 ? [n.id] : [],
+        modules: [n.id],
+        tests: [],
+        dependsOn: depsByNode.get(n.id) || [],
+        description: `${n.lang ? `[${n.lang}] ` : ''}入 ${Number(n.fanIn) || 0} / 出 ${Number(n.fanOut) || 0}`,
+      }
+    })
+    if (domains.length === 0) {
+      const evDoms = Array.isArray(evArch.domains) ? evArch.domains : []
+      const mapped = evDoms
+        .filter((d) => d && usedDomains.has(d.id))
+        .map((d) => ({ id: d.id, title: d.name || d.title || d.id }))
+      domains = mapped.length > 0
+        ? mapped
+        : [...usedDomains].sort().map((id) => ({ id, title: id }))
+    }
+  }
+
+  if (!hasFlows && evWf && !evWf.empty && Array.isArray(evWf.steps) && evWf.steps.length > 0) {
+    const steps = evWf.steps
+      .map((s) => ({
+        feature: String(s.feature || s.id || '').trim(),
+        actor: String(s.actor || String(s.id || '').split('/')[0] || 'root').trim(),
+        action: String(s.action || s.label || s.id || '').trim(),
+      }))
+      .filter((s) => s.feature)
+    if (steps.length > 0) {
+      if (features.length === 0) {
+        const seen = new Set()
+        features = []
+        for (const s of steps) {
+          if (seen.has(s.feature)) continue
+          seen.add(s.feature)
+          features.push({
+            id: s.feature,
+            title: s.action || s.feature,
+            domain: domainGroupOfNodeId(s.feature),
+            entrypoints: [s.feature],
+            modules: [s.feature],
+            tests: [],
+            dependsOn: [],
+          })
+        }
+      }
+      flows = [{
+        id: 'static-entry-chains',
+        title: '入口调用流',
+        actors: Array.isArray(evWf.lanes) && evWf.lanes.length > 0 ? evWf.lanes : [...new Set(steps.map((s) => s.actor))],
+        features: steps.map((s) => s.feature),
+        steps,
+      }]
+    }
+  }
+
+  return { ...base, domains, features, flows }
+}
+
 function buildMultiDiagrams(tree, flow, evidence) {
   const diagrams = {
     architecture: { id: 'architecture', kind: 'architecture', width: tree.width, height: tree.height, domains: tree.domains, nodes: tree.nodes, edges: tree.edges },
@@ -475,14 +568,19 @@ function buildMultiDiagrams(tree, flow, evidence) {
       if (evDiagrams[kind]) diagrams[kind] = layouter(evDiagrams[kind])
     }
   }
-  const activeTabs = Array.isArray(evidence?.activeTabs) && evidence.activeTabs.length > 0
+  const activeTabs = Array.isArray(evidence?.activeTabs)
     ? evidence.activeTabs.filter((t) => t && diagrams[t.id])
     : [{ id: 'architecture', tier: 1, title: '架构全景' }, { id: 'workflow', tier: 1, title: '主流程' }]
-  return { diagrams, activeTabs, geometryReport: verifyMultiDiagramGeometry(diagrams) }
+  const activeDiagrams = {}
+  for (const tab of activeTabs) {
+    if (diagrams[tab.id]) activeDiagrams[tab.id] = diagrams[tab.id]
+  }
+  return { diagrams, activeTabs, geometryReport: verifyMultiDiagramGeometry(activeDiagrams) }
 }
 
 export function buildVisualModel({ featureMap = {}, diffOverlay = {}, mode = 'architecture-map', title = '', briefSpec = null, evidence = null, analysis = null } = {}) {
-  const overlay = computeDiffOverlay(featureMap, diffOverlay), tree = layoutDomainTree(featureMap, overlay), flow = layoutFlowDag(featureMap, overlay)
+  const effectiveFeatureMap = synthesizeFeatureMapFromEvidence(featureMap, evidence)
+  const overlay = computeDiffOverlay(effectiveFeatureMap, diffOverlay), tree = layoutDomainTree(effectiveFeatureMap, overlay), flow = layoutFlowDag(effectiveFeatureMap, overlay)
   const { diagrams, activeTabs, geometryReport } = buildMultiDiagrams(tree, flow, evidence)
   const repoName = String(featureMap?.repoName || featureMap?.project || briefSpec?.repoName || '项目仓库').trim()
   const resolvedMode = mode === 'visual-brief' ? 'visual-brief' : 'architecture-map'

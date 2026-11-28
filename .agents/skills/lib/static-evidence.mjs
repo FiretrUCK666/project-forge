@@ -12,6 +12,8 @@ import { basename, join, resolve } from 'node:path'
 import { readFeatureMapSafe } from './feature-map.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { MAX_ANALYZE_FILE_BYTES, analyzeRepoStatic, analyzeRepoStaticSync } from './static-analyzer.mjs'
+import { extractErdEvidence } from './static-evidence-erd.mjs'
+import { isTestOrFixtureFile } from './static-gates.mjs'
 import { stripCodeCommentsLines } from './static-gates-lexer.mjs'
 
 export const DIAGRAM_TIERS = Object.freeze({
@@ -38,12 +40,6 @@ const DIAGRAM_TITLES = Object.freeze({
   timeline: '演进时间线',
   waterfall: '实测耗时瀑布',
 })
-
-function stripSqlComments(text) {
-  return String(text ?? '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/--[^\n]*/g, '')
-}
 
 function readCleanCode(repoRoot, rel) {
   const txt = readTextSafe(join(repoRoot, rel), MAX_ANALYZE_FILE_BYTES)
@@ -114,9 +110,8 @@ function buildWorkflowDiagram(analysis, featureMap) {
 }
 
 function isTestFixturePath(rel) {
-  const p = posixPath(String(rel || ''))
-  return /(?:^|\/)(?:__fixtures__|fixtures-[^/]+|[^/]*\.fixtures\.[^/]+)$/i.test(p)
-    || /^scripts\/dev\/fixtures/i.test(p)
+  const p = posixPath(String(rel || '')).replace(/^\.\//, '')
+  return isTestOrFixtureFile(p) || /(?:^|\/)fixtures[^/]*(?:\/|$)/i.test(p)
 }
 
 function buildTreeDiagram(repoRoot, analysis, featureMap) {
@@ -150,142 +145,6 @@ function buildTreeDiagram(repoRoot, analysis, featureMap) {
     empty: analysis.repoFiles.length === 0,
     totalFiles: analysis.repoFiles.length,
     root: serialize(rootNode),
-  }
-}
-
-function extractErdEvidence(repoRoot, repoFiles) {
-  const entities = new Map()
-  const relations = []
-  const seenRel = new Set()
-  const addEntity = (name, source, fields = []) => {
-    const clean = String(name ?? '').trim().replace(/^["'`]|["'`]$/g, '')
-    if (!clean) return null
-    if (!entities.has(clean)) entities.set(clean, { name: clean, source, fields: [] })
-    const ent = entities.get(clean)
-    for (const f of fields) {
-      if (f && !ent.fields.includes(f)) ent.fields.push(f)
-    }
-    return ent
-  }
-  const addRelation = (from, to, label = 'references') => {
-    const f = String(from ?? '').trim().replace(/^["'`]|["'`]$/g, '')
-    const t = String(to ?? '').trim().replace(/^["'`]|["'`]$/g, '')
-    if (!f || !t || f === t) return
-    const key = `${f}->${t}:${label}`
-    if (seenRel.has(key)) return
-    seenRel.add(key)
-    relations.push({ from: f, to: t, label })
-  }
-
-  for (const rel of repoFiles) {
-    const low = rel.toLowerCase()
-    if (low.endsWith('.prisma')) {
-      const raw = readTextSafe(join(repoRoot, rel), MAX_ANALYZE_FILE_BYTES)
-      if (!raw) continue
-      const clean = stripCodeCommentsLines(raw, 'ts').join('\n')
-      for (const m of clean.matchAll(/\bmodel\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)\}/g)) {
-        const modelName = m[1]
-        const fields = []
-        for (const rawLine of m[2].split('\n')) {
-          const line = rawLine.trim()
-          if (!line || line.startsWith('@@')) continue
-          const fm = /^([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_?[\]]*)/.exec(line)
-          if (!fm) continue
-          fields.push(`${fm[1]}:${fm[2]}`)
-          const targetType = fm[2].replace(/[?[\]]+$/g, '')
-          if (/@relation\b/.test(line) && /^[A-Z]/.test(targetType)) {
-            addRelation(modelName, targetType, fm[1])
-          }
-        }
-        addEntity(modelName, rel, fields)
-      }
-      continue
-    }
-
-    if (low.endsWith('.sql')) {
-      const raw = readTextSafe(join(repoRoot, rel), MAX_ANALYZE_FILE_BYTES)
-      if (!raw) continue
-      const clean = stripSqlComments(raw)
-      for (const m of clean.matchAll(/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[A-Za-z0-9_"`]+\.)?([A-Za-z0-9_"`]+)\s*\(([\s\S]*?)\)\s*;/gi)) {
-        const tbl = m[1].replace(/["`]/g, '')
-        const body = m[2]
-        const fields = []
-        for (const seg of body.split(/,\s*\n|,\s*(?=[A-Za-z_"`])/)) {
-          const line = seg.trim()
-          if (!line) continue
-          const fk = /\bFOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+(?:[A-Za-z0-9_"`]+\.)?([A-Za-z0-9_"`]+)/i.exec(line)
-          if (fk) { addRelation(tbl, fk[2].replace(/["`]/g, ''), fk[1].trim()); continue }
-          if (/^(?:PRIMARY\s+KEY|UNIQUE|CONSTRAINT|CHECK|INDEX|KEY)\b/i.test(line)) {
-            const refM = /\bREFERENCES\s+(?:[A-Za-z0-9_"`]+\.)?([A-Za-z0-9_"`]+)/i.exec(line)
-            if (refM) addRelation(tbl, refM[1].replace(/["`]/g, ''), 'fk')
-            continue
-          }
-          const col = /^["`]?([A-Za-z_][A-Za-z0-9_]*)["`]?\s+([A-Za-z0-9_()]+)/.exec(line)
-          if (col) {
-            fields.push(`${col[1]}:${col[2]}`)
-            const inlineRef = /\bREFERENCES\s+(?:[A-Za-z0-9_"`]+\.)?([A-Za-z0-9_"`]+)/i.exec(line)
-            if (inlineRef) addRelation(tbl, inlineRef[1].replace(/["`]/g, ''), col[1])
-          }
-        }
-        addEntity(tbl, rel, fields)
-      }
-      continue
-    }
-
-    if (/\.(?:ts|tsx|js|mjs|py|go|rs)$/i.test(low)) {
-      const cleaned = readCleanCode(repoRoot, rel)
-      if (!cleaned) continue
-      const text = cleaned.codeLines.join('\n')
-      if (/@Entity\s*\(/.test(text)) {
-        for (const m of text.matchAll(/@Entity\s*\([^)]*\)\s*(?:export\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)\n\}/g)) {
-          const cols = [...m[2].matchAll(/@(?:PrimaryGeneratedColumn|PrimaryColumn|Column)\s*\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)/g)].map((c) => c[1])
-          addEntity(m[1], rel, cols)
-          for (const rm of m[2].matchAll(/@(?:ManyToOne|OneToMany|OneToOne|ManyToMany)\s*\(\s*\(\)\s*=>\s*([A-Za-z_][A-Za-z0-9_]*)/g)) {
-            addRelation(m[1], rm[1], 'orm')
-          }
-        }
-      }
-      if (/\b(?:pgTable|mysqlTable|sqliteTable)\s*\(/.test(text)) {
-        for (const m of text.matchAll(/\b(?:pgTable|mysqlTable|sqliteTable)\s*\(\s*['"]([A-Za-z0-9_]+)['"]\s*,\s*\{([\s\S]*?)\}\s*\)/g)) {
-          const cols = [...m[2].matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/gm)].map((c) => c[1])
-          addEntity(m[1], rel, cols)
-          for (const rm of m[2].matchAll(/\.references\s*\(\s*\(\)\s*=>\s*([A-Za-z_][A-Za-z0-9_]*)\./g)) {
-            addRelation(m[1], rm[1], 'fk')
-          }
-        }
-      }
-      if (low.endsWith('.py') && /__tablename__\s*=/.test(text)) {
-        for (const m of text.matchAll(/class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*:([\s\S]*?)(?=\nclass\s|\n[^\s]|$)/g)) {
-          if (!/__tablename__\s*=/.test(m[2])) continue
-          const cols = [...m[2].matchAll(/^\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:db\.)?(?:Column|mapped_column)\s*\(/gm)].map((c) => c[1])
-          addEntity(m[1], rel, cols)
-          for (const rm of m[2].matchAll(/ForeignKey\s*\(\s*['"]([A-Za-z0-9_]+)\./g)) addRelation(m[1], rm[1], 'fk')
-        }
-      }
-      if (low.endsWith('.go') && /gorm:"/.test(text)) {
-        for (const m of text.matchAll(/type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\s*\{([\s\S]*?)\}/g)) {
-          if (!/gorm:"/.test(m[2])) continue
-          const cols = [...m[2].matchAll(/^\s*([A-Z][A-Za-z0-9_]*)\s+[^\n]*gorm:"/gm)].map((c) => c[1])
-          addEntity(m[1], rel, cols)
-        }
-      }
-      if (low.endsWith('.rs') && /\btable!\s*\{/.test(text)) {
-        for (const m of text.matchAll(/\btable!\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{([\s\S]*?)\}\s*\}/g)) {
-          const cols = [...m[2].matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*->/gm)].map((c) => c[1])
-          addEntity(m[1], rel, cols)
-        }
-      }
-    }
-  }
-
-  const list = [...entities.values()].sort((a, b) => a.name.localeCompare(b.name))
-  const totalFields = list.reduce((sum, e) => sum + e.fields.length, 0)
-  const active = list.length >= 1 && (totalFields > 0 || relations.length > 0)
-  return {
-    active,
-    reason: active ? `发现 ${list.length} 个实体、${totalFields} 个字段与 ${relations.length} 条关系` : '未发现有效 Schema/SQL/ORM 实体定义',
-    threshold: '>=1 entity with fields or relations',
-    data: { id: 'erd', tier: 2, entities: list, relations },
   }
 }
 
@@ -586,14 +445,29 @@ function extractDataflowEvidence(repoRoot, repoFiles) {
   for (const rel of repoFiles.filter((r) => /(?:^|\/)Dockerfile(?:\.[A-Za-z0-9_-]+)?$/i.test(r))) {
     const txt = readTextSafe(join(repoRoot, rel), MAX_ANALYZE_FILE_BYTES)
     if (!txt) continue
-    const dockerStages = []
-    for (const m of txt.matchAll(/^\s*FROM\s+\S+\s+AS\s+([A-Za-z0-9_-]+)/gim)) {
-      dockerStages.push(m[1])
-      addStage(`${rel}:${m[1]}`, rel, 'docker-stage')
+    const knownStages = new Set()
+    let stageIndex = 0
+    let currentStage = null
+    const pendingRefs = []
+    for (const rawLine of txt.replace(/\r\n/g, '\n').split('\n')) {
+      const trimmed = rawLine.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const fromM = /^FROM\s+(?:--\S+\s+)*\S+(?:\s+AS\s+([A-Za-z0-9_.-]+))?/i.exec(trimmed)
+      if (fromM) {
+        currentStage = fromM[1] || `stage-${stageIndex}`
+        stageIndex += 1
+        knownStages.add(currentStage)
+        addStage(`${rel}:${currentStage}`, rel, 'docker-stage')
+        continue
+      }
+      if (!currentStage) continue
+      for (const cm of trimmed.matchAll(/--from=([A-Za-z0-9_.-]+)/gi)) {
+        pendingRefs.push({ from: cm[1], to: currentStage })
+      }
     }
-    for (const m of txt.matchAll(/--from=([A-Za-z0-9_-]+)/g)) {
-      if (dockerStages.includes(m[1]) && dockerStages.length >= 2) {
-        addEdge(`${rel}:${m[1]}`, `${rel}:${dockerStages[dockerStages.length - 1]}`, rel)
+    for (const ref of pendingRefs) {
+      if (knownStages.has(ref.from) && ref.from !== ref.to) {
+        addEdge(`${rel}:${ref.from}`, `${rel}:${ref.to}`, rel)
       }
     }
   }
@@ -678,8 +552,19 @@ export function extractMultiDiagramEvidenceSync(repoRoot, {
     tree: buildTreeDiagram(root, resolvedAnalysis, fmData),
   }
   for (const id of DIAGRAM_TIERS.tier1) {
-    diagrams[id] = tier1Diagrams[id]
-    activeTabs.push({ id, tier: 1, title: DIAGRAM_TITLES[id], reason: 'Tier 1 常驻视图' })
+    const diag = tier1Diagrams[id]
+    if (diag && !diag.empty) {
+      diagrams[id] = diag
+      activeTabs.push({ id, tier: 1, title: DIAGRAM_TITLES[id], reason: 'Tier 1 常驻视图' })
+    } else {
+      skippedTabs.push({
+        id,
+        tier: 1,
+        title: DIAGRAM_TITLES[id],
+        reason: `${DIAGRAM_TITLES[id]}当前无可渲染节点或文件（空视图不展示）`,
+        threshold: 'non-empty static or feature-map evidence',
+      })
+    }
   }
 
   const tier2Results = {

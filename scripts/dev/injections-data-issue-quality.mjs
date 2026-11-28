@@ -39,12 +39,12 @@ export const INJECTIONS_ISSUE_QUALITY = [
     to: '  if (false && !quality.ok) {\n    return {\n      ok: false,\n      blocked: true,\n      code: quality.code,',
     alsoPatches: [
       {
-        file: 'kit/skills/dev-flow/scripts/flow-issues.mjs',
+        file: 'kit/skills/dev-flow/scripts/flow-issue-core.mjs',
         from: '  if (!quality.ok) {\n    if (opts.json) {',
         to: '  if (false && !quality.ok) {\n    if (opts.json) {',
       },
       {
-        file: '.agents/skills/dev-flow/scripts/flow-issues.mjs',
+        file: '.agents/skills/dev-flow/scripts/flow-issue-core.mjs',
         from: '  if (!quality.ok) {\n    if (opts.json) {',
         to: '  if (false && !quality.ok) {\n    if (opts.json) {',
       },

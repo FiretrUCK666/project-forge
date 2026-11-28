@@ -319,15 +319,13 @@ export function projectVisualBriefViewModel({ mainRoot, workRoot = mainRoot, sid
     : []
 
   const masterPrdInfo = matchingMasterPrd ? { rel: matchingMasterPrd.rel, status: matchingMasterPrd.status, approved: isPlanDocApproved(matchingMasterPrd) } : null
-  const evBundle = featureMapSource !== 'none'
-    ? collectRepoVisualEvidenceSync({
-        workRoot: effWork,
-        cacheRoot: effMain,
-        featureMap,
-        analysis,
-        evidence,
-      })
-    : { analysis, evidence }
+  const evBundle = collectRepoVisualEvidenceSync({
+    workRoot: effWork,
+    cacheRoot: effMain,
+    featureMap: featureMapSource !== 'none' ? featureMap : null,
+    analysis,
+    evidence,
+  })
   const resolvedAnalysis = evBundle.analysis
   const resolvedEvidence = evBundle.evidence
 

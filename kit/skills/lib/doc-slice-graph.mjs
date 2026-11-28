@@ -24,7 +24,7 @@ import { basename, dirname, relative, resolve } from 'node:path'
 
 import { isManagedPlanDoc, parseDocFilename } from './doc-frontmatter.mjs'
 import { posixPath } from './git.mjs'
-import { parseBodyRelations } from './github-client.mjs'
+import { parseBodyRelations } from './github-parse.mjs'
 import { DONE_PLAN_STATUSES, INERT_PLAN_STATUSES, indexPlanDocs } from './plan-index.mjs'
 
 /** 判定为「不参与当前规划」的文档状态。 */

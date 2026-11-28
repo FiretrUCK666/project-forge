@@ -19,7 +19,7 @@ import {
   canonicalPath, gitRun, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots, samePath, withFileLock, withFileLockSync, writeJsonAtomic,
 } from './git.mjs'
 import { hasDotGitInAncestors, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
-import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
+import { parseIssueNumbers, parsePrNumber } from './github-parse.mjs'
 
 export { readPlanningProvenanceIndex, verifyPlanningProvenance }
 

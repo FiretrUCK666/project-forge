@@ -133,13 +133,14 @@ async function batchSyntaxCheck(files) {
   return runSpawnCheckPool(files)
 }
 
-function checkScripts({ ROOT, rel, readText, walk, fail, note }, syntaxErrors) {
+function checkScripts({ ROOT, rel, readText, countLines, walk, fail, note }, syntaxErrors) {
   const scripts = walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs'))
   if (scripts.length === 0) { fail('scripts/ 下没有任何 .mjs'); return }
 
   for (const file of scripts) {
     const name = rel(file)
     const text = readText(file)
+    if (!name.startsWith('scripts/dev/') && countLines(text) > 800) fail(`${name} 有 ${countLines(text)} 行，超过产品脚本单文件 800 行上限`)
     for (const m of text.matchAll(/^\s*(?:import|export)[\s\S]*?from\s+['"]([^'"]+)['"]/gm)) {
       const spec = m[1]
       if (spec.startsWith('node:') || spec.startsWith('./') || spec.startsWith('../')) continue

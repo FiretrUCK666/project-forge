@@ -5,12 +5,12 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { parseDocFilename } from './doc-frontmatter.mjs'
 import { EXIT } from './exit-codes.mjs'
+import { stripHomedirLeaks } from './git-core.mjs'
 import { posixPath, readJsonSafe, readTextSafe, sha256Text, writeJsonAtomic } from './git.mjs'
 import { resolveGitDirFast } from './git-fast.mjs'
 import { listTaskLedgers } from './ledger.mjs'
@@ -76,14 +76,7 @@ export function formatClickableFileUri(absPath) {
   return pathToFileURL(resolve(String(absPath || ''))).href
 }
 
-export function stripHomedirLeaks(text) {
-  const raw = String(homedir() || '').trim()
-  let out = String(text ?? '')
-  if (raw.length < 4) return out
-  const markers = [...new Set([raw.replace(/\\/g, '/').replace(/\/+$/, ''), raw.replace(/\//g, '\\').replace(/\\+$/, '')])]
-  for (const m of markers) if (m.length >= 4 && out.includes(m)) out = out.split(m).join('~')
-  return out
-}
+export { stripHomedirLeaks }
 
 export function uniqClean(arr, existing = [], maxLen = 1200) {
   const out = [...(Array.isArray(existing) ? existing : [])]

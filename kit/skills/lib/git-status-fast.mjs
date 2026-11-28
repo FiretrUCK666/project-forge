@@ -11,7 +11,7 @@ import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, 
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
-import { canonicalPath, posixPath, readTextSafe } from './git.mjs'
+import { canonicalPath, posixPath, readTextSafe } from './git-core.mjs'
 import { readGitObjectFast, readHeadFast, readSystemGitConfigMapFast, resolveGitDirFast, resolveRefShaFast } from './git-fast.mjs'
 
 const FAST_STATUS_MAX_ENTRIES = 250

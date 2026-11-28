@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import {
   existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -66,6 +67,33 @@ let atomicCounter = 0
 /** 路径统一归一化为正斜杠，避免跨平台集合比对失配。 */
 export function posixPath(p) {
   return String(p ?? '').replace(/\\/g, '/')
+}
+
+function getHomeMarkers() {
+  const raw = String(homedir() || '').trim()
+  if (raw.length < 4) return []
+  const fwd = raw.replace(/\\/g, '/').replace(/\/+$/, '')
+  const bwd = raw.replace(/\//g, '\\').replace(/\\+$/, '')
+  return [...new Set([fwd, bwd].filter((s) => s.length >= 4))]
+}
+
+/** 检测文本是否包含宿主机用户主目录绝对路径泄露。 */
+export function containsHomedirLeak(text) {
+  const body = String(text ?? '')
+  if (!body) return false
+  for (const marker of getHomeMarkers()) {
+    if (body.includes(marker)) return true
+  }
+  return false
+}
+
+/** 剥离文本中的宿主机用户主目录绝对路径前缀，统一替换为 `~`。 */
+export function stripHomedirLeaks(text) {
+  let out = String(text ?? '')
+  for (const marker of getHomeMarkers()) {
+    if (out.includes(marker)) out = out.split(marker).join('~')
+  }
+  return out
 }
 
 /**

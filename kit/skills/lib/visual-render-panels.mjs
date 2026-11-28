@@ -362,27 +362,6 @@ export function renderInspectorShellHtml() {
   return '<aside id="pf-inspector" class="pf-inspector is-collapsed" aria-live="polite" hidden><div id="passport-content"></div></aside>'
 }
 
-export function renderCatalogHtml(tree) {
-  const nodes = tree?.nodes || []
-  const domains = tree?.domains || []
-  if (nodes.length === 0) return '<div class="pf-empty-box">暂无已映射模块。</div>'
-  const byDom = new Map()
-  for (const d of domains) byDom.set(d.id, { dom: d, items: [] })
-  for (const n of nodes) {
-    if (!byDom.has(n.domain)) byDom.set(n.domain, { dom: { id: n.domain, title: n.domainTitle || n.domain }, items: [] })
-    byDom.get(n.domain).items.push(n)
-  }
-  return Array.from(byDom.values()).filter((g) => g.items.length > 0).map((g) => {
-    const itemsHtml = g.items.map((n) => {
-      const diffText = DIFF_LABELS[n.diffState] || ''
-      const badge = diffText ? `<span class="pf-pill pf-pill-${escapeXml(n.diffState)}">${escapeXml(diffText)}</span>` : ''
-      const sub = n.shortSummary || toRelPath(n.primaryAnchor || n.entrypoints?.[0] || n.modules?.[0] || '') || n.id
-      return `<button type="button" class="pf-catalog-item" data-target-id="${escapeXml(n.id)}"><div class="pf-catalog-head"><span>${escapeHtml(n.title)}</span>${badge}</div><span class="pf-catalog-paths">${escapeHtml(sub)}</span></button>`
-    }).join('')
-    return `<section class="pf-catalog-group" data-domain-group="${escapeXml(g.dom.id)}"><div class="pf-catalog-dom"><span>${escapeHtml(g.dom.title)}</span><span>${g.items.length}</span></div>${itemsHtml}</section>`
-  }).join('\n')
-}
-
 export function renderCommandPaletteHtml() {
   return [
     '<div id="pf-cmdk" class="pf-dialog" role="dialog" aria-modal="true" aria-label="搜索模块与快捷操作" hidden>',

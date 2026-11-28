@@ -18,7 +18,7 @@ metadata:
 
 ## 改前与改后三件事
 
-1. **改前核对禁改边界（`--mode pre-edit`）**：确认待修改路径未落入 `AGENTS.md` `do-not-edit` 列表，标出 `high-risk` 路径与已处于 `730-800` 行紧文件区的目标文件。
+1. **改前核对禁改边界与并发雷达（`--mode pre-edit`）**：确认待修改路径未落入 `AGENTS.md` `do-not-edit` 列表，输出 `contextBrief`、兄弟会话 `concurrencyRadar`、活跃主题 `decisions[]`/`deadEnds[]`、`high-risk` 路径与紧文件预警；先做前提质疑与 Deletion Test（能删减或合并单源绝不叠平行抽象）。
 2. **改前查相邻复用**：扫描同目录及共享层导出符号，优先合入既有主干与共享原语，不复制粘贴双轨逻辑。
 3. **改后立即执行门禁（`--mode verify` / `standalone`）**：对本次改动文件执行词法去噪扫描，零阻塞项后进入 `flow.mjs verify` 与提审。
 
@@ -29,7 +29,7 @@ metadata:
 | 检查项 | 作用域 | 阻断判据 |
 | --- | --- | --- |
 | 禁改区保护 | 全部改动文件 | 命中 `AGENTS.md` `do-not-edit` 路径即硬阻断 |
-| 过程工件与机械拆分命名 | 代码/测试/脚本文件名 | 拦截 `issue<数字>`/`pr<数字>`/`stage<字母>`/`wave<数字>` 及新增 `-partN`/`-misc`/`-extra`/`-overflow`/`-rest` 垃圾桶拆分名（`edit.mechanical-split-name`） |
+| 过程工件与机械拆分命名 | 代码/测试/脚本文件名 | 拦截 `issue<数字>`/`pr<数字>`/`stage<字母>`/`wave<数字>` 过程工件名；新增 `-partN`/`-misc`/`-extra` 机械拆分名发非阻断 `warning`（`edit.mechanical-split-name`，不误伤业务缩写） |
 | 压制与借口标记 | 非夹具源码注释/属性 | 拦截无正当锚点（`pf-allow:` / `justification:`）或无关联追踪单号（`edit.hack-without-issue`）的 `HACK`、`WORKAROUND`、`TEMP`、`@ts-ignore`、`@ts-nocheck`、`eslint-disable`、`# type: ignore`、`# noqa`、`#[allow(` |
 | 履历墓碑与死代码块 | 非夹具源码注释 | 拦截历史变更履历注释与连续 `>=4` 行（含 `>=3` 行代码特征）注释死代码块 |
 | `arch-rules` 与循环导入 | 纯代码视图 | 解析导入对照 `arch-rules` 阻断反向依赖，并阻断变更 JS/TS 文件新引入的 2 节点双向循环导入（`edit.circular-import`） |

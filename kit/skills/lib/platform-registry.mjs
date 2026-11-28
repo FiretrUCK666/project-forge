@@ -62,6 +62,7 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
   id: 'generic-git',
   label: 'Generic Git Remote',
   mrRefPattern: null,
+  prRefPrefix: '#',
   defaultApiBase: null,
   capabilities: NONE_CAPABILITIES,
 })
@@ -141,6 +142,7 @@ export const GITHUB_PROVIDER = Object.freeze({
   id: 'github',
   label: 'GitHub',
   mrRefPattern: 'refs/pull/{n}/head',
+  prRefPrefix: '#',
   defaultApiBase: 'https://api.github.com',
   tokenEnvVars: Object.freeze(['GH_TOKEN', 'GITHUB_TOKEN', 'PF_PLATFORM_TOKEN']),
   capabilities: Object.freeze({
@@ -169,6 +171,7 @@ export const GITLAB_PROVIDER = Object.freeze({
   id: 'gitlab',
   label: 'GitLab',
   mrRefPattern: 'refs/merge-requests/{n}/head',
+  prRefPrefix: '!',
   defaultApiBase: 'https://gitlab.com/api/v4',
   tokenEnvVars: Object.freeze(['GITLAB_TOKEN', 'GL_TOKEN', 'PF_PLATFORM_TOKEN']),
   capabilities: Object.freeze({
@@ -197,6 +200,7 @@ export const GITCODE_PROVIDER = Object.freeze({
   id: 'gitcode',
   label: 'GitCode',
   mrRefPattern: 'refs/merge-requests/{n}/head',
+  prRefPrefix: '#',
   defaultApiBase: 'https://gitcode.com/api/v4',
   tokenEnvVars: Object.freeze(['GITCODE_TOKEN', 'GITLAB_TOKEN', 'PF_PLATFORM_TOKEN']),
   capabilities: Object.freeze({
@@ -225,6 +229,7 @@ export const GITEE_PROVIDER = Object.freeze({
   id: 'gitee',
   label: 'Gitee',
   mrRefPattern: 'refs/pull/{n}/head',
+  prRefPrefix: '#',
   defaultApiBase: 'https://gitee.com/api/v5',
   tokenEnvVars: Object.freeze(['GITEE_TOKEN', 'PF_PLATFORM_TOKEN']),
   capabilities: Object.freeze({
@@ -253,6 +258,7 @@ export const GITEA_PROVIDER = Object.freeze({
   id: 'gitea',
   label: 'Gitea',
   mrRefPattern: 'refs/pull/{n}/head',
+  prRefPrefix: '#',
   defaultApiBase: 'https://codeberg.org/api/v1',
   tokenEnvVars: Object.freeze(['GITEA_TOKEN', 'FORGEJO_TOKEN', 'CODEBERG_TOKEN', 'PF_PLATFORM_TOKEN']),
   capabilities: Object.freeze({
@@ -284,6 +290,7 @@ export function registerHostingProvider(provider) {
     ...provider,
     id,
     mrRefPattern: provider.mrRefPattern ?? null,
+    prRefPrefix: provider.prRefPrefix ?? '#',
     defaultApiBase: provider.defaultApiBase ?? null,
     capabilities: Object.freeze({
       ...NONE_CAPABILITIES,
@@ -449,6 +456,7 @@ export function resolveRemoteDescriptor(remoteInput, optsOrMap) {
       ...(ext?.port ? { port: ext.port } : {}),
       providerId: matchedProvider.id,
       mrRefPattern: matchedProvider.mrRefPattern ?? null,
+      prRefPrefix: matchedProvider.prRefPrefix ?? '#',
       repoSlug: slug,
       capabilities: matchedProvider.capabilities,
       isUpstream,
@@ -585,6 +593,7 @@ export function resolveRemoteTarget(remoteUrls = {}, {
     isLocal,
     pushRemote,
     mrRefPattern: provider?.mrRefPattern ?? null,
+    prRefPrefix: provider?.prRefPrefix ?? '#',
     capabilities,
     originUrl,
     upstreamUrl,

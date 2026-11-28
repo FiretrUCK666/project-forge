@@ -410,6 +410,7 @@ export class GenericRemoteBackend {
     this.pushRemote = pushRemote
     this.mainRoot = mainRoot
     this.gitDir = gitDir
+    this.prRefPrefix = '#'
     this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: false, checks: false, releases: false, mention: false })
     this._local = buildLocalBackendMixins(this.kind, mainRoot, gitDir)
   }
@@ -592,6 +593,7 @@ export class LocalOnlyBackend {
     this.mainRoot = mainRoot
     this.gitDir = gitDir
     this.baseBranch = baseBranch
+    this.prRefPrefix = '#'
     this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: true, checks: false, releases: false, mention: false })
     this._local = buildLocalBackendMixins(this.kind, mainRoot, gitDir)
   }

@@ -65,6 +65,8 @@ export function buildClaimComments({
   reason = '',
   issues = [],
   prNumber = null,
+  prUrl = null,
+  prRefPrefix = '#',
   supportsMention = false,
   capabilities = null,
 } = {}) {
@@ -111,6 +113,11 @@ export function buildClaimComments({
     release: '任务已恢复待认领状态，其他协作者可直接认领接手。',
   }
 
+  const cleanPrefix = String(prRefPrefix ?? '#').trim() || '#'
+  const validPrNum = Number.isInteger(Number(prNumber)) && Number(prNumber) > 0 ? Number(prNumber) : null
+  const cleanPrUrl = String(prUrl ?? '').trim()
+  const prClaimRef = cleanPrUrl || (validPrNum ? `${cleanPrefix}${validPrNum}` : '')
+
   const issueLines = [
     headingMap[normAction],
     '',
@@ -118,7 +125,7 @@ export function buildClaimComments({
     ...(cleanTask ? [`- **任务**：\`${cleanTask}\``] : []),
     ...(cleanBranch ? [`- **分支**：\`${cleanBranch}\``] : []),
     ...(normAction === 'takeover' && prevText ? [`- **原认领人**：${prevText}`] : []),
-    ...(prNumber ? [`- **关联 PR**：#${prNumber}`] : []),
+    ...(prClaimRef ? [`- **关联 PR**：${prClaimRef}`] : []),
     ...(cleanReason ? [`- **原因**：${cleanReason}`] : []),
     `- **下一步**：${nextStepMap[normAction]}`,
   ]
@@ -127,7 +134,7 @@ export function buildClaimComments({
     headingMap[normAction],
     '',
     ...(actorText ? [`- **认领人**：${actorText}`] : []),
-    ...(prNumber ? [`- **关联 PR**：#${prNumber}`] : []),
+    ...(prClaimRef ? [`- **关联 PR**：${prClaimRef}`] : []),
     ...(cleanTask ? [`- **任务**：\`${cleanTask}\``] : []),
     ...(cleanBranch ? [`- **分支**：\`${cleanBranch}\``] : []),
     ...(normAction === 'takeover' && prevText ? [`- **原认领人**：${prevText}`] : []),
@@ -142,23 +149,25 @@ export function buildClaimComments({
   }
 }
 
-/** 渲染 `flow.mjs submit`（首次提审 / 同轮 HEAD 更新 / 返工更新）结构化多行评论。 */
+/** 渲染 `flow.mjs submit`（首次提审 / 同轮 HEAD 更新 / 返工更新）结构化多行评论（零平台名硬编码、零 `PR #null`、单次裸 `prUrl` 原生富展开）。 */
 export function buildSubmitComments({
   isRework = false, isHeadUpdate = false, round = 1, shortHead = 'HEAD', actorDisplay = '', branch,
-  verifiedCmd, prNumber = null, prUrl = null, linkedIssues = [], recentRebuts = '',
+  verifiedCmd, prNumber = null, prUrl = null, prRefPrefix = '#', linkedIssues = [], recentRebuts = '',
 } = {}) {
   const cleanActor = String(actorDisplay ?? '').trim()
   const issuesText = linkedIssues.map((n) => `#${n}`).join(', ')
   const cleanPrUrl = String(prUrl ?? '').trim()
-  const prRef = prNumber
-    ? (cleanPrUrl ? `[#${prNumber}](${cleanPrUrl})` : `#${prNumber}`)
-    : (cleanPrUrl ? `[PR](${cleanPrUrl})` : '')
-  if (isRework && prNumber) {
+  const prefix = String(prRefPrefix ?? '#').trim() || '#'
+  const validPrNum = Number.isInteger(Number(prNumber)) && Number(prNumber) > 0 ? Number(prNumber) : null
+  const prToken = validPrNum ? `${prefix}${validPrNum}` : ''
+  const prBodyRef = cleanPrUrl || prToken
+  const branchText = branch ? `\`${branch}\`` : '`HEAD`'
+  if (isRework && validPrNum) {
     const prCommentBody = [
       `### 返工已提交（Round ${round} @ \`${shortHead}\`）`,
       '',
       ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-      `- **分支**：\`${branch}\`（HEAD \`${shortHead}\` · PR #${prNumber}）`,
+      `- **分支**：${branchText}（HEAD \`${shortHead}\` · ${prBodyRef}）`,
       `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
       ...(recentRebuts ? [`- **反驳与说明**：${recentRebuts}`] : []),
       ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
@@ -168,7 +177,7 @@ export function buildSubmitComments({
       `### 返工已提交（Round ${round} @ \`${shortHead}\`）`,
       '',
       ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-      `- **分支 / PR**：\`${branch}\` · ${cleanPrUrl ? prRef : `PR #${prNumber}`}`,
+      `- **分支 / PR**：${branchText} · ${prBodyRef}`,
       `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
       ...(recentRebuts ? [`- **反驳与说明**：${recentRebuts}`] : []),
       `- **下一步**：等待 Round ${round} 独立审查复核。`,
@@ -181,7 +190,7 @@ export function buildSubmitComments({
       heading,
       '',
       ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-      `- **分支**：\`${branch}\`（HEAD \`${shortHead}\`${prNumber ? ` · PR #${prNumber}` : ''}）`,
+      `- **分支**：${branchText}（HEAD \`${shortHead}\`${prBodyRef ? ` · ${prBodyRef}` : ''}）`,
       `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
       ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
       `- **下一步**：请独立审查上下文按最新 HEAD \`${shortHead}\` 复核 Round ${round}。`,
@@ -190,7 +199,7 @@ export function buildSubmitComments({
       heading,
       '',
       ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-      `- **分支 / PR**：\`${branch}\`${prRef ? ` · ${prRef}` : ''}`,
+      `- **分支 / PR**：${branchText}${prBodyRef ? ` · ${prBodyRef}` : ''}`,
       `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
       ...(iss ? [`- **关联**：Fixes #${iss}`] : []),
       `- **下一步**：等待 Round ${round} 独立审查复核（同轮 HEAD 已更新）。`,
@@ -201,16 +210,19 @@ export function buildSubmitComments({
     `### 提交待审（Round 1 @ \`${shortHead}\`）`,
     '',
     ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-    `- **分支**：\`${branch}\`（HEAD \`${shortHead}\` · PR #${prNumber}）`,
+    `- **分支**：${branchText}（HEAD \`${shortHead}\`${prBodyRef ? ` · ${prBodyRef}` : ''}）`,
     `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
     ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
     '- **下一步**：请独立审查上下文执行双门核验与故障注入复核。',
   ].join('\n')
+  const firstIssueHeading = cleanPrUrl
+    ? `### 提交待审（@ \`${shortHead}\`）`
+    : (validPrNum ? `### 提交待审 · 已提 ${prToken}（@ \`${shortHead}\`）` : `### 提交待审 · 分支 ${branchText}（@ \`${shortHead}\`）`)
   const issueCommentBodyFor = (iss) => [
-    `### 提交待审 · 已提 PR #${prNumber}（@ \`${shortHead}\`）`,
+    firstIssueHeading,
     '',
     ...(cleanActor ? [`- **实施人**：${cleanActor}`] : []),
-    `- **分支 / PR**：\`${branch}\`${prRef ? ` · ${prRef}` : ''}`,
+    `- **分支 / PR**：${branchText}${prBodyRef ? ` · ${prBodyRef}` : ''}`,
     `- **验证命令**：\`${verifiedCmd}\`（退出码 0）`,
     `- **关联**：Fixes #${iss}`,
     '- **下一步**：等待 Round 1 独立审查复核。',
@@ -218,9 +230,9 @@ export function buildSubmitComments({
   return { prCommentBody, issueCommentBodyFor }
 }
 
-/** 渲染 `flow.mjs merge` 成功后的 PR 与关联 Issue 结构化收尾评论。 */
+/** 渲染 `flow.mjs merge` 成功后的 PR 与关联 Issue 结构化收尾评论（零 `PR #null`，支持方言前缀与单次裸 `prUrl`）。 */
 export function buildMergeComments({
-  prNumber, branch, baseBranch, headSha = '', mergeCommit = '',
+  prNumber = null, prUrl = null, prRefPrefix = '#', branch, baseBranch, headSha = '', mergeCommit = '',
   reviewerId = null, reviewerDisplay = null,
   implementerDisplay = '', linkedIssues = [], humanApprovedReason = null,
   bypassed = [],
@@ -231,6 +243,11 @@ export function buildMergeComments({
   const cleanImpl = String(implementerDisplay ?? '').trim()
   const cleanReviewer = String(reviewerDisplay ?? (reviewerId ? formatAttribution({ agent: reviewerId }) : '')).trim()
   const skipped = (Array.isArray(bypassed) ? bypassed : []).filter(Boolean)
+  const prefix = String(prRefPrefix ?? '#').trim() || '#'
+  const validPrNum = Number.isInteger(Number(prNumber)) && Number(prNumber) > 0 ? Number(prNumber) : null
+  const cleanPrUrl = String(prUrl ?? '').trim()
+  const branchText = branch ? `\`${branch}\`` : '`HEAD`'
+  const prTitlePart = cleanPrUrl ? branchText : (validPrNum ? `${prefix}${validPrNum}` : `分支 ${branchText}`)
   // 结论行要么写清是谁独立复核放的，要么写清人类凭什么放行、逐条列出被绕过的项。
   // 「门禁检查通过」这种不带主语的结论什么也没说：既没说谁判的，也没说绕过了什么。
   const conclusion = (suffix) => {
@@ -241,20 +258,25 @@ export function buildMergeComments({
     return parts.join('\n')
   }
   const prCommentBody = [
-    `### 已合并（PR #${prNumber} -> \`${baseBranch}\`）`,
+    `### 已合并（${prTitlePart} -> \`${baseBranch}\`）`,
     '',
     conclusion(''),
+    ...(cleanPrUrl ? [`- **变更链接**：${cleanPrUrl}`] : []),
     ...(shortMerge ? [`- **合并提交**：\`${shortMerge}\``] : []),
     cleanImpl
-      ? `- **来源分支 / 实施人**：\`${branch}\`${shortHead ? ` @ \`${shortHead}\`` : ''} · ${cleanImpl}`
-      : `- **来源分支**：\`${branch}\`${shortHead ? ` @ \`${shortHead}\`` : ''}`,
+      ? `- **来源分支 / 实施人**：${branchText}${shortHead ? ` @ \`${shortHead}\`` : ''} · ${cleanImpl}`
+      : `- **来源分支**：${branchText}${shortHead ? ` @ \`${shortHead}\`` : ''}`,
     ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
     '- **下一步**：核对待清理 Worktree 与分支清单，经维护者确认后执行清理收尾。',
   ].join('\n')
+  const issueHeading = cleanPrUrl
+    ? `### 已合并（${branchText} -> \`${baseBranch}\`）`
+    : (validPrNum ? `### 已合并 · ${prefix}${validPrNum}（${branchText} -> \`${baseBranch}\`）` : `### 已合并 · 分支 ${branchText}（-> \`${baseBranch}\`）`)
   const issueCommentBody = [
-    `### 已合并 · PR #${prNumber}（\`${branch}\` -> \`${baseBranch}\`）`,
+    issueHeading,
     '',
     conclusion('并合并'),
+    ...(cleanPrUrl ? [`- **变更链接**：${cleanPrUrl}`] : []),
     ...(shortMerge ? [`- **合并提交**：\`${shortMerge}\``] : []),
     ...(cleanImpl ? [`- **实施人**：${cleanImpl}`] : []),
     '- **下一步**：主干已更新，按收尾清单清理工作区。',

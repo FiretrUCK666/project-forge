@@ -233,8 +233,8 @@ export async function acquireGitClaimLease(mainRoot, taskId, payload = {}, { rem
   const nextActor = String(payload.actor || payload.agent || payload.account || '').trim().toLowerCase()
   const prevActor = String(existing?.actor || existing?.agent || existing?.account || '').trim().toLowerCase()
   if (existing && !takeover && (!prevActor || !nextActor || prevActor !== nextActor)) return { ok: false, blocked: true, code: 'BLOCKED_ISSUE_ALREADY_CLAIMED', lease: existing }
-  const treeRes = await gitRun(mainRoot, ['rev-parse', '--verify', '-q', 'HEAD^{tree}']).catch(() => ({ ok: false, stdout: '' }))
-  const treeOid = treeRes?.ok ? treeRes.stdout.trim() : '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+  const treeRes = await gitRun(mainRoot, ['mktree'], { input: '' }).catch(() => ({ ok: false, stdout: '' }))
+  const treeOid = (treeRes?.ok && treeRes.stdout.trim()) ? treeRes.stdout.trim() : '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
   const commit = await gitRun(mainRoot, ['-c', 'user.name=pf', '-c', 'user.email=pf@local', 'commit-tree', treeOid, '-m', JSON.stringify(payload)])
   if (!commit.ok) return { ok: true, skipped: true }
   const newOid = commit.stdout.trim()

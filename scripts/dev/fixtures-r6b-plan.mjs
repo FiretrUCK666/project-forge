@@ -14,7 +14,7 @@ import { syncDocsLifecycle } from '../../kit/skills/lib/docs.mjs'
 import { buildHandoff } from '../../kit/skills/lib/handoff-package.mjs'
 import { evaluatePlanNextState } from '../../kit/skills/lib/plan-next.mjs'
 import { buildSessionOrientation } from '../../kit/skills/lib/session-orient.mjs'
-import { PRE_INIT_MAX_BYTES, appendPreInitNote, readPreInitState } from '../../kit/skills/lib/session-state.mjs'
+import { PRE_INIT_MAX_BYTES, appendPreInitNote, consumePreInitNotes, readPreInitState } from '../../kit/skills/lib/session-state.mjs'
 import { generateRepoMap } from '../../kit/skills/dev-explore/scripts/repo-map.mjs'
 import { approveSpec } from '../../kit/skills/dev-plan/scripts/doc-plan-ops.mjs'
 import { listDocs } from '../../kit/skills/dev-plan/scripts/doc-audit-repo.mjs'
@@ -435,6 +435,7 @@ export function registerR6bPlanCases(cases) {
       if (!bounded || Buffer.byteLength(JSON.stringify(bounded), 'utf8') > PRE_INIT_MAX_BYTES) {
         return `preInit 未控制在 ${PRE_INIT_MAX_BYTES} 字节内`
       }
+      consumePreInitNotes(dir, { topic: 'default' })
 
       // 2. doc-plan note 追加 + triage 继承 planMode + Case 4 prdRequired 输出 --kind all + initDoc 自动吸收清空
       const noteRun = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [

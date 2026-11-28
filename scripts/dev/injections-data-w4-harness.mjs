@@ -20,11 +20,11 @@ export const INJECTIONS_W4_HARNESS = [
   },
   {
     id: 'I399',
-    what: 'C1 harness-context: enforceSlotBoundary 跳过 Case >= 2 脏主仓 BLOCKED_DIRTY_MAIN 硬拦截',
+    what: 'C1 harness-context: enforceSlotBoundary 跳过 Case >= 2 原地/合主干脏主仓 BLOCKED_DIRTY_MAIN 硬拦截',
     file: 'kit/skills/lib/harness-context.mjs',
     alsoDropIn: ['.agents/skills/lib/harness-context.mjs'],
-    from: "  if (caseNum >= 2 && hasCommits && isDirtyMain) {",
-    to: "  if (false && caseNum >= 2 && hasCommits && isDirtyMain) {",
+    from: "  if (caseNum >= 2 && hasCommits && isDirtyMain && !isolatedWorktreeFromCleanHead) {",
+    to: "  if (false && caseNum >= 2 && hasCommits && isDirtyMain && !isolatedWorktreeFromCleanHead) {",
     expect: '[C1] harness-context:',
   },
   {

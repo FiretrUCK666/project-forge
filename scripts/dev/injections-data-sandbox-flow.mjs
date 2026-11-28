@@ -41,10 +41,10 @@ export const INJECTIONS_SANDBOX_FLOW = [
   },
   {
     id: 'I985',
-    what: 'C7 flow-sandbox: promote 对 high-risk/one-way 变更误放行 Case 3 原地晋升',
+    what: 'C7 flow-sandbox: promote 对 one-way/跨多域契约变更误放行 Case 3 原地晋升',
     file: 'kit/skills/dev-flow/scripts/flow-sandbox.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-sandbox.mjs'],
-    from: "  const needsSpec = policy.riskTier === 'high' || (coreDomains.length >= 3 && touchesContract)",
+    from: "  const needsSpec = ((policy.oneWayBoundaryHits?.length ?? 0) > 0 || (coreDomains.length >= 3 && touchesContract) || Number(opts.case) === 4) && !approvedSpecRel",
     to: '  const needsSpec = false',
     expect: '[Sandbox-C7]',
   },

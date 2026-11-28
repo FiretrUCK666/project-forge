@@ -8,9 +8,11 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from '../../lib/concurrency-radar.mjs'
+import { parseDocFrontmatter } from '../../lib/docs.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import {
-  ensureWorktreesIgnored, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath,
+  ensureWorktreesIgnored, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { isNonImplRoleActor, isValidActorName } from '../../lib/harness-context.mjs'
@@ -18,6 +20,7 @@ import {
   createDefaultLedger, createExploredEvidence, readTaskLedger, recordMountedDepsInLedger,
   resolveTaskContext, updateTaskLedger,
 } from '../../lib/ledger.mjs'
+import { indexPlanDocs } from '../../lib/plan-index.mjs'
 import {
   detectDeclaredRepo, parseIssueNumbers, parseRemoteUrls,
 } from '../../lib/platform.mjs'
@@ -153,6 +156,7 @@ export async function handleSandboxStart({
   const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, {
     caseType: Math.max(2, Number(opts.case ?? 3)),
     commits: state.commits,
+    creatingIsolatedWorktree: true,
   })
   if (!slotChk.ok) return emitBlockedStart(opts, slotChk)
   if (Number(state.commits ?? 0) <= 0) {
@@ -263,12 +267,16 @@ export async function handleSandboxStart({
     { skill: 'dev-flow', text: `1. 在 ${sandboxRel} 高频试错并运行内环快检：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --inner` },
     { skill: 'dev-flow', text: `2. 收敛提交后按真实 diff 晋升：node ".agents/skills/dev-flow/scripts/flow.mjs" promote --task ${taskId}` },
   ]
+  const sbRadar = projectConcurrencyRadar(roots.mainRoot, { currentTaskId: taskId, currentWorkRoot: sandboxAbs, currentWriteScope: writeScope, baseBranch, baseSha })
+  const sbWarnings = [...(slotChk.dirtyMainWarning ? [slotChk.dirtyMainWarning] : []), ...(sbRadar.warnings ?? [])]
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(withNextSteps({ ...ledger, depsMount: depMount }, nextSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps({ ...ledger, depsMount: depMount, concurrencyRadar: sbRadar, ...(sbWarnings.length > 0 ? { warnings: sbWarnings } : {}) }, nextSteps, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {
     process.stdout.write(`隔离沙箱任务 ${taskId} 已就绪：\n`)
     process.stdout.write(`- 沙箱工作位: ${sandboxRel}（分支: ${branch}，依赖模式: ${depMount.mode}）\n`)
     process.stdout.write(`- 实施者: ${probeReg.actor}（writeScope=${probeReg.writeScope.join(',') || '**'}） | 工单绑定: ${issueBinding.mode}${issueBinding.exemptKind ? `(${issueBinding.exemptKind})` : ''}\n`)
+    for (const w of sbWarnings) process.stdout.write(`- [提醒] ${w.message}\n`)
+    for (const rl of formatConcurrencyRadarLines(sbRadar)) process.stdout.write(`${rl}\n`)
     printNextStep(nextSteps, { repoRoot: roots.mainRoot })
   }
   return { exitCode: EXIT.OK }
@@ -464,9 +472,33 @@ export async function handlePromote(opts, roots) {
     hasDevReview,
     repoRoot: workRoot,
   })
+  const findApprovedSpecForPromote = () => {
+    const checkSpecRel = (rawRel) => {
+      if (!rawRel) return null
+      const norm = posixPath(String(rawRel)).replace(/^\.\//, '')
+      for (const base of [workRoot, roots.mainRoot]) {
+        const abs = resolve(base, norm)
+        if (!existsSync(abs)) continue
+        const fm = parseDocFrontmatter(readTextSafe(abs) ?? '')
+        const st = String(fm.data?.status ?? '').toLowerCase()
+        if (st === 'approved' || fm.data?.approved === true) return norm
+      }
+      return null
+    }
+    const explicitHit = checkSpecRel(opts.spec ?? ledger.specFile)
+    if (explicitHit) return explicitHit
+    for (const base of [workRoot, roots.mainRoot]) {
+      const specs = indexPlanDocs(base, { includeArchive: false, includeWorktrees: false, managedOnly: true })
+        .filter((d) => d.kind === 'spec' && (String(d.status).toLowerCase() === 'approved' || d.data?.approved === true))
+      const hit = specs.find((d) => d.taskId === taskId || d.slug === ledger.slug || d.slug === taskId)
+      if (hit) return hit.rel
+    }
+    return null
+  }
+  const approvedSpecRel = findApprovedSpecForPromote()
   const coreDomains = collectCoreSourceDomains(changedFiles)
   const touchesContract = diffTouchesExportContract(diffText, parity)
-  const needsSpec = policy.riskTier === 'high' || (coreDomains.length >= 3 && touchesContract)
+  const needsSpec = ((policy.oneWayBoundaryHits?.length ?? 0) > 0 || (coreDomains.length >= 3 && touchesContract) || Number(opts.case) === 4) && !approvedSpecRel
 
   if (needsSpec) {
     ledger.status = 'sandbox-needs-spec'
@@ -498,12 +530,15 @@ export async function handlePromote(opts, roots) {
     return { exitCode: EXIT.OK }
   }
 
-  // Step C: Case 2 / Case 3 原地晋升外环实施态
+  // Step C: Case 2 / Case 3 / 已批准 SPEC 的 Case 4 原地晋升外环实施态
   const todoRel = opts.todo ?? ledger.todoFile ?? null
+  const specRel = approvedSpecRel ?? ledger.specFile ?? null
   const hasAddedCoreModule = diffEntries.some(
     (e) => /^[AR]/i.test(String(e.status ?? '')) && CODE_EXT_RE.test(e.file ?? '') && !TEST_FILE_RE.test(e.file ?? '') && !/^docs\//.test(e.file ?? ''),
   )
-  const resolvedCase = (todoRel || hasAddedCoreModule || coreDomains.length >= 2 || changedFiles.length >= 4) ? 3 : 2
+  const resolvedCase = approvedSpecRel
+    ? 4
+    : ((todoRel || hasAddedCoreModule || (policy.highRiskHits?.length ?? 0) > 0 || coreDomains.length >= 2 || changedFiles.length >= 4) ? 3 : 2)
   const primaryImplementer = pickPrimaryImplementer(ledger, opts)
 
   const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
@@ -556,7 +591,7 @@ export async function handlePromote(opts, roots) {
     isPlanning: false,
     externalPr: null,
     linkedIssues: preservedIssues,
-    docs: { spec: ledger.specFile, todo: todoRel, prd: ledger.prdFile },
+    docs: { spec: specRel, todo: todoRel, prd: ledger.prdFile },
     ledger,
     opts: effectiveBindOpts,
     implementerId: primaryImplementer,
@@ -578,6 +613,7 @@ export async function handlePromote(opts, roots) {
   ledger.lastVerifyExitCode = null
   ledger.linkedIssues = [...new Set(bindRes.linkedIssues)]
   ledger.issueBinding = bindRes.issueBinding
+  if (specRel) ledger.specFile = specRel
   if (todoRel) ledger.todoFile = todoRel
   if (!ledger.claimedAt) {
     ledger.claimedAt = now

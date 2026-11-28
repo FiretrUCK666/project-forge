@@ -10,8 +10,27 @@ import { dirname, posix, resolve } from 'node:path'
 
 import { matchGlob } from './git-core.mjs'
 import { isInsideDir, posixPath } from './git.mjs'
-import { buildLexedViews } from './static-gates-lexer.mjs'
+import { CHANGELOG_VOICE_TOMBSTONE_RE } from './no-changelog-voice.mjs'
+import { buildLexedViews, detectCommentedDeadCodeBlocks } from './static-gates-lexer.mjs'
 import { extractSymbols } from './symbol-index.mjs'
+
+export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs|e2e|src\/test|src\/it)\/|(?:\.(?:test|spec)\.[^/]+$)|_test\.[^/]+$|(?:^|\/)test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$|\.Tests\//i
+export const FIXTURE_FILE_RE = /(?:^|\/)(?:fixtures?|__fixtures__|testdata|__mocks__)\/|(?:\.(?:fixtures?|mocks?|testdata)\.[^/]+$)|(?:^|\/)fixtures(?:-[^/]+)?\.[^/]+$|(?:^|\/)injections-data(?:-[^/]+)?\.[^/]+$/i
+
+export function isTestOrFixtureFile(rel) {
+  const p = posixPath(rel)
+  return TEST_FILE_RE.test(p) || FIXTURE_FILE_RE.test(p)
+}
+
+export const TOMBSTONE_COMMENT_RE = CHANGELOG_VOICE_TOMBSTONE_RE
+export const TOMBSTONE_DATE_RE = /\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\s*(?:fixed|changed|updated|migrated|removed|replaced|修复|改为|改成|迁移|删除|替换)/i
+export const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
+export const EXCUSE_TEMP_RE = /\bTEMP\b/
+export const EXCUSE_HACK_RE = /\b(?:hack|workaround)\b|\bTEMP\b/i
+export const ISSUE_REF_RE = /(?:issue\s*#\d+|#\d+\b|https?:\/\/[^\s)]+\/issues\/\d+)/i
+export const RUST_ALLOW_RE = /^\s*#\[\s*allow\(/
+export const JUSTIFICATION_ANCHOR_RE = /\b(?:pf-allow|justification|justified-by|issue\s*#\d+)\s*[:：]/i
+export const NEAR_LIMIT_LINES = 730
 
 const BACKTICK_SPAN_RE = /`([^`\n]{2,140})`/g
 const PATH_LINE_ANCHOR_RE = /(?::\d+(?:-\d+)?|#L\d+(?:-L\d+)?)$/
@@ -374,20 +393,20 @@ export function buildSplitReuseGuidance({ fileRel = '', fullText = '', ext = '',
   return { file: rel, suggestedPathPattern, extractableSymbols, fixHint: `${parts.join('；')}。` }
 }
 
-const MECHANICAL_SPLIT_NAME_RE = /(?:^|\/)[^/]+(?:-part\d+|-(?:misc|extra|overflow|rest|part[a-z]))\.[^/]+$/i
+const MECHANICAL_SPLIT_NAME_RE = /(?:^|\/)[^/]+(?:-part\d+|-(?:misc|extra|part[a-z]))\.[^/]+$/i
 
-/** 拦截新增垃圾桶/机械分段文件名（如 `-part2.mjs`、`-misc.ts`、`-overflow.js`）。 */
+/** 提示新增垃圾桶/机械分段文件名（如 `-part2.mjs`、`-misc.ts`，非阻断 warning，排除 REST/overflow 领域词）。 */
 export function checkMechanicalSplitName(fileRel) {
   const rel = posixPath(fileRel).replace(/^\.\//, '')
   if (!rel || !MECHANICAL_SPLIT_NAME_RE.test(rel)) return null
   return {
     ruleId: 'edit.mechanical-split-name',
     defectClass: 'file-bloat',
-    severity: 'high',
+    severity: 'medium',
     file: rel,
     line: 1,
-    message: `检测到机械分段/垃圾桶文件名（禁止为规避行数上限而按序号或 misc 拆分）：${rel}`,
-    fixHint: '按真实职责边界命名拆分模块（如 `<domain>-parser.mjs`），禁止 `-partN`/`-misc`/`-extra`/`-overflow`/`-rest` 后缀。',
+    message: `检测到疑似机械分段/垃圾桶文件名（建议按职责命名，而非按序号或 misc 拆分）：${rel}`,
+    fixHint: '按真实职责边界命名拆分模块（如 `<domain>-parser.mjs`），避免 `-partN`/`-misc`/`-extra` 后缀。',
   }
 }
 
@@ -520,4 +539,124 @@ export function detectLineSquashCheat({
     message: `检测到对紧/大文件的虚假压行缩减（${baseLineCount} -> ${currentLineCount} 行，空行减少 ${blankLineDrop}，非空行净减 ${nonEmptyDrop}，分号拼行增量 +${semicolonJump}）：${rel}`,
     fixHint: '禁止通过批量删除空行或分号并句压低行数；请将真实职责拆分为独立内聚模块。',
   }
+}
+
+function scanSegmentHygiene({ rel, ext, rawLines, lineNumbers, isFixture, generatedExempt }) {
+  const tombstoneComments = []
+  const excuseSuppressions = []
+  const views = buildLexedViews(rawLines.join('\n'), ext)
+  const mapLine = (idx) => (Array.isArray(lineNumbers) && typeof lineNumbers[idx] === 'number' ? lineNumbers[idx] : idx + 1)
+  if (!isFixture) {
+    for (let i = 0; i < views.lines.length; i += 1) {
+      const line = views.lines[i]
+      const commentText = views.commentLines[i]
+      if (!generatedExempt && commentText && (TOMBSTONE_COMMENT_RE.test(commentText) || TOMBSTONE_DATE_RE.test(commentText))) {
+        tombstoneComments.push({ file: rel, line: mapLine(i), excerpt: line.trim().slice(0, 120) })
+      }
+      const hasJustify = JUSTIFICATION_ANCHOR_RE.test(commentText || line)
+      const isHackLike = Boolean(commentText && EXCUSE_HACK_RE.test(commentText))
+      const hasIssueRef = Boolean(commentText && ISSUE_REF_RE.test(commentText))
+      if (!hasJustify && !(isHackLike && hasIssueRef) && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {
+        excuseSuppressions.push({
+          file: rel,
+          line: mapLine(i),
+          kind: isHackLike ? 'missing-issue-link' : 'suppression-bypass',
+          excerpt: line.trim().slice(0, 120),
+        })
+      }
+    }
+  }
+  const deadCodeBlocks = (isFixture || generatedExempt)
+    ? []
+    : detectCommentedDeadCodeBlocks(views).map((b) => ({
+        file: rel,
+        line: mapLine(b.startLine - 1),
+        endLine: mapLine(b.endLine - 1),
+        length: b.length,
+        excerpt: b.excerpt,
+      }))
+  return { tombstoneComments, excuseSuppressions, deadCodeBlocks }
+}
+
+/** 扫描源码增行或按 hunk 独立扫描履历注释、借口压制、注释死代码、自动生成头标豁免、纯声明式/类型契约降级与大文件/紧文件指标。 */
+export function scanStructuralHygiene({
+  fileRel, lines = [], hunks = null, fullText = null, fullLineCount = 0,
+  warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES,
+  skipFixtureCheck = false, gitAttributesText = '',
+}) {
+  const rel = posixPath(fileRel)
+  const ext = rel.split('.').pop()?.toLowerCase() ?? ''
+  const isFixture = FIXTURE_FILE_RE.test(rel)
+  const rawJoined = Array.isArray(lines) ? lines.join('\n') : String(lines ?? '')
+  const effectiveFullText = typeof fullText === 'string' && fullText.length > 0
+    ? fullText
+    : (Array.isArray(lines) && lines.length >= fullLineCount && lines.length > 0 ? rawJoined : '')
+  const generatedExempt = Boolean(
+    !rel.startsWith('kit/skills/') && (
+      (gitAttributesText && isGitAttributesGenerated(gitAttributesText, rel))
+      || (effectiveFullText && isGeneratedSourceHeader(effectiveFullText, ext))
+    ),
+  )
+
+  const tombstoneComments = []
+  const excuseSuppressions = []
+  const deadCodeBlocks = []
+  if (Array.isArray(hunks) && hunks.length > 0) {
+    for (const hk of hunks) {
+      const addedLines = Array.isArray(hk?.addedLines) && hk.addedLines.length > 0
+        ? hk.addedLines
+        : (Array.isArray(hk?.added) ? hk.added.map((text, idx) => ({ line: (hk.startLine ?? 1) + idx, text })) : [])
+      if (addedLines.length === 0) continue
+      const seg = scanSegmentHygiene({
+        rel, ext,
+        rawLines: addedLines.map((x) => x.text),
+        lineNumbers: addedLines.map((x) => x.line),
+        isFixture, generatedExempt,
+      })
+      tombstoneComments.push(...seg.tombstoneComments)
+      excuseSuppressions.push(...seg.excuseSuppressions)
+      deadCodeBlocks.push(...seg.deadCodeBlocks)
+    }
+  } else {
+    const rawArr = Array.isArray(lines) ? lines : String(lines ?? '').replace(/\r\n/g, '\n').split('\n')
+    const seg = scanSegmentHygiene({ rel, ext, rawLines: rawArr, lineNumbers: null, isFixture, generatedExempt })
+    tombstoneComments.push(...seg.tombstoneComments)
+    excuseSuppressions.push(...seg.excuseSuppressions)
+    deadCodeBlocks.push(...seg.deadCodeBlocks)
+  }
+
+  const isCheckableSrc = (skipFixtureCheck || !isTestOrFixtureFile(rel)) && !rel.endsWith('.min.js') && !generatedExempt
+  const oversizedClass = (isCheckableSrc && fullLineCount > warnLines)
+    ? classifyOversizedFile({ fileRel: rel, fullText: effectiveFullText, ext, fullLineCount, warnLines, gitAttributesText })
+    : null
+  const declMeta = oversizedClass?.category === 'declarative-data'
+    ? oversizedClass
+    : (isCheckableSrc && fullLineCount > warnLines && effectiveFullText
+      ? classifyDeclarativeDataFile({ fullText: effectiveFullText, ext, fullLineCount, warnLines })
+      : null)
+  const declarativeDataFile = declMeta ? { file: rel, ...declMeta } : null
+  const downgraded = Boolean(oversizedClass?.downgrade) || Boolean(declarativeDataFile)
+  const godFile = (isCheckableSrc && !downgraded && fullLineCount > warnLines)
+    ? { file: rel, lines: fullLineCount, severity: fullLineCount > highLines ? 'high' : 'warn' }
+    : null
+  const nearLimitFile = (isCheckableSrc && !downgraded && fullLineCount >= nearLimitLines && fullLineCount <= warnLines)
+    ? { file: rel, lines: fullLineCount, limit: warnLines }
+    : null
+  return { generatedExempt, oversizedClass, declarativeDataFile, tombstoneComments, excuseSuppressions, deadCodeBlocks, godFile, nearLimitFile }
+}
+
+/** 统一单源静态卫生评估入口（供 dev-edit、dev-review、dev-govern 共用，严格单向无环）。 */
+export function evaluateFileHygiene({
+  fileRel, lines = [], hunks = null, fullText = null, fullLineCount = 0,
+  warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES,
+  skipFixtureCheck = false, gitAttributesText = '', agentsText = null, forgeHooksConfig = null,
+} = {}) {
+  const hyg = scanStructuralHygiene({
+    fileRel, lines, hunks, fullText, fullLineCount,
+    warnLines, highLines, nearLimitLines, skipFixtureCheck, gitAttributesText,
+  })
+  const oversizedExempt = hyg.godFile
+    ? resolveOversizedExemption({ fileRel, agentsText, forgeHooksConfig })
+    : { exempt: false }
+  return { ...hyg, oversizedExempt }
 }

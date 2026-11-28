@@ -405,14 +405,28 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
     })
   } else {
     const bytes = Buffer.byteLength(agentsInfo.text, 'utf8')
-    if (bytes > AGENTS_MAX_BYTES) {
+    let managedBytes = 0
+    for (const mb of agentsInfo.text.matchAll(/<!--\s*project-forge:\s*begin\b[^>]*-->[\s\S]*?<!--\s*project-forge:\s*end\b[^>]*-->/g)) {
+      managedBytes += Buffer.byteLength(mb[0], 'utf8')
+    }
+    const customBytes = Math.max(0, bytes - managedBytes)
+    if (managedBytes > AGENTS_WARN_BYTES) {
       addFinding(findings, {
         id: 'docs.agents-over-30kb',
         category: 'docs',
         severity: 'critical',
         file: 'AGENTS.md',
-        title: `AGENTS.md is ${bytes} bytes (> ${AGENTS_MAX_BYTES} byte hard cap)`,
-        action: 'Prune redundant prose or move subdirectory-specific rules to <subdir>/AGENTS.md.',
+        title: `AGENTS.md managed regions are ${managedBytes} bytes (> ${AGENTS_WARN_BYTES} byte managed cap; total=${bytes}B, custom=${customBytes}B)`,
+        action: 'Trim project-forge managed sections or enable compact pointer mode.',
+      })
+    } else if (bytes > AGENTS_MAX_BYTES) {
+      addFinding(findings, {
+        id: 'docs.agents-over-30kb',
+        category: 'docs',
+        severity: 'info',
+        file: 'AGENTS.md',
+        title: `AGENTS.md is ${bytes} bytes (> ${AGENTS_MAX_BYTES}B advisory; managed=${managedBytes}B <= ${AGENTS_WARN_BYTES}B, custom=${customBytes}B)`,
+        action: 'Optional: move project-specific prose to <subdir>/AGENTS.md or docs/TDD.md without truncating existing clauses.',
       })
     } else if (bytes > AGENTS_WARN_BYTES) {
       addFinding(findings, {

@@ -26,8 +26,8 @@ export const INJECTIONS_W5_BLIND_FIXES = [
     what: 'C2: edit-gate.mjs 关闭存量大文件棘轮基线比对，局部 <=80 行修改仍触发硬阻断',
     file: 'kit/skills/dev-edit/scripts/edit-gate.mjs',
     alsoDropIn: ['.agents/skills/dev-edit/scripts/edit-gate.mjs'],
-    from: "      if (baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {",
-    to: "      if (false && baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {",
+    from: "        } else if (baseLineCount !== null && baseLineCount > lineCap) {",
+    to: "        } else if (false && baseLineCount !== null && baseLineCount > lineCap) {",
     expect: 'W5 C2',
   },
   {
@@ -70,8 +70,8 @@ export const INJECTIONS_W5_BLIND_FIXES = [
     what: 'C4: doc-plan.mjs 摘除 audit 指向 critique-pass 的独立子代理角色交接硬提示',
     file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
     alsoDropIn: ['.agents/skills/dev-plan/scripts/doc-plan.mjs'],
-    from: "            { skill: 'dev-plan', text: `2. 独立只读 Critique 通过后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" critique-pass --file \"${res.file}\" --reviewer <criticId> --round 1` },",
-    to: "            { skill: 'dev-plan', text: `2. node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" critique-pass --file \"${res.file}\" --reviewer <criticId> --round 1` },",
+    from: "            { skill: 'dev-plan', text: `2. 独立只读 Critique 通过后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" critique-pass --file \"${res.file}\" --reviewer <criticId> --round ${nextRound}` },",
+    to: "            { skill: 'dev-plan', text: `2. node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" critique-pass --file \"${res.file}\" --reviewer <criticId> --round ${nextRound}` },",
     expect: 'W5 C4',
   },
 ]

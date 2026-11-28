@@ -12,6 +12,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
+import { buildPreEditEnrichment, formatPreEditEnrichmentLines } from '../../lib/concurrency-radar.mjs'
 import { execSafe, resolveExecutable } from '../../lib/exec.mjs'
 import {
   LIKELY_DEFAULT_BRANCHES, gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, isDefaultBranch, isMacOsJunkPath, isMainModule,
@@ -28,7 +29,7 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  checkProcessArtifactFilename, countTextLines, evaluateArchRules, hasBehavioralAssertion, isLegalArchiveMove, isMetaTestHarness, isReleaseNotesDocPath, isTestOrFixtureFile, matchGlob, scanStructuralHygiene, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
+  checkProcessArtifactFilename, countTextLines, evaluateArchRules, evaluateFileHygiene, hasBehavioralAssertion, isLegalArchiveMove, isMetaTestHarness, isReleaseNotesDocPath, isTestOrFixtureFile, matchGlob, scanTestAntiCheat, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 import {
   buildSplitReuseGuidance, checkMechanicalSplitName, classifyOversizedFile, detectLineSquashCheat,
@@ -103,10 +104,11 @@ async function resolveCompareBaseSha(workRoot, isGit, defaultBranch, taskLedger,
 
 function printHelp() {
   process.stdout.write([
-    '用法：node edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--base <ref>] [--with-native] [--dir <path>] [--task <id>] [--final] [--skip-edit-gate --reason <why>] [--json]',
+    '用法：node edit-gate.mjs [--mode verify|pre-edit|standalone] [--pre-edit] [--files a,b] [--changed] [--base <ref>] [--with-native] [--dir <path>] [--task <id>] [--final] [--skip-edit-gate --reason <why>] [--json]',
     '',
     'Options:',
     '  --mode <mode>       verify | pre-edit | standalone (default: standalone)',
+    '  --pre-edit          Alias for --mode pre-edit (outputs contextBrief & concurrencyRadar)',
     '  --files <a,b>       Comma-separated target files to check',
     '  --changed           Collect uncommitted and branch-changed files from git',
     '  --base <ref>        Explicit base git ref/SHA for --changed diff (supports detached HEAD)',
@@ -379,7 +381,7 @@ export async function runEditGate(opts = {}) {
     const isNewlyAdded = isMarkedNew || (!isGit ? !existsSync(join(workTreeRoot, rel)) : (baseBlobMap.get(rel) ?? null) === null)
     if (isNewlyAdded) {
       const mechHit = checkMechanicalSplitName(rel)
-      if (mechHit) blockers.push(mechHit)
+      if (mechHit) warnings.push(mechHit)
     }
     if (highRiskGlobs.some((pat) => matchGlob(rel, pat))) {
       highRiskHits.push(rel)
@@ -423,10 +425,12 @@ export async function runEditGate(opts = {}) {
         warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: lineCount, message: `目标文件处于紧文件区（${lineCount}/800 行），新增逻辑建议抽离独立模块：${rel}`, fixHint: g.fixHint })
       }
     }
+    const preExtra = buildPreEditEnrichment({ workTreeRoot, mainRoot, checkedFiles, taskId, taskLedger, isWorktree: roots.isWorktree })
     const ok = blockers.length === 0
     return {
       ok, mode, exitCode: ok ? EXIT.OK : EXIT.FACT, repoRoot: posixPath(workTreeRoot),
       checkedFiles, blockers, violations: blockers, warnings, nearLimitFiles, highRiskHits, reuseHints, splitGuidance, nativeCheckers,
+      ...preExtra,
       summary: { checked: checkedFiles.length, blockers: blockers.length, warnings: warnings.length },
     }
   }
@@ -454,6 +458,11 @@ export async function runEditGate(opts = {}) {
     diffChunks = splitDiffByFile(diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n'))
   }
 
+  const rawMaxFileLines = devProfile['max-file-lines']
+  const lineCap = typeof rawMaxFileLines === 'number' && rawMaxFileLines > 0 ? rawMaxFileLines : 800
+  const lineCapDisabled = rawMaxFileLines === null
+  const nearCap = Math.min(NEAR_LIMIT_LINES, Math.max(1, lineCap - 70))
+
   for (const entry of dedupEntries) {
     const rel = entry.file
     const abs = join(workTreeRoot, rel)
@@ -462,9 +471,9 @@ export async function runEditGate(opts = {}) {
       if (/\.(?:md|mdx|rst|txt|sql)$/i.test(rel)) {
         const docTxt = readTextSafe(abs, 512 * 1024)
         const docLines = docTxt ? countTextLines(docTxt) : 0
-        if (docLines > 800) {
-          const cls = classifyOversizedFile({ fileRel: rel, fullText: docTxt, fullLineCount: docLines, warnLines: 800, gitAttributesText })
-          if (cls?.downgrade) warnings.push({ ruleId: 'edit.oversized-downgraded', severity: 'low', file: rel, lines: docLines, category: cls.category, message: `非运行逻辑文件超出 800 行（${cls.category}，${docLines} 行），已自动降级放行：${rel}` })
+        if (docLines > lineCap) {
+          const cls = classifyOversizedFile({ fileRel: rel, fullText: docTxt, fullLineCount: docLines, warnLines: lineCap, gitAttributesText })
+          if (cls?.downgrade) warnings.push({ ruleId: 'edit.oversized-downgraded', severity: 'low', file: rel, lines: docLines, category: cls.category, message: `非运行逻辑文件超出 ${lineCap} 行（${cls.category}，${docLines} 行），已自动降级放行：${rel}` })
         }
       }
       continue
@@ -477,27 +486,17 @@ export async function runEditGate(opts = {}) {
     const isNewEntry = entry.status === '??' || /^A/i.test(String(entry.status ?? ''))
     const ext = rel.split('.').pop()?.toLowerCase() ?? ''
     const fileChunk = (!isNewEntry && diffChunks && diffChunks.has(rel)) ? diffChunks.get(rel) : null
-    const lines = fileChunk !== null
-      ? summarizeHunkChanges(fileChunk).added
-      : txt.replace(/\r\n/g, '\n').split('\n')
+    const parsedChunk = fileChunk !== null ? summarizeHunkChanges(fileChunk) : null
+    const lines = parsedChunk !== null ? parsedChunk.added : txt.replace(/\r\n/g, '\n').split('\n')
+    const hunks = parsedChunk !== null ? parsedChunk.hunks : null
     const fullLineCount = countTextLines(txt)
-    const hyg = scanStructuralHygiene({ fileRel: rel, lines, fullText: txt, fullLineCount, warnLines: 800, nearLimitLines: NEAR_LIMIT_LINES, gitAttributesText })
-
+    const hyg = evaluateFileHygiene({ fileRel: rel, lines, hunks, fullText: txt, fullLineCount, warnLines: lineCap, nearLimitLines: nearCap, gitAttributesText, agentsText, forgeHooksConfig })
     for (const s of hyg.excuseSuppressions) {
       const isIssueMissing = s.kind === 'missing-issue-link'
       blockers.push({
-        ruleId: isIssueMissing ? 'edit.hack-without-issue' : 'edit.suppression-bypass',
-        defectClass: 'suppression-bypass',
-        severity: 'high',
-        file: rel,
-        line: s.line,
-        excerpt: s.excerpt,
-        message: isIssueMissing
-          ? `检测到未关联追踪单号（#<issue>）的 HACK/WORKAROUND/TEMP 注释：${rel}:${s.line}`
-          : `检测到无正当锚点的压制/借口注释：${rel}:${s.line}`,
-        fixHint: isIssueMissing
-          ? '临时 HACK/WORKAROUND/TEMP 必须先通过 node .agents/skills/dev-flow/scripts/flow.mjs issue create 或 escalation.mjs 建单并在注释中注明 #<N>，或直接根治。'
-          : '直接修复根因类型或静态检查错误，禁止使用 @ts-ignore/eslint-disable/HACK/WORKAROUND/TEMP/noqa/#[allow( 压制。',
+        ruleId: isIssueMissing ? 'edit.hack-without-issue' : 'edit.suppression-bypass', defectClass: 'suppression-bypass', severity: 'high', file: rel, line: s.line, excerpt: s.excerpt,
+        message: isIssueMissing ? `检测到未关联追踪单号（#<issue>）的 HACK/WORKAROUND/TEMP 注释：${rel}:${s.line}` : `检测到无正当锚点的压制/借口注释：${rel}:${s.line}`,
+        fixHint: isIssueMissing ? '临时 HACK/WORKAROUND/TEMP 必须先通过 node .agents/skills/dev-flow/scripts/flow.mjs issue create 或 escalation.mjs 建单并在注释中注明 #<N>，或直接根治。' : '直接修复根因类型或静态检查错误，禁止使用 @ts-ignore/eslint-disable/HACK/WORKAROUND/TEMP/noqa/#[allow( 压制。',
       })
     }
     if (enableCommentPathCheck && !isTestOrFixtureFile(rel)) {
@@ -523,7 +522,7 @@ export async function runEditGate(opts = {}) {
       if (squashHit) blockers.push(squashHit)
     }
     if (hyg.godFile) {
-      const exempt = resolveOversizedExemption({ fileRel: rel, agentsText, forgeHooksConfig })
+      const exempt = hyg.oversizedExempt ?? resolveOversizedExemption({ fileRel: rel, agentsText, forgeHooksConfig })
       if (exempt.exempt) {
         warnings.push({ ruleId: 'edit.oversized-exempt', severity: 'low', file: rel, lines: fullLineCount, source: exempt.source, message: `超限文件命中审查豁免（${exempt.source}，${fullLineCount} 行）：${rel}` })
       } else {
@@ -531,11 +530,17 @@ export async function runEditGate(opts = {}) {
         const guidance = buildSplitReuseGuidance({ fileRel: rel, fullText: txt, ext, siblingReuse: sibs })
         const isUntouchedOnMain = !ratchetInfo.hasBranchBase && baseText !== null && isGit
           && baseText.replace(/\r\n/g, '\n') === txt.replace(/\r\n/g, '\n')
-        if (baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {
+        const oversizedTarget = lineCapDisabled ? warnings : blockers
+        if (isUntouchedOnMain && baseLineCount !== null && baseLineCount > lineCap) {
+          warnings.push({
+            ruleId: 'edit.existing-oversized', severity: 'medium', file: rel, lines: fullLineCount, baseLines: baseLineCount, netGrowth: 0,
+            message: `主干未改动存量大文件（${fullLineCount} 行 > ${lineCap} 行上限，净增 0），降级预警放行：${rel}`,
+          })
+        } else if (baseLineCount !== null && baseLineCount > lineCap) {
           const netGrowth = fullLineCount - baseLineCount
           if (netGrowth > BROWNFIELD_GROWTH_LIMIT) {
-            blockers.push({
-              ruleId: 'edit.file-oversized-growth', defectClass: 'file-bloat', severity: 'high', file: rel,
+            oversizedTarget.push({
+              ruleId: 'edit.file-oversized-growth', defectClass: 'file-bloat', severity: lineCapDisabled ? 'medium' : 'high', file: rel,
               line: fullLineCount, lines: fullLineCount, baseLines: baseLineCount, netGrowth,
               message: `存量大文件单次净增超限（基线 ${baseLineCount} 行 -> 当前 ${fullLineCount} 行，净增 +${netGrowth} > ${BROWNFIELD_GROWTH_LIMIT} 行棘轮上限）：${rel}`,
               fixHint: guidance.fixHint,
@@ -547,20 +552,20 @@ export async function runEditGate(opts = {}) {
             })
           }
         } else {
-          blockers.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 800 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: guidance.fixHint })
+          oversizedTarget.push({ ruleId: 'edit.file-oversized', defectClass: 'file-bloat', severity: lineCapDisabled ? 'medium' : 'high', file: rel, line: fullLineCount, lines: fullLineCount, message: `源文件超出 ${lineCap} 行上限（当前 ${fullLineCount} 行）：${rel}`, fixHint: guidance.fixHint })
         }
       }
     } else if (hyg.declarativeDataFile) {
       warnings.push({
         ruleId: 'edit.declarative-data-file', severity: 'low', file: rel, lines: fullLineCount,
         literalRatio: hyg.declarativeDataFile.literalRatio, controlFlowCount: hyg.declarativeDataFile.controlFlowCount,
-        message: `纯声明式数据源码超出 800 行（${fullLineCount} 行，字面量占比 ${Math.round(hyg.declarativeDataFile.literalRatio * 100)}%，控制流 ${hyg.declarativeDataFile.controlFlowCount}），已降级放行（建议按领域拆表或外置 JSON）：${rel}`,
+        message: `纯声明式数据源码超出 ${lineCap} 行（${fullLineCount} 行，字面量占比 ${Math.round(hyg.declarativeDataFile.literalRatio * 100)}%，控制流 ${hyg.declarativeDataFile.controlFlowCount}），已降级放行（建议按领域拆表或外置 JSON）：${rel}`,
       })
     } else if (hyg.oversizedClass?.downgrade) {
       warnings.push({ ruleId: 'edit.oversized-downgraded', severity: 'low', file: rel, lines: fullLineCount, category: hyg.oversizedClass.category, message: `超限文件自动降级放行（${hyg.oversizedClass.category}，${fullLineCount} 行）：${rel}` })
     } else if (hyg.nearLimitFile) {
       nearLimitFiles.push(hyg.nearLimitFile)
-      warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: fullLineCount, message: `紧文件预警（${fullLineCount}/800 行），建议提前规划模块拆分：${rel}` })
+      warnings.push({ ruleId: 'edit.file-near-limit', severity: 'low', file: rel, lines: fullLineCount, message: `紧文件预警（${fullLineCount}/${lineCap} 行），建议提前规划模块拆分：${rel}` })
     }
 
     const isMetaHarness = isMetaTestHarness(rel, txt)
@@ -689,6 +694,7 @@ function formatText(res) {
       lines.push(`  - ${h.dir}: ${h.siblings.map((s) => `${s.file} (${s.symbols.slice(0, 4).join(', ')})`).join(' | ')}`)
     }
   }
+  lines.push(...formatPreEditEnrichmentLines(res))
   return lines.join('\n')
 }
 
@@ -702,9 +708,9 @@ export async function runCli(argv = process.argv.slice(2)) {
     parsed = parseStandardCli(argv, {
       allowPositionalWithoutSubcommand: true,
       positionalDir: 'auto',
-      booleanFlags: ['changed', 'with-native', 'skip-edit-gate', 'final', 'emit-signals'],
+      booleanFlags: ['changed', 'with-native', 'skip-edit-gate', 'final', 'emit-signals', 'pre-edit'],
       valueFlags: ['mode', 'files', 'task', 'reason', 'base'],
-      usageHint: 'edit-gate.mjs [--mode verify|pre-edit|standalone] [--files a,b] [--changed] [--base <ref>] [--with-native] [--json]',
+      usageHint: 'edit-gate.mjs [--mode verify|pre-edit|standalone] [--pre-edit] [--files a,b] [--changed] [--base <ref>] [--with-native] [--json]',
     })
   } catch (err) {
     process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`)
@@ -712,7 +718,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
   const { opts, targetDir } = parsed
   const res = await runEditGate({
-    mode: opts.mode ?? (opts.task ? 'verify' : 'standalone'),
+    mode: opts.mode ?? (opts['pre-edit'] ? 'pre-edit' : (opts.task ? 'verify' : 'standalone')),
     dir: targetDir,
     files: opts.files,
     changed: Boolean(opts.changed),

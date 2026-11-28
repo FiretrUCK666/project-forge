@@ -5,8 +5,9 @@
 export const INJECTIONS_CONV_S2 = [
   {
     id: 'I921',
-    what: 'session-state boundTopicSize 退化为静默 FIFO 淘汰 facts 而非抛 BLOCKED_TOPIC_BUDGET_EXCEEDED',
-    file: 'kit/skills/lib/session-state.mjs',
+    what: 'session-topics boundTopicSize 退化为静默 FIFO 淘汰 facts 而非抛 BLOCKED_TOPIC_BUDGET_EXCEEDED',
+    file: 'kit/skills/lib/session-topics.mjs',
+    alsoDropIn: ['.agents/skills/lib/session-topics.mjs'],
     from: "    err.code = 'BLOCKED_TOPIC_BUDGET_EXCEEDED'\n    err.exitCode = EXIT.FACT\n    throw err",
     to: '    const k0 = Object.keys(topicState.facts)[0]; if (k0) { delete topicState.facts[k0]; continue }\n    break',
     expect: 'Conv-S2 C5',

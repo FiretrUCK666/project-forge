@@ -8,13 +8,14 @@
 import { spawn } from 'node:child_process'
 
 import { printNextStep, withNextSteps } from '../../lib/cli.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from '../../lib/concurrency-radar.mjs'
 import { formatContextBriefLines } from '../../lib/context-brief.mjs'
 import { computePrDiffContext } from '../../lib/diff-materiality.mjs'
 import { EXIT } from '../../lib/exit-codes.mjs'
 import { gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readTaskLedger, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { resolveDocPlanMode } from '../../lib/pending-decisions.mjs'
-import { appendPreInitNote, normalizeTopicId, readSessionState, recordTriageDecision } from '../../lib/session-state.mjs'
+import { appendPreInitNote, matchTopicForContext, normalizeTopicId, readSessionState, recordTriageDecision } from '../../lib/session-state.mjs'
 import {
   getVisualBriefSummary,
   readBriefSidecar,
@@ -38,20 +39,30 @@ function openInBrowser(uri) {
 }
 
 export async function handleNoteSubcommand({ opts, cli, repoRoot, mainRoot }) {
+  const deadEndList = opts['dead-end'] ?? []
   const hasNote = Boolean(
     opts.topic || opts.decision || opts.reset
     || (opts.fact?.length ?? 0) > 0 || (opts.resolve?.length ?? 0) > 0 || (opts.drop?.length ?? 0) > 0
-    || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
+    || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0
+    || deadEndList.length > 0,
   )
-  if (!hasNote) throw new Error('note 至少需要传入 --topic / --fact / --resolve / --drop / --reset / --decision / --exclude / --anchor / --open 之一')
+  if (!hasNote) throw new Error('note 至少需要传入 --topic / --fact / --resolve / --drop / --reset / --decision / --dead-end / --exclude / --anchor / --open 之一')
 
   const prevSess = readSessionState(mainRoot)
-  const candTopicId = normalizeTopicId(opts.topic || prevSess?.activeTopic || 'default')
+  const topicMatch = matchTopicForContext(prevSess?.topics, { topic: opts.topic ?? null, worktreePath: repoRoot })
+  if (!opts.topic && topicMatch.ambiguous) {
+    const out = { ok: false, ambiguous: true, availableTopics: topicMatch.availableTopics, message: `存在多个活跃主题（${topicMatch.availableTopics.join(', ')}），请显式传入 --topic <id> 以免跨会话串台。` }
+    if (cli.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+    else process.stdout.write(`${out.message}\n`)
+    return 0
+  }
+  const candTopicId = normalizeTopicId(opts.topic || topicMatch.matchedKey || 'default')
   const prevTopic = prevSess?.topics?.[candTopicId] ?? null
   const hasPriorNoteContent = Boolean(
     prevTopic && !prevTopic.consumedByTaskId && (
       Object.keys(prevTopic.facts ?? {}).length > 0
       || (prevTopic.decisions?.length ?? 0) > 0
+      || (prevTopic.deadEnds?.length ?? 0) > 0
       || (prevTopic.nonGoals?.length ?? 0) > 0
       || (prevTopic.anchors?.length ?? 0) > 0
       || (prevTopic.open?.length ?? 0) > 0
@@ -60,12 +71,13 @@ export async function handleNoteSubcommand({ opts, cli, repoRoot, mainRoot }) {
   const hadPriorTurn = Boolean(prevTopic && !prevTopic.consumedByTaskId && prevTopic.updatedAt && (hasPriorNoteContent || !prevTopic.triage))
 
   const noteRes = appendPreInitNote(mainRoot, {
-    topic: opts.topic ?? null,
+    topic: opts.topic ?? (topicMatch.matchedKey ?? null),
     facts: opts.fact ?? [],
     resolve: opts.resolve ?? [],
     drop: opts.drop ?? [],
     reset: Boolean(opts.reset),
     decision: opts.decision ?? null,
+    deadEnds: deadEndList,
     exclusions: opts.exclude ?? [],
     anchors: opts.anchor ?? [],
     openQuestions: opts.open ?? [],
@@ -105,17 +117,19 @@ export async function handleNoteSubcommand({ opts, cli, repoRoot, mainRoot }) {
   if (cli.json) {
     process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   } else {
-    process.stdout.write(`已写入 Working Brief（topic=${noteRes.topicId}, ${noteRes.byteSize} B）：facts=${Object.keys(noteRes.preInit.facts ?? {}).length}, decisions=${noteRes.preInit.decisions.length}, nonGoals=${noteRes.preInit.nonGoals.length}, anchors=${noteRes.preInit.anchors.length}, open=${(noteRes.preInit.unresolvedOpen ?? noteRes.preInit.openQuestions).length}\n`)
+    process.stdout.write(`已写入 Working Brief（topic=${noteRes.topicId}, ${noteRes.byteSize} B）：facts=${Object.keys(noteRes.preInit.facts ?? {}).length}, decisions=${noteRes.preInit.decisions.length}, deadEnds=${(noteRes.preInit.deadEnds ?? []).length}, nonGoals=${noteRes.preInit.nonGoals.length}, anchors=${noteRes.preInit.anchors.length}, open=${(noteRes.preInit.unresolvedOpen ?? noteRes.preInit.openQuestions).length}\n`)
     if (visualBrief) process.stdout.write(`Living Visual Brief (${visualBrief.confirmedState}): ${visualBrief.htmlUri}\n`)
   }
   return 0
 }
 
 export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainRoot, resolveCliPlanMode }) {
+  const deadEndList = opts['dead-end'] ?? []
   const hasPreInitNote = Boolean(
     opts.topic || opts.decision || opts.reset
     || (opts.fact?.length ?? 0) > 0 || (opts.resolve?.length ?? 0) > 0 || (opts.drop?.length ?? 0) > 0
-    || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0,
+    || (opts.exclude?.length ?? 0) > 0 || (opts.anchor?.length ?? 0) > 0 || (opts.open?.length ?? 0) > 0
+    || deadEndList.length > 0,
   )
   const summary = opts.summary ?? opts._.join(' ')
   if (!summary && !hasPreInitNote) throw new Error('triage 需要传入 --summary "<需求描述>"')
@@ -128,6 +142,7 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
       drop: opts.drop ?? [],
       reset: Boolean(opts.reset),
       decision: opts.decision ?? null,
+      deadEnds: deadEndList,
       exclusions: opts.exclude ?? [],
       anchors: opts.anchor ?? [],
       openQuestions: opts.open ?? [],
@@ -223,6 +238,14 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
         ? [{ skill: 'dev-flow', text: '进入隔离沙箱高频迭代：node ".agents/skills/dev-flow/scripts/flow.mjs" start --sandbox --task <id> --slug <slug> --agent <id>' }]
         : [{ skill: 'dev-flow', text: '低风险原地微调（或按需建位）：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case 1 --slug <slug> --agent <id>' }]
 
+  result.concurrencyRadar = projectConcurrencyRadar(mainRoot, { currentWorkRoot: repoRoot, currentFiles: triagePaths })
+  if (noteRes?.preInit) {
+    result.activeTopic = {
+      topicId: noteRes.topicId,
+      decisions: noteRes.preInit.decisions ?? [],
+      deadEnds: noteRes.preInit.deadEnds ?? [],
+    }
+  }
   if (cli.json) {
     process.stdout.write(`${JSON.stringify(withNextSteps(result, steps, { repoRoot: mainRoot }), null, 2)}\n`)
   } else {
@@ -236,6 +259,8 @@ export async function handleTriageSubcommand({ opts, cli, roots, repoRoot, mainR
     if (result.visualBrief) {
       process.stdout.write(`- Living Visual Brief (${result.visualBrief.confirmedState}): ${result.visualBrief.htmlUri}\n`)
     }
+    const radarLines = formatConcurrencyRadarLines(result.concurrencyRadar)
+    if (radarLines.length > 0) process.stdout.write(`${radarLines.join('\n')}\n`)
     const briefLines = formatContextBriefLines(result.contextBrief)
     if (briefLines.length > 0) process.stdout.write(`${briefLines.join('\n')}\n`)
     printNextStep(steps, { repoRoot: mainRoot })
@@ -320,7 +345,8 @@ export async function handleBriefSubcommand({ opts, cli, repoRoot, mainRoot }) {
   )
 
   const sess = readSessionState(mainRoot)
-  const resolvedTopic = topicId || (!taskId ? (sess?.activeTopic ?? null) : null)
+  const briefTopicMatch = matchTopicForContext(sess?.topics, { topic: topicId, taskId, worktreePath: effectiveWorkRoot })
+  const resolvedTopic = topicId || (!taskId ? (briefTopicMatch.matchedKey ?? null) : null)
   const resolvedKey = sanitizeBriefKey(
     ledger?.briefKey
     || taskId

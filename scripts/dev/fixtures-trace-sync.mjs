@@ -377,13 +377,27 @@ export function registerTraceSyncCases(cases) {
     if (!firstSubmit.prCommentBody.includes('### 提交待审（Round 1')) {
       return `首次提交应渲染提交待审：\n${firstSubmit.prCommentBody}`
     }
-    if (!firstIssueBody.includes('[#77](https://example.com/acme/demo/pull/77)')
-      || firstIssueBody.includes('#77 (https://example.com/acme/demo/pull/77)')) {
-      return `有 prUrl 时应渲染单链接 [#N](url) 避免 GitHub/移动端双重展开：\n${firstIssueBody}`
+    const urlHits = (firstIssueBody.match(/https:\/\/example\.com\/acme\/demo\/pull\/77/g) ?? []).length
+    if (urlHits !== 1 || firstIssueBody.includes('[#77](') || /^###[^\n]*#77/m.test(firstIssueBody)) {
+      return `有 prUrl 时标题应省略重复 #N 且正文仅出现一次裸 prUrl 供原生富展开：\n${firstIssueBody}`
     }
     const noUrlIssueBody = headUpdate.issueCommentBodyFor(10)
     if (!noUrlIssueBody.includes('· #77') || noUrlIssueBody.includes('[#77](')) {
       return `无 prUrl 时应渲染纯 #N：\n${noUrlIssueBody}`
+    }
+    const gitlabSubmit = buildSubmitComments({
+      isRework: false, isHeadUpdate: false, round: 1, shortHead: '2222222', actorDisplay: '`impl-w4c`',
+      branch: 'feat/gl', verifiedCmd: 'exit 0', prNumber: 88, prRefPrefix: '!', linkedIssues: [10],
+    })
+    if (!gitlabSubmit.issueCommentBodyFor(10).includes('!88') || gitlabSubmit.issueCommentBodyFor(10).includes('PR #')) {
+      return `方言前缀 ! 未生效：\n${gitlabSubmit.issueCommentBodyFor(10)}`
+    }
+    const localSubmit = buildSubmitComments({
+      isRework: false, isHeadUpdate: false, round: 1, shortHead: '3333333', actorDisplay: '`impl-w4c`',
+      branch: 'feat/local', verifiedCmd: 'exit 0', prNumber: null, linkedIssues: [10],
+    })
+    if (localSubmit.prCommentBody.includes('#null') || localSubmit.issueCommentBodyFor(10).includes('#null')) {
+      return `prNumber=null 竟渲染出 #null：\n${localSubmit.prCommentBody}\n${localSubmit.issueCommentBodyFor(10)}`
     }
 
     // 2) 同轮非返工二次 submit 端到端验证
@@ -433,7 +447,7 @@ export function registerTraceSyncCases(cases) {
       const issCmts = srvState.comments[ghIss.number] ?? []
       if (prCmts.some((c) => c.body.includes('### 提交待审'))
         || !prCmts.some((c) => c.body.includes('### 提交更新（Round 1 · HEAD 更新 @'))
-        || !issCmts.some((c) => c.body.includes(`已提 PR #${prNum}`))
+        || !issCmts.some((c) => c.body.includes('### 提交待审') && c.body.includes(`/pull/${prNum}`))
         || !issCmts.some((c) => c.body.includes('### 提交更新（Round 1 · HEAD 更新 @'))) {
         return `首次新建 PR 应省略冗余首评且同轮二次提交应区分提交更新：${JSON.stringify({ prCmts, issCmts })}`
       }

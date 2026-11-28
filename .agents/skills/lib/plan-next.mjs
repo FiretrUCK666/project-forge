@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 
 import { buildContextBrief, extractDocPaths, formatContextBriefLines } from './context-brief.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from './concurrency-radar.mjs'
 import { collectExcludedReviewers, critiqueTextFingerprint, parseCritiqueRounds, readPlanCritiqueEntrySync } from './critique-rounds.mjs'
 import { parseDocFrontmatter } from './docs.mjs'
 import { gitStatusPorcelainZ, posixPath, readTextSafe } from './git.mjs'
@@ -158,7 +159,16 @@ export async function evaluatePlanNextState({
   const { selectedDoc, masterPrd, childSlices } = selectTargetPlanningDoc({
     explicitDoc, taskId: resolvedTaskId, ledger: activeLedger, allDocs, prdDocs, specDocs, todoDocs,
   })
-  const preInit = readPreInitState(effMain)
+  const preInit = readPreInitState(effMain, {
+    taskId: resolvedTaskId,
+    slug: selectedDoc?.data?.slug ?? null,
+    branch: activeLedger?.branch ?? selectedDoc?.data?.branch ?? null,
+    worktreePath: activeLedger?.worktreePath ?? (selectedDoc?.locationType === 'worktree' ? selectedDoc.root : null),
+  })
+  const concurrencyRadar = projectConcurrencyRadar(effMain, {
+    currentTaskId: resolvedTaskId,
+    currentWorkRoot: activeLedger?.worktreePath ? resolve(effMain, activeLedger.worktreePath) : repoRoot,
+  })
 
   if (!selectedDoc) {
     const contextBrief = buildContextBrief(repoRoot || effMain, {
@@ -188,6 +198,7 @@ export async function evaluatePlanNextState({
       preInit,
       visualBrief,
       contextBrief,
+      concurrencyRadar,
       nextAction: '当前无在途规划文档；先跑 dev-explore 核清仓内复用，再执行 doc-plan.mjs triage 定档分流。',
       command: 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>"',
       blockingReasons: [],
@@ -245,6 +256,7 @@ export async function evaluatePlanNextState({
       preInit,
       visualBrief,
       contextBrief,
+      concurrencyRadar,
       nextAction: `文档 ${relDoc} 已处于终态（status=${selectedDoc.status}），无需继续规划或开工；如需新需求请另建规划或运行 flow next。`,
       command: 'node ".agents/skills/dev-flow/scripts/flow.mjs" next',
       blockingReasons: [],
@@ -456,9 +468,14 @@ export function buildPlanHandoff({ state, deliveryMode = state?.deliveryMode ?? 
     lines.push('', '### 预初始化讨论缓冲（init 前保留）')
     if (s.preInit.topic) lines.push(`- 主题：${s.preInit.topic}`)
     if (s.preInit.decisions?.length > 0) lines.push(`- 已定结论：${s.preInit.decisions.join('；')}`)
+    if (s.preInit.deadEnds?.length > 0) lines.push(`- 已证伪死路：${s.preInit.deadEnds.join('；')}`)
     if (s.preInit.exclusions?.length > 0) lines.push(`- 明确不做：${s.preInit.exclusions.join('；')}`)
     if (s.preInit.anchors?.length > 0) lines.push(`- 锚点：${s.preInit.anchors.join('、')}`)
     if (s.preInit.openQuestions?.length > 0) lines.push(`- 待拍板：${s.preInit.openQuestions.join('；')}`)
+  }
+  const radarLines = formatConcurrencyRadarLines(s.concurrencyRadar)
+  if (radarLines.length > 0) {
+    lines.push('', '### 兄弟会话并发雷达', ...radarLines)
   }
   if (s.pendingDecisions?.unresolved?.length > 0) {
     lines.push('', '### 未清空待拍板问题（须逐项问到零）')

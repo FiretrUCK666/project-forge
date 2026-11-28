@@ -455,7 +455,7 @@ export async function handleRun(opts, roots) {
   const totalTools = map.features.reduce((acc, f) => acc + (f.verificationTools?.length ?? 0), 0)
   const scratchDir = posixPath(resolveTaskScratchDir(roots.gitDir, taskId, roots.mainRoot))
   if (matched.length === 0) {
-    const isEmptyNotApplicable = totalTools === 0 && !opts.tool && !opts.feature
+    const isEmptyNotApplicable = (totalTools === 0 || (mapSource === 'prefill-in-memory' && targetFiles.length === 0 && useChanged)) && !opts.tool && !opts.feature
     if (isEmptyNotApplicable) {
       const payload = {
         ok: true,

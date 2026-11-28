@@ -256,19 +256,24 @@ export function registerIssueBindingCases(cases) {
         return `作者分离阻断前误建孤儿单：exit=${blockAuth.res.exitCode}, created=${gh.created.length}`
       }
 
-      // 3. 门禁前置：主仓脏改动阻断时绝不产生孤儿工单
+      // 3. 隔离 worktree 精准边界：脏主仓新开隔离 worktree 降级预警放行（不再误阻断并行会话），清理后再验正向建单
       const app2 = validSpecAndTodo('auto-c4', { owner: 'planner', approved: true })
       writeFileSync(join(dir, 'docs/specs/261124-auto-c4-spec.md'), app2.spec, 'utf8')
       writeFileSync(join(dir, 'docs/todo/261124-auto-c4-todo.md'), app2.todo, 'utf8')
       gitCommitFast(dir, 'docs: auto-c4 approved')
+      const appDirtyIso = validSpecAndTodo('dirty-iso', { owner: 'planner', approved: true })
+      writeFileSync(join(dir, 'docs/specs/261124-dirty-iso-spec.md'), appDirtyIso.spec, 'utf8')
+      writeFileSync(join(dir, 'docs/todo/261124-dirty-iso-todo.md'), appDirtyIso.todo, 'utf8')
+      gitCommitFast(dir, 'docs: dirty-iso approved')
       writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = false\n', 'utf8')
-      const blockDirty = await withCaptureIo(() => handleStart({
-        task: 'auto-c4', slug: 'auto-c4', case: '4',
-        spec: 'docs/specs/261124-auto-c4-spec.md', todo: 'docs/todo/261124-auto-c4-todo.md',
+      const isoOnDirty = await withCaptureIo(() => handleStart({
+        task: 'dirty-iso', slug: 'dirty-iso', case: '4',
+        spec: 'docs/specs/261124-dirty-iso-spec.md', todo: 'docs/todo/261124-dirty-iso-todo.md',
+        'no-issue': true, reason: '验证脏主仓新开隔离 worktree 降级预警不误阻断',
         agent: 'impl-a', json: true, _ghClient: gh.client, _ghProbe: gh.ghProbe,
       }, roots))
-      if (blockDirty.res.exitCode !== EXIT.FACT || gh.created.length !== 0) {
-        return `脏主仓阻断前误建孤儿单：exit=${blockDirty.res.exitCode}, created=${gh.created.length}`
+      if (isoOnDirty.res.exitCode !== 0 || gh.created.length !== 0) {
+        return `脏主仓新开隔离 worktree 应降级预警放行且豁免不建单：exit=${isoOnDirty.res.exitCode}, created=${gh.created.length}`
       }
       writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = true\n', 'utf8')
 

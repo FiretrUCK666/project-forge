@@ -9,6 +9,7 @@ import { existsSync, lstatSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
+import { computeMainDriftIntersection } from '../../lib/concurrency-radar.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { buildSubmitComments, docIsoDate, formatAttribution } from '../../lib/docs.mjs'
 import {
@@ -445,6 +446,8 @@ export async function handleVerify(opts, roots) {
     return { exitCode: governRes.exitCode ?? EXIT.FACT }
   }
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+  const verifyDrift = await computeMainDriftIntersection({ mainRoot: roots.mainRoot, workRoot: implRoot, baseBranch: ledger.baseBranch, baseSha: ledger.baseSha, changedFiles })
+  if (verifyDrift.warning && !opts.json) process.stderr.write(`[提醒] ${verifyDrift.warning.message}\n`)
   await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? pickSignalBlameFile(changedFiles, ''), taskId, message: `verify (${mode}) exit=${finalExit}: ${redactDiagnosticText(cmd, 240)}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
   emitVerifyOutcomeOutput({
     opts, roots, taskId, mode, rawTarget, cmd, targetTip, allOk, finalExit, ledger, policy,
@@ -546,6 +549,8 @@ export async function handleSubmit(opts, roots) {
     if (!opts.json) printNextStep([{ skill: 'dev-flow', text: unlockCmd }], { repoRoot: roots.mainRoot })
     return { exitCode: EXIT.FACT }
   }
+  const submitDrift = await computeMainDriftIntersection({ mainRoot: roots.mainRoot, workRoot: implRoot, baseBranch: ledger.baseBranch, baseSha: effectiveBase, changedFiles: changedForVisual })
+  if (submitDrift.warning && !opts.json) process.stderr.write(`[提醒] ${submitDrift.warning.message}\n`)
   const evidence = readVerificationEvidence(roots.gitDir, taskId)
   const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
   if (!evCheck.ok) {
@@ -731,7 +736,7 @@ export async function handleSubmit(opts, roots) {
   const isRework = reworkState.isRework
   if (hasExistingPr) {
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
-    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework, isHeadUpdate: !isRework && hasExistingPr, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
+    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework, isHeadUpdate: !isRework && hasExistingPr, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, prUrl: ledger.prUrl ?? null, prRefPrefix: backend.prRefPrefix ?? '#', linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
     const reuseAction = isRework ? 'rework-submitted' : 'submitted-existing-pr'
     commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, isPr: true, body: prCommentBody, statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
@@ -748,7 +753,7 @@ export async function handleSubmit(opts, roots) {
       ledger.prNumber = prResult.number
       ledger.prUrl = prResult.url ?? null
       ledger.prState = 'OPEN'
-      const { issueCommentBodyFor } = buildSubmitComments({ isRework: false, round: 1, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number, prUrl: prResult.url, linkedIssues: ledger.linkedIssues ?? [] })
+      const { issueCommentBodyFor } = buildSubmitComments({ isRework: false, round: 1, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number, prUrl: prResult.url, prRefPrefix: backend.prRefPrefix ?? '#', linkedIssues: ledger.linkedIssues ?? [] })
       for (const iss of ledger.linkedIssues ?? []) {
         commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'pr-created', ...submitStateIdentity, prNumber: prResult.number, headSha: currentHead } }) })
       }

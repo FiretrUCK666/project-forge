@@ -88,12 +88,13 @@ export function registerConvS2Cases(cases) {
 
       // 4. doc-locate / repo-map 不传 --topic 零写入；传 --topic 仅写仓外锚点
       const beforeAnchorStat = readFileSync(statePath, 'utf8')
+      const beforeTopicsSnap = JSON.stringify(readAllActiveTopics(dir))
       const locNoTopic = await runAbsAsync('kit/skills/dev-explore/scripts/doc-locate.mjs', ['--query', 'login', '--scope', 'src', '--json'], { cwd: dir })
-      if (locNoTopic.status !== 0 || readFileSync(statePath, 'utf8') !== beforeAnchorStat) {
+      if (locNoTopic.status !== 0 || readFileSync(statePath, 'utf8') !== beforeAnchorStat || JSON.stringify(readAllActiveTopics(dir)) !== beforeTopicsSnap) {
         return `doc-locate 无 --topic 发生状态写入：status=${locNoTopic.status}`
       }
       const mapNoTopic = await runAbsAsync('kit/skills/dev-explore/scripts/repo-map.mjs', ['--json'], { cwd: dir })
-      if (mapNoTopic.status !== 0 || readFileSync(statePath, 'utf8') !== beforeAnchorStat) {
+      if (mapNoTopic.status !== 0 || readFileSync(statePath, 'utf8') !== beforeAnchorStat || JSON.stringify(readAllActiveTopics(dir)) !== beforeTopicsSnap) {
         return `repo-map 无 --topic 发生状态写入：status=${mapNoTopic.status}`
       }
       const locWithTopic = await runAbsAsync('kit/skills/dev-explore/scripts/doc-locate.mjs', ['--file', 'src/auth.mjs', '--topic', 'topic-b', '--json'], { cwd: dir })

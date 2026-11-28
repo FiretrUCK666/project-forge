@@ -277,10 +277,17 @@ export function discoverCodeModules(repoRoot) {
   return modules
 }
 
-/** 解析 Markdown 相对链接目标存在性（支持 VitePress 根路由及 `.github/*.md` 仓库根目录回退）。 */
+const IGNORED_LINK_DIR_RE = /^(?:\.\/)?(?:(?:dist|build|\.next|out|coverage|target)\/|\.(?:claude|cursor|codex|windsurf|gemini|vscode|idea|agents)\/)/i
+
+/** 解析 Markdown 相对链接目标存在性（支持 VitePress 根路由及 `.github/*.md` 仓库根目录回退；排除无扩展名站内路由、构建产物与隐藏代理目录）。 */
 export function markdownTargetExists(repoRoot, fromFileAbs, decoded, vitePressRoots = []) {
-  if (decoded.startsWith('/')) {
-    const route = decoded.replace(/^\/+/, '').replace(/\/+$/, '')
+  const normDecoded = posixPath(String(decoded ?? '')).trim()
+  if (!normDecoded) return true
+  if (IGNORED_LINK_DIR_RE.test(normDecoded)) return true
+  if (normDecoded.startsWith('/')) {
+    const route = normDecoded.replace(/^\/+/, '').replace(/\/+$/, '')
+    if (!route) return true
+    if (IGNORED_LINK_DIR_RE.test(route)) return true
     const candidates = [route, `${route}.md`, `${route}/index.md`]
     if (/\.html$/i.test(route)) {
       const stem = route.replace(/\.html$/i, '')
@@ -292,6 +299,8 @@ export function markdownTargetExists(repoRoot, fromFileAbs, decoded, vitePressRo
         if (c && existsSync(join(repoRoot, `${prefix}${c}`))) return true
       }
     }
+    // 无扩展名应用内路由（如 /settings、/api/v1/users）不视为断链
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(route)) return true
     return false
   }
   const directAbs = resolve(dirname(fromFileAbs), decoded)

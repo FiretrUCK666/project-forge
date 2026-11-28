@@ -32,6 +32,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { degradeSkillCommands, getSkillFallbacks, resolveAvailableSkills } from './cli.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from './concurrency-radar.mjs'
 import { buildContextBrief, formatContextBriefLines } from './context-brief.mjs'
 import { discoverContextDocs } from './doc-locator.mjs'
 import { listTaskLedgers } from './ledger.mjs'
@@ -138,18 +139,24 @@ export function buildSessionOrientation(mainRoot) {
 
   let openLocalIssues = []
   let pendingLocalMigration = false
+  let isLocalOnlyRepo = true
   try {
     const fastGitDir = resolveGitDirFast(mainRoot)
     openLocalIssues = listLocalIssues({ mainRoot, gitDir: fastGitDir, state: 'open' }).issues ?? []
-    if (openLocalIssues.length > 0 && fastGitDir) {
+    if (fastGitDir) {
       const cfg = readGitConfigFast(fastGitDir, { systemMap: false })
       const hasRemote = Boolean(cfg?.remoteText && cfg.remoteText.trim().length > 0)
       const markers = detectGitModeMarkers(fastGitDir, { hasRemote })
-      pendingLocalMigration = hasRemote && !markers.localMode
+      isLocalOnlyRepo = !hasRemote || Boolean(markers.localMode)
+      if (openLocalIssues.length > 0) {
+        pendingLocalMigration = hasRemote && !markers.localMode
+      }
     }
   } catch {
     openLocalIssues = []
   }
+
+  const concurrencyRadar = projectConcurrencyRadar(mainRoot, { currentWorkRoot: mainRoot })
 
   const stuck = [
     ...docs.prd.flatMap((d) => d.blockedBy.map((why) => ({ file: d.file, why }))),
@@ -280,6 +287,7 @@ export function buildSessionOrientation(mainRoot) {
         lines.push(`- 已定事实（${factEntries.length}）：${factEntries.map(([k, v]) => `${k}=${v}`).join('；')}`)
       }
       if ((t.decisions ?? []).length > 0) lines.push(`- 已定结论（${t.decisions.length}）：${t.decisions.join('；')}`)
+      if ((t.deadEnds ?? []).length > 0) lines.push(`- 已证伪死路（${t.deadEnds.length}）：${t.deadEnds.join('；')}`)
       const nonGoals = t.nonGoals ?? t.exclusions ?? []
       if (nonGoals.length > 0) lines.push(`- 明确不做（${nonGoals.length}）：${nonGoals.join('；')}`)
       if ((t.anchors ?? []).length > 0) lines.push(`- 技术锚点（${t.anchors.length}）：${t.anchors.join('、')}`)
@@ -291,19 +299,29 @@ export function buildSessionOrientation(mainRoot) {
     }
   }
 
+  const radarLines = formatConcurrencyRadarLines(concurrencyRadar)
+  if (radarLines.length > 0) {
+    lines.push('## 兄弟会话并发雷达', '', ...radarLines, '')
+  }
+
   const briefLines = formatContextBriefLines(contextBrief)
   if (briefLines.length > 0) {
     lines.push(...briefLines, '')
   }
 
-  // 远端评论只在远端：把这件事说明白，否则新会话会以为本地就是全部。
+  // 仅在绑定远端且非 local-only 时提示远端评论位置；纯本地仓统一走本地工单与本地账本。
   const hasAgents = existsSync(join(mainRoot, 'AGENTS.md'))
   if (hasAgents) {
     const agentsText = readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
     if (/dev-review|review-pack/.test(agentsText)) {
-      lines.push('> **审查细节不在本地**：PR/Issue 上的评论才有根因与建议修法（逐条核对表、Must Fix、故障注入记录）。')
-      lines.push('> 要读它们，先 `flow next --task <id>` 拿到 PR 号，再去远端看；本地账本只记结论与轮次。')
-      lines.push('')
+      if (isLocalOnlyRepo) {
+        lines.push('> **纯本地模式**：当前未绑定远端，工单与审查上下文均在本地账本与 `flow.mjs issue list` 中维护，无需推送远端或查询远端审查。')
+        lines.push('')
+      } else {
+        lines.push('> **审查细节不在本地**：PR/Issue 上的评论才有根因与建议修法（逐条核对表、Must Fix、故障注入记录）。')
+        lines.push('> 要读它们，先 `flow next --task <id>` 拿到编号，再去对应远端看；本地账本只记结论与轮次。')
+        lines.push('')
+      }
     }
   }
 
@@ -313,6 +331,7 @@ export function buildSessionOrientation(mainRoot) {
     contextIndex: contextDocs.contextIndex,
     docLocateHints: contextDocs.docLocateHints,
     contextBrief,
+    concurrencyRadar,
     preInit,
     activeTopics,
     tasks,

@@ -50,11 +50,11 @@ export const INJECTIONS_ISSUE_BINDING = [
   },
   {
     id: 'I811',
-    what: 'flow-inspect.mjs: 绕过 checkStartMainCleanAndSlot 前置门禁，导致脏主仓仍触发自动建单产生孤儿单',
+    what: 'flow-inspect.mjs: 绕过 checkStartAuthorSeparation 前置门禁，导致作者即实施者仍触发自动建单产生孤儿单',
     file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
     alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-inspect.mjs'],
-    from: '  const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, { caseType, commits: state.commits })\n  if (!slotChk.ok) {',
-    to: '  const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, { caseType, commits: state.commits })\n  if (false && !slotChk.ok) {',
+    from: '  if (authCheck.blocked) {\n    return emitBlockedStart(opts, authCheck)\n  }',
+    to: '  if (false && authCheck.blocked) {\n    return emitBlockedStart(opts, authCheck)\n  }',
     expect: 'C1/C4：先门禁后建单防孤儿单、先复用不重复、Case 3/4 自动建单回链与 --planning 晋升绑定',
   },
 ]

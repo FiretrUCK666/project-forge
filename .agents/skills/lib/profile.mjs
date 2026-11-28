@@ -40,6 +40,7 @@ export const DEV_PROFILE_KEYS = Object.freeze([
 export const OPTIONAL_DEV_PROFILE_KEYS = Object.freeze([
   'evergreen-docs',
   'worktree-shared-readonly',
+  'max-file-lines',
 ])
 
 const EXPLICIT_NONE_RE = /^(?:none|\(none\)|null|n\/a|无|\(无\)|暂无|-)$/i
@@ -425,6 +426,7 @@ export function parseAgentsProfile(repoRoot) {
     doNotEdit: [],
     evergreenDocs: [],
     worktreeSharedReadonly: [],
+    maxFileLines: 800,
     mergeAuthority: 'reviewer',
     explicitNone,
     decisions: new Set(),
@@ -482,11 +484,22 @@ export function parseAgentsProfile(repoRoot) {
 
       const kv = /^(?:[-*]\s+)?`?(quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit)`?\s*:\s*(.*)$/i.exec(trimmed)
       if (!kv) {
-        const optEv = /^(?:[-*]\s+)?`?(evergreen-docs|worktree-shared-readonly)`?\s*:\s*(.*)$/i.exec(trimmed)
+        const optEv = /^(?:[-*]\s+)?`?(evergreen-docs|worktree-shared-readonly|max-file-lines)`?\s*:\s*(.*)$/i.exec(trimmed)
         if (optEv) {
           const optKey = optEv[1].toLowerCase()
-          const optProp = optKey === 'evergreen-docs' ? 'evergreenDocs' : 'worktreeSharedReadonly'
           const rawOpt = stripInlineYamlComment(optEv[2])
+          if (optKey === 'max-file-lines') {
+            const cleaned = stripWrapQuotes(rawOpt)
+            if (isExplicitNoneValue(cleaned)) {
+              explicitNone.add(optKey)
+              profile.maxFileLines = null
+            } else if (/^\d+$/.test(cleaned)) {
+              const parsedLines = Number.parseInt(cleaned, 10)
+              if (Number.isFinite(parsedLines) && parsedLines > 0) profile.maxFileLines = parsedLines
+            }
+            continue
+          }
+          const optProp = optKey === 'evergreen-docs' ? 'evergreenDocs' : 'worktreeSharedReadonly'
           if (rawOpt === '') activeListKey = optProp
           else if (isExplicitNoneValue(rawOpt)) explicitNone.add(optKey)
           else {
@@ -621,6 +634,7 @@ export function parseDevProfile(repoRoot) {
     'do-not-edit': [...p.doNotEdit],
     'evergreen-docs': [...p.evergreenDocs],
     'worktree-shared-readonly': [...p.worktreeSharedReadonly],
+    'max-file-lines': p.maxFileLines,
     explicitNone: p.explicitNone,
     mergeAuthority: p.mergeAuthority,
   }

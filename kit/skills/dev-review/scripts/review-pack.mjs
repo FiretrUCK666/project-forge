@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli, withNextSteps } from '../../lib/cli.mjs'
+import { projectConcurrencyRadar } from '../../lib/concurrency-radar.mjs'
 import { subcommandNamesFor } from '../../lib/subcommand-meta.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
@@ -22,6 +23,7 @@ import {
 } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
+import { readPreInitState } from '../../lib/session-state.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { assembleReviewContext, resolveDefaultBaseRef, validatePackCliArgs } from './review-context.mjs'
 import {
@@ -606,6 +608,20 @@ async function main(argv = process.argv.slice(2)) {
     })
 
     const { contextBrief, ...reviewContextRest } = reviewContext ?? {}
+    const concurrencyRadar = projectConcurrencyRadar(mainRoot, {
+      currentTaskId: task?.taskId ?? null,
+      currentWorkRoot: reviewRoot,
+      currentFiles: diff.files.map((f) => f.file),
+      baseBranch: task?.baseBranch ?? null,
+      baseSha: task?.baseSha ?? null,
+    })
+    const activeTopicRaw = readPreInitState(mainRoot, {
+      taskId: task?.taskId ?? null,
+      slug: task?.slug ?? null,
+      branch: task?.branch ?? null,
+      worktreePath: task?.worktreePath ?? null,
+    })
+    const activeTopic = activeTopicRaw ? { topicId: activeTopicRaw.topicId, decisions: activeTopicRaw.decisions ?? [], deadEnds: activeTopicRaw.deadEnds ?? [] } : null
     const pack = {
       status: opts['untrusted-scan'] && untrustedWarnings.length === 0 ? 'UNTRUSTED_SCAN_PASS' : 'PACK_READY',
       mode,
@@ -650,6 +666,8 @@ async function main(argv = process.argv.slice(2)) {
       doorAssessment,
       reviewContext: reviewContextRest,
       contextBrief: contextBrief ?? null,
+      concurrencyRadar,
+      activeTopic,
       empiricalGate,
       untrustedWarnings,
       untrustedAdvisories,

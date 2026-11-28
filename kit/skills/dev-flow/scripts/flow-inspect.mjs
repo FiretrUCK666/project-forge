@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep, withNextSteps } from '../../lib/cli.mjs'
+import { formatConcurrencyRadarLines, projectConcurrencyRadar } from '../../lib/concurrency-radar.mjs'
 import { parseDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import {
   ackInboundExternalPr, applyLocalAutoClaim, backfillCriteriaFingerprint, buildStartReuseNextSteps, calibrateLedgerBaseBranch, checkStartAuthorSeparation,
@@ -236,6 +237,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     activeTasks: listTaskLedgers(mainRoot, { includeTerminal: false }).map((t) => ({
       taskId: t.taskId, slug: t.slug, status: t.status, branch: t.branch, worktreePath: t.worktreePath, prNumber: t.prNumber,
     })),
+    concurrencyRadar: projectConcurrencyRadar(mainRoot, { currentWorkRoot: workRoot }),
     inputs: { issues: fetchedIssues, prs: fetchedPrs, milestones: graph.milestones ?? [], unknown: graph.unknown, reuseExistingPr, issueGraph: analyzeIssueDependencies(fetchedIssues), graph },
   }
 }
@@ -598,7 +600,9 @@ export async function handleStart(opts, roots) {
     return emitBlockedStart(opts, authCheck)
   }
 
-  const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, { caseType, commits: state.commits })
+  const slotChk = await checkStartMainCleanAndSlot(roots.mainRoot, {
+    caseType, commits: state.commits, creatingIsolatedWorktree: state.commits > 0 && caseType >= 2,
+  })
   if (!slotChk.ok) {
     return emitBlockedStart(opts, slotChk)
   }
@@ -744,14 +748,21 @@ export async function handleStart(opts, roots) {
         { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
         `2. 在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,
       ]
+  const startRadar = projectConcurrencyRadar(roots.mainRoot, { currentTaskId: taskId, currentWorkRoot: implAbs, currentFiles: filesList, baseBranch, baseSha })
+  const startWarnings = [
+    ...(slotChk.dirtyMainWarning ? [slotChk.dirtyMainWarning] : []),
+    ...(startRadar.warnings ?? []),
+  ]
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(withNextSteps({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, nextTier2, { repoRoot: roots.mainRoot }), null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(withNextSteps({ ...ledger, depsMount: depMount, migratedDocs, concurrencyRadar: startRadar, ...(startWarnings.length > 0 ? { warnings: startWarnings } : {}), ...(createdIssue ? { createdIssue } : {}) }, nextTier2, { repoRoot: roots.mainRoot }), null, 2)}\n`)
   } else {
     if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
     process.stdout.write(`任务 ${taskId} 已就绪（Tier 2 Worktree 模式${isPlanning ? '·规划隔离' : ''}）：\n`)
     process.stdout.write(`- 实施位: ${implRel}（分支: ${branch}，依赖模式: ${depMount.mode}）\n`)
     if (migratedDocs.length > 0) process.stdout.write(`- 已迁入规划文档: ${migratedDocs.join(', ')}\n`)
     process.stdout.write(`- 角色: ${role} | 基线: ${baseBranch}@${(baseSha ?? '').slice(0, 7)}\n`)
+    for (const w of startWarnings) process.stdout.write(`- [提醒] ${w.message}\n`)
+    for (const rl of formatConcurrencyRadarLines(startRadar)) process.stdout.write(`${rl}\n`)
     if (Array.isArray(state.driftWarnings)) {
       for (const w of state.driftWarnings) process.stdout.write(`- [提醒] ${w.message}\n`)
     }

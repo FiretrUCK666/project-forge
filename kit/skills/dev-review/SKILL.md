@@ -44,7 +44,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> |
 
 ## 零预设工具分级实证策略与上下文装配
 
-`review-context.mjs` 按变更文件反查 `docs/feature-map.json` 切片（缺损时 Fail-Soft 轻量预填）与依赖逆邻域，注入受波及 `businessFlows`、相邻模块接口、运行时能力与跨 `>= 2` PR `verify.scratch-used` 提示。**严禁跳过业务流实证直看 `--include-diff`**：
+`review-context.mjs` 按变更文件反查 `docs/feature-map.json` 切片（缺损时 Fail-Soft 轻量预填）与依赖逆邻域，注入受波及 `businessFlows`、相邻模块接口、只读 `concurrencyRadar`、运行时能力与跨 `>= 2` PR `verify.scratch-used` 提示；评审同时校验前提合理性与 Deletion Test（避免平行重复抽象）。**严禁跳过业务流实证直看 `--include-diff`**：
 1. **已登记健康工具优先**：功能地图存在未过期工具时优先跑 `verify-tools.mjs run`；高风险过期（`BLOCKED_STALE_HIGH_RISK_TOOL`）硬阻断复用；
 2. **复用可用运行能力**：无工具或中风险过期时，复用本机/宿主运行时、无头浏览器、GUI 驱动或模拟器真测受波及业务流与模块边界；
 3. **仓外 `scratch/{taskId}/` 现写探针**：缺现成入口时在 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 现写一次性探针（不脏仓树，随 `cleanup`/`abort` 销毁，跨 `>= 2` PR 提示固化）；

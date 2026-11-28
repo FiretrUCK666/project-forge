@@ -37,7 +37,7 @@ import { collectTaskRuntimeSnapshot } from './flow-lifecycle-helpers.mjs'
 import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
 import {
   analyzeIssueClaimState, assertClaimOrMergeProvenance, collectMasterIssueCriteriaState,
-  evaluateMasterIssueCloseGuard, handleClaim, handleRelease,
+  evaluateMasterIssueCloseGuard, handleClaim, handleRelease, releaseGitClaimLease,
 } from './flow-merge-claim.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
 import { guardSandboxPreSubmitOrFinalize } from './flow-sandbox.mjs'
@@ -254,6 +254,8 @@ export async function syncPostMergeTargets({
   ].filter(Boolean)
   const { prCommentBody, issueCommentBody } = buildMergeComments({
     prNumber: ledger.prNumber ?? null,
+    prUrl: ledger.prUrl ?? null,
+    prRefPrefix: backend?.prRefPrefix ?? '#',
     branch: ledger.branch,
     baseBranch,
     headSha: currentHead,
@@ -690,6 +692,7 @@ export async function handleMerge(opts, roots) {
     ledger.syncFailures = [...(Array.isArray(ledger.syncFailures) ? ledger.syncFailures : []), ...syncFailures]
   }
   await runLifecycleGovernHook({ stage: 'merge', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+  await releaseGitClaimLease(roots.mainRoot, taskId, { remoteUrls, role: ledger.role, opts }).catch(() => null)
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   markTriageConsumed(roots.mainRoot, { taskId, slug: ledger?.slug ?? null, terminal: true })
   const verifiedRemoteMerged = Boolean(

@@ -52,6 +52,7 @@ export class RemoteApiBackend {
     this.pushRemote = pushRemote
     this.mainRoot = mainRoot
     this.gitDir = gitDir
+    this.prRefPrefix = provider?.prRefPrefix ?? '#'
     this.capabilities = capabilities ?? provider?.capabilities ?? NONE_CAPABILITIES
     this.client = client ?? (pid === 'github'
       ? createGitHubClient({ cwd: mainRoot, repo: targetRepo, token })
@@ -81,7 +82,7 @@ export class RemoteApiBackend {
       action: takeover ? 'takeover' : 'claim',
       taskId, account, verifiedPlatformLogin, agent, actor, actorDisplay, branch,
       previousActor, previousAccount, previousVerifiedPlatformLogin, previousAgent,
-      reason, issues: issueList, prNumber, capabilities: this.capabilities,
+      reason, issues: issueList, prNumber, prRefPrefix: this.prRefPrefix, capabilities: this.capabilities,
     })
     const effectiveAgent = agent ?? actor ?? null
     const baseState = {

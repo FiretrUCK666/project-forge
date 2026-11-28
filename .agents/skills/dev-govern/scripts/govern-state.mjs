@@ -15,7 +15,8 @@ import {
   gitRun, gitStatusPorcelainZ, isMacOsJunkPath, posixPath, readJsonSafe,
   resolveDefaultBranch, writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
-import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { detectGitModeMarkers } from '../../lib/platform.mjs'
 import { applyIssuesToBackend, buildIssues } from '../../lib/escalation.mjs'
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { appendGovernSignal, inferSignalModule, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
@@ -458,6 +459,20 @@ export async function handleSampleCommits(workRoot, mainRoot, gitDir, isGit, opt
   return 0
 }
 
+function isLocalOnlyGovernRepo(rootDir) {
+  if (!rootDir) return true
+  try {
+    const gitDir = resolveGitDirFast(rootDir)
+    if (!gitDir) return true
+    const cfg = readGitConfigFast(gitDir, { systemMap: false })
+    const hasRemote = Boolean(cfg?.remoteText && cfg.remoteText.trim().length > 0)
+    const markers = detectGitModeMarkers(gitDir, { hasRemote })
+    return !hasRemote || Boolean(markers.localMode)
+  } catch {
+    return true
+  }
+}
+
 export function buildGovernNextSteps({ mode, opts, mainRoot, cluster, devProfile, findings = [], plan, reconcileSummary, findingsCount }) {
   const skills = resolveAvailableSkills(mainRoot)
   const nextSteps = []
@@ -502,7 +517,16 @@ export function buildGovernNextSteps({ mode, opts, mainRoot, cluster, devProfile
     }
     for (const c of cmds) nextSteps.push(`  $ ${c}`)
   } else if (opts.issues || mode === 'issues') {
-    nextSteps.push(opts.applyIssues ? 'GitHub issues created safely via UTF-8 --body-file.' : 'Review generated payloads; pass `--apply-issues` after confirming with user to create on GitHub.')
+    const localOnly = isLocalOnlyGovernRepo(mainRoot)
+    if (localOnly) {
+      nextSteps.push(opts.applyIssues
+        ? 'Local issues created via `flow.mjs issue`.'
+        : 'Review generated payloads; pass `--apply-issues` after confirming with user to record local issues via `flow.mjs issue create`.')
+    } else {
+      nextSteps.push(opts.applyIssues
+        ? 'Issues created safely via TaskBackend UTF-8 --body-file.'
+        : 'Review generated payloads; pass `--apply-issues` after confirming with user to create issues via TaskBackend (`flow.mjs issue create`).')
+    }
   } else {
     nextSteps.push('Run `plan` (`--plan-only`), `reconcile`, `audit --cluster`, or `sample` for rule-sinking.')
     if (count > 0 && !opts.baselineApplied && !opts.baselineSaved) {
@@ -589,13 +613,16 @@ export function formatTextReport(result) {
   }
 
   if (result.issues) {
+    const localOnly = isLocalOnlyGovernRepo(result.mainRoot || result.repoRoot)
     lines.push('', '--- Issue Payloads (TaskBackend / UTF-8 --body-file safe) ---')
     if (result.issues.length === 0) lines.push('  No actionable findings to convert into issues.')
     else {
       for (let i = 0; i < result.issues.length; i += 1) {
         const iss = result.issues[i]
         lines.push(`  Issue #${i + 1}: ${iss.title}`, `    Labels: ${iss.labels.join(', ')}`)
-        lines.push(`    Safe Command: GitHub write UTF-8 temp file + \`gh issue create --title "${iss.title.replace(/"/g, '\\"')}" --body-file <tmp.md>\` (local-only/generic-git: \`flow.mjs issue create\`)`)
+        lines.push(localOnly
+          ? `    Safe Command: \`node ".agents/skills/dev-flow/scripts/flow.mjs" issue create --title "${iss.title.replace(/"/g, '\\"')}" --body-file <tmp.md>\``
+          : `    Safe Command: \`node ".agents/skills/dev-flow/scripts/flow.mjs" issue create --title "${iss.title.replace(/"/g, '\\"')}" --body-file <tmp.md>\` (write UTF-8 temp file first)`)
       }
     }
   }

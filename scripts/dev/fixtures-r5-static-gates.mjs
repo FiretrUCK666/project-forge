@@ -164,7 +164,11 @@ export function registerR5StaticGatesCases(cases) {
 
       const badRes = await runEditGate({ mode: 'verify', dir, changed: true })
       const badRules = new Set(badRes.blockers.map((b) => b.ruleId))
-      for (const want of ['edit.mechanical-split-name', 'edit.circular-import', 'edit.line-squash-cheat']) {
+      const warnRules = new Set(badRes.warnings.map((w) => w.ruleId))
+      if (!warnRules.has('edit.mechanical-split-name')) {
+        return `反机械拆分门禁漏报 edit.mechanical-split-name warning：${JSON.stringify(badRes.warnings)}`
+      }
+      for (const want of ['edit.circular-import', 'edit.line-squash-cheat']) {
         if (!badRules.has(want)) return `反机械拆分门禁漏报 ${want}：${JSON.stringify(badRes.blockers)}`
       }
       if (badRes.blockers.filter((b) => b.ruleId === 'edit.line-squash-cheat').length !== 2) {

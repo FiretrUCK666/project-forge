@@ -73,7 +73,7 @@ export function checkStartAuthorSeparation(rootDir, docRels = [], implementerId,
   return { blocked: false }
 }
 
-export async function checkStartMainCleanAndSlot(mainRoot, { caseType, commits }) {
+export async function checkStartMainCleanAndSlot(mainRoot, { caseType, commits, creatingIsolatedWorktree = true }) {
   if (Number(caseType) < 2 || Number(commits) <= 0) {
     return enforceSlotBoundary({ mainRoot, implRoot: mainRoot, caseType, isDirtyMain: false, commits })
   }
@@ -92,6 +92,7 @@ export async function checkStartMainCleanAndSlot(mainRoot, { caseType, commits }
     caseType,
     isDirtyMain,
     commits,
+    creatingIsolatedWorktree,
   })
 }
 

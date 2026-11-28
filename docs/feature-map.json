@@ -392,6 +392,7 @@
         "kit/skills/lib/markdown-scan.mjs",
         "kit/skills/lib/session-orient.mjs",
         "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/session-topics.mjs",
         "kit/skills/lib/symbol-index.mjs",
         "kit/skills/dev-explore/SKILL.md"
       ],
@@ -485,6 +486,8 @@
         "kit/skills/dev-plan/SKILL.md",
         "kit/skills/lib/harness-context.mjs",
         "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/session-topics.mjs",
+        "kit/skills/lib/concurrency-radar.mjs",
         "kit/skills/lib/doc-approval.mjs",
         "kit/skills/lib/mutability.mjs",
         "kit/skills/lib/doc-plan-clarify.mjs",
@@ -609,7 +612,8 @@
         "scripts/dev/injections-data-w5-blind-fixes.mjs",
         "scripts/dev/fixtures-issue-quality.mjs",
         "scripts/dev/injections-data-issue-quality.mjs",
-        "scripts/dev/fixtures-iterate-hotspots.mjs"
+        "scripts/dev/fixtures-iterate-hotspots.mjs",
+        "scripts/dev/fixtures-s2-harness-multisession.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#八个技能分工与确定性阻断点"
@@ -685,6 +689,8 @@
         "kit/skills/dev-flow/scripts/flow-start-provenance.mjs",
         "kit/skills/lib/harness-context.mjs",
         "kit/skills/lib/session-state.mjs",
+        "kit/skills/lib/session-topics.mjs",
+        "kit/skills/lib/concurrency-radar.mjs",
         "kit/skills/lib/gate-enforcement.mjs",
         "kit/skills/lib/mutability.mjs"
       ],
@@ -760,7 +766,8 @@
         "scripts/dev/fixtures-multi-platform.mjs",
         "scripts/dev/injections-data-multi-platform.mjs",
         "scripts/dev/live-forge-e2e.mjs",
-        "scripts/dev/fixtures-iterate-hotspots.mjs"
+        "scripts/dev/fixtures-iterate-hotspots.mjs",
+        "scripts/dev/fixtures-s2-harness-multisession.mjs"
       ],
       "docAnchors": [
         "docs/TDD.md#5-八个内置技能与日常研发流转",
@@ -1053,6 +1060,7 @@
         "kit/skills/dev-iterate/scripts/iterate-plan.mjs",
         "kit/skills/dev-iterate/scripts/iterate-cycle.mjs",
         "kit/skills/lib/suite-inventory.mjs",
+        "kit/skills/lib/suite-runner.mjs",
         "kit/skills/dev-iterate/SKILL.md"
       ],
       "businessFlows": [

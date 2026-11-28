@@ -1,0 +1,538 @@
+/**
+ * survey-reentry.mjs —— 通用技能容器探测、`.pf-manifest.json`（v1/v2/v3）读取与重入失步诊断。
+ */
+
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import * as protocol from './protocol.mjs'
+// 「有内容才算痕迹」的判据与「工具产物归属」同一处，避免两条判据各写一份。
+const { discoverKitSkills, hasRealContent } = protocol
+import { DEFAULT_KIT_SKILLS_DIR, discoverCustomSkillsWithMirrors, listCustomContainers } from '../../kit/skills/lib/skill-discovery.mjs'
+import { isManagedPlanDoc } from '../../kit/skills/lib/doc-frontmatter.mjs'
+
+export { isManagedPlanDoc }
+import {
+  isMacMetadataName,
+  posixPath,
+  readTextSafe,
+  skillVersion,
+} from './text.mjs'
+import {
+  CODE_EXT,
+  SKIP_DIRS,
+  detectSkillKind,
+  isJunkFile,
+} from './survey-ecosystem.mjs'
+
+const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
+
+function scanManagedSkillDir(baseRel, root) {
+  const full = join(root, baseRel)
+  if (!existsSync(full)) return []
+  let entries = []
+  try {
+    entries = readdirSync(full, { withFileTypes: true })
+      .filter((e) => !isMacMetadataName(e.name))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  } catch { return [] }
+  const out = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const sub = join(full, entry.name)
+    if (!existsSync(join(sub, 'SKILL.md')) && !existsSync(join(sub, 'skill.md'))) continue
+    const meta = detectSkillKind(sub)
+    out.push({
+      dirName: entry.name,
+      name: meta?.skillMeta?.name || entry.name,
+      path: `${baseRel}/${entry.name}`,
+      ...(meta?.skillMeta?.summary ? { summary: meta.skillMeta.summary } : {}),
+      valid: meta?.skillMeta?.hasValidFrontmatter === true,
+    })
+  }
+  return out
+}
+
+export function detectLocalSkills(root) {
+  const kitNames = new Set(discoverKitSkills().map((s) => s.dirName))
+  const { customSkills, mirrorCopies } = discoverCustomSkillsWithMirrors(root, kitNames, null)
+  const mirrorSet = new Set(mirrorCopies.map((m) => m.path))
+  const mirrorMap = new Map(mirrorCopies.map((m) => [m.path, m.mirrorsOf]))
+  const found = []
+  for (const dir of listCustomContainers(root)) {
+    for (const item of scanManagedSkillDir(dir, root)) {
+      if (mirrorSet.has(item.path)) continue
+      found.push({
+        path: item.path,
+        name: item.name === item.dirName ? undefined : item.name,
+        ...(item.summary ? { summary: item.summary } : {}),
+        valid: item.valid,
+      })
+    }
+  }
+  for (const m of mirrorCopies) {
+    found.push({
+      path: m.path,
+      name: m.name,
+      ...(m.summary ? { summary: m.summary } : {}),
+      valid: m.valid,
+      isMirror: true,
+      mirrorsOf: mirrorMap.get(m.path),
+    })
+  }
+  if (found.length === 0 && customSkills.length > 0) {
+    return customSkills.map((s) => ({ path: s.path, name: s.name, summary: s.summary, valid: s.valid }))
+  }
+  return found
+}
+
+function hashBufferMatchesNormalized(buf, expectedHash) {
+  if (!buf.includes(13)) {
+    return createHash('sha256').update(buf).digest('hex') === expectedHash
+  }
+  const head = buf.length > 4096 ? buf.subarray(0, 4096) : buf
+  if (!head.includes(0)) {
+    if (createHash('sha256').update(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1').digest('hex') === expectedHash) return true
+  }
+  return createHash('sha256').update(buf).digest('hex') === expectedHash
+}
+
+function hashMatchesNormalized(filePath, expectedHash, cachedBuf = null) {
+  try {
+    const buf = cachedBuf ?? readFileSync(filePath)
+    return hashBufferMatchesNormalized(buf, expectedHash)
+  } catch {
+    return false
+  }
+}
+
+function listInstalledSkillDirNames(root, textByRel = null) {
+  if (textByRel && textByRel.size > 0) {
+    const dirs = new Set()
+    for (const rel of textByRel.keys()) {
+      if (!rel.startsWith('.agents/skills/')) continue
+      const parts = rel.split('/')
+      if (parts.length === 4 && (parts[3] === 'SKILL.md' || parts[3] === 'skill.md')) {
+        dirs.add(parts[2])
+      }
+    }
+    return [...dirs].sort()
+  }
+  const full = join(root, '.agents', 'skills')
+  if (!existsSync(full)) return []
+  let entries = []
+  try {
+    entries = readdirSync(full, { withFileTypes: true })
+  } catch { return [] }
+  const out = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || isMacMetadataName(entry.name)) continue
+    const sub = join(full, entry.name)
+    if (existsSync(join(sub, 'SKILL.md')) || existsSync(join(sub, 'skill.md'))) out.push(entry.name)
+  }
+  return out.sort()
+}
+
+export function detectKit(root, { kitDir, rawFiles } = {}) {
+  const skillsRoot = join(root, '.agents', 'skills')
+  const manifestFull = join(root, PF_MANIFEST_REL)
+  const cachedManifestText = rawFiles?.textByRel?.get(PF_MANIFEST_REL)
+  const manifestExists = cachedManifestText !== undefined || existsSync(manifestFull)
+  const effectiveKitDir = kitDir ? resolve(kitDir) : DEFAULT_KIT_SKILLS_DIR
+  const kitSkillNames = (() => {
+    try {
+      return readdirSync(effectiveKitDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && e.name !== 'lib' && !isMacMetadataName(e.name)
+          && (existsSync(join(effectiveKitDir, e.name, 'SKILL.md')) || existsSync(join(effectiveKitDir, e.name, 'skill.md'))))
+        .map((e) => e.name)
+        .sort()
+    } catch { return [] }
+  })()
+  const kitSkillSet = new Set(kitSkillNames)
+
+  const rawText = manifestExists ? (cachedManifestText ?? readTextSafe(manifestFull)) : undefined
+  let manifest = null
+  if (manifestExists) {
+    try { manifest = rawText ? JSON.parse(rawText) : null } catch { manifest = null }
+  }
+  const manifestValid = Boolean(
+    manifestExists
+    && manifest
+    && typeof manifest === 'object'
+    && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2 || manifest.schemaVersion === 3)
+    && manifest.files
+    && typeof manifest.files === 'object'
+    && !Array.isArray(manifest.files),
+  )
+
+  const installedSkills = listInstalledSkillDirNames(root, rawFiles?.textByRel ?? null)
+  const manifestManagedDirs = new Set()
+  if (manifestValid) {
+    for (const key of Object.keys(manifest.files)) {
+      const clean = posixPath(key).replace(/^\.agents\/skills\//, '').replace(/^\/+/, '')
+      const top = clean.split('/')[0]
+      if (top && top !== 'lib') manifestManagedDirs.add(top)
+    }
+  }
+  const managedSkills = kitSkillNames.filter((k) => (
+    installedSkills.includes(k) && (!manifestValid || manifestManagedDirs.has(k))
+  ))
+  const customDiscovery = discoverCustomSkillsWithMirrors(root, kitSkillSet, manifestValid ? manifest : null, { knownDirs: rawFiles?.dirs ?? null })
+  const mapSkillRec = ({ name, description, summary, path, container, valid, mirrorsOf }) => ({
+    name,
+    ...(description ? { description } : {}),
+    ...(summary ? { summary } : {}),
+    path,
+    container,
+    valid,
+    ...(mirrorsOf ? { mirrorsOf } : {}),
+  })
+  const customSkills = customDiscovery.customSkills.map(mapSkillRec)
+  const mirrorCopies = customDiscovery.mirrorCopies.map(mapSkillRec)
+
+  if (!manifestExists) {
+    return {
+      present: installedSkills.length > 0,
+      manifestExists: false,
+      manifestValid: false,
+      corrupted: false,
+      manifestPath: undefined,
+      schemaVersion: undefined,
+      tier: undefined,
+      forgeVersion: undefined,
+      installedAt: undefined,
+      filesCount: 0,
+      missingFiles: [],
+      modifiedFiles: [],
+      disabledSkills: [],
+      removedFiles: [],
+      customizedFiles: [],
+      removedAgentsRegions: [],
+      versionMismatch: false,
+      drifted: false,
+      installedSkills,
+      managedSkills,
+      customSkills,
+      mirrorCopies,
+      uninstalledKitSkills: [],
+      kitSkillsCovered: managedSkills,
+      agentsRegions: [],
+    }
+  }
+
+  if (!manifestValid) {
+    return {
+      present: true,
+      manifestExists: true,
+      manifestValid: false,
+      corrupted: true,
+      manifestPath: PF_MANIFEST_REL,
+      schemaVersion: manifest?.schemaVersion,
+      tier: manifest?.tier,
+      forgeVersion: manifest?.forgeVersion,
+      installedAt: manifest?.installedAt,
+      filesCount: 0,
+      missingFiles: [],
+      modifiedFiles: [],
+      disabledSkills: [],
+      removedFiles: [],
+      customizedFiles: [],
+      removedAgentsRegions: [],
+      versionMismatch: false,
+      drifted: true,
+      installedSkills,
+      managedSkills,
+      customSkills,
+      mirrorCopies,
+      uninstalledKitSkills: kitSkillNames.filter((k) => !installedSkills.includes(k)),
+      kitSkillsCovered: managedSkills,
+      agentsRegions: [],
+    }
+  }
+
+  const disabledSkills = Array.isArray(manifest.disabledSkills)
+    ? [...new Set(manifest.disabledSkills.map(String))].sort()
+    : []
+  const disabledSet = new Set(disabledSkills)
+  const removedFiles = Array.isArray(manifest.removedFiles)
+    ? [...new Set(manifest.removedFiles.map((p) => posixPath(p)))].sort()
+    : (manifest.removedFiles && typeof manifest.removedFiles === 'object'
+        ? Object.keys(manifest.removedFiles).map((p) => posixPath(p)).sort()
+        : [])
+  const removedSet = new Set(removedFiles)
+  const customizedFiles = manifest.customizedFiles && typeof manifest.customizedFiles === 'object' && !Array.isArray(manifest.customizedFiles)
+    ? Object.keys(manifest.customizedFiles).map((p) => posixPath(p)).sort()
+    : []
+  const customizedSet = new Set(customizedFiles)
+  const removedAgentsRegions = Array.isArray(manifest.removedAgentsRegions)
+    ? [...new Set(manifest.removedAgentsRegions.map(String))].sort()
+    : []
+
+  const missingFiles = []
+  const modifiedFiles = []
+  const fileKeys = Object.keys(manifest.files)
+  for (const rel of fileKeys) {
+    const entry = manifest.files[rel]
+    const normRel = posixPath(rel)
+    const topSkill = normRel.split('/')[0]
+    if (removedSet.has(normRel) || disabledSet.has(topSkill)) continue
+    const fullRel = normRel.startsWith('.agents/skills/') ? normRel : `.agents/skills/${normRel}`
+    const cachedBuf = rawFiles?.bufByRel?.get(fullRel) ?? null
+    const abs = normRel.startsWith('.agents/skills/')
+      ? join(root, normRel)
+      : join(skillsRoot, normRel)
+    if (!cachedBuf && !existsSync(abs)) {
+      missingFiles.push(normRel)
+      continue
+    }
+    if (customizedSet.has(normRel)) continue
+    const expectedHash = typeof entry === 'string' ? entry : entry?.sha256
+    if (expectedHash && !hashMatchesNormalized(abs, expectedHash, cachedBuf)) {
+      modifiedFiles.push(normRel)
+    }
+  }
+
+  const skillRootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+  const expectedForgeVersion = skillVersion(readTextSafe(join(skillRootDir, 'SKILL.md')))
+  const versionMismatch = Boolean(
+    expectedForgeVersion
+    && manifest.forgeVersion
+    && manifest.forgeVersion !== expectedForgeVersion,
+  )
+  const agentsRegions = manifest.agentsRegions && typeof manifest.agentsRegions === 'object'
+    ? Object.keys(manifest.agentsRegions)
+    : []
+  const uninstalledKitSkills = kitSkillNames.filter((k) => (
+    !installedSkills.includes(k)
+    && !disabledSet.has(k)
+    && !removedSet.has(`${k}/SKILL.md`)
+    && !removedSet.has(k)
+  ))
+
+  return {
+    present: true,
+    manifestExists: true,
+    manifestValid: true,
+    corrupted: false,
+    manifestPath: PF_MANIFEST_REL,
+    schemaVersion: manifest.schemaVersion,
+    forgeVersion: manifest.forgeVersion,
+    installedAt: manifest.installedAt,
+    filesCount: fileKeys.length,
+    missingFiles,
+    modifiedFiles,
+    disabledSkills,
+    removedFiles,
+    customizedFiles,
+    removedAgentsRegions,
+    versionMismatch,
+    drifted: missingFiles.length > 0 || modifiedFiles.length > 0 || versionMismatch || uninstalledKitSkills.length > 0,
+    installedSkills,
+    managedSkills,
+    customSkills,
+    mirrorCopies,
+    uninstalledKitSkills,
+    kitSkillsCovered: managedSkills,
+    agentsRegions,
+  }
+}
+
+const TDD_SOURCE_PATH_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|mts|cts|py|go|rs|java|kt|kts|rb|php|cs|c|cpp|cc|h|hpp|m|mm|swift|sh|ps1|json|ya?ml|toml|sql|vue|svelte)$/i
+const TDD_IGNORED_PREFIXES = ['docs/', 'node_modules/', '.worktrees/', '.git/']
+const UNREGISTERED_SKIP_TOP_DIRS = new Set([
+  ...SKIP_DIRS,
+  '.git', '.agents', '.github', '.vscode', '.worktrees', '.husky', '.changeset',
+  'docs', 'scripts', 'tests', 'test', '__tests__',
+])
+
+export function detectTddStalePaths(root, tddRel, preReadText = undefined, relSet = null) {
+  if (!tddRel) return []
+  const text = preReadText !== undefined ? preReadText : readTextSafe(join(root, tddRel))
+  if (!text) return []
+  const source = text.replace(/\r\n/g, '\n')
+  const snippets = []
+  for (const m of source.matchAll(/`([^`\n]+)`/g)) snippets.push(m[1])
+  for (const block of source.matchAll(/```[a-zA-Z0-9_-]*\n([\s\S]*?)```/g)) {
+    for (const line of block[1].split('\n')) {
+      snippets.push(line.replace(/(?:^|\s)#.*$/, ''))
+    }
+  }
+  const stale = new Set()
+  for (const chunk of snippets) {
+    for (const rawToken of chunk.split(/[\s,;()]+/)) {
+      const clean = rawToken.trim().replace(/^['"]|['"]$/g, '').replace(/^\.\//, '')
+      if (!clean || clean.endsWith('/') || !clean.includes('/')) continue
+      if (/^(?:https?:|mailto:|git@|ssh:|~\/)/i.test(clean)) continue
+      if (/^[A-Za-z]:[\\/]/.test(clean) || clean.startsWith('/')) continue
+      if (clean.includes('..') || /[<>*?{}$]/.test(clean)) continue
+      if (TDD_IGNORED_PREFIXES.some((p) => clean.startsWith(p))) continue
+      if (!TDD_SOURCE_PATH_EXT.test(clean)) continue
+      if (!(relSet?.has(clean) || existsSync(join(root, clean)))) stale.add(clean)
+    }
+  }
+  return [...stale].sort()
+}
+
+function dirContainsFiles(root, dir, { codeOnly = false, depth = 0 } = {}) {
+  if (depth > 4) return false
+  let entries = []
+  try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return false }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink() || isMacMetadataName(entry.name)) continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name) || entry.name === '.git' || entry.name === '.worktrees') continue
+      if (dirContainsFiles(root, full, { codeOnly, depth: depth + 1 })) return true
+    } else if (entry.isFile()) {
+      const rel = relative(root, full).replace(/\\/g, '/')
+      if (codeOnly ? CODE_EXT.test(entry.name) : !isJunkFile(rel)) return true
+    }
+  }
+  return false
+}
+
+export function collectTopModuleDirs(root, workspace, relFiles = null) {
+  const candidates = []
+  if (workspace?.declared && (workspace.packages?.length ?? 0) > 0) {
+    for (const p of workspace.packages) candidates.push(p)
+  } else if (Array.isArray(relFiles) && relFiles.length > 0) {
+    const found = new Set()
+    for (const rel of relFiles) {
+      if (!CODE_EXT.test(rel)) continue
+      const parts = rel.split('/')
+      if (parts.length < 2) continue
+      const top = parts[0]
+      if (top === 'src') {
+        if (parts.length >= 3 && !SKIP_DIRS.has(parts[1])) found.add(`src/${parts[1]}`)
+      } else if (!top.startsWith('.') && !UNREGISTERED_SKIP_TOP_DIRS.has(top)) {
+        found.add(top)
+      }
+    }
+    return [...found].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  } else {
+    if (existsSync(join(root, 'src'))) {
+      let entries = []
+      try { entries = readdirSync(join(root, 'src'), { withFileTypes: true }) } catch {}
+      for (const entry of entries) {
+        if (!entry.isDirectory() || isMacMetadataName(entry.name) || SKIP_DIRS.has(entry.name)) continue
+        const full = join(root, 'src', entry.name)
+        if (dirContainsFiles(root, full, { codeOnly: true })) candidates.push(`src/${entry.name}`)
+      }
+    }
+    let entries = []
+    try { entries = readdirSync(root, { withFileTypes: true }) } catch {}
+    for (const entry of entries) {
+      if (!entry.isDirectory() || isMacMetadataName(entry.name) || entry.name === 'src') continue
+      if (UNREGISTERED_SKIP_TOP_DIRS.has(entry.name)) continue
+      if (entry.name.startsWith('.')) continue
+      const full = join(root, entry.name)
+      if (dirContainsFiles(root, full, { codeOnly: true })) candidates.push(entry.name)
+    }
+  }
+  return [...new Set(candidates)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+const RUNNER_TO_ECOSYSTEM = [
+  { eco: 'python', re: /\b(?:pytest|uv\s+run\s+pytest|poetry\s+run\s+pytest|python3?\s+-m\s+(?:unittest|pytest))\b/ },
+  { eco: 'rust', re: /\bcargo\s+(?:test|build|clippy|check)\b/ },
+  { eco: 'go', re: /\bgo\s+(?:test|build|vet)\b/ },
+  { eco: 'java', re: /\b(?:mvn|\.\/gradlew|gradle)\s+(?:test|build|check|package)\b/ },
+  { eco: 'dotnet', re: /\bdotnet\s+(?:test|build)\b/ },
+  { eco: 'swift', re: /\bswift\s+(?:test|build)\b/ },
+]
+
+function extractProfileAndBuildCommands(agentsText) {
+  const lines = String(agentsText ?? '').replace(/\r\n/g, '\n').split('\n')
+  const hasHeadings = lines.some((l) => /^##\s+/.test(l))
+  const cmds = []
+  let inRelevant = !hasHeadings
+  let inFence = false
+  for (const line of lines) {
+    if (/^##\s+/.test(line)) {
+      inRelevant = /^##\s+(?:Dev Profile|环境与构建验证|构建与验证|构建与测试)/i.test(line.trim())
+      inFence = false
+      continue
+    }
+    if (!inRelevant) continue
+    if (/^```/.test(line.trim())) { inFence = !inFence; continue }
+    if (!inFence) continue
+    const code = line.replace(/(?:^|\s)#.*$/, '').trim()
+    if (!code || code.startsWith('#')) continue
+    cmds.push(code)
+  }
+  return cmds
+}
+
+function hasManagedPlanContent(root, list) {
+  if (!hasRealContent(list)) return false
+  if (!root) return true
+  return (list ?? []).some((rel) => {
+    const clean = String(rel ?? '').replace(/\\/g, '/')
+    if (!clean || clean.endsWith('/.gitkeep')) return false
+    const text = readTextSafe(join(root, clean)) ?? ''
+    return isManagedPlanDoc(clean, text)
+  })
+}
+
+export function isReentryProject(docs, kit, root = null) {
+  return Boolean(
+    kit?.manifestExists
+    || (docs?.agentsMarkers?.marks ?? 0) > 0
+    || docs?.tdd
+    || hasManagedPlanContent(root, docs?.specsDirContent)
+    || hasManagedPlanContent(root, docs?.todoDirContent)
+    || hasManagedPlanContent(root, docs?.prdDirContent),
+  )
+}
+
+export function detectStaleAgentScripts({
+  agentsText,
+  agentClaims,
+  ecosystem,
+  commandsByEcosystem,
+  taskEntryMeta,
+}) {
+  const stale = new Set()
+  const pkgScripts = Array.isArray(ecosystem?.packageScripts) ? new Set(ecosystem.packageScripts) : null
+  const ecoKinds = new Set((ecosystem?.kinds ?? []).filter((k) => k !== 'unknown' && k !== 'empty' && k !== 'docs-only'))
+  const hasBuckets = Boolean(commandsByEcosystem && Object.keys(commandsByEcosystem).length > 0)
+
+  if (pkgScripts) {
+    for (const name of (agentClaims?.scripts ?? [])) {
+      if (!pkgScripts.has(name)) stale.add(name)
+    }
+  } else if (ecoKinds.size > 0 && !ecoKinds.has('node')) {
+    for (const name of (agentClaims?.scripts ?? [])) {
+      stale.add(name)
+    }
+  }
+
+  const cmdLines = extractProfileAndBuildCommands(agentsText)
+  for (const code of cmdLines) {
+    for (const m of code.matchAll(/\bmake\s+([A-Za-z0-9_.-]+)/g)) {
+      const target = m[1]
+      if (!target.startsWith('-') && taskEntryMeta?.makeTargets?.size > 0 && !taskEntryMeta.makeTargets.has(target)) {
+        stale.add(`make ${target}`)
+      }
+    }
+    for (const m of code.matchAll(/\bjust\s+([A-Za-z0-9_-]+)/g)) {
+      const recipe = m[1]
+      if (!recipe.startsWith('-') && taskEntryMeta?.justRecipes?.size > 0 && !taskEntryMeta.justRecipes.has(recipe)) {
+        stale.add(`just ${recipe}`)
+      }
+    }
+    if (hasBuckets && ecoKinds.size > 0) {
+      for (const rule of RUNNER_TO_ECOSYSTEM) {
+        const hit = rule.re.exec(code)
+        if (!hit) continue
+        if (!ecoKinds.has(rule.eco) && !commandsByEcosystem[rule.eco]) {
+          stale.add(hit[0])
+        }
+      }
+    }
+  }
+
+  return [...stale].sort()
+}

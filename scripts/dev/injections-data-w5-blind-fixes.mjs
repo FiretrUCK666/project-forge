@@ -1,0 +1,77 @@
+/**
+ * injections-data-w5-blind-fixes.mjs —— Wave 5 真实开源仓盲测修复故障注入表（I417–I424）。
+ */
+
+export const INJECTIONS_W5_BLIND_FIXES = [
+  {
+    id: 'I417',
+    what: 'C1: repo-map.mjs 跳过磁盘存在性核对，重新盲收未构建 package.json 僵尸入口',
+    file: 'kit/skills/dev-explore/scripts/repo-map.mjs',
+    alsoDropIn: ['.agents/skills/dev-explore/scripts/repo-map.mjs'],
+    from: "  if (isRegularFileRel(root, combined)) return combined",
+    to: "  if (combined) return combined",
+    expect: 'W5 C1',
+  },
+  {
+    id: 'I418',
+    what: 'C2: edit-gate.mjs 放开存量大文件 >80 行净增硬阻断，导致失控膨胀逃逸',
+    file: 'kit/skills/dev-edit/scripts/edit-gate.mjs',
+    alsoDropIn: ['.agents/skills/dev-edit/scripts/edit-gate.mjs'],
+    from: "        if (netGrowth > BROWNFIELD_GROWTH_LIMIT) {",
+    to: "        if (false && netGrowth > BROWNFIELD_GROWTH_LIMIT) {",
+    expect: 'W5 C2',
+  },
+  {
+    id: 'I419',
+    what: 'C2: edit-gate.mjs 关闭存量大文件棘轮基线比对，局部 <=80 行修改仍触发硬阻断',
+    file: 'kit/skills/dev-edit/scripts/edit-gate.mjs',
+    alsoDropIn: ['.agents/skills/dev-edit/scripts/edit-gate.mjs'],
+    from: "      if (baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {",
+    to: "      if (false && baseLineCount !== null && baseLineCount > 800 && !isUntouchedOnMain) {",
+    expect: 'W5 C2',
+  },
+  {
+    id: 'I420',
+    what: 'C3: review.mjs 关闭手写 AGENTS.md + 已装 kit 场景下的 Dev Profile 缺失阻断',
+    file: 'scripts/review.mjs',
+    from: "        if (kitInstalled) {",
+    to: "        if (false && kitInstalled) {",
+    expect: 'W5 C3',
+  },
+  {
+    id: 'I421',
+    what: 'C3: credential-scan.mjs 退化为按文件名无条件报 .npmrc，无害工作区配置再次误报',
+    file: 'kit/skills/lib/credential-scan.mjs',
+    alsoDropIn: ['.agents/skills/lib/credential-scan.mjs'],
+    from: "  if (isNpmrcFile(name)) {\n    if (typeof contentText !== 'string') return true\n    return !isHarmlessNpmrcContent(contentText)\n  }",
+    to: "  if (isNpmrcFile(name)) {\n    return true\n  }",
+    expect: 'W5 C3',
+  },
+  {
+    id: 'I422',
+    what: 'C4: suite-inventory.mjs 禁用 TypeScript 项目识别，纯 TS 仓退回写入 .mjs 测试',
+    file: 'kit/skills/lib/suite-inventory.mjs',
+    alsoDropIn: ['.agents/skills/lib/suite-inventory.mjs'],
+    from: "  const isTypeScript = stack === 'node' ? detectTypeScriptProject(repoRoot, files, dirRel) : false",
+    to: "  const isTypeScript = false",
+    expect: 'W5 C4',
+  },
+  {
+    id: 'I423',
+    what: 'C4: workflow-helpers.mjs 摘除 buildSubmitNextSteps 的独立审查角色交接硬提示',
+    file: 'kit/skills/lib/workflow-helpers.mjs',
+    alsoDropIn: ['.agents/skills/lib/workflow-helpers.mjs'],
+    from: "      text: `【须派发独立审查子代理/新会话，严禁在当前实现上下文自跑】node \".agents/skills/dev-review/scripts/review-pack.mjs\" --task ${taskId} --round ${nextRound}`,",
+    to: "      text: `node \".agents/skills/dev-review/scripts/review-pack.mjs\" --task ${taskId} --round ${nextRound}`,",
+    expect: 'W5 C4',
+  },
+  {
+    id: 'I424',
+    what: 'C4: doc-plan.mjs 摘除 audit 指向 critique-pass 的独立子代理角色交接硬提示',
+    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
+    alsoDropIn: ['.agents/skills/dev-plan/scripts/doc-plan.mjs'],
+    from: "            { skill: 'dev-plan', text: `2. 独立只读 Critique 通过后执行【须派发独立只读子代理/新会话，严禁在当前实现/规划上下文自跑】：node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" critique-pass --file \"${res.file}\" --reviewer <criticId> --round 1` },",
+    to: "            { skill: 'dev-plan', text: `2. node \".agents/skills/dev-plan/scripts/doc-plan.mjs\" critique-pass --file \"${res.file}\" --reviewer <criticId> --round 1` },",
+    expect: 'W5 C4',
+  },
+]

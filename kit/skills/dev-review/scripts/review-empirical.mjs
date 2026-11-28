@@ -1,0 +1,752 @@
+/**
+ * review-empirical.mjs -- Empirical-first & two-phase fault-injection state machine
+ * gating `--include-diff` across --task, --pr, --local, --staged, and --base modes.
+ *
+ * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
+ */
+
+import { printNextStep } from '../../lib/cli.mjs'
+import { computeWorktreeEnv, gitRun, posixPath } from '../../lib/git.mjs'
+import { hasExecutableCodeMutation } from '../../lib/gate-enforcement.mjs'
+import { updateTaskLedger } from '../../lib/ledger.mjs'
+import { CODE_EXT_RE } from '../../lib/static-gates.mjs'
+import {
+  determineWorkflowPolicy, buildE2eObservation, hasRepoCiWorkflow, hasValidE2eObservationOnHead,
+  readVerificationEvidence, resolveScopedVerificationGate, runLowRiskDocStaticCheck, validateE2eEvidenceText,
+} from '../../lib/workflow-policy.mjs'
+import { evaluateStoredVisualEvidence, mergeArtifactRecords, stageAndSyncTaskArtifacts } from '../../lib/empirical-artifacts.mjs'
+import { EXIT } from './review-diff.mjs'
+import {
+  buildModeTargetFlags, buildUnblockCommands, checkDirtyFaultResidueBeforeSync,
+  checkUntrustedBeforeExec, collectDevProfileEmpiricalCmds, computeCleanBaselineFingerprint,
+  computeWorkspaceFingerprint, emitGateBlock, getEffectiveStatusEntries, handleEmpiricalE2eFailure,
+  hasPendingFaultInReceipt, isSameScopeContext, readReceipt, recordMechanicalPack,
+  resolveAndValidateE2eEvidenceInput, resolveArtifactAndVisualInput, resolveEmpiricalReceiptPath,
+  runCommandList, sanitizeCmdTemplate, writeReceipt,
+} from './review-empirical-state.mjs'
+
+export {
+  checkDirtyFaultResidueBeforeSync,
+  collectDevProfileEmpiricalCmds,
+  computeWorkspaceFingerprint,
+  emitGateBlock,
+  getEffectiveStatusEntries,
+  recordMechanicalPack,
+}
+
+function hasSubstantiveStoredObservation(holder, headSha) {
+  if (!hasValidE2eObservationOnHead(holder, headSha)) return false
+  const obs = holder?.e2eObservation
+  if (obs?.shallowRejected) return false
+  return validateE2eEvidenceText(obs?.summary ?? '').ok
+}
+
+function isAllFourDevProfileNone(profile) {
+  const exp = profile?.explicitNone
+  const hasNone = (k) => (exp instanceof Set ? exp.has(k) : (Array.isArray(exp) && exp.includes(k)))
+  return ['quick-test', 'full-test', 'smoke-verify', 'merge-gate'].every(hasNone)
+}
+
+export function computeEmpiricalRequirements({
+  diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null, explicitCmds = [], repoRoot = null,
+}) {
+  const allFiles = [...new Set([...(diff?.files ?? []).map((f) => f.file), ...(diff?.untracked ?? [])])]
+  const isEmptyDiff = allFiles.length === 0
+  const ownArchived = [
+    task?.archivedTodoFile, task?.archivedSpecFile, task?.archivedPrdFile,
+    ...(task?.todoFile?.startsWith('docs/archive/') ? [task.todoFile] : []),
+    ...(task?.specFile?.startsWith('docs/archive/') ? [task.specFile] : []),
+    ...(task?.prdFile?.startsWith('docs/archive/') ? [task.prdFile] : []),
+  ].filter(Boolean)
+
+  const policy = determineWorkflowPolicy({
+    changedFiles: allFiles,
+    ownArchived,
+    caseType: task?.caseType ?? 3,
+    highRiskGlobs: effectiveProfile?.['high-risk'] ?? [],
+    doNotEditGlobs: effectiveProfile?.['do-not-edit'] ?? [],
+    gateWeakeningHits: gateWeakenedHits,
+    visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
+    diffBytes: diff?.bytes ?? 0,
+    repoRoot,
+    hasCiWorkflow: repoRoot ? hasRepoCiWorkflow(repoRoot) : false,
+    profile: {
+      smokeVerify: effectiveProfile?.['smoke-verify']?.[0],
+      explicitNone: effectiveProfile?.explicitNone,
+    },
+  })
+  const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
+  const hasCodeFiles = allFiles.some((f) => CODE_EXT_RE.test(f))
+  const isPureDocsNoneRepo = !isEmptyDiff && isAllFourDevProfileNone(effectiveProfile) && !hasCodeFiles
+  const extraCmds = (Array.isArray(explicitCmds) ? explicitCmds : [explicitCmds]).map((s) => String(s ?? '').trim()).filter(Boolean)
+  const scopedGate = isLowRiskPureDoc
+    ? { scoped: false, affectedStacks: [], affectedPackages: [] }
+    : resolveScopedVerificationGate({ repoRoot, changedFiles: allFiles, profile: effectiveProfile })
+  let autoCommands = [...new Set(extraCmds)]
+  let hasDevProfileTestCmds = false
+  let scopedSkippedCommands = []
+  if (!isLowRiskPureDoc) {
+    const devCmds = collectDevProfileEmpiricalCmds(effectiveProfile, { scopedGate })
+    hasDevProfileTestCmds = devCmds.hasDevProfileTestCmds
+    scopedSkippedCommands = devCmds.skippedCommands
+    const toolAutoRaw = (reviewContext?.healthyToolCommands ?? []).filter(Boolean)
+    const toolAutoCmds = scopedGate.scoped ? scopedGate.filterCommands(toolAutoRaw).kept : toolAutoRaw
+    const baseAuto = devCmds.autoCommands.length > 0 ? devCmds.autoCommands : toolAutoCmds
+    autoCommands = [...new Set([...baseAuto, ...extraCmds])]
+  }
+  const runtimeTouched = (behavioralGate?.runtimeFilesTouched?.length ?? 0) > 0
+  const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
+
+  const empiricalRequired = !isEmptyDiff && !isLowRiskPureDoc
+  const faultRequired = !isEmptyDiff && !isLowRiskPureDoc && Boolean(policy.faultInjectionRequired) && (runtimeTouched || smokeRequired) && !policy.smokeExplicitNone
+  const visualCheckRequired = !isEmptyDiff && Boolean(policy.visualCheckRequired || behavioralGate?.empiricalVisualCheckRequired)
+  const businessFlowEmpiricalRequired = !isEmptyDiff && !isLowRiskPureDoc && runtimeTouched && !policy.smokeExplicitNone
+  const e2eObservationRequired = !isEmptyDiff && !isLowRiskPureDoc && (smokeRequired || visualCheckRequired || businessFlowEmpiricalRequired)
+
+  return {
+    isEmptyDiff,
+    isLowRiskPureDoc,
+    isPureDocsNoneRepo,
+    staticDocCheckRequired: policy.staticDocCheckRequired || isPureDocsNoneRepo,
+    changedFiles: allFiles,
+    riskTier: policy.riskTier,
+    autoCommands,
+    scopedGate: {
+      scoped: scopedGate.scoped,
+      affectedStacks: scopedGate.affectedStacks,
+      affectedPackages: scopedGate.affectedPackages,
+      skippedCommands: scopedSkippedCommands,
+    },
+    hasDevProfileTestCmds,
+    empiricalRequired,
+    faultRequired,
+    visualCheckRequired,
+    smokeRequired,
+    businessFlowEmpiricalRequired,
+    e2eObservationRequired,
+    hasPresetVerificationTools: Boolean(reviewContext?.empiricalTaskOrder?.hasPresetTools),
+  }
+}
+
+export function evaluateIncludeDiffGate({
+  gitDir, mode, task, round, prNo, baseRef, reviewRoot, mainRoot,
+  headSha, diffScope, workspaceFingerprint, dirtyEntries = [],
+  requirements, behavioralGate, opts = {}, diffText = null,
+}) {
+  if (requirements.isEmptyDiff) {
+    return {
+      required: false,
+      faultRequired: false,
+      visualCheckRequired: false,
+      readyForDiff: true,
+      dirtyFaultResidue: false,
+      mode,
+      round,
+      targetRoot: posixPath(reviewRoot),
+      headSha,
+      diffScope,
+      workspaceFingerprint,
+      steps: {
+        mechanicalPack: { done: true },
+        empirical: { done: true, status: 'empty-diff' },
+        faultFail: { done: true },
+        faultRestore: { done: true },
+        visualCheck: { required: false, done: true },
+      },
+      missingSteps: [],
+      unblockCommands: [],
+      nextSteps: [],
+    }
+  }
+
+  const receiptPath = resolveEmpiricalReceiptPath({ gitDir, mode, task, prNo, reviewRoot, baseRef })
+  const receipt = readReceipt(receiptPath)
+  const sameScope = isSameScopeContext(receipt, { mode, round, headSha, diffScope })
+  const matchesBaseline = Boolean(sameScope && receipt.baselineFingerprint === workspaceFingerprint)
+
+  const dirtyFaultResidue = hasPendingFaultInReceipt(receipt, {
+    mode, round, headSha, diffScope, currentFingerprint: workspaceFingerprint,
+  }) || ((mode === 'task' || mode === 'pr') && dirtyEntries.length > 0)
+
+  const mechanicalDone = Boolean(
+    requirements.isLowRiskPureDoc || (matchesBaseline && receipt.mechanicalPackSeen === true),
+  )
+  const empiricalDone = !requirements.empiricalRequired || Boolean(
+    matchesBaseline
+    && receipt.empiricalVerified
+    && receipt.empiricalVerified.fingerprint === workspaceFingerprint
+    && receipt.empiricalVerified.headSha === headSha
+    && receipt.empiricalVerified.diffScope === diffScope
+    && (mode !== 'task' || Number(receipt.empiricalVerified.round) === Number(round)),
+  )
+  const faultFailDone = !requirements.faultRequired || Boolean(
+    matchesBaseline
+    && receipt.faultInjectedAndFailed
+    && receipt.faultInjectedAndFailed.baselineFingerprint === workspaceFingerprint,
+  )
+  const faultRestoreDone = !requirements.faultRequired || Boolean(
+    matchesBaseline
+    && receipt.faultRestoredClean === true
+    && receipt.faultRestoredMeta?.fingerprint === workspaceFingerprint,
+  )
+  const evInput = resolveAndValidateE2eEvidenceInput(opts)
+  const shallowE2eEvidence = evInput.ok ? null : { code: evInput.code, reason: evInput.reason, raw: evInput.raw }
+  const e2eEvidenceInput = evInput.ok ? evInput.text : ''
+  const evidence = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
+  const artifactVisual = resolveArtifactAndVisualInput(opts, {
+    repoRoot: reviewRoot,
+    visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
+  })
+  // 在拦截前先核查账本与回执里已落盘的同 HEAD 实证，避免后续 `--include-diff` 未重传 `--artifact` 时误拦。
+  const storedVisualCheck = (evidence && !evidence.dirty && (!headSha || evidence.headSha === headSha))
+    ? evaluateStoredVisualEvidence({
+        evidence,
+        policy: { visualFilesChanged: behavioralGate?.visualFilesChanged ?? [] },
+        headSha,
+      })
+    : null
+  const evidenceVisualSatisfied = Boolean(storedVisualCheck && storedVisualCheck.ok && !storedVisualCheck.unclaimed)
+  const receiptVisualSatisfied = Boolean(
+    matchesBaseline && (
+      receipt?.empiricalVerified?.visualChecked
+      || receipt?.visualChecked
+      || (Array.isArray(receipt?.artifacts) && receipt.artifacts.length > 0)
+      || receipt?.empiricalVerified?.visual?.satisfiedBy
+    ),
+  )
+  const visualSatisfied = Boolean(
+    artifactVisual.visual.satisfiedBy !== null
+    || evidenceVisualSatisfied
+    || receiptVisualSatisfied
+    || ((!storedVisualCheck || storedVisualCheck.ok) && behavioralGate?.visualVerifiedOnHead),
+  )
+  const artifactBlock = artifactVisual.errors.length > 0
+    ? {
+        code: artifactVisual.code ?? 'BLOCKED_ARTIFACT_INVALID',
+        reason: artifactVisual.reason,
+        uiFiles: artifactVisual.visual.uiFiles,
+        errors: artifactVisual.errors,
+      }
+    : null
+
+  const visualDone = !requirements.visualCheckRequired || (!artifactBlock && visualSatisfied)
+  const smokeOk = !requirements.smokeRequired || Boolean(
+    (evidence && evidence.headSha === headSha && !evidence.dirty && evidence.smokeVerifiedOnHead !== false && evidence.gates?.smoke?.exitCode === 0)
+    || (empiricalDone && receipt?.empiricalVerified?.executed !== false && !receipt?.empiricalVerified?.errorOnly
+      && receipt?.empiricalVerified?.smokeExecuted === true),
+  )
+  const e2eObservationDone = !requirements.e2eObservationRequired || Boolean(
+    !shallowE2eEvidence && smokeOk && (
+      hasSubstantiveStoredObservation(receipt?.empiricalVerified, headSha)
+      || hasSubstantiveStoredObservation(evidence, headSha)
+      || Boolean(e2eEvidenceInput)
+      || evidenceVisualSatisfied
+      || artifactVisual.visual.satisfiedBy !== null
+      || ((!storedVisualCheck || storedVisualCheck.ok) && behavioralGate?.visualVerifiedOnHead)
+      || (matchesBaseline && (receipt?.empiricalVerified?.visualChecked || receipt?.visualChecked))
+    ),
+  )
+
+  const staticDocRequired = requirements.staticDocCheckRequired ?? requirements.isLowRiskPureDoc
+  const staticDocCheck = (staticDocRequired && Array.isArray(requirements.changedFiles) && requirements.changedFiles.length > 0 && reviewRoot)
+    ? runLowRiskDocStaticCheck(reviewRoot, requirements.changedFiles, { diffText })
+    : null
+  const staticDocBlock = staticDocCheck && !staticDocCheck.ok
+    ? { code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', reason: `BLOCKED_STATIC_DOC_CHECK_FAILED: ${staticDocCheck.errors.map((e) => e?.message ?? String(e)).join('；')}`, errors: staticDocCheck.errors }
+    : null
+
+  const missingSteps = []
+  if (!mechanicalDone) missingSteps.push('mechanical-pack')
+  if (!empiricalDone) missingSteps.push('check-empirical')
+  if (requirements.faultRequired) {
+    if (!faultFailDone) missingSteps.push('check-fault:fail')
+    if (!faultRestoreDone) missingSteps.push('check-fault:restore')
+  }
+  if (staticDocBlock) missingSteps.push('static-doc-check')
+  if (requirements.visualCheckRequired && !visualDone) missingSteps.push('visual-check')
+  if (requirements.e2eObservationRequired && !e2eObservationDone && (!requirements.visualCheckRequired || visualDone)) {
+    missingSteps.push('e2e-observation')
+  }
+  if (shallowE2eEvidence && !missingSteps.includes('e2e-observation')) {
+    missingSteps.push('e2e-observation')
+  }
+
+  const readyForDiff = !dirtyFaultResidue && !artifactBlock && missingSteps.length === 0
+  const unblockCommands = readyForDiff
+    ? []
+    : buildUnblockCommands({
+        missingSteps, dirtyFaultResidue, mode, task, round, prNo, baseRef, reviewRoot, mainRoot,
+        autoCommands: requirements.autoCommands,
+        isPureDocsNoneRepo: Boolean(requirements.isPureDocsNoneRepo),
+      })
+
+  return {
+    required: requirements.empiricalRequired,
+    faultRequired: requirements.faultRequired,
+    visualCheckRequired: requirements.visualCheckRequired,
+    isLowRiskPureDoc: Boolean(requirements.isLowRiskPureDoc),
+    readyForDiff,
+    dirtyFaultResidue,
+    shallowE2eEvidence,
+    ...(staticDocBlock ? { staticDocBlock } : {}),
+    ...(artifactBlock ? { artifactBlock } : {}),
+    ...(requirements.visualCheckRequired && !visualDone && !artifactVisual.ok
+      ? { visualBlock: { code: artifactVisual.code, reason: artifactVisual.reason, uiFiles: artifactVisual.visual.uiFiles } }
+      : {}),
+    mode, round, targetRoot: posixPath(reviewRoot), headSha, diffScope, workspaceFingerprint,
+    baselineFingerprint: matchesBaseline ? receipt.baselineFingerprint : null,
+    steps: {
+      mechanicalPack: { done: mechanicalDone, at: (matchesBaseline ? receipt.mechanicalPackAt : null) ?? null },
+      empirical: {
+        done: empiricalDone,
+        status: matchesBaseline && receipt?.empiricalVerified
+          ? (receipt.empiricalVerified.status ?? 'passed')
+          : (requirements.isLowRiskPureDoc ? 'low-risk-pure-doc-exempt' : 'pending'),
+        commands: matchesBaseline && receipt?.empiricalVerified ? (receipt.empiricalVerified.commands ?? []) : [],
+        at: matchesBaseline && receipt?.empiricalVerified ? receipt.empiricalVerified.verifiedAt : null,
+      },
+      faultFail: {
+        done: faultFailDone, required: requirements.faultRequired,
+        failedCmd: faultFailDone && receipt?.faultInjectedAndFailed ? receipt.faultInjectedAndFailed.failedCmd : null,
+        exitCode: faultFailDone && receipt?.faultInjectedAndFailed ? receipt.faultInjectedAndFailed.exitCode : null,
+        at: faultFailDone && receipt?.faultInjectedAndFailed ? receipt.faultInjectedAndFailed.injectedAt : null,
+      },
+      faultRestore: { done: faultRestoreDone, required: requirements.faultRequired, at: faultRestoreDone ? receipt?.faultRestoredAt : null },
+      visualCheck: { required: requirements.visualCheckRequired, done: visualDone },
+      e2eObservation: {
+        required: Boolean(requirements.e2eObservationRequired),
+        done: e2eObservationDone,
+        observation: receipt?.empiricalVerified?.e2eObservation ?? evidence?.e2eObservation ?? null,
+      },
+    },
+    missingSteps, unblockCommands, nextSteps: unblockCommands,
+  }
+}
+
+export async function handleCheckEmpirical(ctx) {
+  const {
+    opts, roots, mode, task, round, prNo, reviewRoot, headSha, diffScope,
+    diff, effectiveProfile, behavioralGate, gateWeakenedHits, scanUntrustedDiff,
+  } = ctx
+  const { mainRoot, gitDir } = roots
+  const receiptPath = resolveEmpiricalReceiptPath({ gitDir, mode, task, prNo, reviewRoot, baseRef: opts.base })
+  const prev = readReceipt(receiptPath)
+
+  const untrusted = checkUntrustedBeforeExec({
+    opts, task, mode, headSha, prNo, receipt: prev, diff, reviewRoot, scanUntrustedDiff,
+  })
+  if (untrusted.blocked) {
+    return emitGateBlock({ opts, code: 'BLOCKED_UNTRUSTED_HAZARD', payload: untrusted.payload, textLines: untrusted.textLines })
+  }
+
+  const dirtyEntries = await getEffectiveStatusEntries(reviewRoot, mainRoot)
+  const currentFingerprint = await computeWorkspaceFingerprint({
+    reviewRoot, mainRoot, headSha, diff, statusEntries: dirtyEntries,
+  })
+  const sameCtx = isSameScopeContext(prev, { mode, round, headSha, diffScope })
+  const pendingFault = hasPendingFaultInReceipt(prev, {
+    mode, round, headSha, diffScope, currentFingerprint,
+  }) || ((mode === 'task' || mode === 'pr') && dirtyEntries.length > 0)
+
+  if (pendingFault) {
+    const msg = `BLOCKED_DIRTY_FAULT_RESIDUE: 审查工作位 ${posixPath(reviewRoot)} 存在未还原的故障注入残留，请先还原并运行 check-fault --phase restore。`
+    return emitGateBlock({
+      opts, code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
+      payload: { status: 'BLOCKED_DIRTY_FAULT_RESIDUE', code: 'BLOCKED_DIRTY_FAULT_RESIDUE', exitCode: EXIT.FACT, mode, round, targetRoot: posixPath(reviewRoot), dirtyFiles: dirtyEntries.map((e) => e.file), error: msg },
+      textLines: ['BLOCKED_DIRTY_FAULT_RESIDUE', `Worktree : ${posixPath(reviewRoot)}`, `Reason   : ${msg}`],
+    })
+  }
+
+  const explicitCmds = (opts.cmd ?? []).map((s) => String(s).trim()).filter(Boolean)
+  const requirements = computeEmpiricalRequirements({
+    diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext: ctx.reviewContext ?? null, explicitCmds, repoRoot: reviewRoot,
+  })
+  const commandsToRun = requirements.autoCommands
+  const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
+
+  const evInput = resolveAndValidateE2eEvidenceInput(opts)
+  if (!evInput.ok) {
+    return emitGateBlock({
+      opts,
+      code: evInput.code,
+      payload: {
+        status: evInput.code, code: evInput.code, exitCode: EXIT.FACT,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint,
+        rawEvidence: evInput.raw, error: evInput.reason,
+        nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --e2e-evidence "<执行入口 + 真实输出/状态>"`],
+      },
+      textLines: [evInput.code, evInput.reason],
+    })
+  }
+  const e2eEvidenceInput = evInput.text
+
+  const artifactVisual = resolveArtifactAndVisualInput(opts, {
+    repoRoot: reviewRoot,
+    visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
+  })
+  if (!artifactVisual.ok) {
+    return emitGateBlock({
+      opts,
+      code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED',
+      payload: {
+        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.FACT,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint,
+        uiFiles: artifactVisual.visual.uiFiles, artifactErrors: artifactVisual.errors,
+        error: artifactVisual.reason,
+        nextSteps: [
+          `node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --artifact "<真实非空产物路径>"`
+          + ` 或 --visual-blocked-reason "<无渲染环境的诚实阻塞说明>"`,
+        ],
+      },
+      textLines: ['BLOCKED_VISUAL_EVIDENCE_REQUIRED', artifactVisual.reason],
+    })
+  }
+
+  if (commandsToRun.length === 0 && !requirements.isEmptyDiff && !requirements.isLowRiskPureDoc && !requirements.isPureDocsNoneRepo) {
+    const msg = 'BLOCKED_EMPIRICAL_CMD_REQUIRED: 未配置 Dev Profile 测试命令且触及非低风险变更，必须通过 --cmd "<C* 证伪命令>" 实跑验证。'
+    return emitGateBlock({
+      opts,
+      code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED',
+      payload: {
+        status: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', exitCode: EXIT.FACT,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint,
+        nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --cmd "<验证命令>"`],
+        error: msg,
+      },
+      textLines: ['BLOCKED_EMPIRICAL_CMD_REQUIRED', msg],
+    })
+  }
+
+  const smokeCmdList = (behavioralGate?.smokeVerifyCommands ?? []).map(sanitizeCmdTemplate).filter(Boolean)
+  const smokeExecuted = commandsToRun.length > 0 && (smokeCmdList.length === 0 || smokeCmdList.some((sc) => commandsToRun.includes(sc)) || explicitCmds.length > 0)
+
+  let cmdResults = []
+  let statusLabel = 'passed'
+  let lowRiskNoRuntimeChecks = false
+  if (commandsToRun.length === 0) {
+    if (!requirements.isEmptyDiff && (requirements.staticDocCheckRequired || requirements.isPureDocsNoneRepo) && Array.isArray(requirements.changedFiles) && requirements.changedFiles.length > 0 && reviewRoot) {
+      const staticCheck = runLowRiskDocStaticCheck(reviewRoot, requirements.changedFiles, { diffText: diff?.text ?? null })
+      if (!staticCheck.ok) {
+        const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: ${staticCheck.errors.map((e) => e?.message ?? String(e)).join('；')}`
+        return emitGateBlock({
+          opts, code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
+          payload: { status: 'BLOCKED_STATIC_DOC_CHECK_FAILED', code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', exitCode: EXIT.FACT, mode, round, headSha, workspaceFingerprint: currentFingerprint, errors: staticCheck.errors, error: msg },
+          textLines: ['BLOCKED_STATIC_DOC_CHECK_FAILED', msg],
+        })
+      }
+    }
+    lowRiskNoRuntimeChecks = true
+    statusLabel = requirements.isEmptyDiff
+      ? 'empty-diff-no-checks'
+      : (requirements.isPureDocsNoneRepo ? 'pure-docs-static-verified' : 'low-risk-no-runtime-checks')
+  } else {
+    const wtEnv = computeWorktreeEnv({ mainRoot, gitDir, taskId: task?.taskId ?? mode, slotIndex: task?.slotIndex })
+    cmdResults = await runCommandList(commandsToRun, { cwd: reviewRoot, env: wtEnv, stopOnFail: true })
+    const failed = cmdResults.find((r) => !r.ok || r.errorOnly)
+    if (failed) {
+      const changedFiles = [...new Set([...(diff?.files ?? []).map((f) => f.file), ...(diff?.untracked ?? [])])]
+      const failReport = await handleEmpiricalE2eFailure({
+        mainRoot, gitDir, task, mode, failedCmdRes: failed, headSha, changedFiles, opts,
+      })
+      const msg = `BLOCKED_EMPIRICAL_FAILED: 实证命令失败 (exit=${failed.exitCode}): ${failed.cmd}`
+      return emitGateBlock({
+        opts, code: 'BLOCKED_EMPIRICAL_FAILED',
+        payload: { status: 'BLOCKED_EMPIRICAL_FAILED', code: 'BLOCKED_EMPIRICAL_FAILED', exitCode: EXIT.FACT, mode, round, headSha, workspaceFingerprint: currentFingerprint, commands: cmdResults, diagnostic: failReport.diagnostic, escalatedIssue: failReport.escalation, error: msg },
+        textLines: [
+          'BLOCKED_EMPIRICAL_FAILED',
+          `Command  : ${failed.cmd} (exit=${failed.exitCode})`,
+          ...(failed.stdoutExcerpt ? [`Stdout   : ${failed.stdoutExcerpt}`] : []),
+          ...(failed.stderrExcerpt ? [`Stderr   : ${failed.stderrExcerpt}`] : []),
+          `Evidence : ${failReport.diagnostic.Evidence.join(' | ')}`,
+          `Unknowns : ${failReport.diagnostic.Unknowns.join(' | ')}`,
+          `NextSteps: ${failReport.diagnostic.NextSteps.join(' | ')}`,
+        ],
+      })
+    }
+  }
+
+  const flowEv = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
+  const carriedObs = hasSubstantiveStoredObservation(flowEv, headSha)
+    ? flowEv.e2eObservation
+    : (sameCtx && hasSubstantiveStoredObservation(prev?.empiricalVerified, headSha) ? prev.empiricalVerified.e2eObservation : null)
+  const e2eObservation = e2eEvidenceInput
+    ? buildE2eObservation({
+        summary: e2eEvidenceInput,
+        headSha,
+        source: 'review-check-empirical',
+        cmd: commandsToRun.join(' && ') || null,
+        executed: commandsToRun.length > 0 || Boolean(e2eEvidenceInput),
+        succeeded: true,
+        errorOnly: false,
+      })
+    : carriedObs
+
+  const keepMechanical = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint && prev?.mechanicalPackSeen)
+  const keepFault = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint)
+  const verifiedAt = new Date().toISOString()
+  let stagedArtifactRecs = artifactVisual.records ?? []
+  if (task?.taskId && gitDir && stagedArtifactRecs.length > 0) {
+    const staged = await stageAndSyncTaskArtifacts({
+      repoRoot: reviewRoot, gitCommonDir: gitDir, mainRoot, taskId: task.taskId,
+      records: stagedArtifactRecs, backend: null, observationSummary: e2eEvidenceInput,
+    }).catch(() => null)
+    if (staged?.records) stagedArtifactRecs = staged.records
+  }
+  const artifacts = mergeArtifactRecords(prev?.artifacts ?? [], stagedArtifactRecs)
+  const visualChecked = Boolean(artifactVisual.visual.satisfiedBy || e2eEvidenceInput)
+  writeReceipt(receiptPath, {
+    mode, round, prNo: prNo ?? null, headSha, diffScope, baselineFingerprint: currentFingerprint,
+    untrustedScanClean: untrusted.scanClean ?? prev?.untrustedScanClean ?? null,
+    humanApprovedExec: Boolean(untrusted.approved || prev?.humanApprovedExec),
+    mechanicalPackSeen: keepMechanical, mechanicalPackAt: keepMechanical ? prev.mechanicalPackAt : null,
+    ...(artifacts.length > 0 ? { artifacts } : {}),
+    empiricalVerified: {
+      status: statusLabel, lowRiskNoRuntimeChecks, fingerprint: currentFingerprint, headSha, round, diffScope,
+      commands: cmdResults, executed: commandsToRun.length > 0 || lowRiskNoRuntimeChecks, succeeded: true, errorOnly: false,
+      smokeExecuted, e2eObservation, visualChecked, ...(artifactVisual.visual.required ? { visual: artifactVisual.visual } : {}), verifiedAt,
+    },
+    faultInjectedAndFailed: keepFault ? (prev?.faultInjectedAndFailed ?? null) : null,
+    faultRestoredClean: keepFault ? Boolean(prev?.faultRestoredClean) : false,
+    faultRestoredAt: keepFault ? (prev?.faultRestoredAt ?? null) : null,
+    faultRestoredMeta: keepFault ? (prev?.faultRestoredMeta ?? null) : null,
+  })
+
+  const gate = evaluateIncludeDiffGate({
+    gitDir, mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot,
+    headSha, diffScope, workspaceFingerprint: currentFingerprint, dirtyEntries,
+    requirements, behavioralGate, opts, diffText: diff?.text ?? null,
+  })
+  const payload = {
+    status: 'EMPIRICAL_VERIFIED',
+    ok: true,
+    mode,
+    round,
+    targetRoot: posixPath(reviewRoot),
+    headSha,
+    diffScope,
+    workspaceFingerprint: currentFingerprint,
+    baselineFingerprint: currentFingerprint,
+    lowRiskNoRuntimeChecks,
+    commands: cmdResults,
+    empiricalGate: gate,
+    nextSteps: gate.unblockCommands,
+  }
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+  } else {
+    process.stdout.write([
+      'EMPIRICAL_VERIFIED',
+      `Worktree : ${posixPath(reviewRoot)} | HEAD ${headSha.slice(0, 8)}`,
+      `Mode     : ${mode}${mode === 'task' ? ` (Round ${round})` : ''} | Status: ${statusLabel}`,
+      `Commands : ${cmdResults.length === 0 ? statusLabel : cmdResults.map((c) => `${c.cmd} (exit=${c.exitCode}, ${c.durationMs}ms)`).join('; ')}`,
+    ].join('\n') + '\n')
+    if (gate.unblockCommands.length > 0) printNextStep(gate.unblockCommands, { repoRoot: mainRoot })
+  }
+  return EXIT.OK
+}
+
+export async function handleCheckFault(ctx) {
+  const {
+    opts, roots, mode, task, round, prNo, reviewRoot, headSha, diffScope,
+    diff, effectiveProfile, behavioralGate, gateWeakenedHits, scanUntrustedDiff,
+  } = ctx
+  const { mainRoot, gitDir } = roots
+  const phase = String(opts.phase ?? '').trim().toLowerCase()
+  if (phase !== 'fail' && phase !== 'restore') {
+    process.stderr.write('Error: check-fault requires --phase fail|restore\n')
+    return EXIT.USAGE
+  }
+
+  const receiptPath = resolveEmpiricalReceiptPath({ gitDir, mode, task, prNo, reviewRoot, baseRef: opts.base })
+  const prev = readReceipt(receiptPath)
+  const untrusted = checkUntrustedBeforeExec({
+    opts, task, mode, headSha, prNo, receipt: prev, diff, reviewRoot, scanUntrustedDiff,
+  })
+  if (untrusted.blocked) {
+    return emitGateBlock({ opts, code: 'BLOCKED_UNTRUSTED_HAZARD', payload: untrusted.payload, textLines: untrusted.textLines })
+  }
+
+  const requirements = computeEmpiricalRequirements({ diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, repoRoot: reviewRoot })
+  if (!requirements.faultRequired) {
+    const out = {
+      status: 'FAULT_EXEMPT_LOW_RISK_OR_EMPTY',
+      ok: true,
+      mode,
+      round,
+      headSha,
+      reason: requirements.isEmptyDiff ? 'empty-diff' : 'low-risk-no-runtime-checks',
+    }
+    if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+    else process.stdout.write(`FAULT_EXEMPT_LOW_RISK_OR_EMPTY: ${out.reason}\n`)
+    return EXIT.OK
+  }
+
+  const dirtyEntries = await getEffectiveStatusEntries(reviewRoot, mainRoot)
+  const currentFingerprint = await computeWorkspaceFingerprint({
+    reviewRoot, mainRoot, headSha, diff, statusEntries: dirtyEntries,
+  })
+
+  const sameScope = isSameScopeContext(prev, { mode, round, headSha, diffScope })
+  const isCleanCommitMode = mode === 'task' || mode === 'pr'
+  const baselineFingerprint = (sameScope && prev?.baselineFingerprint)
+    ? prev.baselineFingerprint
+    : (isCleanCommitMode ? computeCleanBaselineFingerprint({ headSha, diff }) : null)
+
+  if (!baselineFingerprint) {
+    const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
+    const msg = 'BLOCKED_EMPIRICAL_FIRST: 尚未采集当前工作区基线指纹，请先运行机械审查包与 check-empirical。'
+    return emitGateBlock({
+      opts, code: 'BLOCKED_EMPIRICAL_FIRST',
+      payload: {
+        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.FACT,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint, missingSteps: ['mechanical-pack', 'check-empirical'],
+        nextSteps: [
+          `node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags}`,
+          `node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags}`,
+        ],
+        error: msg,
+      },
+      textLines: ['BLOCKED_EMPIRICAL_FIRST', msg],
+    })
+  }
+
+  const explicitCmds = (opts.cmd ?? []).map((s) => String(s).trim()).filter(Boolean)
+  const prevEmpiricalCmds = (prev?.empiricalVerified?.commands ?? []).map((c) => c.cmd).filter(Boolean)
+  const commandsToRun = explicitCmds.length > 0 ? explicitCmds : (prevEmpiricalCmds.length > 0 ? prevEmpiricalCmds : requirements.autoCommands)
+
+  if (commandsToRun.length === 0) {
+    process.stderr.write('Error: check-fault requires --cmd "<command>" when no verification command is configured.\n')
+    return EXIT.USAGE
+  }
+
+  const wtEnv = computeWorktreeEnv({ mainRoot, gitDir, taskId: task?.taskId ?? mode, slotIndex: task?.slotIndex })
+  const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
+
+  if (phase === 'fail') {
+    if (currentFingerprint === baselineFingerprint) {
+      const msg = 'BLOCKED_FAULT_NO_MUTATION: 工作区与基线指纹完全相同（未注入任何故障改动），禁止空跑故障注入。'
+      return emitGateBlock({
+        opts, code: 'BLOCKED_FAULT_NO_MUTATION',
+        payload: { status: 'BLOCKED_FAULT_NO_MUTATION', code: 'BLOCKED_FAULT_NO_MUTATION', exitCode: EXIT.FACT, mode, round, headSha, baselineFingerprint, workspaceFingerprint: currentFingerprint, error: msg },
+        textLines: ['BLOCKED_FAULT_NO_MUTATION', msg],
+      })
+    }
+    const diffCheck = await gitRun(reviewRoot, ['diff', '--unified=0', 'HEAD'])
+    const untrackedCode = dirtyEntries.filter((e) => e.xy === '??').map((e) => e.file).filter((f) => /\.(?:mjs|cjs|js|ts|tsx|jsx|vue|svelte|py|go|rs|java|kt|kts|rb|php|cs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1)$/i.test(f))
+    const mut = hasExecutableCodeMutation(diffCheck.ok ? diffCheck.stdout : '', untrackedCode)
+    if (!mut.hasMutation) {
+      const msg = 'BLOCKED_FAULT_INJECTION_NOOP: 故障注入 diff 仅含注释、空白或非可执行变更，禁止以空故障绕过故障注入门禁。'
+      return emitGateBlock({
+        opts, code: 'BLOCKED_FAULT_INJECTION_NOOP',
+        payload: { status: 'BLOCKED_FAULT_INJECTION_NOOP', code: 'BLOCKED_FAULT_INJECTION_NOOP', exitCode: EXIT.FACT, mode, round, headSha, baselineFingerprint, workspaceFingerprint: currentFingerprint, error: msg },
+        textLines: ['BLOCKED_FAULT_INJECTION_NOOP', msg],
+      })
+    }
+
+    const results = await runCommandList(commandsToRun, { cwd: reviewRoot, env: wtEnv, stopOnFail: false })
+    const caught = results.find((r) => !r.ok)
+    if (!caught) {
+      const msg = 'BLOCKED_FAULT_NOT_CAUGHT: 工作区已注入故障，但全部验证命令依然退出 0（测试未抓住该故障）。'
+      return emitGateBlock({
+        opts, code: 'BLOCKED_FAULT_NOT_CAUGHT',
+        payload: { status: 'BLOCKED_FAULT_NOT_CAUGHT', code: 'BLOCKED_FAULT_NOT_CAUGHT', exitCode: EXIT.FACT, mode, round, headSha, baselineFingerprint, mutatedFingerprint: currentFingerprint, commands: results, error: msg },
+        textLines: ['BLOCKED_FAULT_NOT_CAUGHT', msg],
+      })
+    }
+
+    const injectedAt = new Date().toISOString()
+    const baseRecord = sameScope && prev ? prev : {
+      mode, round, prNo: prNo ?? null, headSha, diffScope, baselineFingerprint,
+      untrustedScanClean: untrusted.scanClean ?? null, humanApprovedExec: Boolean(untrusted.approved),
+      mechanicalPackSeen: false, mechanicalPackAt: null, empiricalVerified: null,
+    }
+    writeReceipt(receiptPath, {
+      ...baseRecord, baselineFingerprint,
+      faultInjectedAndFailed: {
+        baselineFingerprint, mutatedFingerprint: currentFingerprint, headSha, round, diffScope,
+        failedCmd: caught.cmd, exitCode: caught.exitCode, commands: results, injectedAt,
+      },
+      faultRestoredClean: false, faultRestoredAt: null, faultRestoredMeta: null,
+    })
+
+    const restoreHint = isCleanCommitMode
+      ? `git -C "${posixPath(reviewRoot)}" checkout -- .`
+      : '请将注入的故障手工还原回基线改动（保留原有 --local 未提交修改）'
+    const nextSteps = [restoreHint, `node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase restore ${targetFlags} --cmd "${caught.cmd}"`]
+    const payload = {
+      status: 'FAULT_INJECTED_FAILED', ok: true, mode, round, targetRoot: posixPath(reviewRoot), headSha,
+      baselineFingerprint, mutatedFingerprint: currentFingerprint, failedCmd: caught.cmd, failedExitCode: caught.exitCode, commands: results, nextSteps,
+    }
+    if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+    else {
+      process.stdout.write(['FAULT_INJECTED_FAILED', `Worktree : ${posixPath(reviewRoot)} | FailedCmd: ${caught.cmd} (exit=${caught.exitCode})`].join('\n') + '\n')
+      printNextStep(nextSteps, { repoRoot: mainRoot })
+    }
+    return EXIT.OK
+  }
+
+  // phase === 'restore'
+  const notCleanForMode = isCleanCommitMode && dirtyEntries.length > 0
+  if (notCleanForMode || currentFingerprint !== baselineFingerprint) {
+    const msg = notCleanForMode
+      ? `BLOCKED_DIRTY_FAULT_RESIDUE: 工作区仍有未还原改动（${dirtyEntries.map((e) => e.file).slice(0, 5).join(', ')}），请先彻底还原再运行 --phase restore。`
+      : 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作区指纹尚未还原回注入前基线（baselineFingerprint），请彻底还原后再运行 --phase restore。'
+    return emitGateBlock({
+      opts, code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
+      payload: { status: 'BLOCKED_DIRTY_FAULT_RESIDUE', code: 'BLOCKED_DIRTY_FAULT_RESIDUE', exitCode: EXIT.FACT, mode, round, targetRoot: posixPath(reviewRoot), baselineFingerprint, workspaceFingerprint: currentFingerprint, dirtyFiles: dirtyEntries.map((e) => e.file), error: msg },
+      textLines: ['BLOCKED_DIRTY_FAULT_RESIDUE', msg],
+    })
+  }
+
+  if (!sameScope || prev?.faultInjectedAndFailed?.baselineFingerprint !== baselineFingerprint) {
+    const msg = 'BLOCKED_EMPIRICAL_FIRST: 尚未记录对应当前基线的 check-fault --phase fail 成功证据，不能直接标记还原。'
+    return emitGateBlock({
+      opts, code: 'BLOCKED_EMPIRICAL_FIRST',
+      payload: {
+        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.FACT,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint, missingSteps: ['check-fault:fail'],
+        nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase fail ${targetFlags} --cmd "${commandsToRun[0]}"`],
+        error: msg,
+      },
+      textLines: ['BLOCKED_EMPIRICAL_FIRST', msg],
+    })
+  }
+
+  const results = await runCommandList(commandsToRun, { cwd: reviewRoot, env: wtEnv, stopOnFail: true })
+  const failed = results.find((r) => !r.ok)
+  if (failed) {
+    const msg = `BLOCKED_EMPIRICAL_FAILED: 还原后复绿命令仍然失败 (exit=${failed.exitCode}): ${failed.cmd}`
+    return emitGateBlock({
+      opts, code: 'BLOCKED_EMPIRICAL_FAILED',
+      payload: { status: 'BLOCKED_EMPIRICAL_FAILED', code: 'BLOCKED_EMPIRICAL_FAILED', exitCode: EXIT.FACT, mode, round, headSha, workspaceFingerprint: currentFingerprint, commands: results, error: msg },
+      textLines: ['BLOCKED_EMPIRICAL_FAILED', msg],
+    })
+  }
+
+  const restoredAt = new Date().toISOString()
+  writeReceipt(receiptPath, { ...prev, faultRestoredClean: true, faultRestoredAt: restoredAt, faultRestoredMeta: { fingerprint: currentFingerprint, commands: results } })
+  const faultRecord = {
+    headSha, round, baselineFingerprint, workspaceFingerprint: currentFingerprint,
+    failedCmd: prev?.faultInjectedAndFailed?.failedCmd ?? null,
+    failedExitCode: prev?.faultInjectedAndFailed?.exitCode ?? null,
+    commands: results.map((r) => ({ cmd: r.cmd, exitCode: r.exitCode, ok: r.ok })),
+    restoredAt,
+  }
+  if (task?.taskId) await updateTaskLedger(mainRoot, task.taskId, { faultRecord })
+
+  const gate = evaluateIncludeDiffGate({
+    gitDir, mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot,
+    headSha, diffScope, workspaceFingerprint: currentFingerprint, dirtyEntries, requirements, behavioralGate, opts, diffText: diff?.text ?? null,
+  })
+  const payload = {
+    status: 'FAULT_RESTORED_CLEAN', ok: true, mode, round, targetRoot: posixPath(reviewRoot), headSha,
+    workspaceFingerprint: currentFingerprint, baselineFingerprint, faultRecord, commands: results, empiricalGate: gate,
+    nextSteps: gate.unblockCommands.length > 0 ? gate.unblockCommands : [`node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags} --include-diff`],
+  }
+  if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+  else {
+    process.stdout.write(['FAULT_RESTORED_CLEAN', `Worktree : ${posixPath(reviewRoot)} | Restored cleanly & verified (${results.length} cmd)`].join('\n') + '\n')
+    printNextStep(payload.nextSteps, { repoRoot: mainRoot })
+  }
+  return EXIT.OK
+}

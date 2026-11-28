@@ -100,7 +100,6 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const head = stParsed.head
   const branch = stParsed.branch ?? (head ? '(detached)' : null)
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
-  const topology = parseRemotesTopology(remoteRes.stdout)
   if (roots.gitDir && Object.keys(remoteUrls).length > 0) {
     cleanStaleLocalModeMarker(roots.gitDir, { hasRemote: true })
   }
@@ -158,7 +157,9 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
 
   const profile = parseAgentsProfile(mainRoot)
   const declaredRepo = detectDeclaredRepo(mainRoot)
-  const remoteTarget = resolveRemoteTarget(remoteUrls, { declaredRepo })
+  const remoteTarget = resolveRemoteTarget(remoteUrls, { declaredRepo, cwd: mainRoot })
+  const topoProviderHint = remoteTarget.providerId !== 'none' && remoteTarget.providerId !== 'generic-git' ? remoteTarget.providerId : null
+  const topology = parseRemotesTopology(remoteRes.stdout, { providerHint: topoProviderHint })
   const ghProbe = opts._ghProbe ?? (await probePlatformEnv({ cwd: mainRoot, remoteUrls, probeNetwork: Boolean(opts.probeAuth) }))
   const originFull = remoteTarget.repoSlug ?? null
   const canQueryApi = Boolean(opts._ghClient || isVerifiedTier(ghProbe.env?.trackB?.tier))
@@ -189,7 +190,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const reuseExistingPr = graph.reuseExistingPr
 
   const identity = resolveWorkspaceIdentity({
-    gitDir: roots.gitDir, remoteUrls, declaredRepo, gitIdentity, historyAuthors, commits, externalPr,
+    gitDir: roots.gitDir, cwd: mainRoot, remoteUrls, declaredRepo, gitIdentity, historyAuthors, commits, externalPr,
     apiProbe: repoMetaRes?.ok ? repoMetaRes : undefined,
   })
   const driftWarnings = detectRemoteDriftWarnings({
@@ -445,7 +446,7 @@ export async function handleStart(opts, roots) {
       || Boolean(existing.prContextUnavailable)
     )
     if (needIssueRefresh || needPrRefresh) {
-      const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+      const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: roots.mainRoot })
       const hydrated = await resolveAndHydrateTaskContexts({
         mainRoot: roots.mainRoot, gitDir: roots.gitDir, remoteUrls: state.remoteUrls ?? {},
         providerId, role, targetRepo,
@@ -498,7 +499,7 @@ export async function handleStart(opts, roots) {
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
 
   if (effectiveExternalPr) {
-    const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, state.remotesTopology ? { origin: state.remotesTopology[0] } : null)
+    const targetCtx = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, state.remotesTopology ? { origin: state.remotesTopology[0] } : null, { cwd: roots.mainRoot })
     const { targetRepo } = targetCtx
     const {
       issueContext, issueContextUnavailable, prContext, prContextUnavailable, prPatch,
@@ -618,7 +619,7 @@ export async function handleStart(opts, roots) {
     if (!opts.slug && !opts.title) slug = slugify(taskId)
   }
 
-  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo, null, { cwd: roots.mainRoot })
   const {
     issueContext, issueContextUnavailable, prContext, prContextUnavailable, prPatch,
   } = await resolveAndHydrateTaskContexts({

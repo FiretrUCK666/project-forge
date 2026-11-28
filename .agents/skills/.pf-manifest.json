@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "7.0.0",
-  "installedAt": "2026-11-27T22:49:06.505Z",
+  "installedAt": "2026-11-28T02:24:10.252Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "e7ed8003762dec1aa6dd0e8ee9a66675e623eba1b663a6d102314f5b20b8ce8b"
@@ -28,19 +28,19 @@
       "sha256": "37253fa5047913871da0880de73cdea86eef00a2ce0fdb4e3bf5eff3a229e725"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
-      "sha256": "df656dec1a7270b1e2e6ff608f702cd0d76dba27b2b68cdbb94155c3d995a685"
+      "sha256": "5def20de0bba364989651dc3fdf8be157e2d66aaa5a22d6ce13a6bd1425fac89"
     },
     "dev-flow/scripts/flow-context.mjs": {
-      "sha256": "bddf652bcee536fb3514a1d0a105f3ba04363bf99bb2dede4ce90c1fbbd20db4"
+      "sha256": "d470c11df21e45d928afdca3a1a9d1d3b3b1939808053372cdbc22ca231a8ff4"
     },
     "dev-flow/scripts/flow-explore.mjs": {
       "sha256": "3e39303db8f09af674a22b42251d817a0b8348c18a2371b27bdd9f783aefab50"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
-      "sha256": "a4660b96555899ada88d225736ca53dffe7f8f4c6f96cbfacfe92c3c3e5c1a44"
+      "sha256": "ead165dc4476a6706ca5ace14124aad129bf4b829e9174d7cce1fc38196284d9"
     },
     "dev-flow/scripts/flow-intake.mjs": {
-      "sha256": "a8d52251ff608d075f346b2c2f0a3ab4cd5b7a06baacddb5417db275ee00cd1b"
+      "sha256": "16fd20c5e9fe3adda570c64d89428081f54d80e5e6dcb4321cba216798bc6897"
     },
     "dev-flow/scripts/flow-issues.mjs": {
       "sha256": "eb8c08f8ebbd535b09333fd0556a30cbb7d04b0f9e57995fee42936f1a8828d6"
@@ -49,19 +49,19 @@
       "sha256": "bda9d6b30f9f3c97adee0701beee66dc803cd317a0700181257ec937ae6f0a73"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
-      "sha256": "379dd277ba1784475f3bf95dad1a659dbf2f35988176b1d4bc6974d8cdfc3858"
+      "sha256": "772eedd7032471605eed44ec8acd72709892367369022930c66462384977d442"
     },
     "dev-flow/scripts/flow-lifecycle-hooks.mjs": {
       "sha256": "fc4456012a19eedfacb37c95f7648cd789a482d5fb16635a31211063933e3dad"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "dcc9d68a28eb1d488b525ecb625cf4112ab2a09127ed7bf710a4f2c17a78889e"
+      "sha256": "6e1c6ddd35d6550fef0d23599e4a0b72644e77bcc07cb7d9e07e8cb4fa091e4b"
     },
     "dev-flow/scripts/flow-merge-claim.mjs": {
       "sha256": "21997833c9ac36ec6e5847c2a444c4e727ae93876f10b25edcbea004be944f65"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "e6e5f8a12c086bf6ea12540c44914c233e4c255815b7f0f97bf8bba763982288"
+      "sha256": "633ee1be87d2916cbc6b55e623584e7da4b2e323d3f34e575201ddf5ef2b95ca"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "28fa1a318176b296b9c47c6666e631072c255708e4e6f70659f1bbf2b7713166"
@@ -70,7 +70,7 @@
       "sha256": "0b6851846851655c8dbbf9ca62bfb7ac511fda1950b5781e62f9d779aca75bc6"
     },
     "dev-flow/scripts/flow-start-helpers.mjs": {
-      "sha256": "c546eb2e39a70efb7c80fcead1e8a98614525944408d7a1a772ec783f826adbb"
+      "sha256": "168cd2e2b216635e1f0153446fded05fd6a8cffde13d557091b6ccd645471c7c"
     },
     "dev-flow/scripts/flow-start-provenance.mjs": {
       "sha256": "154d6fd37b3a1ffdde78271e12e2d3ddd0fe1be8d4248b29e3f49664b496f3ef"
@@ -184,10 +184,10 @@
       "sha256": "a2e819260afe2b196c93f8c4f7246926697fead92f424001d343a9cd8c31b5e5"
     },
     "dev-review/scripts/review-pr.mjs": {
-      "sha256": "9cb625431b416d2c9a31cf9eff4f3aca28be8d39c966d1b42f1f9317fec5c210"
+      "sha256": "34065eb4f8a35a72236f36138796d222eaeac0a973299a083dfd7a1fbd048671"
     },
     "dev-review/scripts/review-sync.mjs": {
-      "sha256": "4b716260c6ec3b91fff0b5d50934b09464a3af4e8640f63c2e6a3c175e4c72ee"
+      "sha256": "8e84e6bbc6be8eae1a4061ff8f4f2f841045841ea32352f0fcf5c233e4bbf2b7"
     },
     "dev-verify-tools/SKILL.md": {
       "sha256": "174939a73c178bc04396f16026728e1b700ca11833fd468c0f58e00001f53418"
@@ -289,7 +289,7 @@
       "sha256": "e94b5b3601ea8bd6473f3559d195e2de58c95515a0444d7c9014bd9cbe496289"
     },
     "lib/escalation.mjs": {
-      "sha256": "067b68cfe21110ded4b7447caf704681e765c51dc991054f11a2144bb3b55037"
+      "sha256": "6d5d0a14c772c69612c5bf22155195d114bfadd23db0f3820da8ca602b61fbe9"
     },
     "lib/evidence-substance.mjs": {
       "sha256": "931c85e7ebef862dc5c9562d710ecd1ee1d8b1a9c38c7158747d7b9339921172"
@@ -397,22 +397,22 @@
       "sha256": "7de14afc6bdc3e31994b774f33bbad683d1629b65eda3ed9a7a643e2a68eee0b"
     },
     "lib/plan-sync.mjs": {
-      "sha256": "d47c4d4359942c457e8409c83be81b2d823699892c47cbf4b6c61d54e530916e"
+      "sha256": "f90dd23d2d0b7c441b972e960d5145037c76baedd6edcf4aba1749b63a277844"
     },
     "lib/platform-http.mjs": {
       "sha256": "652c4d6260c922cc867ebdfbcbbc5e47299230e58a0b43435e49ac9b4f8e9019"
     },
     "lib/platform-probe.mjs": {
-      "sha256": "94b42f23c3943d0f7bdcedafd7dada7543b852ffd6bd9f9f0f98deece9b009d4"
+      "sha256": "498a0254827372d70f3cd4758995bebc2d57cb2ed0cfc7b93af8cb0b49b66692"
     },
     "lib/platform-providers.mjs": {
-      "sha256": "7c06da98dedddbb28794fa23d205c609e1ebee055478dbcfe6883abb819844c4"
+      "sha256": "d401b6ea303db9659263e8e97d34b5ed84aed8dd0b05ff1b7c37dc5047b325d9"
     },
     "lib/platform-registry.mjs": {
-      "sha256": "2321472eac8d3011be425a614caf1cb566f77c8c4190f61eb1c583dc533444a2"
+      "sha256": "44345be0c7b7af63b2ed85d0c637189e9a02637360e9f7726b671ccc7c118d3d"
     },
     "lib/platform.mjs": {
-      "sha256": "121501a4e5e5e714fe2ee67404e242c5c612f8b6900f33765807e89448a45d94"
+      "sha256": "4b0eb3975193fe06e552b2ac057d5a52b97d4c1feb92e715506ffe0a2314e9e1"
     },
     "lib/pr-template-hydrate.mjs": {
       "sha256": "b6933ac5ee27ade2d91a2be2aa144c9e166c93fb0248acd892442fc1eeeac701"
@@ -481,7 +481,7 @@
       "sha256": "51064fd452e3b38b5c155d230589b301d4bc6c7b23c762620fb8f1321d1b7e4e"
     },
     "lib/task-backend.mjs": {
-      "sha256": "2283c9ffb163bbee879365421ca3490278c7640f48761961f1c9f992ad09052d"
+      "sha256": "1ff1e3e5c44877b14a57f2a556cee7700d798d7df5daae4c7d7342e6700be53c"
     },
     "lib/task-graph.mjs": {
       "sha256": "b91dc6503fc7f7901fc2905c0202114e5beb5dd703fd81b0c6118677bc372203"

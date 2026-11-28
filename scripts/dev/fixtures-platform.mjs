@@ -594,6 +594,11 @@ cases.push(['C4/C5：10 键能力矩阵、5 方言多级群组 resolveRemoteTarg
   if (lanTarget.providerId !== 'gitlab' || !lanTarget.isLan || lanTarget.apiBaseUrl !== 'http://192.168.1.25:8080/api/v4' || lanTarget.repoSlug !== 'grp/sub/demo') {
     return `LAN 自建 GitLab 解析失败：${JSON.stringify(lanTarget)}`
   }
+  const sshPortTarget = resolveRemoteTarget({ origin: 'ssh://git@gitlab.example.com:10022/group/sub/repo.git' }, { providerHint: 'gitlab', sshHostMap: false })
+  const httpsPortTarget = resolveRemoteTarget({ origin: 'https://gitlab.example.com:8443/group/repo.git' }, { providerHint: 'gitlab', sshHostMap: false })
+  if (sshPortTarget.apiBaseUrl !== 'https://gitlab.example.com/api/v4' || httpsPortTarget.apiBaseUrl !== 'https://gitlab.example.com:8443/api/v4') {
+    return `C1 端口隔离失败：ssh=${sshPortTarget.apiBaseUrl}, https=${httpsPortTarget.apiBaseUrl}`
+  }
   const localTarget = resolveRemoteTarget({ origin: 'file:///srv/git/local.git' }, { sshHostMap: false })
   if (!localTarget.isLocal || localTarget.providerId !== 'generic-git' || localTarget.apiBaseUrl !== null) {
     return `本地 file:// 解析失败：${JSON.stringify(localTarget)}`

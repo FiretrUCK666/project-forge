@@ -216,7 +216,7 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
     : null
   const remoteBranchExists = Boolean(shouldProbeRemote && lsRes.ok && lsRes.stdout.trim() !== '')
 
-  const remoteTarget = resolveRemoteTarget(remoteUrls, { role: ledger.role, providerHint: ledger.providerId })
+  const remoteTarget = resolveRemoteTarget(remoteUrls, { role: ledger.role, providerHint: ledger.providerId, cwd: mainRoot })
   const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git' && remoteTarget.capabilities?.api === true)
   const ghProbe = _ghProbe
     ?? (_ghClient ? { env: { providerId: remoteTarget.providerId, trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
@@ -265,9 +265,9 @@ export async function handleCleanup(opts, roots) {
   const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
-  const topology = parseRemotesTopology(remoteRes.stdout)
+  const topology = parseRemotesTopology(remoteRes.stdout, { providerHint: ledger.providerId && ledger.providerId !== 'none' && ledger.providerId !== 'generic-git' ? ledger.providerId : null })
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { targetRepo, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+  const { targetRepo, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology, { cwd: roots.mainRoot, providerHint: ledger.providerId })
   const cl = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, targetRepo, pushRemote, {
     skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
     _ghProbe: opts._ghProbe,

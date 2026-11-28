@@ -20,8 +20,8 @@ export function isExternalPrTaskLedger(task) {
   return task.role === 'inbound-external-pr' || task.isolation === 'review-pr' || Boolean(task.externalPr)
 }
 
-function resolvePrRemoteCtx(task, remoteUrls, declaredRepo) {
-  return resolveRemoteTarget(remoteUrls ?? {}, { role: task?.role, declaredRepo, providerHint: task?.providerId })
+function resolvePrRemoteCtx(task, remoteUrls, declaredRepo, mainRoot = null) {
+  return resolveRemoteTarget(remoteUrls ?? {}, { role: task?.role, declaredRepo, providerHint: task?.providerId, cwd: mainRoot })
 }
 
 export function emitPrUnresolvedBlock({ opts, exitCode, prArg, reason, message }) {
@@ -158,7 +158,7 @@ export async function resolvePrForReviewPack({ mainRoot, roots, prNo, task, opts
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(mainRoot)
-  const remoteTarget = resolvePrRemoteCtx(task, remoteUrls, declaredRepo)
+  const remoteTarget = resolvePrRemoteCtx(task, remoteUrls, declaredRepo, mainRoot)
   const targetRepo = remoteTarget.repoSlug ?? declaredRepo ?? null
 
   let client = opts._ghClient ?? null
@@ -231,7 +231,7 @@ export async function resolvePrForReviewPack({ mainRoot, roots, prNo, task, opts
   let comments = Array.isArray(pr.comments) ? pr.comments : []
   if (comments.length === 0 && typeof client.listComments === 'function') {
     try {
-      const cRes = await client.listComments({ repo: targetRepo, number: num })
+      const cRes = await client.listComments({ repo: targetRepo, number: num, isPr: true })
       if (cRes?.ok && Array.isArray(cRes.comments)) comments = cRes.comments
     } catch { /* ignore best-effort comment read */ }
   }

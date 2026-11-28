@@ -11,43 +11,22 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import {
-  formatArtifactEvidenceLines,
-  stageAndSyncTaskArtifacts,
-} from '../../kit/skills/lib/empirical-artifacts.mjs'
+import { formatArtifactEvidenceLines, stageAndSyncTaskArtifacts } from '../../kit/skills/lib/empirical-artifacts.mjs'
 import { canonicalPath, gitRun, posixPath } from '../../kit/skills/lib/git.mjs'
 import { buildHandoff } from '../../kit/skills/lib/handoff-package.mjs'
 import { createDefaultLedger, writeTaskLedger } from '../../kit/skills/lib/ledger.mjs'
-import {
-  collectMasterIssueCriteriaState,
-  filterBootstrapAutoAttachDocs,
-  renderCriteriaProgressTable,
-  resolveBootstrapStartDocs,
-  resolvePrimaryPlanDocOrder,
-} from '../../kit/skills/lib/master-criteria-sync.mjs'
+import { collectMasterIssueCriteriaState, filterBootstrapAutoAttachDocs, renderCriteriaProgressTable, resolveBootstrapStartDocs, resolvePrimaryPlanDocOrder } from '../../kit/skills/lib/master-criteria-sync.mjs'
 import { syncIssueCriteriaCheckboxes } from '../../kit/skills/lib/plan-sync.mjs'
-import {
-  createProviderClient,
-  resolveGitLabMrHeadSha,
-  resolveRemoteTarget,
-} from '../../kit/skills/lib/platform.mjs'
-import {
-  hydratePrTemplateBody,
-  resolveReadablePrTitle,
-} from '../../kit/skills/lib/pr-template-hydrate.mjs'
+import { createProviderClient, parseRemotesTopology, probePlatformEnv, probePlatformEnvCore, resolveGitLabMrHeadSha, resolveRemoteTarget, resolveWorkspaceIdentity } from '../../kit/skills/lib/platform.mjs'
+import { hydratePrTemplateBody, resolveReadablePrTitle } from '../../kit/skills/lib/pr-template-hydrate.mjs'
 import { createTaskBackend } from '../../kit/skills/lib/task-backend.mjs'
-import {
-  destroyTaskArtifactsDir,
-  isSafeTaskArtifactPath,
-  resolveFlowArtifactsRoot,
-  resolveTaskArtifactsDir,
-  stageTaskArtifact,
-} from '../../kit/skills/lib/verify-state.mjs'
+import { destroyTaskArtifactsDir, isSafeTaskArtifactPath, resolveFlowArtifactsRoot, resolveTaskArtifactsDir, stageTaskArtifact } from '../../kit/skills/lib/verify-state.mjs'
 import { handleAbort, handleCleanup } from '../../kit/skills/dev-flow/scripts/flow-cleanup.mjs'
 import { findMatchingDocStrict } from '../../kit/skills/dev-flow/scripts/flow-context.mjs'
+import { inspectWorkspace } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import { parseAcceptanceCriteria } from '../../kit/skills/dev-review/scripts/review-gates.mjs'
 import { gitInit, rmTree, tmpProject } from './fixtures-helpers.mjs'
-import { runLiveForgeE2e } from './live-forge-e2e.mjs'
+import { alignCloneUrlScheme, buildHttpsAuthGitArgs, cloneAndPrepareRepo, runLiveForgeE2e } from './live-forge-e2e.mjs'
 
 async function startMockForgeServer(handler) {
   const server = createServer((req, res) => {
@@ -687,6 +666,112 @@ export function registerMultiPlatformCases(cases) {
       return `临时私仓命名未强制一次性前缀：${dry.stdout}`
     }
     if (dry.stdout.includes('dummy-ephemeral-token')) return '输出泄露了令牌原文'
+    if (alignCloneUrlScheme('http://forge.example.invalid/g/r.git', 'https://forge.example.invalid') !== 'https://forge.example.invalid/g/r.git') {
+      return 'alignCloneUrlScheme 未将 http 升级为 https'
+    }
+    if (alignCloneUrlScheme('http://127.0.0.1:8080/g/r.git', 'http://127.0.0.1:8080') !== 'http://127.0.0.1:8080/g/r.git') {
+      return 'alignCloneUrlScheme 误改写 http forge 的 cloneUrl'
+    }
+    const authArgs = buildHttpsAuthGitArgs('gitlab', 'secret-tok-xyz')
+    if (authArgs.length !== 2 || authArgs[1].includes('secret-tok-xyz') || !authArgs[1].startsWith('http.extraHeader=Authorization: Basic ')) {
+      return `buildHttpsAuthGitArgs 格式或脱敏异常：${JSON.stringify(authArgs)}`
+    }
+    const emptyBare = canonicalPath(mkdtempSync(join(tmpdir(), 'pf-e2e-empty-bare-')))
+    const workTmp = canonicalPath(mkdtempSync(join(tmpdir(), 'pf-e2e-work-')))
+    try {
+      await gitRun(emptyBare, ['init', '--bare', '-b', 'main'])
+      const prep = await cloneAndPrepareRepo({
+        workDir: workTmp, created: { sshUrl: 'ssh://invalid-unreachable.invalid:1/none.git', cloneUrl: emptyBare, defaultBranch: 'main' },
+        providerId: 'gitlab', forgeUrl: 'https://forge.example.invalid', token: 'tok-1', repoName: 'empty-seed',
+        gitRunner: async (cwd, args, o) => (args.includes('ssh://invalid-unreachable.invalid:1/none.git') ? { ok: false, stderr: 'ssh refused' } : gitRun(cwd, args, o)),
+      })
+      if (prep.usedTransport !== 'https' || !prep.seededEmptyRepo || prep.baseBranch !== 'main') return `cloneAndPrepareRepo 异常：${JSON.stringify(prep)}`
+    } finally { rmTree(emptyBare); rmTree(workTmp) }
     return true
+  }])
+
+  cases.push(['Issue #235 C1/C2：SSH 端口透传 -p、AGENTS.md 自动读取 platform-provider/api-base 与 inspect 拓扑透传', async () => {
+    const seenSshArgs = []
+    const sshCore = await probePlatformEnvCore({
+      providerId: 'gitlab', remoteUrls: { origin: 'ssh://git@gitlab.example.com:10022/grp/sub/app.git' },
+      host: 'gitlab.example.com', apiBaseUrl: 'https://gitlab.example.com/api/v4', repoSlug: 'grp/sub/app', probeNetwork: true,
+      runner: async (cmd, args) => (cmd === 'ssh' ? (seenSshArgs.push(args), { code: 0, stdout: 'Welcome to GitLab, @alice!', stderr: '' }) : { code: 1, stdout: '', stderr: '' }),
+    })
+    if (!seenSshArgs[0]?.includes('-p') || !seenSshArgs[0]?.includes('10022') || sshCore.ssh.port !== 10022 || !sshCore.sshWorks) {
+      return `C1 SSH 自定义端口未透传：args=${JSON.stringify(seenSshArgs)}, ssh=${JSON.stringify(sshCore.ssh)}`
+    }
+    const dirWithAgents = tmpProject({ 'README.md': '# gl\n', 'AGENTS.md': '# Contract\n- `platform-provider`: `gitlab`\n- `platform-api-base`: `https://git.custom.example/api/v4`\n' })
+    const dirPlain = tmpProject({ 'README.md': '# plain\n' })
+    try {
+      const sshRemote = 'ssh://git@git.custom.example:10022/grp/sub/app.git'
+      gitInit(dirWithAgents, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: sshRemote })
+      const tAuto = resolveRemoteTarget({ origin: sshRemote }, { cwd: dirWithAgents, sshHostMap: false })
+      const tPlain = resolveRemoteTarget({ origin: sshRemote }, { cwd: dirPlain, sshHostMap: false })
+      if (tAuto.providerId !== 'gitlab' || tAuto.apiBaseUrl !== 'https://git.custom.example/api/v4' || tPlain.providerId !== 'generic-git') {
+        return `C2 AGENTS.md 自动读取异常：auto=${JSON.stringify(tAuto)}, plain=${JSON.stringify(tPlain)}`
+      }
+      const probed = await probePlatformEnv({ cwd: dirWithAgents, remoteUrls: { origin: sshRemote }, env: { GITLAB_TOKEN: 'glpat-auto-1' } })
+      const idRes = resolveWorkspaceIdentity({ cwd: dirWithAgents, remoteUrls: { origin: sshRemote }, gitIdentity: { name: 'alice', email: 'alice@example.com' } })
+      const topo = parseRemotesTopology(`origin\t${sshRemote} (fetch)\n`, { providerHint: 'gitlab', sshHostMap: false })
+      const insp = await inspectWorkspace(dirWithAgents, { env: {} })
+      if (probed.env.providerId !== 'gitlab' || idRes.providerId !== 'gitlab' || topo.providerId !== 'gitlab' || insp.remotesTopology?.[0]?.providerId !== 'gitlab' || insp.identity?.providerId !== 'gitlab') {
+        return `C2 拓扑/探测透传失败：${JSON.stringify({ p: probed.env.providerId, id: idRes.providerId, topo: topo.providerId, inspTopo: insp.remotesTopology?.[0]?.providerId, inspId: insp.identity?.providerId })}`
+      }
+      return true
+    } finally { rmTree(dirWithAgents); rmTree(dirPlain) }
+  }])
+
+  cases.push(['Issue #235 C3/C4：GitLab 10.x 标签 400 回退、里程碑全局 id 与 isPr=true 零泄漏至 /issues', async () => {
+    const state = { issueLabels: ['old'], mrLabels: ['in-review'], hits: [], closedMsId: null, assignedMsId: null }
+    const mock = await startMockForgeServer(({ req, res, json }) => {
+      const p = new URL(req.url, 'http://127.0.0.1').pathname
+      state.hits.push(`${req.method} ${p}`)
+      res.setHeader('Content-Type', 'application/json')
+      if (req.method === 'POST' && p.endsWith('/milestones')) return res.end(JSON.stringify({ id: 42, iid: 1, title: json?.title, state: 'active' }))
+      if (req.method === 'PUT' && p.endsWith('/milestones/42')) { state.closedMsId = 42; return res.end(JSON.stringify({ id: 42, iid: 1, state: 'closed' })) }
+      if (req.method === 'GET' && p.endsWith('/labels')) return res.end(JSON.stringify([]))
+      if (req.method === 'GET' && /\/(issues|merge_requests)\/\d+$/.test(p)) {
+        return res.end(JSON.stringify({ iid: 5, labels: p.includes('/merge_requests/') ? state.mrLabels : state.issueLabels }))
+      }
+      if (req.method === 'PUT' && /\/(issues|merge_requests)\/\d+$/.test(p)) {
+        const isMr = p.includes('/merge_requests/')
+        if ('add_labels' in (json ?? {}) || 'remove_labels' in (json ?? {})) { res.statusCode = 400; return res.end(JSON.stringify({ message: '400 10.x' })) }
+        if ('labels' in (json ?? {})) {
+          const next = String(json.labels).split(',').map((s) => s.trim()).filter(Boolean)
+          if (isMr) state.mrLabels = next; else state.issueLabels = next
+        }
+        if ('milestone_id' in (json ?? {})) state.assignedMsId = json.milestone_id
+        return res.end(JSON.stringify({ iid: 5, labels: isMr ? state.mrLabels : state.issueLabels }))
+      }
+      if (p.endsWith('/notes')) return res.end(JSON.stringify(req.method === 'POST' ? { id: 9, body: json?.body } : []))
+      res.statusCode = 404
+      res.end(JSON.stringify({ message: 'not found' }))
+    })
+    try {
+      const client = createProviderClient({ providerId: 'gitlab', apiBaseUrl: `${mock.baseUrl}/api/v4`, repoSlug: 'grp/app', token: 'gl-tok' })
+      const backend = createTaskBackend({ role: 'maintainer', providerId: 'gitlab', targetRepo: 'grp/app', client, mainRoot: tmpdir() })
+      const ms = await backend.createMilestone({ title: 'v1.0' })
+      const msA = await backend.assignMilestone({ number: 5, milestone: ms.number })
+      const msC = await backend.closeMilestone({ number: ms.number })
+      if (!ms.ok || ms.number !== 42 || ms.iid !== 1 || !msA.ok || state.assignedMsId !== 42 || !msC.ok || state.closedMsId !== 42) {
+        return `C3 里程碑全局 id 失败：${JSON.stringify({ ms, msA, msC, state })}`
+      }
+      const addIss = await backend.addLabels({ number: 5, labels: ['added'] })
+      const rmIss1 = await backend.removeLabel({ number: 5, label: 'old' })
+      const rmIss2 = await backend.removeLabel({ number: 5, label: 'added' })
+      if (!addIss.ok || !rmIss1.ok || !rmIss2.ok || state.issueLabels.length !== 0) {
+        return `C3 10.x 标签 400 回退或清空末标签失败：${JSON.stringify({ addIss, rmIss1, rmIss2, issueLabels: state.issueLabels })}`
+      }
+      state.hits = []
+      const prCmt = await backend.postComment({ number: 5, isPr: true, body: 'mr review' })
+      const prSync = await backend.syncStateLabel({ number: 5, state: 'reviewed', isPr: true })
+      const prNotes = await backend.listComments({ number: 5, isPr: true })
+      const leakedIssue = state.hits.filter((h) => h.includes('/issues/'))
+      const mrHits = state.hits.filter((h) => h.includes('/merge_requests/5'))
+      if (!prCmt.ok || !prSync.ok || !prNotes.ok || leakedIssue.length > 0 || mrHits.length < 3 || !state.mrLabels.includes('reviewed') || state.mrLabels.includes('in-review')) {
+        return `C4 isPr=true 路由泄漏至 /issues：${JSON.stringify({ prCmt, prSync, prNotes, leakedIssue, hits: state.hits, mrLabels: state.mrLabels })}`
+      }
+      return true
+    } finally { await mock.close() }
   }])
 }

@@ -145,19 +145,19 @@ export class RemoteApiBackend {
     return this._call('removeLabel', [{ repo: repo ?? this.targetRepo, number, label, isPr }])
   }
 
-  async syncStateLabel({ repo, number, state, fallbackLabels = [] } = {}) {
+  async syncStateLabel({ repo, number, state, fallbackLabels = [], isPr = false } = {}) {
     if (hasNoLabelsDecision(this.mainRoot)) return { ok: true, skipped: true, reason: 'no-labels' }
     const targetRepo = repo ?? this.targetRepo
     const repoLabels = typeof this.client?.listLabels === 'function'
       ? ((await Promise.resolve(this.client.listLabels({ repo: targetRepo })).catch(() => null))?.labels ?? [])
       : []
     const { primary, removes } = resolveSemanticStateLabel(state, repoLabels)
-    const addRes = await this.addLabels({ repo: targetRepo, number, labels: primary ? [primary] : fallbackLabels })
+    const addRes = await this.addLabels({ repo: targetRepo, number, labels: primary ? [primary] : fallbackLabels, isPr })
     if (addRes?.reason && /403|forbidden/i.test(String(addRes.reason))) {
       return { ok: false, skipped: true, reason: addRes.reason, label: primary }
     }
     for (const stale of removes) {
-      await Promise.resolve(this.removeLabel({ repo: targetRepo, number, label: stale })).catch(() => ({ ok: false, skipped: true }))
+      await Promise.resolve(this.removeLabel({ repo: targetRepo, number, label: stale, isPr })).catch(() => ({ ok: false, skipped: true }))
     }
     return { ok: Boolean(addRes?.ok || !addRes?.skipped), label: primary, removes, addRes }
   }
@@ -174,8 +174,8 @@ export class RemoteApiBackend {
   closeMilestone({ repo, number } = {}) {
     return this._call('closeMilestone', [{ repo: repo ?? this.targetRepo, number }])
   }
-  assignMilestone({ repo, number, milestone } = {}) {
-    return this._call('assignMilestone', [{ repo: repo ?? this.targetRepo, number, milestone }])
+  assignMilestone({ repo, number, milestone, isPr = false } = {}) {
+    return this._call('assignMilestone', [{ repo: repo ?? this.targetRepo, number, milestone, ...(isPr ? { isPr: true } : {}) }])
   }
   getIssue(arg, maybeNumber) {
     const norm = normalizeIssueArgs(arg, maybeNumber)

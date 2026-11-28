@@ -600,7 +600,7 @@ export async function handleSubmit(opts, roots) {
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
+  const targetCtx = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology, { cwd: roots.mainRoot, providerHint: ledger.providerId })
   const { originFull, originLower, upstreamLower, targetRepo, pushRemote } = targetCtx
 
   if (ledger.role === 'contributor-fork' && originLower && upstreamLower && originLower === upstreamLower) {
@@ -714,7 +714,7 @@ export async function handleSubmit(opts, roots) {
     const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework, isHeadUpdate: !isRework && hasExistingPr, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
     const reuseAction = isRework ? 'rework-submitted' : 'submitted-existing-pr'
-    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
+    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, isPr: true, body: prCommentBody, statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
     for (const iss of ledger.linkedIssues ?? []) {
       commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, prNumber: ledger.prNumber, headSha: currentHead } }) })
     }
